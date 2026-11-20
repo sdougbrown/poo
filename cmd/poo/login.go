@@ -97,7 +97,7 @@ func handleLogin(ctx context.Context, inv clicontract.Invocation, stdout, stderr
 		fmt.Fprintf(stderr, "poo login: name a provider: %s\n", strings.Join(loginNames(), ", "))
 		return exit{usageExitCode}
 	}
-	flow, ok := o.choose(os.Stdin, stderr)
+	flow, ok := o.choose(bufio.NewScanner(os.Stdin), stderr)
 	if !ok {
 		return exit{usageExitCode}
 	}
@@ -174,9 +174,10 @@ func (o *loginOptions) refuseBrowserFlags(flow auth.Flow) error {
 	return nil
 }
 
-// choose returns the sign-in the request names, or the one an operator picks from the list it
-// reads the answer on in.
-func (o *loginOptions) choose(in io.Reader, stderr io.Writer) (auth.Flow, bool) {
+// choose returns the sign-in the request names, or the one an operator picks from the list
+// it reads the answer on in. The scanner is the caller's own, so a flow that asks several
+// questions feeds every answer through one scan of its input.
+func (o *loginOptions) choose(in *bufio.Scanner, stderr io.Writer) (auth.Flow, bool) {
 	if o.provider != "" {
 		for _, flow := range logins() {
 			if slices.Contains(providerNames(flow), o.provider) || flow.Name == o.provider {
@@ -191,13 +192,12 @@ func (o *loginOptions) choose(in io.Reader, stderr io.Writer) (auth.Flow, bool) 
 		fmt.Fprintf(stderr, "  %d. %s\n", i+1, flow.Name)
 	}
 	fmt.Fprintf(stderr, "Which one? [1-%d] ", len(logins()))
-	scanner := bufio.NewScanner(in)
-	if !scanner.Scan() {
+	if !in.Scan() {
 		fmt.Fprintln(stderr, "poo login: nothing was chosen")
 		return auth.Flow{}, false
 	}
 	var choice int
-	if _, err := fmt.Sscanf(strings.TrimSpace(scanner.Text()), "%d", &choice); err != nil ||
+	if _, err := fmt.Sscanf(strings.TrimSpace(in.Text()), "%d", &choice); err != nil ||
 		choice < 1 || choice > len(logins()) {
 		fmt.Fprintln(stderr, "poo login: that is not one of the sign-ins")
 		return auth.Flow{}, false

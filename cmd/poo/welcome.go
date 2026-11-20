@@ -126,7 +126,7 @@ func welcomeModel(stderr io.Writer, in *bufio.Scanner) (model string, ok bool, s
 		if !info.HasOp(poo.OpChat) {
 			continue
 		}
-		if !credentialServes(cat, info.Provider, credentials) {
+		if !credentialServes(cat, settings, info.Provider, credentials) {
 			continue
 		}
 		models = append(models, info.Name)
@@ -149,34 +149,22 @@ func welcomeModel(stderr io.Writer, in *bufio.Scanner) (model string, ok bool, s
 }
 
 // credentialServes reports whether the credential a model's endpoint reads
-// is in reach. A static endpoint needs none. An env-key endpoint reads the
-// variable it names, or the file entry for the key provider that reads it.
-// The Codex endpoint reads the credential of its own that the file holds.
-// The catalog offers a model whatever the credential's state is. Without
-// this check the picker would hand an operator models they cannot run.
-func credentialServes(cat *catalog.Catalog, provider string, credentials auth.Credentials) bool {
+// is in reach. A key endpoint is the settings' own ladder: the variable it
+// names, the stored credential, the literal. The Codex endpoint is the one
+// whose credential is an oauth pair the file holds, so its rung is the
+// file's own entry. The catalog offers a model whatever the credential's
+// state is; without these checks the picker would hand an operator models
+// they cannot run.
+func credentialServes(cat *catalog.Catalog, settings *config.Settings, provider string, credentials auth.Credentials) bool {
 	if provider == auth.ProviderCodex {
 		held, err := credentials.Holds(provider)
 		return err == nil && held
 	}
 	endpoint, ok := cat.Endpoints()[provider]
-	if !ok || endpoint.Credential.Source != catalog.CredentialEnv {
+	if !ok {
 		return true
 	}
-	env := endpoint.Credential.Env
-	if os.Getenv(env) != "" {
-		return true
-	}
-	for _, p := range auth.KeyProviders() {
-		if p.Env != env {
-			continue
-		}
-		held, err := credentials.Holds(p.ID)
-		return err == nil && held
-	}
-	// An environment variable no key provider reads — a hosted provider's,
-	// mostly — has no entry in poo's credential file to fall back on.
-	return false
+	return settings.EndpointKeyPresent(provider, endpoint.Credential)
 }
 
 // welcomeProfile asks which of the profiles the binary links a session

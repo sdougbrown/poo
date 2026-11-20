@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -43,7 +44,7 @@ func TestChooseAnswersToEveryNameTheFlowCarries(t *testing.T) {
 	for _, name := range []string{"codex", "openai-codex"} {
 		t.Run(name, func(t *testing.T) {
 			o := loginOptions{provider: name}
-			flow, ok := o.choose(strings.NewReader(""), io.Discard)
+			flow, ok := o.choose(bufio.NewScanner(strings.NewReader("")), io.Discard)
 			if !ok {
 				t.Fatalf("choose did not answer to %q", name)
 			}
@@ -54,7 +55,7 @@ func TestChooseAnswersToEveryNameTheFlowCarries(t *testing.T) {
 	}
 	t.Run("a name it does not know", func(t *testing.T) {
 		o := loginOptions{provider: "nope"}
-		if _, ok := o.choose(strings.NewReader(""), io.Discard); ok {
+		if _, ok := o.choose(bufio.NewScanner(strings.NewReader("")), io.Discard); ok {
 			t.Error("choose answered to a name it does not know")
 		}
 	})
@@ -831,7 +832,7 @@ func TestThePickerTakesTheNumberOfASignIn(t *testing.T) {
 		t.Run(c.want, func(t *testing.T) {
 			var o loginOptions
 			var stderr strings.Builder
-			flow, ok := o.choose(strings.NewReader(c.input), &stderr)
+			flow, ok := o.choose(bufio.NewScanner(strings.NewReader(c.input)), &stderr)
 			if !ok {
 				t.Fatalf("the picker refused %q: %s", c.input, stderr.String())
 			}
@@ -857,7 +858,7 @@ func TestThePickerRefusesWhatIsNotASignIn(t *testing.T) {
 		t.Run(c.input, func(t *testing.T) {
 			var o loginOptions
 			var stderr strings.Builder
-			if flow, ok := o.choose(strings.NewReader(c.input), &stderr); ok {
+			if flow, ok := o.choose(bufio.NewScanner(strings.NewReader(c.input)), &stderr); ok {
 				t.Fatalf("the picker answered %q with %q", c.input, flow.Provider.ID)
 			}
 			if !strings.Contains(stderr.String(), c.want) {

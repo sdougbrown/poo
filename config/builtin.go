@@ -53,6 +53,41 @@ func (s *Settings) applyBuiltinProviders(override string) error {
 	return nil
 }
 
+// EndpointKeyPresent reports whether the key an endpoint reads is in reach, and an
+// endpoint that reads none is served as it stands. The rungs are the ones
+// EndpointKey reads keys in, in the same order: the environment variable the
+// endpoint names, the credential poo's file holds for the provider that reads the
+// same variable, and the literal the settings carry for an endpoint of the same
+// name. The answer is presence, not the key itself: a caller that filters models
+// by what an operator can run asks what a session would find, and finds it
+// without holding any secret.
+func (s *Settings) EndpointKeyPresent(name string, credential catalog.Credential) bool {
+	if credential.Source == catalog.CredentialNone {
+		return true
+	}
+	if credential.Source == catalog.CredentialEnv {
+		if os.Getenv(credential.Env) != "" {
+			return true
+		}
+		// The environment variable's name is the join, the one fact an endpoint's
+		// declaration and a provider's declaration both carry, so one match answers.
+		for _, provider := range auth.KeyProviders() {
+			if credential.Env != provider.Env {
+				continue
+			}
+			stored, err := (auth.Credentials{Path: s.CredentialFile()}).Read(provider)
+			if err == nil && stored.Key != "" {
+				return true
+			}
+			break
+		}
+	}
+	if named, ok := s.Endpoints[name]; ok {
+		return named.APIKey != ""
+	}
+	return false
+}
+
 // gateKeyEndpoints drops the layer's key-read endpoints whose key is not
 // there, and keeps every other endpoint as it is.
 //

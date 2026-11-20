@@ -2,13 +2,16 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/sdougbrown/poo/config"
+	"github.com/sdougbrown/poo/provider/auth"
 )
 
 // noAmbientKeys empties the environment keys a provider's credential can
@@ -177,5 +180,130 @@ func TestAFrontDoorWithSettingsSkipsTheWelcome(t *testing.T) {
 	}
 	if !strings.Contains(stderr, "no_such_key") {
 		t.Errorf("the refusal is %q, want the load's own diagnostic", stderr)
+	}
+}
+
+// storeCredential writes a credential into poo's own file, the state a
+// `poo login` leaves behind.
+func storeCredential(t *testing.T, provider auth.Provider, credential auth.Credential) {
+	t.Helper()
+	path, err := config.DefaultAuthFile()
+	if err != nil {
+		t.Fatalf("the default credential file is not resolvable here: %v", err)
+	}
+	credentials := auth.Credentials{Path: path}
+	if _, err := credentials.Set(context.Background(), provider, credential, true); err != nil {
+		t.Fatalf("writing the credential fixture: %v", err)
+	}
+}
+
+// TestAWelcomeWithACredentialSkipsTheSignIn covers the shortcut the
+// existing credential takes: an operator who ran `poo login` before their
+// first run is not asked to sign in again. The flow proceeds from the
+// credential that is there.
+func TestAWelcomeWithACredentialSkipsTheSignIn(t *testing.T) {
+	isolatedConfigHome(t)
+	noAmbientKeys(t)
+	t.Setenv("POO_SETTINGS", "")
+	storeCredential(t, auth.Opencode, auth.Credential{Kind: auth.KindAPIKey, Key: "oc-key"})
+	withStdin(t, "1\n\n")
+	var stdout, stderr bytes.Buffer
+
+	path, ok := runWelcome(&stdout, &stderr)
+	if !ok {
+		t.Fatalf("the flow did not finish; stderr: %s", stderr.String())
+	}
+	if strings.Contains(stderr.String(), "Sign in with:") {
+		t.Errorf("the flow's output is %q, and it asked for a sign-in the credential file already holds", stderr.String())
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading the settings the flow wrote: %v", err)
+	}
+	if !strings.Contains(string(data), "opencode-anthropic/claude-haiku-5-5") {
+		t.Errorf("the settings are %q, want the chat model the credential runs", string(data))
+	}
+}
+
+// TestThePickerOffersOnlyModelsTheCredentialRuns covers the picker's two
+// credential rungs: an api-key credential wakes the endpoints that read
+// its provider's variable, and the Codex endpoint is offered only when
+// the file holds the Codex credential of its own.
+func TestThePickerOffersOnlyModelsTheCredentialRuns(t *testing.T) {
+	isolatedConfigHome(t)
+	noAmbientKeys(t)
+	t.Setenv("POO_SETTINGS", "")
+
+	// An OpenCode credential wakes the OpenCode endpoints, and nothing
+	// else: not the Codex endpoint the file's existence alone would wake.
+	storeCredential(t, auth.Opencode, auth.Credential{Kind: auth.KindAPIKey, Key: "oc-key"})
+	withStdin(t, "1\n\n")
+	var stderr bytes.Buffer
+	if _, ok := runWelcome(io.Discard, &stderr); !ok {
+		t.Fatalf("the flow did not finish; stderr: %s", stderr.String())
+	}
+	if strings.Contains(stderr.String(), "openai-codex/") {
+		t.Errorf("the picker offered a Codex model the credential cannot run: %s", stderr.String())
+	}
+	if strings.Contains(stderr.String(), "claude-sonnet-4-5") {
+		t.Errorf("the picker offered a hosted model no key wakes: %s", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "opencode/glm-5.3") {
+		t.Errorf("the picker's output is %q, want the models the credential runs", stderr.String())
+	}
+
+	// A Codex credential brings the Codex models back, and naming one
+	// writes it as the chat role.
+	storeCredential(t, auth.Codex, auth.Credential{Access: "access", Refresh: "refresh"})
+	withStdin(t, "1\n\n")
+	stderr.Reset()
+	path, ok := runWelcome(io.Discard, &stderr)
+	if !ok {
+		t.Fatalf("the flow did not finish with a Codex credential; stderr: %s", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "openai-codex/gpt-5.4-mini") {
+		t.Errorf("the picker's output is %q, want the Codex models the credential runs", stderr.String())
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading the settings the flow wrote: %v", err)
+	}
+	if !strings.Contains(string(data), "openai-codex/gpt-5.4-mini") {
+		t.Errorf("the settings are %q, want the Codex model the operator picked", string(data))
+	}
+}
+
+// TestAWelcomeDoesNotClobberExistingSettings covers the create-not-clobber
+// rule: a settings file that is already there is refused and left as the
+// operator wrote it, not traded for the flow's answers.
+func TestAWelcomeDoesNotClobberExistingSettings(t *testing.T) {
+	isolatedConfigHome(t)
+	noAmbientKeys(t)
+	t.Setenv("POO_SETTINGS", "")
+	storeCredential(t, auth.Opencode, auth.Credential{Kind: auth.KindAPIKey, Key: "oc-key"})
+	dir, err := config.UserConfigDir()
+	if err != nil {
+		t.Fatalf("the user config directory is not resolvable here: %v", err)
+	}
+	path := filepath.Join(dir, config.SettingsFileName)
+	operators := "{\n  \"version\": 1,\n  \"profile\": \"search\"\n}\n"
+	if err := os.WriteFile(path, []byte(operators), 0o644); err != nil {
+		t.Fatalf("writing the operator's settings: %v", err)
+	}
+	withStdin(t, "1\n\n")
+	var stdout, stderr bytes.Buffer
+
+	if _, ok := runWelcome(&stdout, &stderr); ok {
+		t.Fatalf("the flow finished over a settings file that was already there")
+	}
+	if !strings.Contains(stderr.String(), path) {
+		t.Errorf("the flow's output is %q, want it to name the file that is already there", stderr.String())
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading the settings: %v", err)
+	}
+	if string(data) != operators {
+		t.Errorf("the settings are now %q, want the operator's own, byte for byte", string(data))
 	}
 }
