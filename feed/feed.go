@@ -63,6 +63,14 @@ type Spec struct {
 	// OnIdle is the feed's idle policy, or the empty string to inherit
 	// the session's.
 	OnIdle string
+	// Filter is the manifest's delivery filter. Config applies it before Emit.
+	Filter *Filter
+}
+
+// Filter describes when a message should be dropped before delivery.
+type Filter struct {
+	Question         string  `json:"question"`
+	MinNoProbability float64 `json:"min_no_probability"`
 }
 
 // ResolveEnv turns the spec's env bindings into "NAME=value" entries for
@@ -94,7 +102,7 @@ type Set struct {
 // two manifests fails the load, and the failure names both files: an
 // origin has to mean one feed.
 //
-// A bad version, command, name, on_idle or unknown field fails the
+// A bad version, command, name, on_idle, filter or unknown field fails the
 // load. The failure names the file and the feed.
 func Load(paths ...string) (*Set, error) {
 	files, err := manifest.Discover(paths...)
@@ -130,8 +138,7 @@ func (s *Set) Len() int {
 
 // Specs returns the loaded feeds, in name order.
 //
-// The list and each spec's command and env are copies, so a caller may
-// change them without changing the set.
+// The list and its specs are copies, including each command, env and filter.
 func (s *Set) Specs() []Spec {
 	if s == nil || len(s.specs) == 0 {
 		return nil
@@ -140,6 +147,10 @@ func (s *Set) Specs() []Spec {
 	for i, spec := range s.specs {
 		spec.Command = append([]string(nil), spec.Command...)
 		spec.Env = append([]cliregistry.EnvBinding(nil), spec.Env...)
+		if spec.Filter != nil {
+			filter := *spec.Filter
+			spec.Filter = &filter
+		}
 		out[i] = spec
 	}
 	return out
@@ -160,6 +171,7 @@ type body struct {
 	Env         map[string]string `json:"env"`
 	Restart     bool              `json:"restart"`
 	OnIdle      string            `json:"on_idle"`
+	Filter      *Filter           `json:"filter"`
 }
 
 // readFile reads one manifest and returns its validated specs, in name
@@ -215,6 +227,15 @@ func readFeed(path, name string, raw json.RawMessage) (Spec, error) {
 	default:
 		return Spec{}, fmt.Errorf("feed manifest %s: feed %q has an on_idle %q, want %q or %q", path, name, b.OnIdle, OnIdleWake, OnIdleHold)
 	}
+	if f := b.Filter; f != nil {
+		f.Question = strings.TrimSpace(f.Question)
+		if f.Question == "" {
+			return Spec{}, fmt.Errorf("feed manifest %s: feed %q needs a filter.question", path, name)
+		}
+		if !(f.MinNoProbability > 0.5 && f.MinNoProbability <= 1) {
+			return Spec{}, fmt.Errorf("feed manifest %s: feed %q needs a filter.min_no_probability greater than 0.5 and at most 1", path, name)
+		}
+	}
 	names := make([]string, 0, len(b.Env))
 	for entry := range b.Env {
 		names = append(names, entry)
@@ -236,5 +257,6 @@ func readFeed(path, name string, raw json.RawMessage) (Spec, error) {
 		Env:         envs,
 		Restart:     b.Restart,
 		OnIdle:      b.OnIdle,
+		Filter:      b.Filter,
 	}, nil
 }

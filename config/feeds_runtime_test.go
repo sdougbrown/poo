@@ -16,10 +16,92 @@ import (
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/config"
+	"github.com/sdougbrown/poo/decide"
 	"github.com/sdougbrown/poo/exec"
 	"github.com/sdougbrown/poo/pootest"
 	"github.com/sdougbrown/poo/tool/bash"
 )
+
+func TestFeedFilterDropsOnlyAConfidentNo(t *testing.T) {
+	const question = "Does this message need attention?"
+	path := filepath.Join(t.TempDir(), "feed.json")
+	manifest := `{
+  "version": 1,
+  "feeds": {
+    "inbox": {
+      "command": ["sh", "-c", "printf '%s\\n' \"$@\"", "feed",
+        "{\"text\":\"routine\"}",
+        "{\"from\":\"ci\",\"text\":\"uncertain\"}",
+        "{\"text\":\"unavailable\"}",
+        "{\"text\":\"required check failed\"}"],
+      "on_idle": "wake",
+      "filter": {"question": "` + question + `", "min_no_probability": 0.9}
+    }
+  }
+}`
+	if err := os.WriteFile(path, []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	settings, err := config.Parse([]byte(theFeedsSettings(path)), config.FormatYAML)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+	transport := pootest.NewTransport(pootest.Turn{Text: "ack"}, pootest.Turn{Text: "ack"}, pootest.Turn{Text: "ack"})
+	sink := pootest.NewSink()
+	runtime.Options.Transport = transport
+	runtime.Options.Sink = sink
+	model := decide.DeciderFunc(func(_ context.Context, state any, _ string, qs []decide.Question) ([]decide.Answer, error) {
+		fields, ok := state.(map[string]string)
+		if !ok || fields["feed"] != "inbox" || len(fields) != 3 || len(qs) != 1 || qs[0].Instructions != question {
+			t.Errorf("unexpected filter request: %#v, %#v", state, qs)
+			return nil, decide.ErrDeferred
+		}
+		answer := decide.Answer{ID: qs[0].ID}
+		no := 0.94
+		switch fields["text"] {
+		case "routine":
+		case "uncertain":
+			if fields["from"] != "ci" {
+				t.Errorf("filter got sender %q, want ci", fields["from"])
+			}
+			mass := 0.6
+			answer.LabelMass = &mass
+		case "unavailable":
+			return nil, decide.ErrDeferred
+		case "required check failed":
+			no = 0.01
+		default:
+			t.Errorf("unexpected message: %q", fields["text"])
+		}
+		answer.Probabilities = map[string]float64{"no": no, "yes": 1 - no}
+		return []decide.Answer{answer}, nil
+	})
+	sess, err := poo.New(runtime.Options, poo.WithDecider(poo.ModelInfo{}, model))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sess.Close() })
+	waitUntil(t, "the relevant message to reach the chat model", func() bool {
+		return theModelRead(transport, `<feed name="inbox">required check failed</feed>`, poo.FeedOrigin("inbox"))
+	})
+	var queued []string
+	var decisions int
+	for _, rec := range sink.Records() {
+		switch rec := rec.(type) {
+		case *poo.InputQueuedRecord:
+			if rec.Mode == poo.InputModeFeed {
+				queued = append(queued, rec.Text)
+			}
+		case *poo.DecisionRecord:
+			decisions++
+		}
+	}
+	want := []string{`<feed name="inbox" from="ci">uncertain</feed>`, `<feed name="inbox">unavailable</feed>`, `<feed name="inbox">required check failed</feed>`}
+	if !reflect.DeepEqual(queued, want) || decisions != 4 {
+		t.Errorf("queued %v and recorded %d decisions; want %v and 4", queued, decisions, want)
+	}
+}
 
 // The runtime's feeds: the manifest a settings file names is a command
 // the session runs, beside the session, for as long as the session is

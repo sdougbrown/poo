@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"regexp"
 	"time"
+
+	"github.com/sdougbrown/poo/decide"
 )
 
 // A feed is a long-lived source that pushes messages into a session.
@@ -28,6 +30,9 @@ type FeedIO struct {
 	// (ErrSessionClosed, ErrSessionBroken, a store error); the runner
 	// stops and returns that error.
 	Emit func(from, text string) error
+	// Decider returns the current recorded session decider, or nil if absent.
+	// Fetch it for each decision: the session can switch models mid-attempt.
+	Decider func() decide.Decider
 	// Log receives the runner's diagnostics, such as the child's stderr.
 	// It is never nil.
 	Log *slog.Logger
@@ -380,7 +385,8 @@ func (s *Session) runFeedAttempt(f *feedState, attempt int) (err error) {
 		Emit: func(from, text string) error {
 			return s.emitFeedInput(f, attempt, from, text)
 		},
-		Log: s.feedLogger(f.name),
+		Decider: s.Decider,
+		Log:     s.feedLogger(f.name),
 	})
 }
 

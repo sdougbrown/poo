@@ -210,6 +210,20 @@ func TestALoadRefusesBrokenManifests(t *testing.T) {
 			want: []string{"broker", "on_idle", `"sleep"`},
 		},
 		{
+			name: "blank filter question",
+			feeds: map[string]any{
+				"broker": map[string]any{"command": []string{"true"}, "filter": map[string]any{"question": "  ", "min_no_probability": 0.9}},
+			},
+			want: []string{"broker", "filter.question"},
+		},
+		{
+			name: "filter threshold allows a tie",
+			feeds: map[string]any{
+				"broker": map[string]any{"command": []string{"true"}, "filter": map[string]any{"question": "Deliver this?", "min_no_probability": 0.5}},
+			},
+			want: []string{"broker", "filter.min_no_probability"},
+		},
+		{
 			name:  "invalid name",
 			feeds: map[string]any{"Broker": map[string]any{"command": []string{"true"}}},
 			want:  []string{"Broker", "name"},

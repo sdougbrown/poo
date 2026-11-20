@@ -316,6 +316,34 @@ queues it until a run is going, and a feed without `on_idle` inherits
 `jobs.on_idle`. A run that is woken or prompted takes every queued input,
 held ones included.
 
+**Filter before delivery.** An optional `filter` applies to every message
+from a feed, including messages emitted while a run is active. For example:
+
+```json
+"filter": {
+  "question": "Does this event report a failed required check or an unclear status?",
+  "min_no_probability": 0.95
+}
+```
+
+Phrase the question so **yes** means deliver. Set `min_no_probability`
+above 0.5 and at most 1. The session decider
+receives the feed name, sender, and text, not the conversation. Enable this
+only if the configured decider is allowed to receive that data.
+
+Poo drops a message only when the probability of **no** meets the threshold.
+If the endpoint reports label mass, poo multiplies the probability by that
+mass before comparing it. Poo does not queue dropped messages, so they
+cannot wake a run or appear in its history. The usual decision record still
+captures the question and answer on logged sessions.
+
+A missing decider, failed or invalid answer, or probability below the
+threshold leaves the feed's normal delivery policy in place. Invalid label
+mass also leaves the message unfiltered. Messages whose
+sender and text total more than 8 KiB bypass the filter. The feed waits for
+each answer before processing the next message. Stopping the feed cancels
+any pending decision without delivering the message it was assessing.
+
 **The model reads a feed's input as outside input.** The message is one
 XML element: `<feed name="<name>" from="<from>">` around the text, with
 the `from` attribute left out when the input has no sender. In the text,
