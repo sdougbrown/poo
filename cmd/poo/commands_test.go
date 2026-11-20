@@ -179,12 +179,26 @@ func TestTheModelsCommandExplainsAModel(t *testing.T) {
 			t.Errorf("poo models exited with %d", code)
 		}
 	})
-	if !strings.Contains(out, "model_id") {
-		t.Errorf("the explanation is %q, want it to name the fields", out)
+	// The layer a field carries is its row's last cell, so the
+	// assertion is per field: one row misattributed to another layer
+	// fails, however many rows still say settings.
+	for _, field := range []string{"model_id", "context_limit"} {
+		if layer, ok := layerFor(out, field); !ok || layer != "settings" {
+			t.Errorf("the explanation is %q, want %q set by the settings layer", out, field)
+		}
 	}
-	if !strings.Contains(out, "settings") {
-		t.Errorf("the explanation is %q, want it to name the layer", out)
+}
+
+// layerFor returns the layer the explanation's row for the field
+// names.
+func layerFor(out, field string) (string, bool) {
+	for _, line := range strings.Split(out, "\n") {
+		cells := strings.Fields(line)
+		if len(cells) == 3 && cells[0] == field {
+			return cells[2], true
+		}
 	}
+	return "", false
 }
 
 // TestThePruneWithoutAPolicyFails covers the opt-in rule: retention is
