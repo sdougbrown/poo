@@ -230,47 +230,53 @@ func TestAWelcomeWithACredentialSkipsTheSignIn(t *testing.T) {
 // its provider's variable, and the Codex endpoint is offered only when
 // the file holds the Codex credential of its own.
 func TestThePickerOffersOnlyModelsTheCredentialRuns(t *testing.T) {
-	isolatedConfigHome(t)
-	noAmbientKeys(t)
-	t.Setenv("POO_SETTINGS", "")
-
 	// An OpenCode credential wakes the OpenCode endpoints, and nothing
 	// else: not the Codex endpoint the file's existence alone would wake.
-	storeCredential(t, auth.Opencode, auth.Credential{Kind: auth.KindAPIKey, Key: "oc-key"})
-	withStdin(t, "1\n\n")
-	var stderr bytes.Buffer
-	if _, ok := runWelcome(io.Discard, &stderr); !ok {
-		t.Fatalf("the flow did not finish; stderr: %s", stderr.String())
-	}
-	if strings.Contains(stderr.String(), "openai-codex/") {
-		t.Errorf("the picker offered a Codex model the credential cannot run: %s", stderr.String())
-	}
-	if strings.Contains(stderr.String(), "claude-sonnet-4-5") {
-		t.Errorf("the picker offered a hosted model no key wakes: %s", stderr.String())
-	}
-	if !strings.Contains(stderr.String(), "opencode/glm-5.3") {
-		t.Errorf("the picker's output is %q, want the models the credential runs", stderr.String())
-	}
+	t.Run("an api-key credential wakes its own endpoints", func(t *testing.T) {
+		isolatedConfigHome(t)
+		noAmbientKeys(t)
+		t.Setenv("POO_SETTINGS", "")
+		storeCredential(t, auth.Opencode, auth.Credential{Kind: auth.KindAPIKey, Key: "oc-key"})
+		withStdin(t, "1\n\n")
+		var stderr bytes.Buffer
+		if _, ok := runWelcome(io.Discard, &stderr); !ok {
+			t.Fatalf("the flow did not finish; stderr: %s", stderr.String())
+		}
+		if strings.Contains(stderr.String(), "openai-codex/") {
+			t.Errorf("the picker offered a Codex model the credential cannot run: %s", stderr.String())
+		}
+		if strings.Contains(stderr.String(), "claude-sonnet-4-5") {
+			t.Errorf("the picker offered a hosted model no key wakes: %s", stderr.String())
+		}
+		if !strings.Contains(stderr.String(), "opencode/glm-5.3") {
+			t.Errorf("the picker's output is %q, want the models the credential runs", stderr.String())
+		}
+	})
 
 	// A Codex credential brings the Codex models back, and naming one
 	// writes it as the chat role.
-	storeCredential(t, auth.Codex, auth.Credential{Access: "access", Refresh: "refresh", AccountID: "acc"})
-	withStdin(t, "1\n\n")
-	stderr.Reset()
-	path, ok := runWelcome(io.Discard, &stderr)
-	if !ok {
-		t.Fatalf("the flow did not finish with a Codex credential; stderr: %s", stderr.String())
-	}
-	if !strings.Contains(stderr.String(), "openai-codex/gpt-5.4-mini") {
-		t.Errorf("the picker's output is %q, want the Codex models the credential runs", stderr.String())
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("reading the settings the flow wrote: %v", err)
-	}
-	if !strings.Contains(string(data), "openai-codex/gpt-5.4-mini") {
-		t.Errorf("the settings are %q, want the Codex model the operator picked", string(data))
-	}
+	t.Run("a Codex credential wakes the Codex endpoint", func(t *testing.T) {
+		isolatedConfigHome(t)
+		noAmbientKeys(t)
+		t.Setenv("POO_SETTINGS", "")
+		storeCredential(t, auth.Codex, auth.Credential{Access: "access", Refresh: "refresh", AccountID: "acc"})
+		withStdin(t, "1\n\n")
+		var stderr bytes.Buffer
+		path, ok := runWelcome(io.Discard, &stderr)
+		if !ok {
+			t.Fatalf("the flow did not finish with a Codex credential; stderr: %s", stderr.String())
+		}
+		if !strings.Contains(stderr.String(), "openai-codex/gpt-5.4-mini") {
+			t.Errorf("the picker's output is %q, want the Codex models the credential runs", stderr.String())
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("reading the settings the flow wrote: %v", err)
+		}
+		if !strings.Contains(string(data), "openai-codex/gpt-5.4-mini") {
+			t.Errorf("the settings are %q, want the Codex model the operator picked", string(data))
+		}
+	})
 }
 
 // TestAWelcomeDoesNotClobberExistingSettings covers the create-not-clobber
