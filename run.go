@@ -581,7 +581,7 @@ func (s *Session) loop(run *runState) []candidate {
 
 		// A truncated response: the complete calls run, and the
 		// incomplete ones are skipped with a visible result.
-		truncated := resp.finish == FinishLength
+		truncated := resp.truncated()
 
 		// The turn's calls run before the turn ends.
 		processed := false
@@ -718,7 +718,7 @@ func (s *Session) turnEnd(run *runState, turn int, processed bool, resp *respons
 	// the truncated reason.
 	natural := ReasonEndTurn
 	naturalDetail := SettleDetail{Source: string(natural)}
-	if resp.finish == FinishLength {
+	if resp.truncated() {
 		natural = ReasonOutputTruncated
 		naturalDetail = resp.truncation
 	}
@@ -1869,6 +1869,16 @@ type response struct {
 	// errors are the failures the transport reported about the
 	// response.
 	errors []StreamError
+}
+
+// truncated reports whether the provider stopped the response on the
+// output-token limit.
+//
+// The turn reads it twice: once to skip the calls a cut response left
+// incomplete, and once to pick the reason a natural stop settles with.
+// The two read the same predicate so they cannot disagree.
+func (r *response) truncated() bool {
+	return r.finish == FinishLength
 }
 
 // collect fills the response with what the stream carried.
