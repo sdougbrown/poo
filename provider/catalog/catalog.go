@@ -97,6 +97,13 @@ type Options struct {
 	// client that says nothing is named by the HTTP library alone. Empty
 	// sends none.
 	UserAgent string
+	// KeyPresent reports whether the key an endpoint's credential reads is
+	// in reach. The curated layer is poo's word, and an entry whose key the
+	// operator cannot reach is not one to offer: poo models, the model
+	// switcher and the role checks all read the catalog's answer. Nil
+	// offers every entry: a binary that links no credential store offers
+	// what it embeds.
+	KeyPresent func(name string, credential Credential) bool
 	// Cached says the catalog holds what the endpoints last reported, read from the
 	// discovery cache when it is built. It is how a model an endpoint served is a model a
 	// session can name without a probe: the build never reaches the network, and the cache
@@ -163,6 +170,9 @@ func New(opts Options) *Catalog {
 		roles:      map[Role]string{},
 	}
 	for name, endpoint := range c.curated.endpoints {
+		if !c.offered(name, endpoint.Credential) {
+			continue
+		}
 		c.endpoints[name] = endpoint
 	}
 	for name, endpoint := range opts.File.Endpoints {
@@ -316,8 +326,13 @@ func (c *Catalog) addCuratedModels() {
 			continue
 		}
 		curated, endpoint, notes := c.curated.forModel(id)
-		if served, ok := c.endpoints[endpoint]; ok {
+		served, ok := c.endpoints[endpoint]
+		if ok {
 			curated.Endpoint = served.Endpoint
+		} else if _, hosted := c.curated.endpoints[endpoint]; hosted {
+			// The hosted endpoint poo offers is gated away, and no layer
+			// the operator wrote declares it: the model rides on nothing.
+			continue
 		}
 		e := &entry{
 			name:     id,
@@ -329,6 +344,14 @@ func (c *Catalog) addCuratedModels() {
 		c.entries[id] = e
 		c.modelIndex[modelRef{endpoint: endpoint, modelID: id}] = e
 	}
+}
+
+// offered reports whether the curated layer may offer an endpoint: the
+// key it reads is in reach. A catalog built with no presence answer — a
+// binary that links no credential store, or a test — offers everything
+// the layer declares.
+func (c *Catalog) offered(name string, credential Credential) bool {
+	return c.opts.KeyPresent == nil || c.opts.KeyPresent(name, credential)
 }
 
 // addRoles records the role assignments.

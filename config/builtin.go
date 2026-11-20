@@ -101,17 +101,33 @@ func (s *Settings) EndpointKeyPresent(name string, credential catalog.Credential
 	return s.EndpointKey(name, credential) != ""
 }
 
-// gateKeyEndpoints drops the layer's key-read endpoints whose key is not
+// gateKeyEndpoints drops the layer's endpoints whose credential is not
 // there, and keeps every other endpoint as it is.
 //
-// The key is there through the same rungs the key's own resolution reads, in
-// the same order: the variable it names, the credential file's entry for the
-// provider that reads it, and the literal the settings carry for an endpoint
-// of the same name. A read of the file that fails is a file that holds
-// nothing: the variable and the literal are the other ways in.
+// An endpoint that names a key variable takes the key through the same
+// rungs the key's own resolution reads, in the same order: the variable it
+// names, the credential file's entry for the provider that reads it, and
+// the literal the settings carry for an endpoint of the same name. A read
+// of the file that fails is a file that holds nothing: the variable and
+// the literal are the other ways in. An endpoint that names no variable
+// reads the credential poo's file holds under its own name.
 func (s *Settings) gateKeyEndpoints(layer catalog.FileSettings) catalog.FileSettings {
 	for name, endpoint := range layer.Endpoints {
 		if endpoint.APIKeyEnv == "" {
+			// An endpoint that names no key variable reads the credential
+			// poo's file holds under its own name: the Codex transport's
+			// oauth pair. A file that holds none leaves the endpoint
+			// unoffered.
+			held, err := (auth.Credentials{Path: s.CredentialFile()}).Holds(name)
+			if err == nil && held {
+				continue
+			}
+			delete(layer.Endpoints, name)
+			for model, entry := range layer.Models {
+				if entry.Endpoint == name {
+					delete(layer.Models, model)
+				}
+			}
 			continue
 		}
 		credential := catalog.Credential{Source: catalog.CredentialEnv, Env: endpoint.APIKeyEnv}

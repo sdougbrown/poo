@@ -14,7 +14,6 @@ import (
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/config"
 	"github.com/sdougbrown/poo/profile"
-	"github.com/sdougbrown/poo/provider/auth"
 	"github.com/sdougbrown/poo/provider/catalog"
 )
 
@@ -125,17 +124,12 @@ func welcomeSignIn(ctx context.Context, in *bufio.Scanner, stdout, stderr io.Wri
 func welcomeModel(settings *config.Settings, stderr io.Writer, in *bufio.Scanner) (model string, ok bool, stalled bool) {
 	options := settings.CatalogOptions()
 	options.UserAgent = userAgent()
-	credentials := auth.Credentials{Path: settings.CredentialFile()}
 	models := []string{}
 	cat := catalog.New(options)
 	for _, info := range cat.List() {
-		if !info.HasOp(poo.OpChat) {
-			continue
+		if info.HasOp(poo.OpChat) {
+			models = append(models, info.Name)
 		}
-		if !credentialServes(cat, settings, info.Provider, credentials) {
-			continue
-		}
-		models = append(models, info.Name)
 	}
 	if len(models) == 0 {
 		fmt.Fprintln(stderr, "poo: no model in the catalog serves chat. The credential signs in to a provider whose models are not chat models, and no key in the environment wakes one.")
@@ -152,25 +146,6 @@ func welcomeModel(settings *config.Settings, stderr io.Writer, in *bufio.Scanner
 		return "", false, false
 	}
 	return models[choice-1], true, false
-}
-
-// credentialServes reports whether the credential a model's endpoint reads
-// is in reach. A key endpoint is the settings' own ladder: the variable it
-// names, the stored credential, the literal. The Codex endpoint is the one
-// whose credential is an oauth pair the file holds, so its rung is the
-// file's own entry. The catalog offers a model whatever the credential's
-// state is; without these checks the picker would hand an operator models
-// they cannot run.
-func credentialServes(cat *catalog.Catalog, settings *config.Settings, provider string, credentials auth.Credentials) bool {
-	if provider == auth.ProviderCodex {
-		held, err := credentials.Holds(provider)
-		return err == nil && held
-	}
-	endpoint, ok := cat.Endpoints()[provider]
-	if !ok {
-		return true
-	}
-	return settings.EndpointKeyPresent(provider, endpoint.Credential)
 }
 
 // welcomeProfile asks which of the profiles the binary links a session

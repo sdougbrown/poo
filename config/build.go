@@ -1087,6 +1087,10 @@ func (s *Settings) CatalogOptions() catalog.Options {
 		Settings: s.CatalogSettings(),
 		File:     s.modelsFileLayer,
 		Cached:   true,
+		// The curated layer is poo's word, and an entry whose key the
+		// operator cannot reach is not one to offer: the same presence
+		// answer the endpoint key's resolution gives a session.
+		KeyPresent: s.EndpointKeyPresent,
 	}
 }
 

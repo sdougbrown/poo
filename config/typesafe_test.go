@@ -99,6 +99,7 @@ func TestTheBuiltinTypesafeModelIsOfferedOnItsKey(t *testing.T) {
 	// The variable is pinned empty so the environment a test runs in cannot
 	// decide whether the built-in endpoint is offered or which key answers.
 	t.Setenv("TYPESAFE_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "test-key")
 
 	dir := t.TempDir()
 	writeOpencodeAuth(t, dir, map[string]string{"typesafe": "ts_sk_test"})
@@ -149,6 +150,7 @@ func TestTheBuiltinTypesafeModelSleepsOnAnotherProvidersCredential(t *testing.T)
 	// The variable is pinned empty so the environment a test runs in cannot
 	// decide whether the built-in endpoint is offered or which key answers.
 	t.Setenv("TYPESAFE_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "test-key")
 
 	dir := t.TempDir()
 	writeOpencodeAuth(t, dir, map[string]string{"ollama-cloud": "an-ollama-key"})
@@ -175,6 +177,7 @@ func TestTheBuiltinTypesafeModelSleepsOnAnotherProvidersCredential(t *testing.T)
 func TestTheBuiltinTypesafeModelWakesOnTheVariable(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("TYPESAFE_API_KEY", "ts_sk_from_env")
+	t.Setenv("OPENAI_API_KEY", "test-key")
 	writeOpencodeAuth(t, dir, map[string]string{"ollama-cloud": "an-ollama-key"})
 
 	settings, err := config.Load(typesafeSettings(t, dir, "chat: gpt-4o-mini\n  decider: typesafe/jev-latest"))
@@ -233,6 +236,7 @@ func TestTheTypesafeDeciderFoldsTheCallInstructions(t *testing.T) {
 	// The variable is pinned empty so the environment a test runs in cannot
 	// decide which key answers.
 	t.Setenv("TYPESAFE_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "test-key")
 
 	dir := t.TempDir()
 	srv := newTypesafeServer(t)
@@ -305,6 +309,7 @@ func TestTheSettingsKeepTheBuiltinEndpointDeclarations(t *testing.T) {
 	// The variable is pinned empty so the environment a test runs in cannot
 	// decide which key answers.
 	t.Setenv("TYPESAFE_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "test-key")
 
 	dir := t.TempDir()
 	srv := newTypesafeServer(t)
@@ -388,6 +393,7 @@ func TestAKeylessSettingsEntryKeepsTheRecordCredential(t *testing.T) {
 	// The variable is pinned empty so the environment a test runs in cannot
 	// decide which key answers.
 	t.Setenv("TYPESAFE_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "test-key")
 
 	dir := t.TempDir()
 	writeOpencodeAuth(t, dir, map[string]string{"typesafe": "ts_sk_stored"})
@@ -424,6 +430,7 @@ roles:
 // as the request's own field, and each question says only what it was
 // asked.
 func TestADeciderKeepsTheCallInstructionsOnTheRequest(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "test-key")
 	dir := t.TempDir()
 	srv := newTypesafeServer(t)
 	path := writeCodexSettings(t, dir, `version: 1
