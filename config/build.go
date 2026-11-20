@@ -1791,8 +1791,8 @@ func (r *Runtime) resolveSession(opts BuildOptions, workingDir string) error {
 	if settings.Tools.Fetch.AllowPrivateHosts != nil {
 		r.Options.Settings.FetchAllowPrivateHosts = *settings.Tools.Fetch.AllowPrivateHosts
 	}
-	r.Options.Settings.ObservationCapChars = caps.Observation(model.ContextLimit, poo.CharsPerToken)
-	r.Options.Settings.ReadOutputCapChars = caps.ReadOutput(model.ContextLimit, poo.CharsPerToken)
+	r.Options.Settings.ObservationCapChars = caps.Observation(model.PromptLimit(), poo.CharsPerToken)
+	r.Options.Settings.ReadOutputCapChars = caps.ReadOutput(model.PromptLimit(), poo.CharsPerToken)
 
 	strategy := DefaultContextStrategy
 	if settings.Context.Strategy != nil {

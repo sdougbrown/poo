@@ -17,6 +17,7 @@ import (
 	"github.com/sdougbrown/poo/compact/summary"
 	"github.com/sdougbrown/poo/config"
 	"github.com/sdougbrown/poo/exec"
+	"github.com/sdougbrown/poo/internal/caps"
 	"github.com/sdougbrown/poo/perm"
 	"github.com/sdougbrown/poo/pootest"
 	"github.com/sdougbrown/poo/profile"
@@ -129,6 +130,27 @@ roles:
   chat: test-model
 `
 
+// theCappedModelSettings is a settings document whose model takes a smaller
+// prompt than its window.
+const theCappedModelSettings = `
+version: 1
+endpoints:
+  test:
+    endpoint: http://localhost:4000/v1
+    api_key_env: POO_TEST_KEY
+models:
+  test-model:
+    endpoint: test
+    model_id: test-model
+    api: chat_completions
+    tools_mode: native
+    ops: [chat]
+    context_limit: 200000
+    input_limit: 100000
+roles:
+  chat: test-model
+`
+
 // TestTheBuildPicksTheProfileAndItsTools covers the profile: the
 // session offers the tools the profile names, and the policy takes the
 // profile's action for a call no rule covers.
@@ -166,6 +188,25 @@ func TestTheBuildPicksTheProfileAndItsTools(t *testing.T) {
 	// The profiles the binary offers are the ones it links.
 	if len(runtime.Profiles) != 2 {
 		t.Errorf("the build offers %d profiles, want 2", len(runtime.Profiles))
+	}
+}
+
+// TestTheObservationCapsFollowTheInputCap covers the caps the tools elide
+// their output by: they protect the prompt, so a model that takes a smaller
+// prompt than its window gets the caps that prompt affords.
+func TestTheObservationCapsFollowTheInputCap(t *testing.T) {
+	settings, err := config.Parse([]byte(theCappedModelSettings), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+
+	prompt := runtime.Options.Model.PromptLimit()
+	if got, want := runtime.Options.Settings.ObservationCapChars, caps.Observation(prompt, poo.CharsPerToken); got != want {
+		t.Errorf("the observation cap is %d, want the %d the %d-token prompt limit affords", got, want, prompt)
+	}
+	if got, want := runtime.Options.Settings.ReadOutputCapChars, caps.ReadOutput(prompt, poo.CharsPerToken); got != want {
+		t.Errorf("the read output cap is %d, want the %d the %d-token prompt limit affords", got, want, prompt)
 	}
 }
 

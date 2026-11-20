@@ -999,3 +999,55 @@ func TestTheRestoredModelIgnoresAnotherModelsOutputLimit(t *testing.T) {
 		t.Errorf("the restored request carried max_tokens %d, want the default 8192", got)
 	}
 }
+
+// TestARestoredInputCapComesFromTheSameModel covers the fallback for a record
+// written before the cap existed: the restore takes the cap from the
+// settings' entry for the model the record names, and only when that entry
+// describes the same model id. A role the settings now point at another
+// model keeps the limits it ran with.
+func TestARestoredInputCapComesFromTheSameModel(t *testing.T) {
+	// The recorded view is far over the hard ratio of the 2000-token cap
+	// and well under it for the 32768-token window, so a restore that
+	// picks the cap up settles context_exhausted before its first
+	// request.
+	prompt := strings.Repeat("x", 14000)
+	records := func() []poo.Record {
+		return []poo.Record{
+			header("s1"),
+			&poo.MessageRecord{
+				RecordMeta: poo.NewRecordMetaFrom("message", poo.OriginUser),
+				RunID:      "r1",
+				Role:       poo.RoleUser,
+				Content:    poo.NewTextMessage(poo.RoleUser, prompt).Content,
+			},
+		}
+	}
+	for _, tc := range []struct {
+		name    string
+		modelID string
+		want    poo.Reason
+	}{
+		{"the entry describes the recorded model", "test-model", poo.ReasonContextExhausted},
+		{"the entry describes another model", "other-model", poo.ReasonEndTurn},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := restoreOptions(t, scripted([]fakeResponse{{text: "ok"}}), &recordingSink{})
+			opts.Models["fast"] = poo.ModelInfo{
+				Name:         "fast",
+				ModelID:      tc.modelID,
+				ContextLimit: 32768,
+				InputLimit:   2000,
+				Ops:          []poo.Op{poo.OpChat, poo.OpCompact},
+			}
+			session, _, err := poo.Restore(opts, records())
+			if err != nil {
+				t.Fatalf("restoring the session: %v", err)
+			}
+			t.Cleanup(func() { session.Close() })
+
+			if got := runSession(t, session, "hello"); got.Reason != tc.want {
+				t.Errorf("the run settled %q, want %q", got.Reason, tc.want)
+			}
+		})
+	}
+}

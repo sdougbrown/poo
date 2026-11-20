@@ -193,6 +193,9 @@ func TestTheHostedModelsAreListed(t *testing.T) {
 	if hosted.ContextLimit != 400000 {
 		t.Errorf("the context limit is %d, want the generated 400000", hosted.ContextLimit)
 	}
+	if hosted.InputLimit != 272000 {
+		t.Errorf("the input limit is %d, want the generated 272000", hosted.InputLimit)
+	}
 	if hosted.Temperature != poo.TempFixed {
 		t.Errorf("the temperature control is %q, want fixed", hosted.Temperature)
 	}

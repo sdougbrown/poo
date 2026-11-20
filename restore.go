@@ -255,11 +255,15 @@ func Restore(opts Options, records []Record, fns ...Option) (*Session, Restored,
 		if model.MaxOutput <= 0 && created.Model.ModelID == model.ModelID {
 			model.MaxOutput = created.Model.MaxOutput
 		}
-		// The input cap follows the model the session resolved, which is
-		// the endpoint the record names: a record that predates the cap
-		// would otherwise let the prompt grow into the window.
+		// The input cap is the one the settings give the model the record
+		// names, and only for the model id the record itself names: a
+		// record that predates the cap gets it back, and a role the
+		// settings now point at another model keeps the limits it ran
+		// with.
 		if model.InputLimit <= 0 {
-			model.InputLimit = opts.Model.InputLimit
+			if entry, ok := opts.Models[modelLabel(model)]; ok && entry.ModelID == model.ModelID {
+				model.InputLimit = entry.InputLimit
+			}
 		}
 		opts.Model = model
 	}
