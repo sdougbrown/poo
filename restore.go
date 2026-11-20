@@ -632,8 +632,39 @@ func (s *Session) rebuild(records []Record, out *Restored) error {
 	// The turns that produced no message stand where the view stands
 	// when the records end.
 	s.placeRemainingTurns(placed)
+	// A resumed session guards the native compaction the way the live one
+	// did: the first report after the last compaction measured the view the
+	// compaction left.
+	s.compactedInput, s.compactedReportPending = compactedInputFrom(records)
 	out.Messages = len(s.history)
 	return nil
+}
+
+// compactedInputFrom returns the input the first usage report after the last
+// compaction reported, and whether the compaction still waits for one.
+//
+// A request a compaction made is the compaction's own, not the view's input, so
+// its report is left out, the way a live session leaves it out. The session's
+// guard against a compaction that gave nothing back is rebuilt from the same
+// report it watched for.
+func compactedInputFrom(records []Record) (int, bool) {
+	last := -1
+	for i, rec := range records {
+		if _, ok := rec.(*CompactionRecord); ok {
+			last = i
+		}
+	}
+	if last < 0 {
+		return 0, false
+	}
+	for _, rec := range records[last+1:] {
+		usage, ok := rec.(*UsageRecord)
+		if !ok || usage.Origin == OriginCompaction || usage.InputTokens <= 0 {
+			continue
+		}
+		return usage.InputTokens, false
+	}
+	return 0, true
 }
 
 // seedCounters continues the session's counters past the ones the

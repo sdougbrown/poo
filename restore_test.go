@@ -1051,3 +1051,40 @@ func TestARestoredInputCapComesFromTheSameModel(t *testing.T) {
 		})
 	}
 }
+
+// TestTheRestoredSessionKeepsTheCompactedInput covers the guard a resumed
+// session needs: the input the first report after the last compaction gave is
+// the input the strategy compares the new model's window against, and a restore
+// that forgets it would let a compactor that helped nothing run again.
+func TestTheRestoredSessionKeepsTheCompactedInput(t *testing.T) {
+	const after = 1234
+	compactor := pootest.NewCompactor(true, summaryCompaction())
+	compactor.SetShouldAfter(1)
+	sink := &recordingSink{}
+	opts := testOptions(t, scripted([]fakeResponse{
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{text: "the answer", usage: &poo.UsageReport{InputTokens: after, OutputTokens: 5}},
+	}), &echoTool{result: "echoed"}, sink)
+	opts.Compactor = compactor
+	s := newTestSession(t, opts)
+	if res := runSession(t, s, "do the thing"); res.Reason != poo.ReasonEndTurn {
+		t.Fatalf("the run settled %q (%s), want end_turn", res.Reason, res.Detail.Text)
+	}
+	if got := sink.count("compaction"); got != 1 {
+		t.Fatalf("the log holds %d compactions, want 1", got)
+	}
+
+	probe := &budgetProbe{}
+	restoredOpts := restoreOptions(t, scripted([]fakeResponse{{text: "ok"}}), &recordingSink{})
+	restoredOpts.Compactor = probe
+	restored, _, err := poo.Restore(restoredOpts, append([]poo.Record{header("s1")}, sink.allRecords()...))
+	if err != nil {
+		t.Fatalf("restoring the session: %v", err)
+	}
+	t.Cleanup(func() { restored.Close() })
+	runSession(t, restored, "carry on")
+	if probe.last.CompactedInput != after {
+		t.Errorf("the restored budget carries a compacted input of %d, want the report's %d",
+			probe.last.CompactedInput, after)
+	}
+}

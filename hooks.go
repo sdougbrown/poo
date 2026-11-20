@@ -81,8 +81,12 @@ type ContextBudget struct {
 	// means unknown.
 	OutputLimit int
 	// CompactedInput is the input the first usage report after the
-	// latest compaction reported. It is zero when there has been no
-	// compaction or no report since one.
+	// latest compaction reported, in the provider's own tokens. It is
+	// zero when there has been no compaction, and when the endpoint sends
+	// no usage reports at all. A request the transport retried reports the
+	// sum of its attempts, so the value can run high after a retry, and a
+	// strategy that guards on it declines earlier than the next request
+	// would have needed.
 	CompactedInput int
 	// Turns is the number of provider requests the run has made.
 	//
