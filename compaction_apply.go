@@ -245,6 +245,10 @@ func (s *Session) commitCompactionView(run *runState, view compactionView) bool 
 		s.results[handle] = result
 	}
 	s.est.rebase(view.history)
+	// The next usage report is the first after this compaction, so it
+	// reports what the new view cost the endpoint.
+	s.compactedInput = 0
+	s.compactedReportPending = true
 	return true
 }
 

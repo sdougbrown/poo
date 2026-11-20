@@ -41,11 +41,6 @@ const (
 	// Strategy is the name the compaction carries.
 	Strategy = "summary"
 
-	// DefaultRatio is the share of the prompt limit at which the
-	// strategy summarizes. It sits under the handoff strategy's ratio,
-	// so a summary has room to be written before the prompt is full.
-	DefaultRatio = 0.85
-
 	// DefaultKeepRecentTokens is how much of the newest history the
 	// strategy keeps verbatim.
 	DefaultKeepRecentTokens = 20000
@@ -67,7 +62,8 @@ const (
 // Options configure the strategy.
 type Options struct {
 	// Ratio is the share of the prompt limit at which the strategy
-	// summarizes. It defaults to DefaultRatio.
+	// summarizes. Zero means no ratio trigger: the strategy acts when
+	// the next answer no longer fits.
 	Ratio float64
 	// KeepRecentTokens is how much of the newest history the strategy
 	// keeps verbatim. It defaults to DefaultKeepRecentTokens.
@@ -104,9 +100,6 @@ type Compactor struct {
 // New returns the summary strategy.
 func New(opts Options) *Compactor {
 	c := &Compactor{ratio: opts.Ratio, keepRecent: opts.KeepRecentTokens, maxTokens: opts.MaxTokens, files: opts.Files}
-	if c.ratio <= 0 {
-		c.ratio = DefaultRatio
-	}
 	if c.keepRecent <= 0 {
 		c.keepRecent = DefaultKeepRecentTokens
 	}
@@ -131,31 +124,35 @@ func (c *Compactor) MaxTokens() int { return c.maxTokens }
 
 // ShouldCompact reports whether the view should be summarized.
 //
-// The strategy acts when the window is nearly full and the view holds a
-// turn older than the newest one. A single turn has nothing older to
+// The strategy acts when the next answer no longer fits and the view holds
+// a turn older than the newest one. A single turn has nothing older to
 // summarize, so starting a compaction would only fail: the same guard
 // Compact applies belongs here, before the run is told one started.
 //
-// It also acts before the ratio when the room left in the window is under
-// the output limit, because every request then asks for exactly the room
-// left and an estimate that runs low gets the request rejected. That
-// trigger fires only when a summary would give the room back: a window so
-// small that the verbatim tail and the summary alone leave less room than
-// the output limit would summarize on every turn and gain nothing.
+// A configured ratio is an explicit override: when it is set, the strategy
+// also acts at that share of the prompt limit.
+//
+// The room trigger fires only when a summary would give the room back: a
+// window so small that the verbatim tail and the summary alone leave less
+// room than the output limit would summarize on every turn and gain
+// nothing.
 func (c *Compactor) ShouldCompact(view poo.View, budget poo.ContextBudget) bool {
 	if len(liveTurns(view.Turns())) < 2 {
 		return false
 	}
-	return budget.Reached(c.ratio) || c.restoresOutputRoom(view, budget)
+	if c.ratio > 0 && budget.Reached(c.ratio) {
+		return true
+	}
+	return c.restoresRoom(view, budget)
 }
 
-// restoresOutputRoom reports that the output room is short and a summary
+// restoresRoom reports that the next answer does not fit and a summary
 // would end the shortage.
 //
 // The input a compaction would leave is the input now, less the turns the
 // cut replaces, plus a summary as long as the strategy allows.
-func (c *Compactor) restoresOutputRoom(view poo.View, budget poo.ContextBudget) bool {
-	if !budget.OutputRoomShort() {
+func (c *Compactor) restoresRoom(view poo.View, budget poo.ContextBudget) bool {
+	if !budget.RoomShort(budget.OutputLimit) {
 		return false
 	}
 	messages := view.Messages()
@@ -166,7 +163,7 @@ func (c *Compactor) restoresOutputRoom(view poo.View, budget poo.ContextBudget) 
 	after := budget
 	after.EstimatedInput = budget.EstimatedInput - turnTokens(messages[cut.Start:cut.End], budget) +
 		c.maxTokens + c.replacementCarriageTokens(cut, messages[cut.Start:cut.End], budget)
-	return !after.OutputRoomShort()
+	return !after.RoomShort(after.OutputLimit)
 }
 
 // replacementCarriageTokens estimates what the replacement carries besides

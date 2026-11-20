@@ -3,7 +3,6 @@ package poo_test
 import (
 	"context"
 	"errors"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -633,43 +632,6 @@ func TestACompactorsForkCountsTowardTheRunBudget(t *testing.T) {
 	}
 }
 
-// TestTheGateRechecksTheOutputRoomAfterTheNotice covers the gate's own
-// promise: no request leaves with a max_tokens under the minimum. The
-// usage report lands the run just under the notice's ratio, so the
-// notice's own tokens are what push the view past the room to answer —
-// and the gate settles context_exhausted instead of opening the
-// request.
-func TestTheGateRechecksTheOutputRoomAfterTheNotice(t *testing.T) {
-	// The first turn runs a tool and reports the usage that puts the
-	// estimate just inside the notice's ratio, so the notice's own
-	// tokens are what take the room to answer away.
-	tr := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{CallID: "c", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}, usage: &poo.UsageReport{InputTokens: 2475}},
-		{text: "the second answer"},
-	})
-	sink := &recordingSink{}
-	tool := &echoTool{result: "echoed"}
-	opts := testOptions(t, tr, tool, sink)
-	opts.Model.ContextLimit = 3000
-	opts.NoticeRatio = 0.80
-
-	s := newTestSession(t, opts)
-	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
-		t.Fatalf("starting the run: %v", err)
-	}
-	res, err := s.Wait(context.Background())
-	if err != nil {
-		t.Fatalf("waiting for the run: %v", err)
-	}
-
-	if res.Reason != poo.ReasonContextExhausted {
-		t.Errorf("the run settled %q, want context_exhausted", res.Reason)
-	}
-	if res.Detail.Source != "no_output_room" {
-		t.Errorf("the settle source is %q, want no_output_room", res.Detail.Source)
-	}
-}
-
 // failingGateCompactor fails the compaction once, on the run's second
 // gate: the first one opens the run's first request.
 type failingGateCompactor struct {
@@ -688,11 +650,11 @@ func (c *failingGateCompactor) Compact(ctx context.Context, in poo.CompactionEnv
 	return poo.Compaction{}, c.err
 }
 
-// TestAFailingCompactorOverTheHardLimitSettlesContextExhausted covers
-// the compactor-failure row of the failure table: a compaction that
-// fails at or above the hard ratio settles context_exhausted with the
+// TestAFailingCompactorWithNoOutputRoomSettlesContextExhausted covers
+// the compactor-failure row of the failure table: a compaction that fails
+// when the next request cannot go out settles context_exhausted with the
 // compaction_failed source.
-func TestAFailingCompactorOverTheHardLimitSettlesContextExhausted(t *testing.T) {
+func TestAFailingCompactorWithNoOutputRoomSettlesContextExhausted(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{text: "the answer", usage: &poo.UsageReport{InputTokens: 2950}},
 		{text: "the second answer"},
@@ -724,10 +686,10 @@ func TestAFailingCompactorOverTheHardLimitSettlesContextExhausted(t *testing.T) 
 	}
 }
 
-// TestAFailingCompactorBelowTheHardLimitContinuesUncompacted covers the
-// same row's soft half: below the hard ratio the run carries on
+// TestAFailingCompactorWithRoomContinuesUncompacted covers the
+// same row's soft half: with room for the next request the run carries on
 // uncompacted, and the strategy retries at the next gate.
-func TestAFailingCompactorBelowTheHardLimitContinuesUncompacted(t *testing.T) {
+func TestAFailingCompactorWithRoomContinuesUncompacted(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{text: "the answer"},
 		{text: "the second answer"},
@@ -762,43 +724,3 @@ func TestAFailingCompactorBelowTheHardLimitContinuesUncompacted(t *testing.T) {
 	}
 }
 
-// TestTheNoticeNamesTheConfiguredRatio covers the notice's contract
-// with a configured ratio: the notice the model reads names the ratio
-// it fired at, not the default's.
-func TestTheNoticeNamesTheConfiguredRatio(t *testing.T) {
-	// The first turn runs a tool, so the run reaches the gate with the
-	// estimate past the configured ratio; a natural stop would settle
-	// without a gate pass.
-	tr := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{CallID: "c", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}, usage: &poo.UsageReport{InputTokens: 1800}},
-		{text: "the second answer"},
-	})
-	sink := &recordingSink{}
-	tool := &echoTool{result: "echoed"}
-	opts := testOptions(t, tr, tool, sink)
-	opts.Model.ContextLimit = 3000
-	opts.NoticeRatio = 0.60
-
-	s := newTestSession(t, opts)
-	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
-		t.Fatalf("starting the run: %v", err)
-	}
-	if _, err := s.Wait(context.Background()); err != nil {
-		t.Fatalf("waiting for the run: %v", err)
-	}
-
-	noticed := false
-	for _, m := range sink.messages() {
-		if m.Role != poo.RoleUser {
-			continue
-		}
-		if text := m.Content[0].Text; strings.Contains(text, "~60%") {
-			noticed = true
-		} else if strings.Contains(text, "Context notice") {
-			t.Errorf("the notice is %q, want the configured ratio", text)
-		}
-	}
-	if !noticed {
-		t.Error("the log holds no notice with the configured ratio")
-	}
-}

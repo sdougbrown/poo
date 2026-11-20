@@ -377,6 +377,29 @@ func TestTheBuildWarnsWhenNoAskerCanAnswer(t *testing.T) {
 	}
 }
 
+// TestTheRemovedContextRatiosWarn covers the settings migration: a file that
+// still sets a removed ratio loads, and the warning names the key and says it
+// no longer has any effect.
+func TestTheRemovedContextRatiosWarn(t *testing.T) {
+	settings, err := config.Parse([]byte(theModelSettings+`
+context:
+  notice_ratio: 0.8
+  hard_ratio: 0.97
+`), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+	for _, key := range []string{"context.notice_ratio", "context.hard_ratio"} {
+		if !strings.Contains(runtime.Warning, key) {
+			t.Errorf("the warning is %q, want it to name %s", runtime.Warning, key)
+		}
+	}
+	if !strings.Contains(runtime.Warning, "no longer has any effect") {
+		t.Errorf("the warning is %q, want it to say the keys have no effect", runtime.Warning)
+	}
+}
+
 // TestTheBuildScrubsTheCredentials covers the credentials: the names the
 // endpoints' keys are read from are gone from the child environment.
 func TestTheBuildScrubsTheCredentials(t *testing.T) {
@@ -2364,7 +2387,7 @@ context:
 
 // TestTheSummaryStrategyDefaults covers a settings document that names
 // the strategy and nothing else: the compactor gets the strategy's own
-// defaults, not a zeroed one that never fires.
+// defaults, and a zero ratio means no ratio trigger.
 func TestTheSummaryStrategyDefaults(t *testing.T) {
 	settings, err := config.Parse([]byte(theModelSettings+`
 context:
@@ -2383,7 +2406,7 @@ context:
 		got  float64
 		want float64
 	}{
-		{"ratio", strategy.Ratio(), summary.DefaultRatio},
+		{"ratio", strategy.Ratio(), 0},
 		{"keep_recent_tokens", float64(strategy.KeepRecentTokens()), float64(summary.DefaultKeepRecentTokens)},
 		{"max_tokens", float64(strategy.MaxTokens()), float64(summary.DefaultMaxTokens)},
 	} {

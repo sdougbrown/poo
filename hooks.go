@@ -3,6 +3,7 @@ package poo
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/sdougbrown/poo/decide"
 	"github.com/sdougbrown/poo/prompt"
@@ -72,11 +73,6 @@ type ContextBudget struct {
 	// EstimatedInput is the estimated number of prompt tokens of the
 	// next request.
 	EstimatedInput int
-	// NoticeRatio is the share of the prompt limit at which the model is
-	// told that the context is filling up.
-	NoticeRatio float64
-	// HardRatio is the share of the prompt limit at which the run stops.
-	HardRatio float64
 	// CharsPerToken is the calibrated characters-per-token ratio.
 	CharsPerToken float64
 	// OutputLimit is the output limit the next request carries before
@@ -84,6 +80,10 @@ type ContextBudget struct {
 	// limit, or the default for its window, whichever is lower. Zero
 	// means unknown.
 	OutputLimit int
+	// CompactedInput is the input the first usage report after the
+	// latest compaction reported. It is zero when there has been no
+	// compaction or no report since one.
+	CompactedInput int
 	// Turns is the number of provider requests the run has made.
 	//
 	// A compaction strategy needs it: the handoff strategy asks for a
@@ -115,20 +115,52 @@ func (b ContextBudget) PromptLimit() int {
 	return PromptLimitOf(b.ContextLimit, b.InputLimit)
 }
 
-// OutputRoomShort reports that the room the window leaves after the
-// estimated input and the output reserve is under the output limit, so the
-// next request's max_tokens is clamped to the room.
+// RoomShort reports that the next request does not fit: the prompt plus the
+// output need and the reserve is over the window, or the prompt plus the
+// reserve is over the endpoint's input cap.
 //
-// It is the trigger for a strategy that compacts to give the output its
-// room: a strategy checks whether a compaction would end the shortage with
-// the same rule, on a budget whose input is the one it would leave. A budget
-// that knows no window or no output limit, or whose run has asked the model
-// nothing, is never short.
-func (b ContextBudget) OutputRoomShort() bool {
-	if b.Turns < 1 || b.ContextLimit <= 0 || b.OutputLimit <= 0 {
+// It is the trigger for a compaction strategy: a strategy checks whether a
+// compaction would end the shortage with the same rule, on a budget whose
+// input is the one it would leave. A budget with no window and no cap, or
+// whose run has asked the model nothing, is never short.
+func (b ContextBudget) RoomShort(need int) bool {
+	if b.Turns < 1 {
 		return false
 	}
-	return b.ContextLimit-b.EstimatedInput-OutputReserve < b.OutputLimit
+	if b.ContextLimit > 0 && b.EstimatedInput+need+OutputReserve > b.ContextLimit {
+		return true
+	}
+	return b.InputLimit > 0 && b.EstimatedInput+OutputReserve > b.InputLimit
+}
+
+// RequestBlocked reports that the next request cannot go out: the room the
+// window leaves is under MinOutputTokens, or the prompt is over the
+// endpoint's input cap. It names the settle detail's source and text.
+func (b ContextBudget) RequestBlocked() (bool, string, string) {
+	if room := b.OutputRoom(); room < MinOutputTokens {
+		return true, "no_output_room", fmt.Sprintf("the computed max_tokens %d is under the %d-token minimum", room, MinOutputTokens)
+	}
+	if b.InputLimit > 0 && b.EstimatedInput+OutputReserve > b.InputLimit {
+		return true, "prompt_limit", fmt.Sprintf("the estimated input of %d tokens plus the %d-token reserve is over the %d-token input cap",
+			b.EstimatedInput, OutputReserve, b.InputLimit)
+	}
+	return false, "", ""
+}
+
+// OutputRoom returns the max_tokens the next request would carry: the output
+// limit, clamped to the room the window leaves after the input and the
+// reserve.
+func (b ContextBudget) OutputRoom() int {
+	room := b.OutputLimit
+	if room <= 0 {
+		room = DefaultMaxOutputFor(b.ContextLimit)
+	}
+	if b.ContextLimit > 0 {
+		if left := b.ContextLimit - b.EstimatedInput - OutputReserve; left < room {
+			room = left
+		}
+	}
+	return room
 }
 
 // HookContext is what a hook is given.
@@ -442,8 +474,6 @@ const (
 	EventDecision EventName = "decision"
 	// EventUsage is emitted with a request's token accounting.
 	EventUsage EventName = "usage"
-	// EventContextNotice is emitted when the context is filling up.
-	EventContextNotice EventName = "context.notice"
 	// EventCompactionStarted is emitted when a compaction begins.
 	EventCompactionStarted EventName = "compaction.started"
 	// EventCompactionEnded is emitted when a compaction ends.

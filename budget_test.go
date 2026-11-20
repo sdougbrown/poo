@@ -11,182 +11,8 @@ import (
 	"github.com/sdougbrown/poo/pootest"
 )
 
-// The context budget: the estimator with its calibration, the notice, the
-// hard stop, and the computed max_tokens.
-
-// TestTheNoticeFiresOncePerRun covers the rule: the notice fires
-// at most once per run.
-func TestTheNoticeFiresOncePerRun(t *testing.T) {
-	tr := scripted([]fakeResponse{
-		{
-			calls: []poo.ToolCall{{
-				CallID:    "call_1",
-				Name:      "echo",
-				Arguments: []byte(`{"text":"hello"}`),
-			}},
-		},
-		{
-			calls: []poo.ToolCall{{
-				CallID:    "call_2",
-				Name:      "echo",
-				Arguments: []byte(`{"text":"hello"}`),
-			}},
-		},
-		{text: "the answer"},
-	})
-	sink := &recordingSink{}
-	tool := &echoTool{result: strings.Repeat("x", 4000)}
-
-	opts := testOptions(t, tr, tool, sink)
-	// A small window, so the estimate crosses the notice ratio.
-	opts.Model.ContextLimit = 2000
-	opts.NoticeRatio = 0.5
-
-	s := newTestSession(t, opts)
-	runSession(t, s, "do the thing")
-
-	notices := 0
-	for _, ev := range s.Events() {
-		if ev.Name == poo.EventContextNotice {
-			notices++
-		}
-	}
-	if notices != 1 {
-		t.Errorf("the run emitted %d context notices, want 1", notices)
-	}
-	// The notice is a user message the model reads, and it names the
-	// ratio it fired at.
-	// The notice is a user message the model reads, and it names the
-	// ratio it fired at. The session wrote it: the origin is the
-	// session's own, so a replay does not read it as a line the person
-	// typed.
-	found := false
-	for _, m := range sink.messages() {
-		for _, c := range m.Content {
-			if strings.Contains(c.Text, "Context notice") && strings.Contains(c.Text, "~50%") {
-				found = true
-				if got := m.Origin; got != poo.OriginNotice {
-					t.Errorf("the notice's origin is %q, want the session's own", got)
-				}
-			}
-		}
-	}
-	if !found {
-		t.Error("the notice did not reach the model's view")
-	}
-}
-
-// TestTheNoticeMeasuresTheInputCap covers an endpoint that takes a smaller
-// prompt than its window: the notice fires at the ratio of the prompt limit,
-// so a view that is over half of the 12000-token input cap and under half of
-// the 40000-token window is noticed.
-func TestTheNoticeMeasuresTheInputCap(t *testing.T) {
-	tr := scripted([]fakeResponse{
-		{
-			calls: []poo.ToolCall{{
-				CallID:    "call_1",
-				Name:      "echo",
-				Arguments: []byte(`{"text":"hello"}`),
-			}},
-			usage: &poo.UsageReport{InputTokens: 8000},
-		},
-		{text: "the answer"},
-	})
-	sink := &recordingSink{}
-	tool := &echoTool{result: "echoed"}
-
-	opts := testOptions(t, tr, tool, sink)
-	opts.Model.ContextLimit = 40000
-	opts.Model.InputLimit = 12000
-	opts.NoticeRatio = 0.5
-
-	s := newTestSession(t, opts)
-	runSession(t, s, "do the thing")
-
-	notices := 0
-	for _, ev := range s.Events() {
-		if ev.Name == poo.EventContextNotice {
-			notices++
-		}
-	}
-	if notices != 1 {
-		t.Errorf("the run emitted %d context notices, want 1: the 8000-token estimate is over half of the 12000-token input cap", notices)
-	}
-}
-
-// TestTheNoticeRearmsAfterTheUsageDrops covers the other half of the
-// rule: the notice fires again in a later run only if the usage has
-// dropped back below the notice ratio.
-func TestTheNoticeRearmsAfterTheUsageDrops(t *testing.T) {
-	tr := scripted([]fakeResponse{
-		{
-			usage: &poo.UsageReport{InputTokens: 1000, OutputTokens: 10},
-			text:  "the first answer",
-		},
-		{
-			usage: &poo.UsageReport{InputTokens: 10, OutputTokens: 10},
-			text:  "the second answer",
-		},
-	})
-	sink := &recordingSink{}
-	tool := &echoTool{result: "echoed"}
-
-	opts := testOptions(t, tr, tool, sink)
-	opts.Model.ContextLimit = 2000
-	opts.NoticeRatio = 0.5
-
-	s := newTestSession(t, opts)
-	runSession(t, s, "do the thing")
-	// The first run used a lot of context.
-	runSession(t, s, "do the thing again")
-
-	notices := 0
-	for _, ev := range s.Events() {
-		if ev.Name == poo.EventContextNotice {
-			notices++
-		}
-	}
-	// The first run's usage was over the ratio, and the second run's
-	// was under it, so the notice fired once and did not re-arm.
-	if notices != 1 {
-		t.Errorf("the session emitted %d context notices, want 1", notices)
-	}
-}
-
-// TestTheNoticeFiresAgainOnceTheUsageDroppedBelowTheRatio covers the
-// re-arming: after a notice, a later run whose usage fell below the
-// ratio and then rose again gets a second notice.
-func TestTheNoticeFiresAgainOnceTheUsageDroppedBelowTheRatio(t *testing.T) {
-	tr := scripted([]fakeResponse{
-		{usage: &poo.UsageReport{InputTokens: 1000, OutputTokens: 10}, text: "high"},
-		{usage: &poo.UsageReport{InputTokens: 10, OutputTokens: 10}, text: "low"},
-		{usage: &poo.UsageReport{InputTokens: 1000, OutputTokens: 10}, text: "high again"},
-		{usage: &poo.UsageReport{InputTokens: 1000, OutputTokens: 10}, text: "still high"},
-	})
-	sink := &recordingSink{}
-	tool := &echoTool{result: "echoed"}
-
-	opts := testOptions(t, tr, tool, sink)
-	opts.Model.ContextLimit = 2000
-	opts.NoticeRatio = 0.5
-
-	s := newTestSession(t, opts)
-	for i := 0; i < 4; i++ {
-		runSession(t, s, "go on")
-	}
-
-	notices := 0
-	for _, ev := range s.Events() {
-		if ev.Name == poo.EventContextNotice {
-			notices++
-		}
-	}
-	// Run 2 starts high and gets the notice. Run 3 starts low, which
-	// re-arms it. Run 4 starts high again and gets the second notice.
-	if notices != 2 {
-		t.Errorf("the session emitted %d context notices, want 2", notices)
-	}
-}
+// The context budget: the estimator with its calibration, the prompt limit,
+// and the computed max_tokens.
 
 // TestTheEstimateGrowsWithTheAppendedOutput covers the rule: the
 // estimate grows with what was appended between usage reports.
@@ -253,76 +79,6 @@ func TestTheEstimateUsesTheObservedRatio(t *testing.T) {
 	// minus the reserve, capped at the model's ceiling of 8192.
 	if reqs[0].MaxTokens != 8192 {
 		t.Errorf("the first request's max_tokens is %d, want 8192", reqs[0].MaxTokens)
-	}
-}
-
-// TestCrossingTheHardRatioSettlesContextExhausted covers the hard stop: with no compactor, crossing the hard ratio settles the run
-// as context_exhausted.
-func TestCrossingTheHardRatioSettlesContextExhausted(t *testing.T) {
-	tr := scripted([]fakeResponse{
-		{
-			calls: []poo.ToolCall{{
-				CallID:    "call_1",
-				Name:      "echo",
-				Arguments: []byte(`{"text":"hello"}`),
-			}},
-		},
-		{text: "the answer"},
-	})
-	sink := &recordingSink{}
-	// The tool's result is big enough to fill the window.
-	tool := &echoTool{result: strings.Repeat("x", 2000)}
-
-	opts := testOptions(t, tr, tool, sink)
-	opts.Model.ContextLimit = 1000
-	opts.HardRatio = 0.5
-
-	s := newTestSession(t, opts)
-	res := runSession(t, s, "do the thing")
-
-	if res.Reason != poo.ReasonContextExhausted {
-		t.Errorf("the run settled %q, want context_exhausted", res.Reason)
-	}
-	// The hard limit is the reason, not the output room: the output
-	// room check comes first in the gate, and it is under 256.
-	if res.Detail.Source != "no_output_room" && res.Detail.Source != "hard_limit" {
-		t.Errorf("the settle source is %q, want the gate's budget check", res.Detail.Source)
-	}
-}
-
-// TestTheHardLimitSettlesWithItsOwnSource covers the hard ratio's own
-// source: the run stops with detail.source "hard_limit" when the
-// estimate is over the ratio but the output room is still there.
-func TestTheHardLimitSettlesWithItsOwnSource(t *testing.T) {
-	tr := scripted([]fakeResponse{
-		{
-			calls: []poo.ToolCall{{
-				CallID:    "call_1",
-				Name:      "echo",
-				Arguments: []byte(`{"text":"hello"}`),
-			}},
-		},
-		{text: "the answer"},
-	})
-	sink := &recordingSink{}
-	// The result is big enough to push the estimate over the hard
-	// ratio, and small enough to leave output room.
-	tool := &echoTool{result: strings.Repeat("x", 40000)}
-
-	opts := testOptions(t, tr, tool, sink)
-	// A window big enough for the output room, but the estimate is
-	// over the hard ratio.
-	opts.Model.ContextLimit = 20000
-	opts.HardRatio = 0.5
-
-	s := newTestSession(t, opts)
-	res := runSession(t, s, "do the thing")
-
-	if res.Reason != poo.ReasonContextExhausted {
-		t.Errorf("the run settled %q, want context_exhausted", res.Reason)
-	}
-	if res.Detail.Source != "hard_limit" {
-		t.Errorf("the settle source is %q, want hard_limit", res.Detail.Source)
 	}
 }
 
@@ -722,10 +478,10 @@ func TestThePromptLimitIsTheSmallerBoundOfTheWindowAndTheInputCap(t *testing.T) 
 	}
 }
 
-// TestAnInputCapSettlesTheHardLimitBeforeTheWindow covers the hard stop on
+// TestAnInputCapSettlesPromptLimitBeforeTheWindow covers the prompt check on
 // an endpoint that takes a smaller prompt than its window: the estimate is
-// far under the hard ratio of the window and over the hard ratio of the cap.
-func TestAnInputCapSettlesTheHardLimitBeforeTheWindow(t *testing.T) {
+// far under the window's room and over the input cap.
+func TestAnInputCapSettlesPromptLimitBeforeTheWindow(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{calls: []poo.ToolCall{{CallID: "call_1", Name: "echo", Arguments: []byte(`{"text":"hello"}`)}}},
 		{text: "the answer"},
@@ -735,8 +491,7 @@ func TestAnInputCapSettlesTheHardLimitBeforeTheWindow(t *testing.T) {
 
 	opts := testOptions(t, tr, tool, sink)
 	opts.Model.ContextLimit = 40000
-	opts.Model.InputLimit = 12000
-	opts.HardRatio = 0.5
+	opts.Model.InputLimit = 8000
 
 	s := newTestSession(t, opts)
 	res := runSession(t, s, "do the thing")
@@ -744,8 +499,8 @@ func TestAnInputCapSettlesTheHardLimitBeforeTheWindow(t *testing.T) {
 	if res.Reason != poo.ReasonContextExhausted {
 		t.Fatalf("the run settled %q, want context_exhausted", res.Reason)
 	}
-	if res.Detail.Source != "hard_limit" {
-		t.Errorf("the settle source is %q, want hard_limit", res.Detail.Source)
+	if res.Detail.Source != "prompt_limit" {
+		t.Errorf("the settle source is %q, want prompt_limit", res.Detail.Source)
 	}
 }
 

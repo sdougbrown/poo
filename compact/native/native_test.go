@@ -8,29 +8,59 @@ import (
 	"github.com/sdougbrown/poo/compact/native"
 )
 
-// TestTheNativeStrategyActsAtSummaryRatio covers when the strategy asks for
-// a provider window. It waits for the same share of the window summary uses,
-// and only after the run has asked the model something.
-func TestTheNativeStrategyActsAtSummaryRatio(t *testing.T) {
+// TestTheNativeStrategyCompactsWhenTheNextAnswerDoesNotFit covers the
+// trigger: the strategy acts one token after the prompt is at the line the
+// window and the input cap draw, and not one token before it.
+func TestTheNativeStrategyCompactsWhenTheNextAnswerDoesNotFit(t *testing.T) {
 	strategy := native.New(native.Options{})
-	if got := strategy.Ratio(); got != native.DefaultRatio {
-		t.Errorf("the ratio is %v, want the summary ratio %v", got, native.DefaultRatio)
+	if got := strategy.Ratio(); got != 0 {
+		t.Errorf("the ratio is %v, want zero for no ratio trigger", got)
 	}
 	for _, test := range []struct {
-		name  string
-		input int
-		turns int
-		want  bool
+		name   string
+		window int
+		cap    int
+		limit  int
 	}{
-		{"below the ratio", 849, 1, false},
-		{"at the ratio", 850, 1, true},
-		{"above the ratio", 900, 1, true},
-		{"before any turn", 900, 0, false},
+		{"a 128k window", 131072, 0, 32768},
+		{"a 200k window", 200000, 0, 32768},
+		{"a 1M window", 1048576, 0, 32768},
+		{"an input cap under the window", 400000, 272000, 32768},
 	} {
-		budget := poo.ContextBudget{ContextLimit: 1000, EstimatedInput: test.input, Turns: test.turns}
-		if got := strategy.ShouldCompact(nil, budget); got != test.want {
-			t.Errorf("%s: the strategy compacts %v, want %v", test.name, got, test.want)
-		}
+		t.Run(test.name, func(t *testing.T) {
+			line := test.window - test.limit - poo.OutputReserve
+			if test.cap > 0 && test.cap-poo.OutputReserve < line {
+				line = test.cap - poo.OutputReserve
+			}
+			below := poo.ContextBudget{ContextLimit: test.window, InputLimit: test.cap, EstimatedInput: line, OutputLimit: test.limit, Turns: 1}
+			if strategy.ShouldCompact(nil, below) {
+				t.Errorf("the strategy compacted one token under the line at %d input tokens", line)
+			}
+			on := below
+			on.EstimatedInput = line + 1
+			if !strategy.ShouldCompact(nil, on) {
+				t.Errorf("the strategy declined on the line at %d input tokens", line+1)
+			}
+		})
+	}
+}
+
+// TestTheNativeStrategyDoesNotRepeatACompactionThatCannotRestoreTheRoom
+// covers the guard: when the input the last compaction left is still short,
+// another compaction would repeat every turn.
+func TestTheNativeStrategyDoesNotRepeatACompactionThatCannotRestoreTheRoom(t *testing.T) {
+	strategy := native.New(native.Options{})
+	budget := poo.ContextBudget{ContextLimit: 100000, EstimatedInput: 80000, OutputLimit: 32768, Turns: 2}
+	if !strategy.ShouldCompact(nil, budget) {
+		t.Fatal("the strategy declined with the next answer not fitting")
+	}
+	budget.CompactedInput = 90000
+	if strategy.ShouldCompact(nil, budget) {
+		t.Error("the strategy repeated a compaction whose input is still short")
+	}
+	budget.CompactedInput = 60000
+	if !strategy.ShouldCompact(nil, budget) {
+		t.Error("the strategy declined when the last compaction restored the room")
 	}
 }
 
@@ -88,12 +118,12 @@ func TestTheNativeStrategyRequestsAProviderWindow(t *testing.T) {
 // the endpoint accepts.
 func TestTheNativeStrategyActsAtARatioOfTheInputCap(t *testing.T) {
 	strategy := native.New(native.Options{Ratio: 0.5})
-	budget := poo.ContextBudget{ContextLimit: 1000, InputLimit: 400, EstimatedInput: 200, Turns: 1}
-	if !strategy.ShouldCompact(nil, budget) {
-		t.Error("the strategy waited for half of the window, not half of the input cap")
-	}
-	budget.EstimatedInput = 199
+	budget := poo.ContextBudget{ContextLimit: 4000, InputLimit: 1000, EstimatedInput: 499, Turns: 1}
 	if strategy.ShouldCompact(nil, budget) {
 		t.Error("the strategy compacted below half of the input cap")
+	}
+	budget.EstimatedInput = 500
+	if !strategy.ShouldCompact(nil, budget) {
+		t.Error("the strategy waited for half of the window, not half of the input cap")
 	}
 }

@@ -258,7 +258,6 @@ func TestTheEventNames(t *testing.T) {
 		poo.EventPermissionAsked: "permission.asked",
 		poo.EventDecision:        "decision",
 		poo.EventUsage:           "usage",
-		poo.EventContextNotice:   "context.notice",
 		poo.EventCompactionEnded: "compaction.ended",
 		poo.EventObserverDropped: "observer.dropped",
 	}

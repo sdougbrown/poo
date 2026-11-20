@@ -6,8 +6,8 @@
 // the provider's own and nothing else can stand in for it.
 //
 // A native compaction costs a request, and the core charges it the way it
-// charges any other request a strategy makes. Its default threshold matches
-// summary's, but native can compact after the first request.
+// charges any other request a strategy makes. It compacts when the next
+// answer no longer fits, after the first request.
 package native
 
 import (
@@ -20,16 +20,13 @@ import (
 const (
 	// Strategy is the name the compaction carries.
 	Strategy = "native"
-
-	// DefaultRatio is the share of the context window at which the
-	// strategy compacts. It matches summary's ratio.
-	DefaultRatio = 0.85
 )
 
 // Options configure the strategy.
 type Options struct {
-	// Ratio is the share of the context window at which the strategy
-	// compacts. It defaults to DefaultRatio.
+	// Ratio is the share of the prompt limit at which the strategy
+	// compacts. Zero means no ratio trigger: the strategy acts when the
+	// next answer no longer fits.
 	Ratio float64
 }
 
@@ -41,24 +38,33 @@ type Compactor struct {
 
 // New returns the native strategy.
 func New(opts Options) *Compactor {
-	ratio := opts.Ratio
-	if ratio <= 0 {
-		ratio = DefaultRatio
-	}
-	return &Compactor{ratio: ratio}
+	return &Compactor{ratio: opts.Ratio}
 }
 
 // Ratio returns the share of the window at which the strategy acts.
 func (c *Compactor) Ratio() float64 { return c.ratio }
 
-// ShouldCompact reports that the run has reached the point that compacts
-// the provider's state.
+// ShouldCompact reports that the run should compact the provider's state.
 //
-// The strategy waits for its own ratio only. It also waits for the run
-// to have asked the model something: there is no conversation to compact
-// before the first request.
+// The strategy acts when the next answer no longer fits. A configured ratio
+// is an explicit override: when it is set, the strategy also acts at that
+// share of the prompt limit.
+//
+// A compaction that cannot restore the room must not repeat every turn. When
+// the input the last compaction left is still short, the strategy declines:
+// the run settles no_output_room in the gate instead.
 func (c *Compactor) ShouldCompact(view poo.View, budget poo.ContextBudget) bool {
-	return budget.Reached(c.ratio)
+	if c.ratio > 0 && budget.Reached(c.ratio) {
+		return true
+	}
+	if budget.CompactedInput > 0 {
+		after := budget
+		after.EstimatedInput = budget.CompactedInput
+		if after.RoomShort(budget.OutputLimit) {
+			return false
+		}
+	}
+	return budget.RoomShort(budget.OutputLimit)
 }
 
 // Compact asks the core for a provider window.

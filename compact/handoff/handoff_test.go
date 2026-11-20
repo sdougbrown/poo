@@ -223,10 +223,10 @@ func TestATruncatedNoteContinuesTheRun(t *testing.T) {
 	}
 }
 
-// TestAnEmptyReplyAtTheHardLimitSettles covers the rule: at or
-// above the hard limit a compactor that failed settles the run as
+// TestAnEmptyReplyWithoutRoomSettles covers the rule: when the next
+// request cannot go out, a compactor that failed settles the run as
 // context_exhausted, and there is no handoff.
-func TestAnEmptyReplyAtTheHardLimitSettles(t *testing.T) {
+func TestAnEmptyReplyWithoutRoomSettles(t *testing.T) {
 	tr := longScript()
 	tr.SetForkTurns(pootest.Turn{Text: ""})
 	sink := pootest.NewSink()
@@ -236,8 +236,7 @@ func TestAnEmptyReplyAtTheHardLimitSettles(t *testing.T) {
 		ToolOrder:    []string{"echo"},
 		Sink:         sink,
 		SessionID:    "s1",
-		Model:        poo.ModelInfo{ModelID: "test-model", ContextLimit: 2000},
-		HardRatio:    0.5,
+		Model:        poo.ModelInfo{ModelID: "test-model", ContextLimit: 1000},
 		SystemPrompt: "the system prompt",
 		Compactor:    handoff.New(handoff.Options{Ratio: 0.001}),
 	})
@@ -308,10 +307,67 @@ func TestTheStrategyWaitsForARequest(t *testing.T) {
 	}
 }
 
-// TestTheRoomTriggerAsksForAHandoffBelowTheRatio covers the second
-// reason to hand off: a window with less output room left than the
-// output limit, even when its share is under the strategy's ratio. The
-// handoff ends the run, so the trigger cannot repeat.
+// TestTheHandoffStrategyCompactsWhenTheNextAnswerDoesNotFit covers the
+// trigger: the strategy acts one token after the prompt is at the line the
+// window and the input cap draw, and not one token before it.
+func TestTheHandoffStrategyCompactsWhenTheNextAnswerDoesNotFit(t *testing.T) {
+	c := handoff.New(handoff.Options{})
+	if got := c.Ratio(); got != 0 {
+		t.Errorf("the ratio is %v, want zero for no ratio trigger", got)
+	}
+	for _, test := range []struct {
+		name   string
+		window int
+		cap    int
+		limit  int
+	}{
+		{"a 128k window", 131072, 0, 32768},
+		{"a 200k window", 200000, 0, 32768},
+		{"a 1M window", 1048576, 0, 32768},
+		{"an input cap under the window", 400000, 272000, 32768},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			line := test.window - test.limit - poo.OutputReserve
+			if test.cap > 0 && test.cap-poo.OutputReserve < line {
+				line = test.cap - poo.OutputReserve
+			}
+			below := poo.ContextBudget{ContextLimit: test.window, InputLimit: test.cap, EstimatedInput: line, OutputLimit: test.limit, Turns: 1}
+			if c.ShouldCompact(nil, below) {
+				t.Errorf("the strategy compacted one token under the line at %d input tokens", line)
+			}
+			on := below
+			on.EstimatedInput = line + 1
+			if !c.ShouldCompact(nil, on) {
+				t.Errorf("the strategy declined on the line at %d input tokens", line+1)
+			}
+		})
+	}
+}
+
+// TestAHandoffNoteLargerThanTheOutputLimitFiresEarlier covers the need: the
+// note's own output limit raises the line by the difference when it is over
+// the request's output limit.
+func TestAHandoffNoteLargerThanTheOutputLimitFiresEarlier(t *testing.T) {
+	const window = 400000
+	c := handoff.New(handoff.Options{MaxTokens: 64000})
+	budget := poo.ContextBudget{ContextLimit: window, EstimatedInput: window - 64000 - poo.OutputReserve, OutputLimit: 32768, Turns: 1}
+	if c.ShouldCompact(nil, budget) {
+		t.Error("the strategy compacted on the note's line")
+	}
+	budget.EstimatedInput++
+	if !c.ShouldCompact(nil, budget) {
+		t.Error("the strategy declined past the note's line")
+	}
+	// The output limit alone would not have fired this early: the note
+	// raised the line by the difference between the two.
+	if c := handoff.New(handoff.Options{}); c.ShouldCompact(nil, budget) {
+		t.Error("the strategy without the note's limit acted at the same input")
+	}
+}
+
+// TestTheRoomTriggerAsksForAHandoffBelowTheRatio covers the trigger: a
+// view whose next answer does not fit hands off, and the handoff ends the
+// run, so the trigger cannot repeat.
 func TestTheRoomTriggerAsksForAHandoffBelowTheRatio(t *testing.T) {
 	c := handoff.New(handoff.Options{})
 	budget := poo.ContextBudget{
@@ -320,11 +376,8 @@ func TestTheRoomTriggerAsksForAHandoffBelowTheRatio(t *testing.T) {
 		OutputLimit:    32768,
 		Turns:          1,
 	}
-	if budget.Reached(c.Ratio()) {
-		t.Fatal("the budget already reached the ratio, so the room is not what is tested")
-	}
 	if !c.ShouldCompact(nil, budget) {
-		t.Error("the strategy declined with the output room short")
+		t.Error("the strategy declined with the next answer not fitting")
 	}
 	budget.OutputLimit = 0
 	if c.ShouldCompact(nil, budget) {
@@ -332,9 +385,10 @@ func TestTheRoomTriggerAsksForAHandoffBelowTheRatio(t *testing.T) {
 	}
 }
 
-// TestTheForkFailureSettlesAtTheHardLimit covers the rule: a
-// fork that failed is a compactor failure.
-func TestTheForkFailureSettlesAtTheHardLimit(t *testing.T) {
+// TestTheForkFailureWithoutRoomSettles covers the rule: a fork that failed
+// is a compactor failure, and with no room for the next request it settles
+// the run.
+func TestTheForkFailureWithoutRoomSettles(t *testing.T) {
 	tr := longScript()
 	// The transport holds no forked response, so the fork fails.
 	sink := pootest.NewSink()
@@ -344,8 +398,7 @@ func TestTheForkFailureSettlesAtTheHardLimit(t *testing.T) {
 		ToolOrder:    []string{"echo"},
 		Sink:         sink,
 		SessionID:    "s1",
-		Model:        poo.ModelInfo{ModelID: "test-model", ContextLimit: 2000},
-		HardRatio:    0.5,
+		Model:        poo.ModelInfo{ModelID: "test-model", ContextLimit: 1000},
 		SystemPrompt: "the system prompt",
 		Compactor:    handoff.New(handoff.Options{Ratio: 0.001}),
 	})

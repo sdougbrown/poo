@@ -1852,6 +1852,7 @@ func (s *Session) chargeUsageLocked(run *runState, usage *UsageReport) {
 // the shape it had, and a request a compaction made says what it was for.
 func (s *Session) recordUsage(run *runState, meta RecordMeta, turn, request int, usage *UsageReport, requestChars int) bool {
 	s.observeUsage(usage, requestChars)
+	s.noteCompactedInput(meta, usage)
 	if err := s.write(run.ctx, &UsageRecord{
 		RecordMeta:      meta,
 		RunID:           run.id,
@@ -1878,6 +1879,22 @@ func (s *Session) recordUsage(run *runState, meta RecordMeta, turn, request int,
 	}
 	s.events.emit(EventUsage, payload)
 	return true
+}
+
+// noteCompactedInput records the input the first usage report after a
+// compaction reported. A request a compaction made is not the view's input,
+// so its report is left out.
+func (s *Session) noteCompactedInput(meta RecordMeta, usage *UsageReport) {
+	if meta.Origin == OriginCompaction || usage == nil || usage.InputTokens <= 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.compactedReportPending {
+		return
+	}
+	s.compactedInput = usage.InputTokens
+	s.compactedReportPending = false
 }
 
 // addEstimatedUsage counts a turn the endpoint reported no usage for.

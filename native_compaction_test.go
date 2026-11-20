@@ -10,7 +10,8 @@ import (
 	"github.com/sdougbrown/poo/pootest"
 )
 
-// nativeOptions is a session that compacts natively at the summary ratio.
+// nativeOptions is a session that compacts natively when the next answer no
+// longer fits.
 //
 // The window is small enough that the first turn's reported usage fills
 // it, and the fake transport is the provider that compacts.
@@ -19,6 +20,9 @@ func nativeOptions(t *testing.T, tr *pootest.Transport, result string, sink poo.
 	opts := testOptions(t, tr, &echoTool{result: result}, sink)
 	opts.Model.Ops = []poo.Op{poo.OpChat, poo.OpCompact}
 	opts.Model.ContextLimit = 4000
+	// The answer's own limit is small enough that the window has room for
+	// it until the usage fills most of the window.
+	opts.Model.MaxOutput = 512
 	opts.Compactor = native.New(native.Options{})
 	return opts
 }

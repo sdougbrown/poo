@@ -101,7 +101,7 @@ func (s *Session) SetModel(info ModelInfo, transport ...ChatTransport) (ModelSwi
 			name, limit))
 	}
 	prompt := PromptLimitOf(limit, info.InputLimit)
-	if exhausted, reason := s.contextExhaustedLocked(limit, info.InputLimit); exhausted {
+	if exhausted, reason := s.contextExhaustedLocked(info, limit); exhausted {
 		warnings = append(warnings, fmt.Sprintf(
 			"the current view does not fit the %d-token prompt limit of %q: %s; the next run settles context_exhausted",
 			prompt, name, reason))
@@ -199,23 +199,22 @@ func (s *Session) SetDecider(info ModelInfo, decider decide.Decider) error {
 }
 
 // contextExhaustedLocked reports that the next request could not be
-// made: the view does not fit the prompt limit the window and the input cap
-// make, or the window leaves no room to answer.
+// made: the window leaves fewer than MinOutputTokens of room, or the prompt
+// is over the endpoint's input cap.
 //
 // The gate settles the run as context_exhausted in both cases, so a
 // switch warns exactly when the gate would settle.
 //
 // The caller holds the session's lock.
-func (s *Session) contextExhaustedLocked(limit, inputLimit int) (bool, string) {
-	estimated := s.est.estimate(s.modelMessagesLocked())
-	prompt := PromptLimitOf(limit, inputLimit)
-	if float64(estimated) >= s.opts.HardRatio*float64(prompt) {
-		return true, fmt.Sprintf("the estimated input of %d tokens is at or above %d%% of the %d-token prompt limit",
-			estimated, int(s.opts.HardRatio*100), prompt)
+func (s *Session) contextExhaustedLocked(info ModelInfo, limit int) (bool, string) {
+	budget := ContextBudget{
+		ContextLimit:   limit,
+		InputLimit:     info.InputLimit,
+		EstimatedInput: s.est.estimate(s.modelMessagesLocked()),
+		OutputLimit:    min(info.OutputCeiling(), DefaultMaxOutputFor(limit)),
 	}
-	room := limit - estimated - OutputReserve
-	if room < MinOutputTokens {
-		return true, fmt.Sprintf("the computed max_tokens %d is under the %d-token minimum", room, MinOutputTokens)
+	if blocked, _, reason := budget.RequestBlocked(); blocked {
+		return true, reason
 	}
 	return false, ""
 }
