@@ -141,7 +141,7 @@ var errCompactionStore = errors.New("poo: the compaction record was refused")
 //
 // The compaction is validated before it is applied: a compaction the
 // core cannot apply is a compactor failure, and the run carries on
-// uncompacted below the hard limit.
+// uncompacted when the next request can still go out.
 //
 // The compaction's record is written after the new view is known, so the
 // record's tokens_after is the estimate of the new view at the plan's

@@ -1006,7 +1006,7 @@ func TestTheRestoredModelIgnoresAnotherModelsOutputLimit(t *testing.T) {
 // describes the same model id. A role the settings now point at another
 // model keeps the limits it ran with.
 func TestARestoredInputCapComesFromTheSameModel(t *testing.T) {
-	// The recorded view is far over the hard ratio of the 2000-token cap
+	// The recorded view is far over the 2000-token input cap
 	// and well under it for the 32768-token window, so a restore that
 	// picks the cap up settles context_exhausted before its first
 	// request.

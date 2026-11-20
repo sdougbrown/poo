@@ -812,7 +812,7 @@ func TestAModelSwitchTakesTheNewModelAndItsWindow(t *testing.T) {
 }
 
 // TestTheStatuslineBoundsTheFillByTheInputCap covers an endpoint that takes a
-// smaller prompt than its window: the hard stop and the compaction measure
+// smaller prompt than its window: the request gate and the compaction measure
 // against the prompt the endpoint accepts, so the line shows that bound, not
 // the window's whole 400k.
 func TestTheStatuslineBoundsTheFillByTheInputCap(t *testing.T) {

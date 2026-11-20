@@ -81,7 +81,7 @@ func script() *pootest.Transport {
 
 // longScript returns a transport whose first answer fills the window.
 //
-// The answer is long enough that the view is over the hard ratio once
+// The answer is long enough that the next request has no output room once
 // the turn is done.
 func longScript() *pootest.Transport {
 	return pootest.NewTransport(
@@ -178,8 +178,8 @@ func TestTheReplyBecomesTheHandoff(t *testing.T) {
 }
 
 // TestAnEmptyReplyContinuesTheRun covers the rule: an empty
-// reply is a compactor failure, and below the hard limit the run
-// continues and the strategy retries at the next gate.
+// reply is a compactor failure, and with room for the next request the
+// run continues and the strategy retries at the next gate.
 func TestAnEmptyReplyContinuesTheRun(t *testing.T) {
 	tr := script()
 	tr.SetForkTurns(pootest.Turn{Text: ""})
@@ -193,7 +193,7 @@ func TestAnEmptyReplyContinuesTheRun(t *testing.T) {
 		t.Fatalf("waiting for the run: %v", err)
 	}
 	if res.Reason != poo.ReasonEndTurn {
-		t.Errorf("the run settled %q, want end_turn: the run continues below the hard limit", res.Reason)
+		t.Errorf("the run settled %q, want end_turn: the run continues with room for the next request", res.Reason)
 	}
 	if got := len(tr.Forks()); got < 2 {
 		t.Errorf("the transport got %d forks, want the strategy to retry at the next gate", got)
@@ -216,7 +216,7 @@ func TestATruncatedNoteContinuesTheRun(t *testing.T) {
 		t.Fatalf("waiting for the run: %v", err)
 	}
 	if res.Reason != poo.ReasonEndTurn {
-		t.Errorf("the run settled %q, want end_turn: the run continues below the hard limit", res.Reason)
+		t.Errorf("the run settled %q, want end_turn: the run continues with room for the next request", res.Reason)
 	}
 	if res.Detail.Handoff != "" {
 		t.Errorf("the settle detail holds the handoff %q, want none", res.Detail.Handoff)

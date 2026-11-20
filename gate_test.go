@@ -712,7 +712,7 @@ func TestAFailingCompactorWithRoomContinuesUncompacted(t *testing.T) {
 	}
 
 	if res.Reason != poo.ReasonEndTurn {
-		t.Errorf("the run settled %q, want end_turn: below the hard ratio the failure is not fatal", res.Reason)
+		t.Errorf("the run settled %q, want end_turn: the failure is not fatal with room for the next request", res.Reason)
 	}
 	if res.Turns != 2 {
 		t.Errorf("the run made %d requests, want 2: the run continued uncompacted", res.Turns)
@@ -723,4 +723,3 @@ func TestAFailingCompactorWithRoomContinuesUncompacted(t *testing.T) {
 		t.Errorf("the log holds %d compaction records, want none", n)
 	}
 }
-

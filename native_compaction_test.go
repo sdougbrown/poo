@@ -196,7 +196,7 @@ func TestNativeCompactionRefusesAModelWithoutTheCompactOperation(t *testing.T) {
 
 	res := runSession(t, s, "do the thing")
 	if res.Reason != poo.ReasonEndTurn {
-		t.Fatalf("the run settled %q, want end_turn below the hard limit", res.Reason)
+		t.Fatalf("the run settled %q, want end_turn with room for the next request", res.Reason)
 	}
 	if got := tr.Compactions(); got != 0 {
 		t.Errorf("the transport served %d native compactions for a model without the operation, want none", got)
@@ -226,7 +226,7 @@ func TestNativeCompactionRefusesATransportWithoutNativeCompaction(t *testing.T) 
 
 	res := runSession(t, s, "do the thing")
 	if res.Reason != poo.ReasonEndTurn {
-		t.Fatalf("the run settled %q, want end_turn below the hard limit", res.Reason)
+		t.Fatalf("the run settled %q, want end_turn with room for the next request", res.Reason)
 	}
 	if got := inner.Compactions(); got != 0 {
 		t.Errorf("the transport served %d native compactions, want none", got)
@@ -260,7 +260,7 @@ func TestANativeSessionDoesNotCompactASwitchedModelWithoutTheOperation(t *testin
 	}
 	res := runSession(t, s, "do the thing")
 	if res.Reason != poo.ReasonEndTurn {
-		t.Fatalf("the run settled %q, want end_turn below the hard limit", res.Reason)
+		t.Fatalf("the run settled %q, want end_turn with room for the next request", res.Reason)
 	}
 	if got := tr.Compactions(); got != 0 {
 		t.Errorf("the transport served %d native compactions for the switched model, want none", got)
@@ -301,7 +301,7 @@ func TestANativeSessionDoesNotCompactASwitchedTransportWithoutTheCapability(t *t
 		t.Fatalf("waiting for the run: %v", err)
 	}
 	if res.Reason != poo.ReasonEndTurn {
-		t.Fatalf("the run settled %q, want end_turn below the hard limit", res.Reason)
+		t.Fatalf("the run settled %q, want end_turn with room for the next request", res.Reason)
 	}
 	if got := inner.Compactions(); got != 0 {
 		t.Errorf("the switched transport served %d native compactions, want none", got)

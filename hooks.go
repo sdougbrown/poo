@@ -97,9 +97,9 @@ type ContextBudget struct {
 // the prompt limit the ratio names, and that the run has asked the model
 // something.
 //
-// It is the trigger every compaction strategy acts on: a strategy picks
-// the ratio, and the rule that turns a ratio into a decision lives here,
-// where the budget does.
+// It is the explicit early trigger a strategy offers: a strategy that has
+// a configured ratio acts at that share as well as when the next answer no
+// longer fits.
 func (b ContextBudget) Reached(ratio float64) bool {
 	limit := b.PromptLimit()
 	if b.Turns < 1 || limit <= 0 {

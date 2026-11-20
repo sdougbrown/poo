@@ -11,7 +11,7 @@ import (
 // recorded chat role names, so the replay bounds the prompt by the prompt
 // limit and not by the window.
 func TestTheReplayCarriesTheRecordingsInputCap(t *testing.T) {
-	// The recorded prompt is far over the hard ratio of the 2000-token cap
+	// The recorded prompt is far over the 2000-token input cap
 	// and well under it for the 32768-token window, so a replay that keeps
 	// the cap settles context_exhausted before the first request, and one
 	// that loses it makes the recorded call.
@@ -32,7 +32,7 @@ func TestTheReplayCarriesTheRecordingsInputCap(t *testing.T) {
 		t.Fatalf("replaying the capped recording: %v", err)
 	}
 	if len(result.Replayed) != 0 {
-		t.Errorf("the replay made %d calls, want none: the prompt is over the hard ratio of the 2000-token input cap",
+		t.Errorf("the replay made %d calls, want none: the prompt is over the 2000-token input cap",
 			len(result.Replayed))
 	}
 

@@ -26,9 +26,6 @@ import (
 // because the settings' leaves are not the shapes the spec's fields
 // have:
 //
-//   - the hard ratio is above the notice ratio. The spec's expressions
-//     compare a field with a constant, never with another field. The
-//     rule is checked by hand.
 //   - a permission rule matches exactly one of a tool and a class, and
 //     a command prefix names the tool it matches. A rule is an object in
 //     a list, not a leaf, so the rules are checked by hand.

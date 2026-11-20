@@ -15,9 +15,9 @@ import (
 
 // ErrInvalidCompaction reports a compaction the core rejected.
 //
-// A rejected compaction is a compactor failure: below the hard limit
-// the run continues uncompacted, and at or above it the run settles
-// context_exhausted.
+// A rejected compaction is a compactor failure: when the next request
+// can still go out the run continues uncompacted, and when it cannot the
+// run settles context_exhausted.
 var ErrInvalidCompaction = errors.New("poo: the compaction is invalid")
 
 // CompactionMarkerText is the message the core appends after a

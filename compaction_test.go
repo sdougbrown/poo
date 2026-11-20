@@ -707,7 +707,7 @@ func TestAnEmptyCompactionIsRejected(t *testing.T) {
 	res := runSession(t, s, "do the thing")
 
 	if res.Reason != poo.ReasonEndTurn {
-		t.Errorf("the run settled %q, want end_turn: a rejected compaction is not a failure below the hard limit", res.Reason)
+		t.Errorf("the run settled %q, want end_turn: a rejected compaction is not a failure with room for the next request", res.Reason)
 	}
 	if sink.count("compaction") != 0 {
 		t.Errorf("the log holds %d compaction records, want none", sink.count("compaction"))
