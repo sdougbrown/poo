@@ -63,10 +63,11 @@ func TestTheModelsCommandListsTheCatalog(t *testing.T) {
 	}
 }
 
-// TestTheModelsCommandNamesTheClient covers the name the command's probes
-// carry: the same binary asks the endpoints what they serve, so the same
-// name answers for them.
-func TestTheModelsCommandNamesTheClient(t *testing.T) {
+// theProbingServer is a live endpoint that remembers the names its
+// probes carried. The models tests share it, so the probe route and
+// its answer have one owner.
+func theProbingServer(t *testing.T) (*httptest.Server, func() []string) {
+	t.Helper()
 	var mu sync.Mutex
 	var agents []string
 	mux := http.NewServeMux()
@@ -79,7 +80,29 @@ func TestTheModelsCommandNamesTheClient(t *testing.T) {
 	})
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
+	return server, func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), agents...)
+	}
+}
 
+// assertProbesNamed fails when a probe arrived under a name the binary
+// does not carry.
+func assertProbesNamed(t *testing.T, agents []string) {
+	t.Helper()
+	for _, agent := range agents {
+		if !strings.HasPrefix(agent, "poo/") {
+			t.Errorf("a probe named itself %q, want the binary's own name", agent)
+		}
+	}
+}
+
+// TestTheModelsCommandNamesTheClient covers the name the command's probes
+// carry: the same binary asks the endpoints what they serve, so the same
+// name answers for them.
+func TestTheModelsCommandNamesTheClient(t *testing.T) {
+	server, probed := theProbingServer(t)
 	dir := t.TempDir()
 	settings := theSettings(t, dir, server.URL+"/v1")
 	captureStdout(t, func() {
@@ -87,17 +110,11 @@ func TestTheModelsCommandNamesTheClient(t *testing.T) {
 			t.Errorf("poo models exited with %d", code)
 		}
 	})
-	mu.Lock()
-	probed := append([]string(nil), agents...)
-	mu.Unlock()
-	if len(probed) == 0 {
+	agents := probed()
+	if len(agents) == 0 {
 		t.Fatal("the command never probed the endpoint")
 	}
-	for _, agent := range probed {
-		if !strings.HasPrefix(agent, "poo/") {
-			t.Errorf("a probe named itself %q, want the binary's own name", agent)
-		}
-	}
+	assertProbesNamed(t, agents)
 }
 
 // TestTheModelsCommandAsksEvenWhenTheCacheIsFresh covers the command's
@@ -107,19 +124,7 @@ func TestTheModelsCommandNamesTheClient(t *testing.T) {
 // where an earlier probe had freshened the cache the whole process
 // shares.
 func TestTheModelsCommandAsksEvenWhenTheCacheIsFresh(t *testing.T) {
-	var mu sync.Mutex
-	var agents []string
-	mux := http.NewServeMux()
-	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		agents = append(agents, r.Header.Get("User-Agent"))
-		mu.Unlock()
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"object":"list","data":[{"id":"test-model"}]}`)
-	})
-	server := httptest.NewServer(mux)
-	t.Cleanup(server.Close)
-
+	server, probed := theProbingServer(t)
 	dir := t.TempDir()
 	settings := theSettings(t, dir, server.URL+"/v1")
 	// Two runs over one endpoint: the first freshens the shared cache,
@@ -131,17 +136,10 @@ func TestTheModelsCommandAsksEvenWhenTheCacheIsFresh(t *testing.T) {
 			}
 		})
 	}
-	mu.Lock()
-	probed := append([]string(nil), agents...)
-	mu.Unlock()
-	if len(probed) < 2 {
-		t.Fatalf("the command probed %d times in two runs, want the ask made again each time", len(probed))
+	if got := len(probed()); got != 2 {
+		t.Fatalf("the command probed %d times in two runs, want the ask made again each time", got)
 	}
-	for _, agent := range probed {
-		if !strings.HasPrefix(agent, "poo/") {
-			t.Errorf("a probe named itself %q, want the binary's own name", agent)
-		}
-	}
+	assertProbesNamed(t, probed())
 }
 
 // TestTheModelsCommandPrintsJSON covers the flag: the models are
