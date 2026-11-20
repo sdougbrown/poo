@@ -537,6 +537,63 @@ func TestTwoClosesWaitTheSameReadOut(t *testing.T) {
 	}
 }
 
+// TestAReadThatHasNotEnteredStillLeavesOnTheClose covers the window
+// before the read enters the editor: the close has already sent its
+// abort when the read starts. The abort latches in the editor's key
+// engine, so the read ends on its own — without the latch, the read
+// would park in the terminal and the close would wait a departure that
+// never comes, wedging Run's exit.
+func TestAReadThatHasNotEnteredStillLeavesOnTheClose(t *testing.T) {
+	term := openTerminal(t)
+	restore := takeOverStdio(t, term.slave)
+	t.Cleanup(restore)
+
+	m := &machine{in: os.Stdin, out: os.Stdout, r: &renderer{}}
+	i := newEditor(m)
+
+	claimed := make(chan struct{})
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	closed := make(chan struct{})
+	t.Cleanup(func() {
+		releaseOnce.Do(func() { close(release) })
+		select {
+		case <-closed:
+		case <-time.After(10 * time.Second):
+			term.master.Close()
+			i.rl.Keys.RequestRefresh()
+			select {
+			case <-closed:
+			case <-time.After(10 * time.Second):
+			}
+		}
+	})
+	i.beforeReadline = func() { close(claimed); <-release }
+	go func() { i.read() }()
+	// The read has claimed the handshake but not entered the editor.
+	<-claimed
+
+	var waiters atomic.Int32
+	i.beforeWait = func() { waiters.Add(1) }
+	go func() { i.close(); close(closed) }()
+	// The close must be parked in the handshake's wait — its abort is
+	// out — before the read enters the editor behind it.
+	deadline := time.Now().Add(10 * time.Second)
+	for waiters.Load() < 1 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if waiters.Load() < 1 {
+		t.Fatal("the close never reached the wait")
+	}
+	// The read enters behind the abort now, and must leave on its own.
+	releaseOnce.Do(func() { close(release) })
+	select {
+	case <-closed:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the close never returned: a read that started behind the abort did not leave")
+	}
+}
+
 func TestShiftTabCyclesThinkingAtThePrompt(t *testing.T) {
 	server := &fakeServer{t: t}
 	term, code := startTerminalRepl(t, server)

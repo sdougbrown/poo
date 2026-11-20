@@ -53,11 +53,16 @@ type editorInput struct {
 	// afterReadline, when set, runs on the reader's goroutine after a
 	// read leaves the editor and before the handshake reports it.
 	// The close test parks there to prove the close waits the read
-	// out. beforeWait, when set, runs on a close's goroutine just
-	// before it parks in that wait, under readMu; the two-closes test
-	// counts parkings there to know every closer is waiting.
-	afterReadline func()
-	beforeWait    func()
+	// out. beforeReadline, when set, runs on the reader's goroutine
+	// after a read claims the handshake but before it enters the
+	// editor; the not-entered test parks there to prove the abort
+	// reaches a read that starts behind it. beforeWait, when set,
+	// runs on a close's goroutine just before it parks in that wait,
+	// under readMu; the two-closes test counts parkings there to know
+	// every closer is waiting.
+	afterReadline  func()
+	beforeReadline func()
+	beforeWait     func()
 }
 
 // newEditor builds the line editor for the session.
@@ -259,7 +264,11 @@ func (i *editorInput) prompt(p string) {
 // read reads one line, newlines inside a draft included. An end of
 // input is io.EOF; an interrupt is readline.ErrInterrupt. A close is
 // an interrupt for a read that starts after it; a read the close
-// aborts in flight returns the editor's own end, io.EOF.
+// aborts in flight returns the editor's own end, io.EOF. A read that
+// claimed the handshake before the close and enters the editor behind
+// the abort ends the same way: the abort latches in the editor's key
+// engine, so a read that starts behind it reads the end instead of
+// parking in the terminal.
 func (i *editorInput) read() (string, error) {
 	i.readMu.Lock()
 	if i.closed {
@@ -268,6 +277,9 @@ func (i *editorInput) read() (string, error) {
 	}
 	i.readHeld = true
 	i.readMu.Unlock()
+	if i.beforeReadline != nil {
+		i.beforeReadline()
+	}
 	line, err := i.rl.Readline()
 	if i.afterReadline != nil {
 		i.afterReadline()
