@@ -442,6 +442,10 @@ type modelsEndpoint struct {
 	// SkipProbe says the endpoint's models are declared rather than discovered,
 	// so no probe is sent to it.
 	SkipProbe bool `json:"skip_probe,omitempty"`
+	// InstructionsPerQuestion says the endpoint answers what each question
+	// asks and rejects a request-level instructions field, so a decision
+	// call folds its framing into the questions.
+	InstructionsPerQuestion bool `json:"instructions_per_question,omitempty"`
 	// Models are the models the endpoint serves, by the id it calls them.
 	Models map[string]modelsModel `json:"models"`
 }
@@ -451,6 +455,9 @@ type modelsModel struct {
 	// ModelID is what the endpoint calls the model. Empty takes the key the
 	// model is declared under.
 	ModelID string `json:"model_id,omitempty"`
+	// Ops are the operations the model serves. Empty leaves the model's
+	// operations to the catalog's own answer.
+	Ops []poo.Op `json:"ops,omitempty"`
 	// Inputs are the modalities the model reads.
 	Inputs []string `json:"inputs,omitempty"`
 	// ContextLimit is the model's context window.
@@ -513,11 +520,12 @@ func (f modelsFile) layer() (catalog.FileSettings, error) {
 			return catalog.FileSettings{}, fmt.Errorf("the endpoint %s serves no models", name)
 		}
 		out.Endpoints[name] = catalog.EndpointSettings{
-			Endpoint:      endpoint.Endpoint,
-			API:           poo.API(endpoint.API),
-			APIKeyEnv:     endpoint.APIKeyEnv,
-			SessionHeader: endpoint.SessionHeader,
-			SkipProbe:     endpoint.SkipProbe,
+			Endpoint:                endpoint.Endpoint,
+			API:                     poo.API(endpoint.API),
+			APIKeyEnv:               endpoint.APIKeyEnv,
+			SessionHeader:           endpoint.SessionHeader,
+			SkipProbe:               endpoint.SkipProbe,
+			InstructionsPerQuestion: endpoint.InstructionsPerQuestion,
 		}
 		ids := make([]string, 0, len(endpoint.Models))
 		for id := range endpoint.Models {
@@ -539,6 +547,7 @@ func (f modelsFile) layer() (catalog.FileSettings, error) {
 				ModelID:         modelID,
 				API:             poo.API(endpoint.API),
 				ToolsMode:       model.ToolsMode,
+				Ops:             model.Ops,
 				Inputs:          inputs,
 				ContextLimit:    model.ContextLimit,
 				MaxOutput:       model.MaxOutput,

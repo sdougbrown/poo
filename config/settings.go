@@ -130,6 +130,10 @@ type Endpoint struct {
 	// is one — has no model list to answer with, and a probe would be a
 	// request it does not understand.
 	SkipProbe bool `json:"skip_probe,omitempty"`
+	// InstructionsPerQuestion says the endpoint answers what each
+	// question asks and rejects a request-level instructions field, so a
+	// decision call folds its framing into the questions.
+	InstructionsPerQuestion bool `json:"instructions_per_question,omitempty"`
 }
 
 // Model is one model in the settings.

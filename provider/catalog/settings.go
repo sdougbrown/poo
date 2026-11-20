@@ -51,6 +51,10 @@ type EndpointSettings struct {
 	// declared by the settings or the curated layer. A request to the endpoint
 	// would send nothing it understands.
 	SkipProbe bool
+	// InstructionsPerQuestion says the endpoint answers what each question
+	// asks and rejects a request-level instructions field, so a decision
+	// call folds its framing into the questions.
+	InstructionsPerQuestion bool
 }
 
 // ModelSettings is one model in the settings.
@@ -134,7 +138,14 @@ func (m ModelSettings) layer(name, endpointURL string) poo.ModelInfo {
 // the transport resolves by too. An endpoint that names neither needs
 // no key.
 func (e EndpointSettings) endpoint(name string) Endpoint {
-	endpoint := Endpoint{Name: name, Endpoint: e.Endpoint, API: e.API, SessionHeader: e.SessionHeader, SkipProbe: e.SkipProbe}
+	endpoint := Endpoint{
+		Name:                    name,
+		Endpoint:                e.Endpoint,
+		API:                     e.API,
+		SessionHeader:           e.SessionHeader,
+		SkipProbe:               e.SkipProbe,
+		InstructionsPerQuestion: e.InstructionsPerQuestion,
+	}
 	switch {
 	case e.APIKeyEnv != "":
 		endpoint.Credential = Credential{Source: CredentialEnv, Env: e.APIKeyEnv}
@@ -144,4 +155,33 @@ func (e EndpointSettings) endpoint(name string) Endpoint {
 		endpoint.Credential = Credential{Source: CredentialNone}
 	}
 	return endpoint
+}
+
+// mergeEndpoint overlays the endpoint one layer declared onto the one
+// the earlier layers built.
+//
+// A field the layer leaves at its zero value keeps what the earlier
+// layers said, the way a model's fields do: a settings entry that adds
+// a key to a built-in endpoint keeps the record's own declarations.
+func mergeEndpoint(base, overlay Endpoint) Endpoint {
+	out := overlay
+	if out.Endpoint == "" {
+		out.Endpoint = base.Endpoint
+	}
+	if out.API == "" {
+		out.API = base.API
+	}
+	if out.SessionHeader == "" {
+		out.SessionHeader = base.SessionHeader
+	}
+	if !out.SkipProbe {
+		out.SkipProbe = base.SkipProbe
+	}
+	if !out.InstructionsPerQuestion {
+		out.InstructionsPerQuestion = base.InstructionsPerQuestion
+	}
+	if out.Credential.Source == CredentialNone && base.Credential.Source != "" {
+		out.Credential = base.Credential
+	}
+	return out
 }

@@ -261,6 +261,41 @@ func TestTheStoredKeyReachesTheModel(t *testing.T) {
 	}
 }
 
+// TestATypesafeLoginStoresTheKeyTheDeciderReads covers the sign-in the same
+// way for TypeSafe. The key `poo login typesafe` stores is the key the
+// built-in decider's requests carry. The entry's name is the one the
+// endpoint's variable joins, not the name the OpenCode sign-in writes.
+func TestATypesafeLoginStoresTheKeyTheDeciderReads(t *testing.T) {
+	// The variable is pinned empty so the environment a test runs in cannot
+	// decide which key answers.
+	t.Setenv("TYPESAFE_API_KEY", "")
+
+	isolatedConfigHome(t)
+	dir := t.TempDir()
+	settings := loginSettings(t, dir)
+	withoutATerminal(t)
+	withStdin(t, "the-stored-key\n")
+	if code := run([]string{"login", "typesafe", "--force", "--settings", settings}); code != 0 {
+		t.Fatalf("poo login exited with %d", code)
+	}
+	stored, err := os.ReadFile(filepath.Join(dir, "auth.json"))
+	if err != nil {
+		t.Fatalf("reading poo's credential file: %v", err)
+	}
+	if !strings.Contains(string(stored), "typesafe:") || !strings.Contains(string(stored), "key: the-stored-key") {
+		t.Fatalf("poo's file is\n%s\nwant it to hold the typesafe key the sign-in was given", stored)
+	}
+
+	runtime := loginRuntime(t, settings)
+	model, err := runtime.Catalog.Resolve("typesafe/jev-latest")
+	if err != nil {
+		t.Fatalf("resolving the built-in typesafe model: %v", err)
+	}
+	if key := runtime.EndpointKey(model); key != "the-stored-key" {
+		t.Errorf("the model resolves to the key %q, want the key the sign-in stored", key)
+	}
+}
+
 // TestTheStoredKeyOutranksTheSettingsLiteral covers the ladder's last two rungs: a literal the
 // settings carry answers while no credential is stored, and the credential the operator signs in
 // with outranks it once one is.
@@ -791,6 +826,7 @@ func TestThePickerTakesTheNumberOfASignIn(t *testing.T) {
 		{"1\n", auth.CodexLogin.Provider.ID},
 		{"2\n", ollamaCloud.Provider.ID},
 		{"3\n", opencode.Provider.ID},
+		{"4\n", typesafe.Provider.ID},
 	} {
 		t.Run(c.want, func(t *testing.T) {
 			var o loginOptions
@@ -813,7 +849,7 @@ func TestThePickerRefusesWhatIsNotASignIn(t *testing.T) {
 		input string
 		want  string
 	}{
-		{"4\n", "that is not one of the sign-ins"},
+		{"5\n", "that is not one of the sign-ins"},
 		{"0\n", "that is not one of the sign-ins"},
 		{"abc\n", "that is not one of the sign-ins"},
 		{"", "nothing was chosen"},

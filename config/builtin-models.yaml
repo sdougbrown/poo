@@ -14,6 +14,16 @@
 # speaks the Messages API beside the Chat Completions one, at its own base,
 # so the OpenCode endpoints come in pairs: one per API, one key for all.
 #
+# The typesafe endpoint is a third shape: a decisions endpoint, not a chat
+# one. Jev answers the questions a run asks about its state and serves no
+# chat turns, so its models declare ops: [systemone] and can be the
+# decider but not the chat model. Its model list is not the OpenAI shape
+# the probe reads, so the endpoint is not probed and the record is the
+# word on what it serves. The endpoint answers what each question asks
+# and rejects a request-level instructions field, so it declares
+# instructions_per_question and the decider folds the call's framing
+# into each question when it asks.
+#
 # POO_BUILTIN_MODELS names a file read instead of this one, in the same
 # vocabulary. The credential the openai-codex endpoint runs on is not an api
 # key, so none is declared here, and poo sends its credential only to the
@@ -168,3 +178,17 @@ endpoints:
           mode: effort
           param: output_config.effort
         reasoning_levels: [low, medium, high, xhigh, max]
+  typesafe:
+    endpoint: https://api.typesafe.ai/v1
+    api_key_env: TYPESAFE_API_KEY
+    skip_probe: true
+    instructions_per_question: true
+    models:
+      jev-latest:
+        ops: [systemone]
+        inputs: [text]
+        context_limit: 64000
+      jev-preview:
+        ops: [systemone]
+        inputs: [text]
+        context_limit: 64000

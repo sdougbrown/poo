@@ -111,11 +111,12 @@ endpoints:
 
 The file is YAML, and JSON is read as an alternative spelling of it. Its
 vocabulary is the settings' own: `endpoint`, `api`, `api_key_env`,
-`skip_probe` and `models` on an endpoint, and `model_id`, `inputs`,
-`context_limit`, `max_output`, `reasoning`, `reasoning_levels`, `tools_mode`,
-`quirks` and `sampling` on a model. A model's name is `endpoint/id`, so
-`roles.chat: home/qwen3` runs a model the settings never mention. A key this
-file does not have is a failure that names it.
+`skip_probe`, `instructions_per_question` and `models` on an endpoint,
+and `model_id`, `ops`, `inputs`, `context_limit`, `max_output`,
+`reasoning`, `reasoning_levels`, `tools_mode`, `quirks` and `sampling`
+on a model. A model's name is `endpoint/id`, so
+`roles.chat: home/qwen3` runs a model the settings never mention. A key
+this file does not have is a failure that names it.
 
 A literal `api_key` is refused: a models file is the one an operator shares or
 checks in. Name `api_key_env` for the environment variable that holds the key,
@@ -270,6 +271,29 @@ that stream their arguments, and the thinking a model did — with the
 signature the response carried, returned unchanged in the history that
 answers it. An effort level rides as the output config's effort with
 adaptive thinking, and a budget rides in the thinking field itself.
+
+**The TypeSafe provider.** The decisions provider `typesafe` is built
+in. Jev answers the questions a run asks about its state and serves no
+chat turns, so it can be the decider and not the chat model. `poo login
+typesafe` stores a key TypeSafe's console issues, and the
+`TYPESAFE_API_KEY` variable reaches the same endpoint from the
+environment. Like every built-in provider, the models are offered once
+a credential file is there:
+
+```yaml
+roles:
+  chat: opencode-go/glm-5.3
+  decider: typesafe/jev-latest
+```
+
+The endpoint answers what each question asks and rejects a
+request-level instructions field, so it declares
+`instructions_per_question` and the decider folds the call's framing
+into each question when it asks. Its model list is not the OpenAI
+shape the probe reads, so the endpoint is not probed: the built-in
+record is the word on what it serves, and a newer model than the
+record names is a `models` entry away under the same endpoint,
+declaring `ops: [systemone]`.
 
 **Native compaction.** `context.strategy: native` asks the provider to compact
 its own conversation and gives the model the provider's compacted state back.

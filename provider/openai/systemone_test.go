@@ -735,3 +735,139 @@ func TestAnInvalidQuestionResetsTheRequestCount(t *testing.T) {
 		t.Errorf("the refused call reports %d requests, want none", got)
 	}
 }
+
+// TestTheInstructionsPerQuestionFoldCarriesTheCallsFraming covers the
+// endpoint that answers what each question asks: the call's instructions
+// ride with every question that does not already say them, and the
+// request carries no instructions field of its own.
+func TestTheInstructionsPerQuestionFoldCarriesTheCallsFraming(t *testing.T) {
+	srv := newSystemOneServer(t)
+	srv.answers["q1"] = map[string]any{
+		"probabilities": map[string]float64{"approve": 0.5, "deny": 0.5},
+		"choice":        "approve",
+	}
+	srv.answers["q2"] = map[string]any{
+		"probabilities": map[string]float64{"approve": 0.5, "deny": 0.5},
+		"choice":        "approve",
+	}
+	dec := openai.NewSystemOneDecider(openai.SystemOneConfig{
+		Endpoint:                srv.URL,
+		Model:                   "jev-latest",
+		InstructionsPerQuestion: true,
+	})
+	// The second question already says what the call's instructions say,
+	// so it is sent once.
+	said := decide.Question{
+		ID:           "q2",
+		Instructions: "judge the change the agent is about to make",
+		Kind: decide.Choice{Options: []decide.Option{
+			{Name: "approve", Desc: "the change is right"},
+			{Name: "deny", Desc: "the change is wrong"},
+		}},
+	}
+	if _, err := dec.Decide(context.Background(), "the state", "judge the change the agent is about to make",
+		[]decide.Question{choiceQuestion("q1"), said}); err != nil {
+		t.Fatalf("asking the questions: %v", err)
+	}
+	var req map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(srv.body(0)), &req); err != nil {
+		t.Fatalf("the request does not decode: %v", err)
+	}
+	if _, ok := req["instructions"]; ok {
+		t.Error("the request carries an instructions field, want the framing on the questions")
+	}
+	var questions map[string]struct {
+		Instructions string `json:"instructions"`
+	}
+	if err := json.Unmarshal(req["questions"], &questions); err != nil {
+		t.Fatalf("the questions do not decode: %v", err)
+	}
+	if got, want := questions["q1"].Instructions, "judge the change the agent is about to make does the change look right?"; got != want {
+		t.Errorf("the first question's instructions are %q, want the framing folded in: %q", got, want)
+	}
+	if got := questions["q2"].Instructions; got != "judge the change the agent is about to make" {
+		t.Errorf("the second question's instructions are %q, want the sentence it already says once", got)
+	}
+}
+
+// TestTheCallInstructionsRideTheRequestFieldByDefault covers the other
+// shape: an endpoint that reads the call's instructions as the request's
+// own field gets them there, and each question says only what it was
+// asked.
+func TestTheCallInstructionsRideTheRequestFieldByDefault(t *testing.T) {
+	srv := newSystemOneServer(t)
+	srv.answers["q1"] = map[string]any{
+		"probabilities": map[string]float64{"approve": 0.5, "deny": 0.5},
+		"choice":        "approve",
+	}
+	dec := openai.NewSystemOneDecider(openai.SystemOneConfig{
+		Endpoint: srv.URL,
+		Model:    "gemma4",
+	})
+	if _, err := dec.Decide(context.Background(), "the state", "judge the change the agent is about to make",
+		[]decide.Question{choiceQuestion("q1")}); err != nil {
+		t.Fatalf("asking the question: %v", err)
+	}
+	var req struct {
+		Instructions string `json:"instructions"`
+		Questions    map[string]struct {
+			Instructions string `json:"instructions"`
+		} `json:"questions"`
+	}
+	if err := json.Unmarshal([]byte(srv.body(0)), &req); err != nil {
+		t.Fatalf("the request does not decode: %v", err)
+	}
+	if req.Instructions != "judge the change the agent is about to make" {
+		t.Errorf("the request's instructions are %q, want the call's framing", req.Instructions)
+	}
+	if got := req.Questions["q1"].Instructions; got != "does the change look right?" {
+		t.Errorf("the question's instructions are %q, want the question's own", got)
+	}
+}
+
+// TestTheFoldReachesEveryQuestionOfASplitCall covers the fold across the
+// split a long call makes: every batch's request carries no instructions
+// field of its own, and every question in it carries the framing, not
+// only the first batch's.
+func TestTheFoldReachesEveryQuestionOfASplitCall(t *testing.T) {
+	srv := newSystemOneServer(t)
+	dec := openai.NewSystemOneDecider(openai.SystemOneConfig{
+		Endpoint:                srv.URL,
+		Model:                   "jev-latest",
+		InstructionsPerQuestion: true,
+	})
+	questions := make([]decide.Question, 0, 70)
+	for i := 0; i < 70; i++ {
+		srv.answers[fmt.Sprintf("q%d", i)] = map[string]any{
+			"probabilities": map[string]float64{"approve": 0.5, "deny": 0.5},
+			"choice":        "approve",
+		}
+		questions = append(questions, choiceQuestion(fmt.Sprintf("q%d", i)))
+	}
+	if _, err := dec.Decide(context.Background(), "the state", "judge the change the agent is about to make", questions); err != nil {
+		t.Fatalf("asking the questions: %v", err)
+	}
+	if got := dec.Requests(); got < 2 {
+		t.Fatalf("the call made %d requests, want it split", got)
+	}
+	for i := 0; i < dec.Requests(); i++ {
+		var req struct {
+			Instructions string `json:"instructions"`
+			Questions    map[string]struct {
+				Instructions string `json:"instructions"`
+			} `json:"questions"`
+		}
+		if err := json.Unmarshal([]byte(srv.body(i)), &req); err != nil {
+			t.Fatalf("the request %d does not decode: %v", i, err)
+		}
+		if req.Instructions != "" {
+			t.Errorf("the request %d carries the instructions field %q, want none", i, req.Instructions)
+		}
+		for id, question := range req.Questions {
+			if got, want := question.Instructions,
+				"judge the change the agent is about to make does the change look right?"; got != want {
+				t.Errorf("the request %d folds %q into %q, want %q", i, id, got, want)
+			}
+		}
+	}
+}

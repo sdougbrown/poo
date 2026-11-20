@@ -72,6 +72,11 @@ type Endpoint struct {
 	// SkipProbe says the endpoint is not probed for its models, because its
 	// models are declared rather than discovered.
 	SkipProbe bool
+	// InstructionsPerQuestion says the endpoint answers what each question
+	// asks and rejects a request-level instructions field, so a decision
+	// call folds its framing into the questions. False sends the
+	// instructions as the request's own field.
+	InstructionsPerQuestion bool
 	// Credential is how the endpoint's key is read.
 	Credential Credential
 }

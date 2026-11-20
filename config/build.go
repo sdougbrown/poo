@@ -1111,7 +1111,8 @@ func (s *Settings) CatalogSettings() catalog.Settings {
 			// it has no model list, and a probe would reach it with no
 			// credential. The models file declares its own, and the built-in
 			// Codex provider is one of them.
-			SkipProbe: endpoint.SkipProbe,
+			SkipProbe:               endpoint.SkipProbe,
+			InstructionsPerQuestion: endpoint.InstructionsPerQuestion,
 		}
 	}
 
@@ -1279,6 +1280,15 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 	scrub.Names = append(scrub.Names, EnvOverrideNames...)
 	if r.Catalog != nil {
 		scrub.Names = append(scrub.Names, r.Catalog.CredentialEnvNames()...)
+	}
+	// A key provider's variable is scrubbed whether its endpoint is offered
+	// or not. The variable names a credential, and a model-invoked child
+	// must not read one because the catalog happens to hold no endpoint
+	// that reads it.
+	for _, provider := range auth.KeyProviders() {
+		if !slices.Contains(scrub.Names, provider.Env) {
+			scrub.Names = append(scrub.Names, provider.Env)
+		}
 	}
 	r.Env = exec.ScrubEnv(os.Environ(), scrub)
 	// A launcher's credentials are different: poo's own subsystems need them,
@@ -2446,11 +2456,18 @@ func (r *Runtime) newDecider(model poo.ModelInfo) (decide.Decider, error) {
 	if r.Settings.Decider.TimeoutMS != nil {
 		timeout = time.Duration(*r.Settings.Decider.TimeoutMS) * time.Millisecond
 	}
+	// The endpoint declares how a decision call's instructions ride: a
+	// request-level field, or folded into the questions.
+	perQuestion := false
+	if endpoint, ok := r.Catalog.Endpoints()[model.Provider]; ok {
+		perQuestion = endpoint.InstructionsPerQuestion
+	}
 	decider, err := openai.NewSystemOneDeciderFor(model, openai.SystemOneConfig{
-		APIKey:     r.EndpointKey(model),
-		Timeout:    timeout,
-		HTTPClient: r.httpClient,
-		UserAgent:  r.Build.UserAgent(),
+		APIKey:                  r.EndpointKey(model),
+		Timeout:                 timeout,
+		HTTPClient:              r.httpClient,
+		UserAgent:               r.Build.UserAgent(),
+		InstructionsPerQuestion: perQuestion,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("config: %w", err)

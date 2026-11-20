@@ -38,9 +38,17 @@ var opencode = auth.Flow{
 	Method:   auth.MethodKey,
 }
 
+// typesafe is the fourth way in: a TypeSafe key, which the decisions endpoint
+// reads and no chat one does.
+var typesafe = auth.Flow{
+	Name:     "TypeSafe",
+	Provider: auth.Typesafe,
+	Method:   auth.MethodKey,
+}
+
 // logins are the sign-ins this command offers, in the order the picker shows them.
 func logins() []auth.Flow {
-	return []auth.Flow{auth.CodexLogin, ollamaCloud, opencode}
+	return []auth.Flow{auth.CodexLogin, ollamaCloud, opencode, typesafe}
 }
 
 // loginOptions are the flags of `poo login`.

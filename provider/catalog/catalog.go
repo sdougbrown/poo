@@ -165,10 +165,10 @@ func New(opts Options) *Catalog {
 		c.endpoints[name] = endpoint
 	}
 	for name, endpoint := range opts.File.Endpoints {
-		c.endpoints[name] = endpoint.endpoint(name)
+		c.endpoints[name] = mergeEndpoint(c.endpoints[name], endpoint.endpoint(name))
 	}
 	for name, endpoint := range opts.Settings.Endpoints {
-		c.endpoints[name] = endpoint.endpoint(name)
+		c.endpoints[name] = mergeEndpoint(c.endpoints[name], endpoint.endpoint(name))
 	}
 	c.addFileModels()
 	c.addSettingsModels()
