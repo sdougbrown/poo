@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -121,14 +119,7 @@ func TestQuickJSBoundsGuestExecution(t *testing.T) {
 	}
 }
 
-func TestQuickJSHasNoWorkspaceOrHostEnvironment(t *testing.T) {
-	dir := t.TempDir()
-	t.Chdir(dir)
-	t.Setenv("POO_CODEMODE_TEST_SECRET", "not for JavaScript")
-	file := filepath.Join(dir, "input.txt")
-	if err := os.WriteFile(file, []byte("private"), 0600); err != nil {
-		t.Fatal(err)
-	}
+func TestQuickJSLeavesNoHostGlobalsInTheScript(t *testing.T) {
 	res, err := quickjs.New().Run(t.Context(), codemode.RunOptions{
 		// Every global the wrapper must have removed, plus the ones a
 		// QuickJS bump could reintroduce under a familiar name. The
@@ -152,6 +143,25 @@ func TestQuickJSHasNoWorkspaceOrHostEnvironment(t *testing.T) {
 		if slices.Contains(names, danger) {
 			t.Errorf("the script can see the global %q", danger)
 		}
+	}
+}
+
+// TestAScriptThatReturnsNothingIsASuccess covers the print-only script:
+// like a Starlark script that never exits, it is a clean run whose
+// printed lines are the whole result, with no return value.
+func TestAScriptThatReturnsNothingIsASuccess(t *testing.T) {
+	res, err := quickjs.New().Run(t.Context(), codemode.RunOptions{
+		Script: `print("kept line"); print("dropped");`,
+		Nested: nested(noCalls),
+	})
+	if err != nil {
+		t.Fatalf("the run failed: %v", err)
+	}
+	if res.Value != nil {
+		t.Fatalf("the run returned a value: %s", res.Value)
+	}
+	if len(res.Output) != 2 || res.Output[0] != "kept line" || res.Output[1] != "dropped" {
+		t.Fatalf("the run's output is %q", res.Output)
 	}
 }
 
