@@ -43,6 +43,10 @@ type Engine struct{}
 // New returns the Starlark engine.
 func New() *Engine { return &Engine{} }
 
+// ScriptLanguage names the script language the engine runs, so the tool
+// renders the guidance the engine's scripts need.
+func (*Engine) ScriptLanguage() string { return "starlark" }
+
 // state is what the builtins and the run share.
 //
 // A run's builtins close over the run's state, so two runs share

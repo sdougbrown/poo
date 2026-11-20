@@ -21,6 +21,10 @@ type Engine struct{}
 
 func New() *Engine { return &Engine{} }
 
+// ScriptLanguage names the script language the engine runs, so the tool
+// renders the guidance the engine's scripts need.
+func (*Engine) ScriptLanguage() string { return "quickjs" }
+
 func (*Engine) Run(ctx context.Context, opts codemode.RunOptions) (result codemode.RunResult, err error) {
 	limits, err := script.CheckRun(opts)
 	if err != nil {
@@ -46,10 +50,13 @@ func (*Engine) Run(ctx context.Context, opts codemode.RunOptions) (result codemo
 		result.Output, result.Truncated = output.Lines, output.Truncated
 		switch {
 		case err != nil:
+		case trap == nil:
+			// A clean completion keeps its result even when the context
+			// finished during cleanup: no trap means nothing went wrong.
 		case cause != nil:
 			result.Value = nil
 			err = fmt.Errorf("the script stopped: %w", cause)
-		case trap != nil:
+		default:
 			result.Value = nil
 			err = fmt.Errorf("the QuickJS runtime stopped unexpectedly")
 		}
