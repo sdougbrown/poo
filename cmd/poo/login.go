@@ -66,6 +66,10 @@ type loginOptions struct {
 	waitSet bool
 	// provider is the sign-in named on the command line, if one was.
 	provider string
+	// command is the name the shared sign-in's diagnostics answer by: the
+	// command that runs them, so a picker the welcome front door shares
+	// does not answer as a command the operator never typed.
+	command string
 }
 
 // bind reads the login command's flags out of a parsed invocation.
@@ -91,6 +95,7 @@ func (o *loginOptions) bind(inv clicontract.Invocation) {
 func handleLogin(ctx context.Context, inv clicontract.Invocation, stdout, stderr io.Writer) exit {
 	var o loginOptions
 	o.bind(inv)
+	o.command = "poo login"
 	// The list is the question, and a run with no terminal to ask on has no answer to it, so it
 	// says what to type instead of guessing.
 	if o.provider == "" && !interactive() {
@@ -126,11 +131,11 @@ func handleLogin(ctx context.Context, inv clicontract.Invocation, stdout, stderr
 func (o *loginOptions) signInAndStore(ctx context.Context, flow auth.Flow, settingsPath string, settings *config.Settings, in *bufio.Scanner, stdout, stderr io.Writer) (auth.Status, bool) {
 	target, err := pooCredentialFile(settingsPath, settings)
 	if err != nil {
-		fmt.Fprintf(stderr, "poo login: %v\n", err)
+		fmt.Fprintf(stderr, "%s: %v\n", o.command, err)
 		return auth.Status{}, true
 	}
 	credentials := auth.Credentials{Path: target}
-	mayReplace, failed := replace(credentials, flow.Provider, o.force, "poo login", stderr)
+	mayReplace, failed := replace(credentials, flow.Provider, o.force, o.command, in, stderr)
 	if failed {
 		return auth.Status{}, true
 	}
@@ -140,7 +145,7 @@ func (o *loginOptions) signInAndStore(ctx context.Context, flow auth.Flow, setti
 	}
 	status, err := credentials.Set(ctx, flow.Provider, entry, mayReplace)
 	if err != nil {
-		fmt.Fprintf(stderr, "poo login: %v\n", err)
+		fmt.Fprintf(stderr, "%s: %v\n", o.command, err)
 		return auth.Status{}, true
 	}
 	fmt.Fprintf(stdout, "Signed in to %s", status.Provider)
@@ -184,7 +189,7 @@ func (o *loginOptions) choose(in *bufio.Scanner, stderr io.Writer) (auth.Flow, b
 				return flow, true
 			}
 		}
-		fmt.Fprintf(stderr, "poo login: %q is not a sign-in poo knows: %s\n", o.provider, strings.Join(loginNames(), ", "))
+		fmt.Fprintf(stderr, "%s: %q is not a sign-in poo knows: %s\n", o.command, o.provider, strings.Join(loginNames(), ", "))
 		return auth.Flow{}, false
 	}
 	fmt.Fprintln(stderr, "Sign in with:")
@@ -193,13 +198,13 @@ func (o *loginOptions) choose(in *bufio.Scanner, stderr io.Writer) (auth.Flow, b
 	}
 	fmt.Fprintf(stderr, "Which one? [1-%d] ", len(logins()))
 	if !in.Scan() {
-		fmt.Fprintln(stderr, "poo login: nothing was chosen")
+		fmt.Fprintf(stderr, "%s: nothing was chosen\n", o.command)
 		return auth.Flow{}, false
 	}
 	var choice int
 	if _, err := fmt.Sscanf(strings.TrimSpace(in.Text()), "%d", &choice); err != nil ||
 		choice < 1 || choice > len(logins()) {
-		fmt.Fprintln(stderr, "poo login: that is not one of the sign-ins")
+		fmt.Fprintf(stderr, "%s: that is not one of the sign-ins\n", o.command)
 		return auth.Flow{}, false
 	}
 	return logins()[choice-1], true
@@ -208,7 +213,7 @@ func (o *loginOptions) choose(in *bufio.Scanner, stderr io.Writer) (auth.Flow, b
 // signIn runs the flow the operator chose.
 func (o *loginOptions) signIn(ctx context.Context, flow auth.Flow, in *bufio.Scanner, stdout, stderr io.Writer) (auth.Credential, bool) {
 	if flow.Method == auth.MethodKey {
-		return keyCredential(flow, os.Stdin, in, stderr)
+		return keyCredential(flow, o.command, os.Stdin, in, stderr)
 	}
 	attempt, err := flow.Authorize()
 	if err != nil {
@@ -248,7 +253,7 @@ func (o *loginOptions) signIn(ctx context.Context, flow auth.Flow, in *bufio.Sca
 // The two reads are exclusive: one input is one of them. A terminal that ends its prompt with
 // nothing typed has given no key, and asking the same terminal again would sit on a prompt that
 // is not there.
-func keyCredential(flow auth.Flow, stdin *os.File, in *bufio.Scanner, stderr io.Writer) (auth.Credential, bool) {
+func keyCredential(flow auth.Flow, command string, stdin *os.File, in *bufio.Scanner, stderr io.Writer) (auth.Credential, bool) {
 	key := ""
 	if interactive() {
 		fmt.Fprintf(stderr, "%s key: ", flow.Name)
@@ -266,7 +271,7 @@ func keyCredential(flow auth.Flow, stdin *os.File, in *bufio.Scanner, stderr io.
 		}
 	}
 	if key == "" {
-		fmt.Fprintln(stderr, "poo login: no key was given")
+		fmt.Fprintf(stderr, "%s: no key was given\n", command)
 		return auth.Credential{}, true
 	}
 	return auth.Credential{Kind: auth.KindAPIKey, Key: key}, false

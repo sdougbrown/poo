@@ -130,8 +130,8 @@ func TestAWelcomeWithNoChatModelStopsWhenDeclined(t *testing.T) {
 	if _, ok := runWelcome(&stdout, &stderr); ok {
 		t.Fatalf("the flow finished after the re-sign-in was declined")
 	}
-	if strings.Contains(stderr.String(), "Which one? [1-4] Which one?") {
-		t.Errorf("the flow's output is %q, and it asked for a sign-in twice", stderr.String())
+	if strings.Count(stderr.String(), "Sign in with:") != 1 {
+		t.Errorf("the flow's output is %q, want one sign-in list before the decline", stderr.String())
 	}
 }
 
@@ -312,4 +312,60 @@ func TestAWelcomeDoesNotClobberExistingSettings(t *testing.T) {
 	if string(data) != operators {
 		t.Errorf("the settings are now %q, want the operator's own, byte for byte", string(data))
 	}
+}
+
+// TestAWelcomeRefusesWhatIsNotAnAnswer covers the answers the flow's
+// prompts do not take: a word, a number outside the list, and an input
+// that ends first. The flow stops where the answer failed, and no
+// settings file is written.
+func TestAWelcomeRefusesWhatIsNotAnAnswer(t *testing.T) {
+	refused := func(t *testing.T, input, want string) {
+		t.Helper()
+		isolatedConfigHome(t)
+		noAmbientKeys(t)
+		t.Setenv("POO_SETTINGS", "")
+		withStdin(t, input)
+		var stdout, stderr bytes.Buffer
+		if _, ok := runWelcome(&stdout, &stderr); ok {
+			t.Fatalf("the flow finished on %q; stderr: %s", input, stderr.String())
+		}
+		if !strings.Contains(stderr.String(), want) {
+			t.Errorf("the flow's output is %q, want it to refuse with %q", stderr.String(), want)
+		}
+		dir, err := config.UserConfigDir()
+		if err != nil {
+			t.Fatalf("the user config directory is not resolvable here: %v", err)
+		}
+		if _, err := os.Stat(filepath.Join(dir, config.SettingsFileName)); !os.IsNotExist(err) {
+			t.Errorf("the flow wrote a settings file on a refused answer")
+		}
+	}
+	t.Run("a word at the sign-in", func(t *testing.T) {
+		refused(t, "later\n", "that is not one of the sign-ins")
+	})
+	t.Run("a number outside the sign-ins", func(t *testing.T) {
+		refused(t, "9\n", "that is not one of the sign-ins")
+	})
+	t.Run("no answer at the sign-in", func(t *testing.T) {
+		refused(t, "", "nothing was chosen")
+	})
+	t.Run("a word at the model picker", func(t *testing.T) {
+		refused(t, "3\noc-key\nlater\n", "no model was chosen")
+	})
+	t.Run("a number outside the models", func(t *testing.T) {
+		refused(t, "3\noc-key\n9\n", "no model was chosen")
+	})
+	t.Run("no answer at the profile picker", func(t *testing.T) {
+		isolatedConfigHome(t)
+		noAmbientKeys(t)
+		t.Setenv("POO_SETTINGS", "")
+		withStdin(t, "3\noc-key\n1\n")
+		var stdout, stderr bytes.Buffer
+		if _, ok := runWelcome(&stdout, &stderr); ok {
+			t.Fatalf("the flow finished on an answer that never came")
+		}
+		if !strings.Contains(stderr.String(), "no profile was chosen") {
+			t.Errorf("the flow's output is %q, want the profile refusal", stderr.String())
+		}
+	})
 }

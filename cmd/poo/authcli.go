@@ -20,7 +20,7 @@ import (
 //
 // The caller reports a failure with its own name, so one rule serves every command that writes a
 // credential.
-func replace(credentials auth.Credentials, provider auth.Provider, force bool, command string, stderr io.Writer) (bool, bool) {
+func replace(credentials auth.Credentials, provider auth.Provider, force bool, command string, in *bufio.Scanner, stderr io.Writer) (bool, bool) {
 	held, err := credentials.Holds(provider.ID)
 	if err != nil {
 		fmt.Fprintf(stderr, "%s: %v\n", command, err)
@@ -43,7 +43,11 @@ func replace(credentials auth.Credentials, provider auth.Provider, force bool, c
 	}
 	fmt.Fprintf(stderr, "%s already holds a credential for %s%s.\n", credentials.Path, provider.ID, signedIn)
 	fmt.Fprint(stderr, "Replace it? [y/N] ")
-	if !confirmed(os.Stdin) {
+	scanner := in
+	if scanner == nil {
+		scanner = bufio.NewScanner(os.Stdin)
+	}
+	if !confirmed(scanner) {
 		fmt.Fprintf(stderr, "%s: the credential was left as it was\n", command)
 		return false, true
 	}
@@ -58,11 +62,10 @@ func interactive() bool {
 }
 
 // confirmed reads one answer, and reads anything but yes as no.
-func confirmed(in io.Reader) bool {
-	scanner := bufio.NewScanner(in)
-	if !scanner.Scan() {
+func confirmed(in *bufio.Scanner) bool {
+	if !in.Scan() {
 		return false
 	}
-	answer := strings.ToLower(strings.TrimSpace(scanner.Text()))
+	answer := strings.ToLower(strings.TrimSpace(in.Text()))
 	return answer == "y" || answer == "yes"
 }

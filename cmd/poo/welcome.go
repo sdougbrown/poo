@@ -140,7 +140,7 @@ func welcomeModel(stderr io.Writer, in *bufio.Scanner) (model string, ok bool, s
 	for i, name := range models {
 		fmt.Fprintf(stderr, "  %d. %s\n", i+1, name)
 	}
-	fmt.Fprintf(stderr, "Chat model? [1-%d] ", len(models))
+	fmt.Fprintf(stderr, "Chat model? [1-%d, empty for %s] ", len(models), models[0])
 	choice := askChoice(in, stderr, len(models), 1)
 	if choice == 0 {
 		fmt.Fprintln(stderr, "poo: no model was chosen. Run `poo` again to set up, or name the chat model in a settings file.")

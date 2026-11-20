@@ -68,7 +68,7 @@ func handleAuthImportPi(ctx context.Context, inv clicontract.Invocation, stdout,
 		return exit{operationalExitCode}
 	}
 	poo := auth.Credentials{Path: target}
-	mayReplace, failed := replace(poo, auth.Codex, o.force, "poo auth import", stderr)
+	mayReplace, failed := replace(poo, auth.Codex, o.force, "poo auth import", nil, stderr)
 	if failed {
 		return exit{operationalExitCode}
 	}
