@@ -105,6 +105,7 @@ func TestQuickJSBoundsGuestExecution(t *testing.T) {
 		{"memory", `return new ArrayBuffer(128 * 1024 * 1024).byteLength;`, codemode.Limits{}, "out of memory"},
 		{"step budget", `return 1;`, codemode.Limits{ExecSteps: 100}, "does not support the exec_steps limit"},
 		{"batch width", `gather(Array.from({length: 17}, () => ["read", {}]));`, codemode.Limits{}, "gather takes at most"},
+		{"async result", `return Promise.resolve(42);`, codemode.Limits{}, "scripts must be synchronous"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)

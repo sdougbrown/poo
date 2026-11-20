@@ -395,7 +395,7 @@ type Bash struct {
 
 // Codemode are the codemode tool's settings.
 type Codemode struct {
-	// Engine selects the script runtime. An unset engine uses Starlark.
+	// Engine selects the script runtime. The poo command defaults to Starlark.
 	Engine *string `json:"engine,omitempty"`
 	// TimeoutS is a script run's wall-clock limit, in seconds.
 	TimeoutS *int `json:"timeout_s,omitempty"`
@@ -403,7 +403,7 @@ type Codemode struct {
 	ScriptMaxBytes *int `json:"script_max_bytes,omitempty"`
 	// OutputCapChars is the most printed text a run keeps.
 	OutputCapChars *int `json:"output_cap_chars,omitempty"`
-	// ExecSteps is the engine's execution budget.
+	// ExecSteps is the Starlark execution budget.
 	ExecSteps *int `json:"exec_steps,omitempty"`
 }
 

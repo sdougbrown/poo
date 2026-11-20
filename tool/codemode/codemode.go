@@ -30,7 +30,7 @@ var section = prompt.MustCompile("codemode", sectionText, nil)
 //go:embed quickjs.md
 var quickJSSectionText string
 
-var quickJSSection = prompt.MustCompile("codemode", quickJSSectionText, nil)
+var quickJSSection = prompt.MustCompile("codemode.quickjs", quickJSSectionText, nil)
 
 // Tool is the codemode tool.
 type Tool struct {
@@ -42,7 +42,7 @@ type Tool struct {
 	quickJS bool
 }
 
-// New returns a codemode tool that runs its scripts on the engine.
+// New returns a codemode tool with Starlark guidance for a Starlark engine.
 func New(engine codemode.Engine) *Tool {
 	return &Tool{Engine: engine}
 }

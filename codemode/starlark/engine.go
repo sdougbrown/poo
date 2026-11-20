@@ -20,17 +20,17 @@ import (
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/codemode"
-	"github.com/sdougbrown/poo/codemode/internal"
+	"github.com/sdougbrown/poo/codemode/internal/script"
 )
 
 // The engine's own defaults, for the limits a session leaves at zero.
 const (
-	DefaultTimeoutS       = internal.DefaultTimeoutS
-	DefaultScriptMaxBytes = internal.DefaultScriptMaxBytes
-	DefaultOutputCapChars = internal.DefaultOutputCapChars
+	DefaultTimeoutS       = script.DefaultTimeoutS
+	DefaultScriptMaxBytes = script.DefaultScriptMaxBytes
+	DefaultOutputCapChars = script.DefaultOutputCapChars
 	DefaultExecSteps      = 10 * 1000 * 1000
 	// MaxGatherWidth is the most calls one gather may fan out to.
-	MaxGatherWidth = internal.MaxGatherWidth
+	MaxGatherWidth = script.MaxGatherWidth
 )
 
 // exitReason is the thread-cancel reason the exit builtin leaves. The
@@ -51,7 +51,7 @@ func New() *Engine { return &Engine{} }
 type state struct {
 	nested poo.NestedCaller
 	ctx    context.Context
-	output internal.Output
+	output script.Output
 	calls  int
 	exited bool
 	value  json.RawMessage
@@ -59,7 +59,7 @@ type state struct {
 
 // Run executes one script.
 func (e *Engine) Run(ctx context.Context, opts codemode.RunOptions) (codemode.RunResult, error) {
-	limits, err := internal.Limits(opts)
+	limits, err := script.CheckRun(opts)
 	if err != nil {
 		return codemode.RunResult{}, err
 	}
