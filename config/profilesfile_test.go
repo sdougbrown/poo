@@ -109,6 +109,33 @@ profiles:
 	}
 }
 
+func TestProfilesFilesNamedWithoutADirectoryAnswerToTheWorkingDirectory(t *testing.T) {
+	dir := t.TempDir()
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chdir(cwd) })
+	writeProfilesFixture(t, filepath.Join(dir, "profiles.yaml"), `
+profiles:
+  reviewer:
+    base: code
+    prompt_file: reviewer.md
+`)
+	writeProfilesFixture(t, filepath.Join(dir, "reviewer.md"), "Reviewer prompt.")
+
+	settings, err := config.Parse([]byte(theModelSettings+"profiles_files: [profiles.yaml]\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := renderedProfilePrompt(t, settings, "reviewer"); !strings.Contains(got, "Reviewer prompt.") {
+		t.Errorf("the reviewer profile's prompt is missing %q", "Reviewer prompt.")
+	}
+}
+
 func TestProfilesFilesLayerBelowTheSettings(t *testing.T) {
 	dir := t.TempDir()
 	writeProfilesFixture(t, filepath.Join(dir, "first.yaml"), `
