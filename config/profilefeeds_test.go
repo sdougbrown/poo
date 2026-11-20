@@ -168,6 +168,48 @@ func TestASettingsProfileAddsFeedsToItsBase(t *testing.T) {
 	}
 }
 
+// TestAVariantNeverWritesTheBaseDeclaration covers the merge: the
+// variant's feeds grow a copy, so a second variant on the same base
+// cannot overwrite the first one's declaration through the array they
+// would otherwise share.
+func TestAVariantNeverWritesTheBaseDeclaration(t *testing.T) {
+	settings, err := config.Parse([]byte(theModelSettings+
+		"profile: alpha\n"+
+		"profiles:\n"+
+		"  alpha:\n    base: code\n    feeds: [events]\n"+
+		"  beta:\n    base: code\n    feeds: [ticker]\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	// The linked declaration carries spare capacity, so an append that
+	// shares its backing array writes into the slot a variant grew
+	// into rather than allocating its own.
+	declared := make([]string, 1, 8)
+	declared[0] = "broker"
+	opts := config.BuildOptions{
+		Settings:       settings,
+		WorkingDir:     t.TempDir(),
+		Executors:      theExecutors(),
+		DefaultProfile: "code",
+		Tools:          theTools(),
+		Profiles:       []profile.Profile{{Name: "code", Tools: []string{"read"}, Feeds: declared}},
+	}
+	runtime, err := config.Build(opts)
+	if err != nil {
+		t.Fatalf("building the runtime: %v", err)
+	}
+	listed := map[string]string{}
+	for _, p := range runtime.Options.Profiles {
+		listed[p.Name] = strings.Join(p.Feeds, ",")
+	}
+	if listed["alpha"] != "broker,events" {
+		t.Errorf("alpha declares %q, want broker,events", listed["alpha"])
+	}
+	if listed["beta"] != "broker,ticker" {
+		t.Errorf("beta declares %q, want broker,ticker", listed["beta"])
+	}
+}
+
 // TestASettingsProfileRefusesAnEmptyDeclaredFeed covers the validation:
 // a declared feed name cannot be empty, so a warning about a nameless
 // feed never reads as a bug in poo.

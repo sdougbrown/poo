@@ -36,6 +36,10 @@ func (r *Runtime) resolveProfileDefinitions(opts BuildOptions) ([]profile.Profil
 			return nil, err
 		}
 		base.Name = name
+		// The base's feeds belong to the linked profile, so the
+		// variant's additions grow a copy: a base whose slice has
+		// spare capacity is never written through.
+		base.Feeds = slices.Clone(base.Feeds)
 		// The variant's feeds add to the base's declaration: a
 		// specialization asserts more, never less. A name the base
 		// already declares is kept once, so a restatement warns

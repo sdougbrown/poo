@@ -185,7 +185,6 @@ func feedRestartDelay(ran, previous time.Duration) time.Duration {
 // cannot be read back.
 var feedNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 
-// checkFeeds validates the feeds a session is built with.
 // MissingFeedWarning is what the build and the restore say when a
 // profile declares a feed the settings do not load.
 //
@@ -195,6 +194,7 @@ func MissingFeedWarning(profile, feed string) string {
 	return fmt.Sprintf("the profile %q declares the feed %q, and the settings load no feed by that name", profile, feed)
 }
 
+// checkFeeds validates the feeds a session is built with.
 func checkFeeds(specs []FeedSpec) error {
 	seen := make(map[string]bool, len(specs))
 	for _, spec := range specs {
