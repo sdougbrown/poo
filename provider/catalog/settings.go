@@ -156,3 +156,32 @@ func (e EndpointSettings) endpoint(name string) Endpoint {
 	}
 	return endpoint
 }
+
+// mergeEndpoint overlays the endpoint one layer declared onto the one
+// the earlier layers built.
+//
+// A field the layer leaves at its zero value keeps what the earlier
+// layers said, the way a model's fields do: a settings entry that adds
+// a key to a built-in endpoint keeps the record's own declarations.
+func mergeEndpoint(base, overlay Endpoint) Endpoint {
+	out := overlay
+	if out.Endpoint == "" {
+		out.Endpoint = base.Endpoint
+	}
+	if out.API == "" {
+		out.API = base.API
+	}
+	if out.SessionHeader == "" {
+		out.SessionHeader = base.SessionHeader
+	}
+	if !out.SkipProbe {
+		out.SkipProbe = base.SkipProbe
+	}
+	if !out.InstructionsPerQuestion {
+		out.InstructionsPerQuestion = base.InstructionsPerQuestion
+	}
+	if out.Credential.Source == CredentialNone && base.Credential.Source != "" {
+		out.Credential = base.Credential
+	}
+	return out
+}

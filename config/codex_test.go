@@ -1058,10 +1058,12 @@ roles:
 }
 
 // TestACodexModelWithoutTheResponsesAPIIsRefused covers the API the session
-// reads. A model declared under the Codex endpoint without the Responses API
-// would run on the Codex transport while the session treated it as
-// chat-completions, stripping the reasoning blocks the storeless endpoint
-// depends on. The setting is refused, and the refusal names what to add.
+// reads. A model declared under the Codex endpoint with an API of its own
+// that is not the Responses one would run on the Codex transport while the
+// session treated it as chat-completions, stripping the reasoning blocks
+// the storeless endpoint depends on. The setting is refused, and the refusal
+// names what to add. An endpoint entry that names no API of its own keeps
+// the record's, so the refusal is the model's own declaration.
 func TestACodexModelWithoutTheResponsesAPIIsRefused(t *testing.T) {
 	dir := t.TempDir()
 	writeCodexAuth(t, dir, fakeCodexToken(t, "acct_live"), "rt_live", 4102444800000)
@@ -1076,6 +1078,7 @@ models:
   codex-without-api:
     endpoint: openai-codex
     model_id: gpt-6.1-sol
+    api: chat_completions
 roles:
   chat: codex-without-api
 `)

@@ -136,6 +136,9 @@ func TestTheBuiltinTypesafeModelIsOfferedOnItsKey(t *testing.T) {
 	if !catalogEndpoint(t, settings, "typesafe").SkipProbe {
 		t.Error("the typesafe endpoint is probed, want the record to be the word on what it serves")
 	}
+	if !catalogEndpoint(t, settings, "typesafe").InstructionsPerQuestion {
+		t.Error("the typesafe endpoint does not declare per-question instructions, want the record's")
+	}
 }
 
 // TestTheBuiltinTypesafeModelSleepsOnAnotherProvidersCredential covers the
@@ -280,6 +283,90 @@ roles:
 	}
 	if _, ok := req["instructions"]; ok {
 		t.Error("the request carries an instructions field, want the framing on the questions")
+	}
+	var answered map[string]struct {
+		Instructions string `json:"instructions"`
+	}
+	if err := json.Unmarshal(req["questions"], &answered); err != nil {
+		t.Fatalf("the questions do not decode: %v", err)
+	}
+	if got, want := answered["q1"].Instructions,
+		"the permission asker's framing should the tool call be allowed?"; got != want {
+		t.Errorf("the question's instructions are %q, want the framing folded in: %q", got, want)
+	}
+}
+
+// TestTheSettingsKeepTheBuiltinEndpointDeclarations covers the merge: a
+// settings entry that re-declares the built-in typesafe endpoint to
+// carry its own key replaces the record's URL and keeps its own
+// declarations. The endpoint stays unprobed, and the decider keeps
+// folding the call's framing into the questions.
+func TestTheSettingsKeepTheBuiltinEndpointDeclarations(t *testing.T) {
+	// The variable is pinned empty so the environment a test runs in cannot
+	// decide which key answers.
+	t.Setenv("TYPESAFE_API_KEY", "")
+
+	dir := t.TempDir()
+	srv := newTypesafeServer(t)
+	writeOpencodeAuth(t, dir, map[string]string{"typesafe": "ts_sk_stored"})
+	path := writeCodexSettings(t, dir, `version: 1
+auth_file: auth.json
+session:
+  mode: ephemeral
+endpoints:
+  typesafe:
+    endpoint: `+srv.URL+`
+    api_key: ts_sk_literal
+roles:
+  chat: gpt-4o-mini
+  decider: typesafe/jev-latest
+`)
+	settings, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("loading the settings: %v", err)
+	}
+	runtime, err := buildCodex(t, settings, &http.Client{})
+	if err != nil {
+		t.Fatalf("building the runtime: %v", err)
+	}
+	merged := catalogEndpoint(t, settings, "typesafe")
+	if merged.Endpoint != srv.URL {
+		t.Errorf("the endpoint is %q, want the settings' own URL", merged.Endpoint)
+	}
+	if !merged.SkipProbe {
+		t.Error("the settings' entry dropped the record's skip_probe, want it kept")
+	}
+	if !merged.InstructionsPerQuestion {
+		t.Error("the settings' entry dropped the record's per-question instructions, want them kept")
+	}
+	model, decider, err := runtime.Decider()
+	if err != nil {
+		t.Fatalf("resolving the decider: %v", err)
+	}
+	// The literal the settings carry is the endpoint's own credential: the
+	// stored one is read through the variable the record names, which the
+	// settings' entry replaced.
+	if got := runtime.EndpointKey(model); got != "ts_sk_literal" {
+		t.Errorf("the key is %q, want the settings' literal", got)
+	}
+	questions := []decide.Question{{
+		ID:           "q1",
+		Instructions: "should the tool call be allowed?",
+		Kind: decide.Choice{Options: []decide.Option{
+			{Name: "approve", Desc: "the call is safe to allow"},
+			{Name: "deny", Desc: "the call should be refused"},
+		}},
+	}}
+	if _, err := decider.Decide(context.Background(), map[string]string{"cwd": "/tmp"},
+		"the permission asker's framing", questions); err != nil {
+		t.Fatalf("asking the question: %v", err)
+	}
+	var req map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(srv.body(0)), &req); err != nil {
+		t.Fatalf("the request does not decode: %v", err)
+	}
+	if _, ok := req["instructions"]; ok {
+		t.Error("the request carries an instructions field, want the record's declaration kept")
 	}
 	var answered map[string]struct {
 		Instructions string `json:"instructions"`
