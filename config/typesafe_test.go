@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -484,5 +485,54 @@ roles:
 	}
 	if got := req.Questions["q1"].Instructions; got != "should the tool call be allowed?" {
 		t.Errorf("the question's instructions are %q, want the question's own", got)
+	}
+}
+
+// TestTheBuiltinCodexEndpointSleepsOnAnotherProvidersCredential covers the
+// rung the keyless builtin endpoint reads: the credential file is there and
+// holds another provider's entry, and the Codex endpoint and its models are
+// not offered. A chat role naming a Codex model refuses the build, and the
+// refusal names the model.
+func TestTheBuiltinCodexEndpointSleepsOnAnotherProvidersCredential(t *testing.T) {
+	isolatedConfigDir(t)
+	t.Setenv("OPENAI_API_KEY", "")
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		t.Fatalf("the user config directory is not resolvable here: %v", err)
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("making the user config directory: %v", err)
+	}
+	writeOpencodeAuth(t, dir, map[string]string{"opencode": "an-opencode-key"})
+	path := writeCodexSettings(t, dir, `version: 1
+auth_file: auth.json
+session:
+  mode: ephemeral
+roles:
+  chat: openai-codex/gpt-5.4-mini
+`)
+	settings, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("loading the settings: %v", err)
+	}
+	if _, ok := settings.CatalogOptions().File.Endpoints["openai-codex"]; ok {
+		t.Errorf("the gated Codex endpoint is in the builtin layer")
+	}
+	_, err = buildCodex(t, settings, &http.Client{})
+	if err == nil {
+		t.Fatal("the build offered a Codex model the credential file cannot run")
+	}
+	if !strings.Contains(err.Error(), "openai-codex/gpt-5.4-mini") {
+		t.Errorf("the refusal is %q, want it to name the model", err.Error())
+	}
+
+	// The catalog itself holds neither the endpoint nor its models, so poo
+	// models lists nothing the file cannot run.
+	cat := catalog.New(settings.CatalogOptions())
+	if _, ok := cat.Endpoints()["openai-codex"]; ok {
+		t.Errorf("the gated Codex endpoint is in the catalog")
+	}
+	if _, err := cat.Resolve("openai-codex/gpt-5.4-mini"); err == nil {
+		t.Errorf("the gated Codex model resolved")
 	}
 }

@@ -911,3 +911,37 @@ func TestACuratedModelNeedsAKeyInTheReach(t *testing.T) {
 		t.Errorf("the hosted model without a presence answer did not resolve: %v", err)
 	}
 }
+
+// TestTheGateReadsTheCredentialTheSessionResolves covers the override
+// case: settings that re-declare a curated endpoint with their own key
+// variable change the credential the session resolves the key from, and
+// the gate follows the merged one. An entry the curated variable would
+// wake stays unoffered when the override's variable is not there, and
+// wakes when it is.
+func TestTheGateReadsTheCredentialTheSessionResolves(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "curated-key")
+	settings := catalog.Settings{
+		Endpoints: map[string]catalog.EndpointSettings{
+			"anthropic": {
+				Endpoint:  "https://api.anthropic.com/v1",
+				APIKeyEnv: "ANTHROPIC_KEY2",
+			},
+		},
+	}
+	keys := map[string]string{"ANTHROPIC_API_KEY": "curated-key"}
+	present := func(name string, credential catalog.Credential) bool {
+		return keys[credential.Env] != ""
+	}
+	gated := catalog.New(catalog.Options{Settings: settings, KeyPresent: present})
+	if _, err := gated.Resolve("claude-sonnet-4-5"); err == nil {
+		t.Errorf("the override's variable is not there, and the model resolved")
+	}
+	if _, ok := gated.Endpoints()["anthropic"]; ok {
+		t.Errorf("the endpoint the override's key cannot reach is in the catalog")
+	}
+	keys["ANTHROPIC_KEY2"] = "override-key"
+	woken := catalog.New(catalog.Options{Settings: settings, KeyPresent: present})
+	if _, err := woken.Resolve("claude-sonnet-4-5"); err != nil {
+		t.Errorf("the override's variable is there, and the model did not resolve: %v", err)
+	}
+}

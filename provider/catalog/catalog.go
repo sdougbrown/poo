@@ -170,9 +170,6 @@ func New(opts Options) *Catalog {
 		roles:      map[Role]string{},
 	}
 	for name, endpoint := range c.curated.endpoints {
-		if !c.offered(name, endpoint.Credential) {
-			continue
-		}
 		c.endpoints[name] = endpoint
 	}
 	for name, endpoint := range opts.File.Endpoints {
@@ -326,13 +323,27 @@ func (c *Catalog) addCuratedModels() {
 			continue
 		}
 		curated, endpoint, notes := c.curated.forModel(id)
+		// The curated model rides the endpoint a session resolves its key
+		// from: the merged one, whichever layer had the last word on the
+		// credential. A model whose key is not in reach is not one to
+		// offer — poo's word is the curated entry, and the operator's own
+		// models ride no gate.
 		served, ok := c.endpoints[endpoint]
 		if ok {
+			if c.opts.KeyPresent != nil && !c.opts.KeyPresent(endpoint, served.Credential) {
+				continue
+			}
 			curated.Endpoint = served.Endpoint
-		} else if _, hosted := c.curated.endpoints[endpoint]; hosted {
-			// The hosted endpoint poo offers is gated away, and no layer
-			// the operator wrote declares it: the model rides on nothing.
-			continue
+		} else {
+			hosted, isHosted := c.curated.endpoints[endpoint]
+			if !isHosted {
+				continue
+			}
+			if c.opts.KeyPresent != nil && !c.opts.KeyPresent(endpoint, hosted.Credential) {
+				continue
+			}
+			c.endpoints[endpoint] = hosted
+			curated.Endpoint = hosted.Endpoint
 		}
 		e := &entry{
 			name:     id,
@@ -344,14 +355,6 @@ func (c *Catalog) addCuratedModels() {
 		c.entries[id] = e
 		c.modelIndex[modelRef{endpoint: endpoint, modelID: id}] = e
 	}
-}
-
-// offered reports whether the curated layer may offer an endpoint: the
-// key it reads is in reach. A catalog built with no presence answer — a
-// binary that links no credential store, or a test — offers everything
-// the layer declares.
-func (c *Catalog) offered(name string, credential Credential) bool {
-	return c.opts.KeyPresent == nil || c.opts.KeyPresent(name, credential)
 }
 
 // addRoles records the role assignments.

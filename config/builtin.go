@@ -53,6 +53,42 @@ func (s *Settings) applyBuiltinProviders(override string) error {
 	return nil
 }
 
+// gateKeyEndpoints drops the layer's endpoints whose credential is not
+// there, and keeps every other endpoint as it is.
+//
+// An endpoint that names a key variable takes the key through the same
+// rungs the key's own resolution reads, in the same order: the variable it
+// names, the credential file's entry for the provider that reads it, and
+// the literal the settings carry for an endpoint of the same name. A read
+// of the file that fails is a file that holds nothing: the variable and
+// the literal are the other ways in. The one endpoint that names no
+// variable is the Codex one, and its credential is the oauth pair the file
+// holds under its own name: a file without it leaves the endpoint
+// unoffered.
+func (s *Settings) gateKeyEndpoints(layer catalog.FileSettings) catalog.FileSettings {
+	for name, endpoint := range layer.Endpoints {
+		drop := false
+		if endpoint.APIKeyEnv == "" {
+			if name != auth.ProviderCodex {
+				continue
+			}
+			held, err := (auth.Credentials{Path: s.CredentialFile()}).Holds(name)
+			drop = !(err == nil && held)
+		} else {
+			drop = !s.EndpointKeyPresent(name, catalog.Credential{Source: catalog.CredentialEnv, Env: endpoint.APIKeyEnv})
+		}
+		if drop {
+			delete(layer.Endpoints, name)
+			for model, entry := range layer.Models {
+				if entry.Endpoint == name {
+					delete(layer.Models, model)
+				}
+			}
+		}
+	}
+	return layer
+}
+
 // endpointKey resolves the key an endpoint reads: the environment variable
 // the endpoint names, then the credential poo's file holds for the provider
 // that reads the same variable, then the literal the settings carry for an
@@ -99,49 +135,6 @@ func (s *Settings) EndpointKeyPresent(name string, credential catalog.Credential
 		return true
 	}
 	return s.EndpointKey(name, credential) != ""
-}
-
-// gateKeyEndpoints drops the layer's endpoints whose credential is not
-// there, and keeps every other endpoint as it is.
-//
-// An endpoint that names a key variable takes the key through the same
-// rungs the key's own resolution reads, in the same order: the variable it
-// names, the credential file's entry for the provider that reads it, and
-// the literal the settings carry for an endpoint of the same name. A read
-// of the file that fails is a file that holds nothing: the variable and
-// the literal are the other ways in. An endpoint that names no variable
-// reads the credential poo's file holds under its own name.
-func (s *Settings) gateKeyEndpoints(layer catalog.FileSettings) catalog.FileSettings {
-	for name, endpoint := range layer.Endpoints {
-		if endpoint.APIKeyEnv == "" {
-			// An endpoint that names no key variable reads the credential
-			// poo's file holds under its own name: the Codex transport's
-			// oauth pair. A file that holds none leaves the endpoint
-			// unoffered.
-			held, err := (auth.Credentials{Path: s.CredentialFile()}).Holds(name)
-			if err == nil && held {
-				continue
-			}
-			delete(layer.Endpoints, name)
-			for model, entry := range layer.Models {
-				if entry.Endpoint == name {
-					delete(layer.Models, model)
-				}
-			}
-			continue
-		}
-		credential := catalog.Credential{Source: catalog.CredentialEnv, Env: endpoint.APIKeyEnv}
-		if s.EndpointKeyPresent(name, credential) {
-			continue
-		}
-		delete(layer.Endpoints, name)
-		for model, entry := range layer.Models {
-			if entry.Endpoint == name {
-				delete(layer.Models, model)
-			}
-		}
-	}
-	return layer
 }
 
 // builtinLayer reads the built-in providers' record — or the file an
