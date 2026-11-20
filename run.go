@@ -560,6 +560,10 @@ func (s *Session) loop(run *runState) []candidate {
 			// authority on whether the next request fits: the run compacts
 			// once and sends the request again through the gate.
 			if s.compactForRefusal(run, err, resp, requestChars, refusal) {
+				// The refused turn carries nothing and never reaches the
+				// turn-end algorithm, so its end is emitted here: a client that
+				// saw the turn start sees it end before the next one.
+				s.events.emit(EventTurnEnded, map[string]any{"run_id": run.id, "turn": turn})
 				continue
 			}
 			return []candidate{refusal}
