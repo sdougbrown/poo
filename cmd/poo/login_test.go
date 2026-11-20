@@ -447,10 +447,15 @@ func TestALoginSaysWhereTheSettingsStillPoint(t *testing.T) {
 func TestTheCallbackComesBackOnTheFlowsRedirect(t *testing.T) {
 	attempt := codexAttemptForTest(t)
 	ready := make(chan struct{})
+	settled := make(chan struct{})
 	done := make(chan auth.Callback, 1)
 	failed := make(chan error, 1)
 	go func() {
-		callback, err := waitForCallback(context.Background(), attempt, 5e9, func() { close(ready) }, io.Discard)
+		callback, err := waitForCallback(context.Background(), attempt, callbackWait, func() { close(ready) }, io.Discard)
+		// The wait has ended, whatever it says: an ask whose page never reached the client — the
+		// wait handled the request and came back — stops asking, and the select below reads the
+		// wait's own answer.
+		close(settled)
 		if err != nil {
 			failed <- err
 			return
@@ -460,10 +465,12 @@ func TestTheCallbackComesBackOnTheFlowsRedirect(t *testing.T) {
 	// The listener is up by the time the wait says it is.
 	<-ready
 	response := askCallback(t, attempt.Flow.RedirectURI, "",
-		fmt.Sprintf("?code=the-code&state=%s", url.QueryEscape(attempt.State)))
-	response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		t.Fatalf("the callback page is answered %d, want %d", response.StatusCode, http.StatusOK)
+		fmt.Sprintf("?code=the-code&state=%s", url.QueryEscape(attempt.State)), settled)
+	if response != nil {
+		response.Body.Close()
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("the callback page is answered %d, want %d", response.StatusCode, http.StatusOK)
+		}
 	}
 	select {
 	case callback := <-done:
@@ -526,25 +533,36 @@ func TestTheCodexBrowserSignInStoresTheCredential(t *testing.T) {
 	stderr := streamTo(t, &os.Stderr)
 	stdout := streamTo(t, &os.Stdout)
 	exited := make(chan int, 1)
+	stopped := make(chan struct{})
+	finished := make(chan int, 1)
 	go func() {
 		exited <- run([]string{"login", "codex", "--settings", settings, "--no-browser", "--force"})
+	}()
+	// A run that ends while the ask is standing is why the ask fails, so the ask stops and the
+	// exit waits for the select below to read, whatever code it came back with.
+	go func() {
+		code := <-exited
+		close(stopped)
+		finished <- code
 	}()
 
 	// The callback has to come from another goroutine: the command is waiting for it.
 	authorization := signInURL(t, stderr)
 	response := askCallback(t, flow.RedirectURI, "",
-		fmt.Sprintf("?code=the-code&state=%s", url.QueryEscape(authorization.Query().Get("state"))))
-	body, err := io.ReadAll(response.Body)
-	response.Body.Close()
-	if err != nil {
-		t.Fatalf("reading the callback page: %v", err)
-	}
-	if response.StatusCode != http.StatusOK {
-		t.Fatalf("the callback page is %d: %s", response.StatusCode, body)
+		fmt.Sprintf("?code=the-code&state=%s", url.QueryEscape(authorization.Query().Get("state"))), stopped)
+	if response != nil {
+		body, err := io.ReadAll(response.Body)
+		response.Body.Close()
+		if err != nil {
+			t.Fatalf("reading the callback page: %v", err)
+		}
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("the callback page is %d: %s", response.StatusCode, body)
+		}
 	}
 
 	select {
-	case code := <-exited:
+	case code := <-finished:
 		if code != 0 {
 			t.Fatalf("poo login exited %d; its stderr is\n%s", code, stderr())
 		}
@@ -710,10 +728,14 @@ func TestTheCallbackPageReportsTheAnswer(t *testing.T) {
 	withoutATerminal(t)
 	attempt := codexAttemptForTest(t)
 	ready := make(chan struct{})
+	settled := make(chan struct{})
 	done := make(chan auth.Callback, 1)
 	failed := make(chan error, 1)
 	go func() {
-		callback, err := waitForCallback(context.Background(), attempt, 5*time.Second, func() { close(ready) }, io.Discard)
+		callback, err := waitForCallback(context.Background(), attempt, callbackWait, func() { close(ready) }, io.Discard)
+		// The wait has ended, whatever it says: an ask whose page never reached the client stops
+		// asking, and the select below reads what the wait came back with.
+		close(settled)
 		if err != nil {
 			failed <- err
 			return
@@ -723,25 +745,29 @@ func TestTheCallbackPageReportsTheAnswer(t *testing.T) {
 	<-ready
 
 	// A path the flow's redirect does not name is not the sign-in coming back.
-	response := askCallback(t, attempt.Flow.RedirectURI, "/not-the-callback", "")
-	response.Body.Close()
-	if response.StatusCode != http.StatusNotFound {
-		t.Errorf("a request to another path is answered %d, want %d", response.StatusCode, http.StatusNotFound)
+	response := askCallback(t, attempt.Flow.RedirectURI, "/not-the-callback", "", settled)
+	if response != nil {
+		response.Body.Close()
+		if response.StatusCode != http.StatusNotFound {
+			t.Errorf("a request to another path is answered %d, want %d", response.StatusCode, http.StatusNotFound)
+		}
 	}
 
 	// The endpoint's refusal is reported on the page, on the path the flow names.
 	response = askCallback(t, attempt.Flow.RedirectURI, "",
-		fmt.Sprintf("?error=access_denied&state=%s", url.QueryEscape(attempt.State)))
-	page, err := io.ReadAll(response.Body)
-	response.Body.Close()
-	if err != nil {
-		t.Fatalf("reading the callback page: %v", err)
-	}
-	if response.StatusCode != http.StatusBadRequest {
-		t.Errorf("a refused sign-in is answered %d, want %d", response.StatusCode, http.StatusBadRequest)
-	}
-	if !strings.Contains(string(page), "refused") {
-		t.Errorf("the page is %q, want it to say the sign-in was refused", page)
+		fmt.Sprintf("?error=access_denied&state=%s", url.QueryEscape(attempt.State)), settled)
+	if response != nil {
+		page, err := io.ReadAll(response.Body)
+		response.Body.Close()
+		if err != nil {
+			t.Fatalf("reading the callback page: %v", err)
+		}
+		if response.StatusCode != http.StatusBadRequest {
+			t.Errorf("a refused sign-in is answered %d, want %d", response.StatusCode, http.StatusBadRequest)
+		}
+		if !strings.Contains(string(page), "refused") {
+			t.Errorf("the page is %q, want it to say the sign-in was refused", page)
+		}
 	}
 	select {
 	case callback := <-done:
