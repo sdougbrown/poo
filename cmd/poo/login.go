@@ -217,13 +217,13 @@ func (o *loginOptions) signIn(ctx context.Context, flow auth.Flow, in *bufio.Sca
 	}
 	attempt, err := flow.Authorize()
 	if err != nil {
-		fmt.Fprintf(stderr, "poo login: %v\n", err)
+		fmt.Fprintf(stderr, "%s: %v\n", o.command, err)
 		return auth.Credential{}, true
 	}
 	fmt.Fprintf(stderr, "Open this URL to sign in:\n\n  %s\n\n", attempt.URL)
 	if !o.noBrowser {
 		if err := openBrowser(attempt.URL); err != nil {
-			fmt.Fprintf(stderr, "poo login: %v\n", err)
+			fmt.Fprintf(stderr, "%s: %v\n", o.command, err)
 		}
 	}
 	if interactive() {
@@ -233,12 +233,12 @@ func (o *loginOptions) signIn(ctx context.Context, flow auth.Flow, in *bufio.Sca
 	}
 	callback, err := waitForCallback(ctx, attempt, o.waitDuration(), nil, stderr)
 	if err != nil {
-		fmt.Fprintf(stderr, "poo login: %v\n", err)
+		fmt.Fprintf(stderr, "%s: %v\n", o.command, err)
 		return auth.Credential{}, true
 	}
 	credential, err := attempt.Exchange(ctx, nil, callback)
 	if err != nil {
-		fmt.Fprintf(stderr, "poo login: %v\n", err)
+		fmt.Fprintf(stderr, "%s: %v\n", o.command, err)
 		return auth.Credential{}, true
 	}
 	return credential, false

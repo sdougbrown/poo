@@ -98,7 +98,7 @@ func welcomeSignIn(ctx context.Context, in *bufio.Scanner, stdout, stderr io.Wri
 			return true
 		}
 	}
-	o := loginOptions{force: again}
+	o := loginOptions{force: again, command: "poo"}
 	flow, ok := o.choose(in, stderr)
 	if !ok {
 		return false
