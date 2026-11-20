@@ -1,6 +1,7 @@
 package repl
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -115,6 +116,47 @@ func TestANoticeTakesTheSpinnerDown(t *testing.T) {
 	r.paintSpinner()
 	if rowOf(t, scr, "· 2s") >= 0 {
 		t.Fatalf("the spinner came back after the notice:\n%s", scr.text())
+	}
+}
+
+// TestASpinnerRowNeverJoinsHistory covers the spinner's row: the
+// wait stands on the terminal's own row, and it never joins the
+// committed transcript, so the history reads the call and its result
+// alone.
+func TestASpinnerRowNeverJoinsHistory(t *testing.T) {
+	scr, r := aScreen(t, 40)
+	r.toolCall("bash", "sleep")
+	r.armSpinner("bash", "sleep")
+	ageSpinner(r, 2500*time.Millisecond)
+	r.paintSpinner()
+	if rowOf(t, scr, "bash") < 0 {
+		t.Fatalf("the spinner never showed:\n%s", scr.text())
+	}
+	if tr := plain(r.transcriptText()); strings.Contains(tr, "2s") {
+		t.Fatalf("the spinner joined the committed transcript:\n%s", tr)
+	}
+}
+
+// TestASpinnerSavesRoomForTheSeconds covers the seconds' width: a
+// call whose summary fills the row's budget still shows its seconds,
+// because the suffix's width is reserved in the summary's clip, so no
+// dangling separator stands where the clip cut the row.
+func TestASpinnerSavesRoomForTheSeconds(t *testing.T) {
+	scr, r := aScreen(t, 40)
+	r.toolCall("bash", "x")
+	r.armSpinner("bash", strings.Repeat("word ", 20))
+	ageSpinner(r, 2500*time.Millisecond)
+	r.paintSpinner()
+	if rowOf(t, scr, "word") < 0 {
+		t.Fatalf("the summary did not survive the clip:\n%s", scr.text())
+	}
+	if rowOf(t, scr, "· 2s") < 0 {
+		t.Fatalf("the seconds did not survive the clip:\n%s", scr.text())
+	}
+	for _, line := range strings.Split(scr.text(), "\n") {
+		if strings.Contains(line, "2s") && strings.HasSuffix(strings.TrimRight(line, " "), "·") {
+			t.Fatalf("the clip left a dangling separator: %q\n%s", line, scr.text())
+		}
 	}
 }
 

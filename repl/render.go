@@ -941,15 +941,17 @@ func (r *renderer) paintSpinner() {
 	}
 	tool := clipLine(sanitizeLine(s.tool), max(1, r.previewContentWidth()-4))
 	row := tool
+	suffix := ""
+	if seconds := int(elapsed.Seconds()); seconds >= 1 {
+		suffix = fmt.Sprintf(" · %ds", seconds)
+	}
 	if text := firstLine(s.summary); text != "" {
-		budget := r.previewContentWidth() - ansi.StringWidth(tool) - 3
+		budget := r.previewContentWidth() - ansi.StringWidth(tool) - 3 - ansi.StringWidth(suffix)
 		if budget > 0 {
 			row += " · " + clipLine(sanitizeLine(text), budget)
 		}
 	}
-	if seconds := int(elapsed.Seconds()); seconds >= 1 {
-		row += fmt.Sprintf(" · %ds", seconds)
-	}
+	row += suffix
 	frame := brailleFrames[int(elapsed/(100*time.Millisecond))%len(brailleFrames)]
 	r.layout.hint(ansiDim + string(frame) + " " + row + ansiReset)
 }
