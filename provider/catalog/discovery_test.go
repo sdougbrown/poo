@@ -318,10 +318,10 @@ func TestTheProbeReadsTheLimitsEachGatewayShapeReports(t *testing.T) {
 }
 
 // TestAMalformedLimitCostsOnlyThatLimit covers a gateway that writes a token
-// budget in a form the plain integer does not take. A float, an exponent and
-// a numeric string read as the number they spell; a negative, a fraction,
-// text, a value past what a window can be and a non-numeric type read as
-// unknown, and the model beside them still resolves.
+// budget in a form the plain integer does not take. A whole float, an
+// exponent and a numeric string read as the number they spell. A negative,
+// a fraction, text, a value past what a window can be and a non-numeric
+// type read as unknown, and the model beside them still resolves.
 func TestAMalformedLimitCostsOnlyThatLimit(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, r *http.Request) {
@@ -329,6 +329,7 @@ func TestAMalformedLimitCostsOnlyThatLimit(t *testing.T) {
 		_, _ = w.Write([]byte(`{"object":"list","data":[
 			{"id":"valid","limit":{"context":131072,"output":16384}},
 			{"id":"spelled","limit":{"context":1e5,"output":"8192"}},
+			{"id":"whole-float","limit":{"context":65536.0,"output":4096.0}},
 			{"id":"malformed","limit":{"context":-1,"output":12.5},"max_output_tokens":99999999999,"context_length":true,"max_model_len":"lots",
 			 "top_provider":{"context_length":{"n":1},"max_completion_tokens":[1]}}
 		]}`))
@@ -349,9 +350,10 @@ func TestAMalformedLimitCostsOnlyThatLimit(t *testing.T) {
 	}
 
 	for name, want := range map[string][2]int{
-		"valid":     {131072, 16384},
-		"spelled":   {100000, 8192},
-		"malformed": {0, 0},
+		"valid":       {131072, 16384},
+		"spelled":     {100000, 8192},
+		"whole-float": {65536, 4096},
+		"malformed":   {0, 0},
 	} {
 		model, err := c.Resolve("gateway/" + name)
 		if err != nil {
