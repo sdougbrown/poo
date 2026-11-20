@@ -1760,6 +1760,7 @@ func (r *Runtime) resolveSession(opts BuildOptions, workingDir string) error {
 	if settings.Context.HardRatio != nil {
 		r.warn("context.hard_ratio is removed and no longer has any effect")
 	}
+	r.Options.TurnGrowth = settings.Context.TurnGrowth != nil && *settings.Context.TurnGrowth
 	r.Options.Jobs = poo.JobOptions{
 		MaxRunning:         settings.Jobs.MaxRunning,
 		Timeout:            time.Duration(settings.Jobs.TimeoutS) * time.Second,

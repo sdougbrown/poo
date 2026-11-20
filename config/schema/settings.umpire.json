@@ -26,6 +26,7 @@
     "system_prompt.append": { "isEmpty": "string" },
     "system_prompt.remove": { "isEmpty": "array" },
     "context.strategy": { "isEmpty": "string" },
+    "context.turn_growth": { "isEmpty": "boolean" },
     "context.handoff.ratio": { "isEmpty": "number" },
     "context.handoff.max_tokens": { "isEmpty": "number" },
     "context.summary.ratio": { "isEmpty": "number" },

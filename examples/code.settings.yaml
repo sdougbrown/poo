@@ -118,6 +118,9 @@ permission:
 # decides when to compact.
 context:
   strategy: summary
+  # Compact one turn early: the session measures how many tokens one turn
+  # adds to the prompt and counts that as prompt in the fit rule.
+  turn_growth: false
   handoff:
     max_tokens: 2048
   summary:

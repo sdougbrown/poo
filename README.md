@@ -308,6 +308,15 @@ override that adds an earlier trigger at that share of the prompt limit. The
 removed `context.notice_ratio` and `context.hard_ratio` have no effect; a
 settings file that still sets them loads with a warning.
 
+Set `context.turn_growth: true` to compact one turn earlier. The session then
+measures how many tokens one turn adds to the prompt: the largest increase
+between two usage reports of its own requests, over the last four of them, or
+the observation cap in tokens before a difference exists. That growth counts
+as prompt in the fit rule, so a compaction happens before a turn's tool results
+push the request over the limit rather than after. A compaction sets a new
+baseline, since the input it frees is a drop and not a turn. It is off by
+default, which compacts at the last possible moment.
+
 **Native compaction.** `context.strategy: native` asks the provider to compact
 its own conversation and gives the model the provider's compacted state back.
 It is opt-in: the default stays `summary`, which writes its own summary of the
