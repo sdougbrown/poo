@@ -112,6 +112,9 @@ type ToolEnv struct {
 	// does not, and a nested call's own tool does not, so the nesting
 	// is one call deep.
 	Nested NestedCaller
+	// Tools are the session's tools, in offer order, so a tool that
+	// scripts its siblings can name them for the model.
+	Tools []ToolInfo
 	// Settings holds the tool's own settings block.
 	Settings ToolSettings
 }
