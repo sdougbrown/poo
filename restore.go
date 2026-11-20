@@ -644,20 +644,30 @@ func (s *Session) rebuild(records []Record, out *Restored) error {
 // compaction reported, and whether the compaction still waits for one.
 //
 // A request a compaction made is the compaction's own, not the view's input, so
-// its report is left out, the way a live session leaves it out. The session's
-// guard against a compaction that gave nothing back is rebuilt from the same
-// report it watched for.
+// its report is left out, the way a live session leaves it out. A compaction
+// that ended the run never armed the guard: a handoff changes no view, so the
+// guard belongs to the compaction before it. A model switch cleared the value
+// the window that measured it no longer applied to, and its record names only
+// the models, so the switch is taken at its word and nothing is armed.
 func compactedInputFrom(records []Record) (int, bool) {
 	last := -1
 	for i, rec := range records {
-		if _, ok := rec.(*CompactionRecord); ok {
-			last = i
+		compaction, ok := rec.(*CompactionRecord)
+		if !ok || compaction.Compaction.End != nil {
+			continue
 		}
+		last = i
 	}
 	if last < 0 {
 		return 0, false
 	}
-	for _, rec := range records[last+1:] {
+	tail := records[last+1:]
+	for _, rec := range tail {
+		if _, ok := rec.(*ModelsChangedRecord); ok {
+			return 0, false
+		}
+	}
+	for _, rec := range tail {
 		usage, ok := rec.(*UsageRecord)
 		if !ok || usage.Origin == OriginCompaction || usage.InputTokens <= 0 {
 			continue
