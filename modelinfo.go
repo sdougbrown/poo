@@ -245,6 +245,12 @@ type Profile struct {
 	// Unmatched says what the profile does with a side-effecting call
 	// no rule covers: "allow", "ask" or "deny".
 	Unmatched string `json:"unmatched,omitempty"`
+	// Feeds are the names of the feeds the profile declares it needs,
+	// in declaration order. They are a presence assertion, not a
+	// switch: the settings' feeds.paths still control which feeds
+	// load, and a declared feed the settings do not load is skipped
+	// with a warning.
+	Feeds []string `json:"feeds,omitempty"`
 }
 
 // HasOp reports whether the model serves an operation.

@@ -144,6 +144,19 @@ func (s *Set) Len() int {
 	return len(s.specs)
 }
 
+// Has reports whether a loaded feed answers to the name.
+func (s *Set) Has(name string) bool {
+	if s == nil {
+		return false
+	}
+	for _, spec := range s.specs {
+		if spec.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
 // Specs returns the loaded feeds, in name order.
 //
 // The list and its specs are copies, including each command, env and filter.

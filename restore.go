@@ -405,6 +405,9 @@ func checkCompatibility(opts Options, meta SessionMetadata) ([]string, error) {
 		}
 	}
 	var warnings []string
+	if missing := declaredFeeds(opts, meta.Profile); len(missing) > 0 {
+		warnings = append(warnings, missing...)
+	}
 	if meta.SettingsHash != "" && opts.SettingsHash != "" && meta.SettingsHash != opts.SettingsHash {
 		warnings = append(warnings, "the settings changed since the session was created")
 	}
@@ -413,6 +416,41 @@ func checkCompatibility(opts Options, meta SessionMetadata) ([]string, error) {
 			meta.Build.Name, meta.Build.Version, opts.Build.Name, opts.Build.Version))
 	}
 	return warnings, nil
+}
+
+// declaredFeeds names the feeds the recorded profile declares that this
+// build's feeds do not run.
+//
+// A restored session runs without them: the operator's feeds.paths
+// still control which feeds load, so the loss is a warning, not a
+// failure.
+func declaredFeeds(opts Options, name string) []string {
+	if name == "" {
+		return nil
+	}
+	var missing []string
+	for _, p := range opts.Profiles {
+		if p.Name != name {
+			continue
+		}
+		for _, feed := range p.Feeds {
+			if !feedNamed(opts.Feeds, feed) {
+				missing = append(missing, fmt.Sprintf("the profile %q declares the feed %q, and the settings load no feed by that name", name, feed))
+			}
+		}
+		return missing
+	}
+	return nil
+}
+
+// feedNamed reports whether the feeds hold one by the name.
+func feedNamed(feeds []FeedSpec, name string) bool {
+	for _, spec := range feeds {
+		if spec.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 // hasProfile reports whether the profiles hold a name.

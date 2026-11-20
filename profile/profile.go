@@ -48,6 +48,11 @@ type Profile struct {
 	// An empty prompt adds no section: the profile runs on the base
 	// section alone.
 	Prompt string
+	// Feeds are the names of the feeds the profile needs, in
+	// declaration order. The settings' feeds.paths still control
+	// which feeds load: a declared feed the settings do not load is
+	// skipped with a warning, never a failure.
+	Feeds []string
 }
 
 // HasTool reports whether the profile offers the named tool.

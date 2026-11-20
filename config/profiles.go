@@ -36,6 +36,9 @@ func (r *Runtime) resolveProfileDefinitions(opts BuildOptions) ([]profile.Profil
 			return nil, err
 		}
 		base.Name = name
+		// The variant's feeds add to the base's declaration: a
+		// specialization asserts more, never less.
+		base.Feeds = append(slices.Clone(base.Feeds), definition.Feeds...)
 		definitions = append(definitions, base)
 	}
 	return definitions, nil
