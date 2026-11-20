@@ -13,7 +13,7 @@ import (
 func TestTheStatuslineNamesWhatTheSessionKnows(t *testing.T) {
 	s := &status{dir: "/home/me/Code/poo", branch: "main", model: "gemma4", level: "low"}
 	s.setTokens(12300)
-	s.setContextLimit(262144)
+	s.setPromptLimit(262144)
 
 	line := s.line()
 	for _, want := range []string{"⌂ poo", "⎇ main", "gemma4", "🧠 low", "ctx 12.3k/262.1k"} {
@@ -41,32 +41,32 @@ func TestTheStatuslineLeavesOutWhatItDoesNotKnow(t *testing.T) {
 		t.Errorf("the context fill is missing:\n%s", line)
 	}
 	if strings.Contains(line, "ctx 500/") {
-		t.Errorf("the context fill shows a window it does not know:\n%s", line)
+		t.Errorf("the context fill shows a limit it does not know:\n%s", line)
 	}
 }
 
-// TestAWindowSwitchClearsTheWindowItDoesNotKnow covers a move to a
-// model whose window the catalog does not know: the line drops the
-// old window instead of keeping the last model's.
-func TestAWindowSwitchClearsTheWindowItDoesNotKnow(t *testing.T) {
+// TestALimitSwitchClearsTheLimitItDoesNotKnow covers a move to a model
+// whose prompt limit the catalog does not know: the line drops the old
+// limit instead of keeping the last model's.
+func TestALimitSwitchClearsTheLimitItDoesNotKnow(t *testing.T) {
 	s := &status{dir: "/tmp", model: "gemma4"}
-	s.setContextLimit(262144)
+	s.setPromptLimit(262144)
 	s.setTokens(12300)
 
 	s.model = "mystery"
-	s.setContextLimit(0)
+	s.setPromptLimit(0)
 
 	line := s.line()
 	if strings.Contains(line, "/262.1k") {
-		t.Errorf("the statusline keeps the last model's window:\n%s", line)
+		t.Errorf("the statusline keeps the last model's prompt limit:\n%s", line)
 	}
 	if !strings.Contains(line, "ctx 12.3k") {
 		t.Errorf("the context fill went missing:\n%s", line)
 	}
 
-	s.setContextLimit(4096)
+	s.setPromptLimit(4096)
 	if !strings.Contains(s.line(), "ctx 12.3k/4.1k") {
-		t.Errorf("the statusline misses the new window:\n%s", s.line())
+		t.Errorf("the statusline misses the new prompt limit:\n%s", s.line())
 	}
 }
 

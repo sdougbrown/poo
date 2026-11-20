@@ -112,7 +112,7 @@ func (b ContextBudget) Reached(ratio float64) bool {
 // of the window and the endpoint's input cap, ignoring the one that is
 // unknown.
 func (b ContextBudget) PromptLimit() int {
-	return promptLimit(b.ContextLimit, b.InputLimit)
+	return PromptLimitOf(b.ContextLimit, b.InputLimit)
 }
 
 // OutputRoomShort reports that the room the window leaves after the

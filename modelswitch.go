@@ -100,7 +100,7 @@ func (s *Session) SetModel(info ModelInfo, transport ...ChatTransport) (ModelSwi
 			"the model %q declares no context limit, so the session keeps the %d-token window",
 			name, limit))
 	}
-	prompt := promptLimit(limit, info.InputLimit)
+	prompt := PromptLimitOf(limit, info.InputLimit)
 	if exhausted, reason := s.contextExhaustedLocked(limit, info.InputLimit); exhausted {
 		warnings = append(warnings, fmt.Sprintf(
 			"the current view does not fit the %d-token prompt limit of %q: %s; the next run settles context_exhausted",
@@ -208,7 +208,7 @@ func (s *Session) SetDecider(info ModelInfo, decider decide.Decider) error {
 // The caller holds the session's lock.
 func (s *Session) contextExhaustedLocked(limit, inputLimit int) (bool, string) {
 	estimated := s.est.estimate(s.modelMessagesLocked())
-	prompt := promptLimit(limit, inputLimit)
+	prompt := PromptLimitOf(limit, inputLimit)
 	if float64(estimated) >= s.opts.HardRatio*float64(prompt) {
 		return true, fmt.Sprintf("the estimated input of %d tokens is at or above %d%% of the %d-token prompt limit",
 			estimated, int(s.opts.HardRatio*100), prompt)

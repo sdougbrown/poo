@@ -466,12 +466,15 @@ func (m ModelInfo) reasoningError(setting, why string) *ConfigError {
 // compaction triggers and the check a model switch makes. The output room
 // of MaxTokens reads the window, which the prompt and the answer share.
 func (m ModelInfo) PromptLimit() int {
-	return promptLimit(m.ContextLimit, m.InputLimit)
+	return PromptLimitOf(m.ContextLimit, m.InputLimit)
 }
 
-// promptLimit is the smaller of a window and an input cap, where zero is
+// PromptLimitOf is the smaller of a window and an input cap, where zero is
 // unknown.
-func promptLimit(window, input int) int {
+//
+// A wire client that holds only the two numbers reads the same rule here,
+// so the statusline and the session never disagree about the bound.
+func PromptLimitOf(window, input int) int {
 	if input > 0 && (window <= 0 || input < window) {
 		return input
 	}

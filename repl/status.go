@@ -25,9 +25,10 @@ type status struct {
 	// level is the reasoning level the session runs at. It is empty when
 	// the session sends no reasoning setting.
 	level string
-	// contextLimit is the model's context window in tokens. Zero says
-	// the repl does not know it.
-	contextLimit int
+	// promptLimit is the largest prompt the model takes, in tokens: the
+	// smaller of its window and its endpoint's input cap. Zero says the
+	// repl does not know it.
+	promptLimit int
 	// inputTokens is the last request's prompt-token count, the
 	// closest thing on the wire to the context's size.
 	inputTokens int
@@ -111,8 +112,8 @@ func (s *status) line() string {
 	}
 	if s.inputTokens > 0 {
 		ctx := shortTokens(s.inputTokens)
-		if s.contextLimit > 0 {
-			ctx += "/" + shortTokens(s.contextLimit)
+		if s.promptLimit > 0 {
+			ctx += "/" + shortTokens(s.promptLimit)
 		}
 		segments = append(segments, "ctx "+ctx)
 	}
@@ -142,9 +143,9 @@ func (s *status) setTokens(inputTokens int) {
 	}
 }
 
-// setContextLimit records the window the model the session runs fills.
-// A limit of zero says the catalog does not know the window, and the
-// line drops it rather than keeping the last model's.
-func (s *status) setContextLimit(contextLimit int) {
-	s.contextLimit = contextLimit
+// setPromptLimit records the largest prompt the model the session runs
+// takes. A limit of zero says the catalog does not know it, and the line
+// drops it rather than keeping the last model's.
+func (s *status) setPromptLimit(promptLimit int) {
+	s.promptLimit = promptLimit
 }
