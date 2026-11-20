@@ -40,6 +40,16 @@ type Settings struct {
 	// Profile is the name of the profile a session is built from.
 	Profile  string                     `json:"profile,omitempty"`
 	Profiles map[string]ProfileSettings `json:"profiles,omitempty"`
+	// ProfilesFiles name the files that hold profile definitions, read as
+	// layers below the settings' own profiles. The settings' word on a
+	// profile name wins over a file's, and the first file that names one
+	// wins over the later files. Each file uses the settings' own
+	// vocabulary under a `profiles` key. Its name's extension says its
+	// format: YAML the shape an operator writes, with JSON read as an
+	// alternative spelling of it. A relative path resolves against the
+	// settings file's own directory. A prompt_file inside a file answers
+	// to that file's own directory.
+	ProfilesFiles []string `json:"profiles_files,omitempty"`
 	// Permission are the permission policy's settings.
 	Permission Permission `json:"permission,omitempty"`
 	// SystemPrompt are the system prompt's settings.
@@ -99,6 +109,11 @@ type Settings struct {
 	// credentialPath is the resolved path of the file the Codex credential is
 	// read from, empty when a Settings built by hand named none.
 	credentialPath string
+	// profilesFileDirs are the directories the profiles files' own
+	// relative paths answer to, by the profile name a file declared. The
+	// settings' own profiles are not here: their prompt files answer to
+	// the settings file's directory.
+	profilesFileDirs map[string]string
 	// modelsFileLayer is the catalog layer the models file declares, below the
 	// settings: the built-in provider when a credential file is there, then what the
 	// models file names folded over it, in either shape. It is empty when neither

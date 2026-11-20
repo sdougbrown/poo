@@ -135,9 +135,9 @@ fails the load. A file the operator put there is never skipped in silence.
 The one exception is a literal key: a key pi's file writes is copied into the
 settings, where a literal key lives, and the layer never carries one.
 
-`models_file`, `auth_file`, `pi_auth_file`, `system_prompt.base_file` and
-`finish.schema_file` resolve relative paths against the settings file's
-directory. `cli_registry.paths`,
+`models_file`, `auth_file`, `pi_auth_file`, `system_prompt.base_file`,
+`finish.schema_file` and the files `profiles_files` name resolve
+relative paths against the settings file's directory. `cli_registry.paths`,
 `feeds.paths` and `skills.paths` answer to the working directory, and a
 path in them that starts with `~/` resolves under the home directory.
 
@@ -402,6 +402,26 @@ It replaces the `profile` section without replacing the base or tool
 instructions. An explicit `system_prompt` replacement, or a setting that
 sets or removes the `profile` section, takes precedence. A resumed
 session uses its recorded prompt once it has run.
+
+**Profiles files.** `profiles_files` names the files that hold profile
+definitions, so a settings file that has grown a long `profiles` map can
+hand them to files of their own:
+
+```yaml
+profiles_files: [profiles.yaml, team/profiles.yaml]
+```
+
+A profiles file uses the settings' own vocabulary under a `profiles`
+key, and its name's extension says its format — YAML, with JSON read
+as an alternative spelling of it. A key the file does not have, a file
+that does not read, and a file that declares no profiles all fail the
+load.
+
+The files layer below the settings' own profiles, in the order they are
+named: the settings' word on a profile name wins over a file's, and the
+first file that names one wins over the later files. A `prompt_file`
+inside a profiles file resolves against the profiles file's own
+directory, not the settings file's, so a file travels with its prompts.
 
 **Exit codes.** The exit code says why a run ended:
 

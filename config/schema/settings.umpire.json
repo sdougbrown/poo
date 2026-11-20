@@ -7,6 +7,7 @@
     "auth_file": { "isEmpty": "string" },
     "pi_auth_file": { "isEmpty": "string" },
     "profile": { "isEmpty": "string" },
+    "profiles_files": { "isEmpty": "array" },
     "roles.chat": { "isEmpty": "string" },
     "roles.decider": { "isEmpty": "string" },
     "decider.timeout_ms": { "isEmpty": "number" },

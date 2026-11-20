@@ -44,6 +44,7 @@ type SettingsFields struct {
 	PermissionUnmatched             *string  "json:\"permission.unmatched,omitempty\""
 	PiAuthFile                      *string  "json:\"pi_auth_file,omitempty\""
 	Profile                         *string  "json:\"profile,omitempty\""
+	ProfilesFiles                   []string "json:\"profiles_files,omitempty\""
 	ReasoningChat                   *string  "json:\"reasoning.chat,omitempty\""
 	RolesChat                       *string  "json:\"roles.chat,omitempty\""
 	RolesDecider                    *string  "json:\"roles.decider,omitempty\""
@@ -131,6 +132,7 @@ type SettingsAvailability struct {
 	PermissionUnmatched             FieldStatus
 	PiAuthFile                      FieldStatus
 	Profile                         FieldStatus
+	ProfilesFiles                   FieldStatus
 	ReasoningChat                   FieldStatus
 	RolesChat                       FieldStatus
 	RolesDecider                    FieldStatus
@@ -285,6 +287,8 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 	PiAuthFileSatisfied := func() bool { v := f.PiAuthFile; return v != nil && *v != "" }()
 	ProfileEnabled := true
 	ProfileSatisfied := func() bool { v := f.Profile; return v != nil && *v != "" }()
+	ProfilesFilesEnabled := true
+	ProfilesFilesSatisfied := len(f.ProfilesFiles) > 0
 	ReasoningChatEnabled := true
 	ReasoningChatSatisfied := func() bool { v := f.ReasoningChat; return v != nil && *v != "" }()
 	RolesChatEnabled := true
@@ -1287,6 +1291,28 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 			Required:  ProfileEnabled && false,
 			Enabled:   ProfileEnabled,
 			Satisfied: ProfileSatisfied,
+			Fair:      true,
+			Reason: func() *string {
+				var reasons []string
+				if len(reasons) == 0 {
+					return nil
+				}
+				return &reasons[0]
+			}(),
+			Reasons: func() []string {
+				var reasons []string
+				if reasons == nil {
+					reasons = []string{}
+				}
+				return reasons
+			}(),
+			Valid: nil,
+			Error: "",
+		},
+		ProfilesFiles: FieldStatus{
+			Required:  ProfilesFilesEnabled && false,
+			Enabled:   ProfilesFilesEnabled,
+			Satisfied: ProfilesFilesSatisfied,
 			Fair:      true,
 			Reason: func() *string {
 				var reasons []string
@@ -2373,6 +2399,8 @@ func depSatisfied(f SettingsFields, name string) bool {
 	case "Profile":
 		v := f.Profile
 		return v != nil && *v != ""
+	case "ProfilesFiles":
+		return len(f.ProfilesFiles) > 0
 	case "ReasoningChat":
 		v := f.ReasoningChat
 		return v != nil && *v != ""
@@ -2871,6 +2899,12 @@ func Challenge(fieldName string, f SettingsFields, c SettingsConditions, prev Se
 	case "Profile", "profile":
 		found = true
 		status = avail.Profile
+		if status.Reason != nil {
+			explanations = append(explanations, "* "+*status.Reason)
+		}
+	case "ProfilesFiles", "profiles_files":
+		found = true
+		status = avail.ProfilesFiles
 		if status.Reason != nil {
 			explanations = append(explanations, "* "+*status.Reason)
 		}
