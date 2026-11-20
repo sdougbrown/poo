@@ -243,6 +243,15 @@ func Restore(opts Options, records []Record, fns ...Option) (*Session, Restored,
 		}
 		opts.Model = model
 	}
+	// The output cap the session learned from an endpoint belongs to the
+	// model once more: a model that declares no max_output sends the
+	// learned cap instead of taking the same rejection. A declared limit
+	// is the user's word and stays.
+	if opts.Model.MaxOutput == 0 {
+		if limit := learnedOutputLimit(records, opts.Model.ModelID); limit > 0 {
+			opts.Model.MaxOutput = limit
+		}
+	}
 	// The request's shape is the recorded one too: the role's model may
 	// carry it, and the header's own fields fill it when it does not.
 	if created.ToolsMode != "" {
@@ -316,6 +325,26 @@ func recordedPrompt(records []Record) (string, bool) {
 		found = true
 	}
 	return text, found
+}
+
+// learnedOutputLimit returns the last output cap the records hold for a
+// model, or 0 when they hold none.
+//
+// The cap is the endpoint's answer to a rejection of a request the model
+// sent, so it belongs to the model that was rejected, not to the session.
+func learnedOutputLimit(records []Record, modelID string) int {
+	if modelID == "" {
+		return 0
+	}
+	limit := 0
+	for _, rec := range records {
+		learned, ok := rec.(*OutputLimitLearnedRecord)
+		if !ok || learned.ModelID != modelID || learned.Limit <= 0 {
+			continue
+		}
+		limit = learned.Limit
+	}
+	return limit
 }
 
 // checkCompatibility checks the session's metadata against this build

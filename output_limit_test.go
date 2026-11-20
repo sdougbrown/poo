@@ -9,6 +9,7 @@ import (
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/pootest"
+	"github.com/sdougbrown/poo/session"
 )
 
 // reportingTransport is a transport that reports the attempt a request
@@ -298,5 +299,59 @@ func TestACapNoLowerThanTheRequestIsNotRetried(t *testing.T) {
 	}
 	if got := len(tr.Requests()); got != 1 {
 		t.Errorf("the transport got %d requests, want 1", got)
+	}
+}
+
+// TestALearnedOutputLimitIsRecorded covers the log: the cap the session
+// learns is a record beside the event, so a reader of the log knows why
+// max_tokens dropped, and the record round-trips through the codec.
+func TestALearnedOutputLimitIsRecorded(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{err: outputLimitRejection(16384)},
+		{text: "answer"},
+	})
+	sink := &recordingSink{}
+	opts := testOptions(t, tr, &echoTool{}, sink)
+	opts.Model.ContextLimit = 262144
+	s := newTestSession(t, opts)
+
+	if res := runSession(t, s, "one"); res.Reason != poo.ReasonEndTurn {
+		t.Fatalf("the run settled %q, want end_turn", res.Reason)
+	}
+
+	var rec *poo.OutputLimitLearnedRecord
+	for _, r := range sink.allRecords() {
+		if learned, ok := r.(*poo.OutputLimitLearnedRecord); ok {
+			rec = learned
+		}
+	}
+	if rec == nil {
+		t.Fatal("the sink kept no output-limit record")
+	}
+	if rec.Meta().Record != "model.output_limit" {
+		t.Errorf("the record is a %q, want model.output_limit", rec.Meta().Record)
+	}
+	if rec.ModelID != "test-model" {
+		t.Errorf("the record names the model %q, want test-model", rec.ModelID)
+	}
+	if rec.Previous != 32768 || rec.Limit != 16384 {
+		t.Errorf("the record holds %d -> %d, want 32768 -> 16384", rec.Previous, rec.Limit)
+	}
+
+	codec := session.NewCodec()
+	line, err := codec.Encode(rec)
+	if err != nil {
+		t.Fatalf("encoding the record: %v", err)
+	}
+	decoded, err := codec.Decode(line)
+	if err != nil {
+		t.Fatalf("decoding the record: %v", err)
+	}
+	got, ok := decoded.(*poo.OutputLimitLearnedRecord)
+	if !ok {
+		t.Fatalf("the line decoded to a %T, want *poo.OutputLimitLearnedRecord", decoded)
+	}
+	if got.ModelID != rec.ModelID || got.Previous != rec.Previous || got.Limit != rec.Limit {
+		t.Errorf("the record round-tripped as %+v, want %+v", got, rec)
 	}
 }

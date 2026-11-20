@@ -99,6 +99,7 @@ var recordTypes = map[string]func() poo.Record{
 	"compaction":             func() poo.Record { return &poo.CompactionRecord{} },
 	"handoff":                func() poo.Record { return &poo.HandoffRecord{} },
 	"session.models_changed": func() poo.Record { return &poo.ModelsChangedRecord{} },
+	"model.output_limit":     func() poo.Record { return &poo.OutputLimitLearnedRecord{} },
 	"decision":               func() poo.Record { return &poo.DecisionRecord{} },
 	"input.queued":           func() poo.Record { return &poo.InputQueuedRecord{} },
 	"input.delivered":        func() poo.Record { return &poo.InputDeliveredRecord{} },

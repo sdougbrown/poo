@@ -641,6 +641,24 @@ type OmittedBlock struct {
 	Count int `json:"count"`
 }
 
+// OutputLimitLearnedRecord records the output cap a session learned from
+// an endpoint's rejection.
+//
+// A model that declares no max_output asks for a default, and an endpoint
+// whose cap is lower rejects the request. The session keeps the cap it
+// learned and records it here, so a reader of the log knows why
+// max_tokens dropped, and a restored session sends the cap again instead
+// of taking the same rejection.
+type OutputLimitLearnedRecord struct {
+	RecordMeta
+	// ModelID is the identifier of the model the endpoint rejected.
+	ModelID string `json:"model_id"`
+	// Previous is the max_tokens the rejected request asked for.
+	Previous int `json:"previous"`
+	// Limit is the max_tokens the endpoint accepts.
+	Limit int `json:"limit"`
+}
+
 // DecisionRecord records one decision call.
 //
 // One record is written per logical call, whatever the number of wire

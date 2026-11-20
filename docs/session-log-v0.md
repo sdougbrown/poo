@@ -98,6 +98,7 @@ A record that someone produced also carries an `origin`:
 | `turn.interrupted` | Once per turn an interrupt cut short. |
 | `compaction` | Once per compaction a compactor produced. |
 | `session.models_changed` | Once per model switch, between the runs. |
+| `model.output_limit` | Once per learned output cap, when an endpoint rejects a request's `max_tokens`. |
 | `decision` | Once per decision call, failures included. |
 | `permission.asked` | Once per permission ask, when the run starts waiting for an answer. |
 | `permission.answered` | Once per permission ask, when the answer arrives. |
@@ -594,6 +595,21 @@ reader of the log knows which model answered which turn.
 
 The history is never truncated by a switch. A view that does not fit the
 new window is a warning, and the next run settles `context_exhausted`.
+
+## `model.output_limit`
+
+The session learned a model's output cap from an endpoint that rejected a
+request whose `max_tokens` was above it. The session keeps the cap for the
+requests that follow, and the record says why the value dropped.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `model_id` | string | The identifier of the model the endpoint rejected. |
+| `previous` | integer | The `max_tokens` the rejected request asked for. |
+| `limit` | integer | The `max_tokens` the endpoint accepts, which the session asks for from now on. |
+
+A restored session applies the last record for the model it talks to,
+unless that model declares its own limit.
 
 ## `decision`
 

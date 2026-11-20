@@ -1315,6 +1315,15 @@ func (s *Session) learnOutputLimit(run *runState, turn int, perr *ProviderError,
 	}
 	setting := fmt.Sprintf("models.%s.max_output", name)
 	message := fmt.Sprintf("the endpoint rejected max_tokens %d; asking for %d from now on. Set %s to declare the limit.", sent, limit, setting)
+	rec := &OutputLimitLearnedRecord{
+		RecordMeta: NewRecordMeta("model.output_limit"),
+		ModelID:    modelIdentifier(model),
+		Previous:   sent,
+		Limit:      limit,
+	}
+	if err := s.write(context.Background(), rec); err != nil {
+		s.logger().Warn("the output-limit record could not be written", "error", err)
+	}
 	s.logWarn(message)
 	s.events.emit(EventModelOutputLimit, map[string]any{
 		"run_id":   run.id,
