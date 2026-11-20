@@ -403,7 +403,9 @@ func TestCloseLeavesNoReaderInTheTerminal(t *testing.T) {
 			}
 		}
 	})
-	i.afterReadline = func() { close(parked); <-release }
+	remove := i.SetEditorRaceHooks(&editorRaceHooks{
+		AfterReadline: func() { close(parked); <-release },
+	})
 	done := make(chan struct{})
 	go func() { defer close(done); i.read() }()
 	// The prompt on the terminal says the read holds it.
@@ -427,9 +429,9 @@ func TestCloseLeavesNoReaderInTheTerminal(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("the read the close aborted never left the terminal")
 	}
-	// The hook belongs to the first read alone; a read that starts
-	// after the close must not reach it.
-	i.afterReadline = nil
+	// The hooks belong to the first read alone; a read that starts
+	// after the close must not reach them.
+	remove()
 	// A close that waits the read out cannot return while it is
 	// held, however loaded the machine. The window is generous
 	// against a close that polls instead of waiting, and the report
@@ -507,13 +509,15 @@ func TestTwoClosesWaitTheSameReadOut(t *testing.T) {
 			}
 		}
 	})
-	i.afterReadline = func() { close(parked); <-release }
+	var waiters atomic.Int32
+	i.SetEditorRaceHooks(&editorRaceHooks{
+		AfterReadline: func() { close(parked); <-release },
+		BeforeWait:    func() { waiters.Add(1) },
+	})
 	go func() { i.read() }()
 	// The prompt on the terminal says the read holds it.
 	waitFor(t, term, promptMark)
 
-	var waiters atomic.Int32
-	i.beforeWait = func() { waiters.Add(1) }
 	go func() { i.close(); close(first) }()
 	go func() { i.close(); close(second) }()
 	// Both closes must be parked in the handshake's wait before the
@@ -568,13 +572,15 @@ func TestAReadThatHasNotEnteredStillLeavesOnTheClose(t *testing.T) {
 			}
 		}
 	})
-	i.beforeReadline = func() { close(claimed); <-release }
+	var waiters atomic.Int32
+	i.SetEditorRaceHooks(&editorRaceHooks{
+		BeforeReadline: func() { close(claimed); <-release },
+		BeforeWait:     func() { waiters.Add(1) },
+	})
 	go func() { i.read() }()
 	// The read has claimed the handshake but not entered the editor.
 	<-claimed
 
-	var waiters atomic.Int32
-	i.beforeWait = func() { waiters.Add(1) }
 	go func() { i.close(); close(closed) }()
 	// The close must be parked in the handshake's wait — its abort is
 	// out — before the read enters the editor behind it.

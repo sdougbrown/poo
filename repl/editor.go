@@ -44,25 +44,14 @@ type editorInput struct {
 	// session's gate is what keeps it to one. closed reports that
 	// close has shut the read gate. close aborts the held read and
 	// waits until it has left; a read that arrives after close is the
-	// interrupt, without entering the terminal at all.
-	readMu   sync.Mutex
-	readCond *sync.Cond
-	readHeld bool
-	closed   bool
-
-	// afterReadline, when set, runs on the reader's goroutine after a
-	// read leaves the editor and before the handshake reports it.
-	// The close test parks there to prove the close waits the read
-	// out. beforeReadline, when set, runs on the reader's goroutine
-	// after a read claims the handshake but before it enters the
-	// editor; the not-entered test parks there to prove the abort
-	// reaches a read that starts behind it. beforeWait, when set,
-	// runs on a close's goroutine just before it parks in that wait,
-	// under readMu; the two-closes test counts parkings there to know
-	// every closer is waiting.
-	afterReadline  func()
-	beforeReadline func()
-	beforeWait     func()
+	// interrupt, without entering the terminal at all. raceHooks holds
+	// the seams the handshake is tested at, installed by
+	// SetEditorRaceHooks; readMu guards the pointer.
+	readMu    sync.Mutex
+	readCond  *sync.Cond
+	readHeld  bool
+	closed    bool
+	raceHooks *editorRaceHooks
 }
 
 // newEditor builds the line editor for the session.
@@ -276,13 +265,14 @@ func (i *editorInput) read() (string, error) {
 		return "", readline.ErrInterrupt
 	}
 	i.readHeld = true
+	hooks := i.raceHooks
 	i.readMu.Unlock()
-	if i.beforeReadline != nil {
-		i.beforeReadline()
+	if hooks != nil && hooks.BeforeReadline != nil {
+		hooks.BeforeReadline()
 	}
 	line, err := i.rl.Readline()
-	if i.afterReadline != nil {
-		i.afterReadline()
+	if hooks != nil && hooks.AfterReadline != nil {
+		hooks.AfterReadline()
 	}
 	i.readMu.Lock()
 	i.readHeld = false
@@ -311,8 +301,8 @@ func (i *editorInput) close() {
 	i.closed = true
 	i.rl.Keys.Abort()
 	for i.readHeld {
-		if i.beforeWait != nil {
-			i.beforeWait()
+		if h := i.raceHooks; h != nil && h.BeforeWait != nil {
+			h.BeforeWait()
 		}
 		i.readCond.Wait()
 	}
