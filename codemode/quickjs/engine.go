@@ -37,32 +37,27 @@ func (*Engine) Run(ctx context.Context, opts codemode.RunOptions) (result codemo
 	defer cancel()
 	var output script.Output
 	// qjs panics when a WASM call traps, including after wazero closes a
-	// cancelled guest. Keep guest traps out of the session and its output.
+	// cancelled guest. The trap itself stays out of the reported error: a
+	// qjs panic embeds the host's Go stack, which the model must not see.
+	// A real error keeps precedence over the synthesized trap one.
 	defer func() {
 		trap := recover()
+		cause := runCtx.Err()
 		result.Output, result.Truncated = output.Lines, output.Truncated
-		if cause := runCtx.Err(); cause != nil {
+		switch {
+		case err != nil:
+		case cause != nil:
 			result.Value = nil
 			err = fmt.Errorf("the script stopped: %w", cause)
-		} else if trap != nil {
+		case trap != nil:
 			result.Value = nil
 			err = fmt.Errorf("the QuickJS runtime stopped unexpectedly")
 		}
 	}()
 
-	vm, err := qjs.New(qjs.Option{
-		Context:            runCtx,
-		CloseOnContextDone: true,
-		// qjs always mounts CWD. A path below the null device cannot name
-		// a host directory; it leaves even qjs:std with no files to open.
-		CWD:          filepath.Join(os.DevNull, "poo-codemode"),
-		MemoryLimit:  64 << 20,
-		MaxStackSize: 256 << 10,
-		Stdout:       io.Discard,
-		Stderr:       io.Discard,
-	})
+	vm, err := newVM(runCtx)
 	if err != nil {
-		return result, fmt.Errorf("could not start the QuickJS runtime")
+		return result, fmt.Errorf("could not start the QuickJS runtime: %w", err)
 	}
 	defer vm.Close()
 	js := vm.Context()
@@ -81,7 +76,7 @@ func (*Engine) Run(ctx context.Context, opts codemode.RunOptions) (result codemo
 		if len(calls) == 0 {
 			return js.NewString("[]"), nil
 		}
-		results, err := opts.Nested.Call(runCtx, calls)
+		results, err := nestedCall(runCtx, opts.Nested, calls)
 		if err != nil {
 			return nil, err
 		}
@@ -108,7 +103,7 @@ func (*Engine) Run(ctx context.Context, opts codemode.RunOptions) (result codemo
 	// InvokeJS never runs pending jobs, including dynamic imports.
 	entry, err := js.Eval("codemode.js", qjs.Code(wrapper))
 	if err != nil {
-		return result, fmt.Errorf("could not prepare the QuickJS runtime")
+		return result, fmt.Errorf("could not prepare the QuickJS runtime: %w", err)
 	}
 	defer entry.Free()
 	source := js.NewString(opts.Script)
@@ -120,6 +115,8 @@ func (*Engine) Run(ctx context.Context, opts codemode.RunOptions) (result codemo
 	defer value.Free()
 	if !value.IsUndefined() {
 		raw := value.String()
+		// The wrapper only ever returns JSON.stringify output, so this
+		// guards the wrapper's own contract rather than the script.
 		if !json.Valid([]byte(raw)) {
 			return result, fmt.Errorf("the script did not return a JSON value")
 		}
@@ -128,16 +125,50 @@ func (*Engine) Run(ctx context.Context, opts codemode.RunOptions) (result codemo
 	return result, nil
 }
 
+// newVM builds a guest whose filesystem mount is inert.
+func newVM(runCtx context.Context) (*qjs.Runtime, error) {
+	return qjs.New(qjs.Option{
+		Context:            runCtx,
+		CloseOnContextDone: true,
+		// qjs always mounts CWD at the guest's root. It offers no way to
+		// mount nothing, so the path points below the null device, where
+		// no host directory exists. Any file operation traps the runtime
+		// instead of opening a host file. The wrapper's globals deletion
+		// is the boundary the model sees; this mount backs it.
+		CWD:          filepath.Join(os.DevNull, "poo-codemode"),
+		MemoryLimit:  64 << 20,
+		MaxStackSize: 256 << 10,
+		Stdout:       io.Discard,
+		Stderr:       io.Discard,
+	})
+}
+
+// nestedCall runs one batch of tool calls. A panicking tool must not
+// surface as a script error carrying the host's Go stack. qjs stringifies
+// a panic it catches, and that message reaches the model.
+func nestedCall(ctx context.Context, nested poo.NestedCaller, calls []poo.NestedCall) (results []poo.NestedResult, err error) {
+	defer func() {
+		if recover() != nil {
+			err = fmt.Errorf("the tool bridge failed")
+		}
+	}()
+	return nested.Call(ctx, calls)
+}
+
 const wrapper = `(() => {
   const tools = globalThis.__pooTools, log = globalThis.__pooPrint;
   for (const name of ["__pooTools", "__pooPrint", "std", "os", "bjson",
     "print", "console", "scriptArgs", "setTimeout", "setInterval", "clearTimeout",
-    "clearInterval", "QJS_PROXY_VALUE", "performance", "Date"]) {
+    "clearInterval", "QJS_PROXY_VALUE", "performance", "Date", "navigator",
+    "gc", "eval"]) {
     if (!delete globalThis[name]) throw new Error("could not remove " + name);
   }
   const encode = JSON.stringify, decode = JSON.parse, text = String;
   let active = false;
-  const gather = (batch) => active ? decode(tools(encode(batch))) : [];
+  const gather = (batch) => {
+    if (!active) throw new Error("codemode scripts cannot call tools after returning");
+    return decode(tools(encode(batch)));
+  };
   const call = (name, args = null) => gather([[name, args]])[0];
   const print = (value) => { if (active) log(text(value)); };
   const compile = Function, promise = Promise;
@@ -148,7 +179,11 @@ const wrapper = `(() => {
       const value = program(call, gather, print);
       active = false;
       if (value instanceof promise) throw new Error("codemode scripts must be synchronous");
-      return encode(value);
+      const encoded = encode(value);
+      // The guest measures its own return value, so an oversized one never
+      // crosses into host memory: the host would copy it several times.
+      if (encoded.length > 1048576) throw new Error("codemode: the return value is over 1048576 characters; print a summary instead");
+      return encoded;
     } finally {
       active = false;
     }
