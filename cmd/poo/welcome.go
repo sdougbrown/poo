@@ -80,7 +80,14 @@ func welcomeFinish(stderr io.Writer, in *bufio.Scanner, model string) (string, b
 // re-sign-in: a credential is already in the file. The flow is here
 // because it serves no chat model. The operator's pick replaces it.
 func welcomeSignIn(ctx context.Context, in *bufio.Scanner, stdout, stderr io.Writer, again bool) bool {
-	credPath, err := pooCredentialFile("", &config.Settings{Version: 1})
+	// The credential file resolves the way the picker's catalog does: the
+	// same defaults answer both, so a sign-in writes where the picker reads.
+	settings, err := config.LoadDefaults()
+	if err != nil {
+		fmt.Fprintf(stderr, "poo: %v\n", err)
+		return false
+	}
+	credPath, err := pooCredentialFile("", settings)
 	if err != nil {
 		fmt.Fprintf(stderr, "poo: %v\n", err)
 		return false
@@ -91,18 +98,12 @@ func welcomeSignIn(ctx context.Context, in *bufio.Scanner, stdout, stderr io.Wri
 			return true
 		}
 	}
-	fmt.Fprintln(stderr, "Sign in with:")
-	for i, flow := range logins() {
-		fmt.Fprintf(stderr, "  %d. %s\n", i+1, flow.Name)
-	}
-	fmt.Fprintf(stderr, "Which one? [1-%d] ", len(logins()))
-	choice := askChoice(in, stderr, len(logins()), 0)
-	if choice == 0 {
-		fmt.Fprintf(stderr, "poo: nothing was chosen. Run `poo` again to set up, or `poo login` to sign in on its own.\n")
+	o := loginOptions{force: again}
+	flow, ok := o.choose(in, stderr)
+	if !ok {
 		return false
 	}
-	o := loginOptions{force: again}
-	_, failed := o.signInAndStore(ctx, logins()[choice-1], "", &config.Settings{Version: 1}, in, stdout, stderr)
+	_, failed := o.signInAndStore(ctx, flow, "", settings, in, stdout, stderr)
 	return !failed
 }
 

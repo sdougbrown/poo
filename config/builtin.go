@@ -53,39 +53,52 @@ func (s *Settings) applyBuiltinProviders(override string) error {
 	return nil
 }
 
-// EndpointKeyPresent reports whether the key an endpoint reads is in reach, and an
-// endpoint that reads none is served as it stands. The rungs are the ones
-// EndpointKey reads keys in, in the same order: the environment variable the
-// endpoint names, the credential poo's file holds for the provider that reads the
-// same variable, and the literal the settings carry for an endpoint of the same
-// name. The answer is presence, not the key itself: a caller that filters models
-// by what an operator can run asks what a session would find, and finds it
-// without holding any secret.
-func (s *Settings) EndpointKeyPresent(name string, credential catalog.Credential) bool {
-	if credential.Source == catalog.CredentialNone {
-		return true
-	}
+// endpointKey resolves the key an endpoint reads: the environment variable
+// the endpoint names, then the credential poo's file holds for the provider
+// that reads the same variable, then the literal the settings carry for an
+// endpoint of the same name. The catalog holds no secret, so the literal is
+// read where it is written.
+//
+// The order is the operator's intent, most explicit first: a variable set in
+// the environment is the answer the process was told to use, and a stored
+// credential must not override it silently. The operator's own sign-in
+// outranks a literal that was written before it.
+func (s *Settings) EndpointKey(name string, credential catalog.Credential) string {
 	if credential.Source == catalog.CredentialEnv {
-		if os.Getenv(credential.Env) != "" {
-			return true
+		if key := os.Getenv(credential.Env); key != "" {
+			return key
 		}
-		// The environment variable's name is the join, the one fact an endpoint's
-		// declaration and a provider's declaration both carry, so one match answers.
+		// The environment variable's name is the one fact an endpoint's declaration and a
+		// provider's declaration both carry, so it is the join: an endpoint that reads the
+		// variable a provider stores its key under is served by that provider's credential,
+		// and no endpoint name is hardcoded here.
 		for _, provider := range auth.KeyProviders() {
 			if credential.Env != provider.Env {
 				continue
 			}
+			// An absent or unreadable credential is not a failure here: the next rung answers.
 			stored, err := (auth.Credentials{Path: s.CredentialFile()}).Read(provider)
 			if err == nil && stored.Key != "" {
-				return true
+				return stored.Key
 			}
-			break
 		}
 	}
 	if named, ok := s.Endpoints[name]; ok {
-		return named.APIKey != ""
+		return named.APIKey
 	}
-	return false
+	return ""
+}
+
+// EndpointKeyPresent reports whether the key an endpoint reads is in reach,
+// and an endpoint that reads none is served as it stands. It is the presence
+// answer to endpointKey's resolution: a caller that filters models by what an
+// operator can run asks what a session would find, and finds it without
+// holding any secret.
+func (s *Settings) EndpointKeyPresent(name string, credential catalog.Credential) bool {
+	if credential.Source == catalog.CredentialNone {
+		return true
+	}
+	return s.EndpointKey(name, credential) != ""
 }
 
 // gateKeyEndpoints drops the layer's key-read endpoints whose key is not
@@ -101,10 +114,8 @@ func (s *Settings) gateKeyEndpoints(layer catalog.FileSettings) catalog.FileSett
 		if endpoint.APIKeyEnv == "" {
 			continue
 		}
-		if os.Getenv(endpoint.APIKeyEnv) != "" || s.credentialHolds(endpoint.APIKeyEnv) {
-			continue
-		}
-		if named, ok := s.Endpoints[name]; ok && named.APIKey != "" {
+		credential := catalog.Credential{Source: catalog.CredentialEnv, Env: endpoint.APIKeyEnv}
+		if s.EndpointKeyPresent(name, credential) {
 			continue
 		}
 		delete(layer.Endpoints, name)
@@ -115,19 +126,6 @@ func (s *Settings) gateKeyEndpoints(layer catalog.FileSettings) catalog.FileSett
 		}
 	}
 	return layer
-}
-
-// credentialHolds reports whether the credential file holds a key entry for
-// the provider that reads the named environment variable.
-func (s *Settings) credentialHolds(env string) bool {
-	for _, provider := range auth.KeyProviders() {
-		if provider.Env != env {
-			continue
-		}
-		held, err := (auth.Credentials{Path: s.credentialPath}).Holds(provider.ID)
-		return err == nil && held
-	}
-	return false
 }
 
 // builtinLayer reads the built-in providers' record — or the file an

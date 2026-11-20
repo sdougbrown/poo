@@ -2484,44 +2484,14 @@ func (r *Runtime) newDecider(model poo.ModelInfo) (decide.Decider, error) {
 //
 // The endpoint is the model's provider, as the catalog resolved it: a model the
 // settings never named is served by the endpoint the models file declared for
-// it, and its key is that endpoint's. The source is the catalog's own
-// credential rule — the environment variable, then the credential poo's auth
-// file holds for the provider, then the literal the settings carry — so one
-// rule answers for a model whichever layer declared it. The catalog holds no
-// secret, so the literal is read where it is written.
-//
-// The order is the operator's intent, most explicit first: a variable set in the
-// environment is the answer the process was told to use, and a stored credential
-// must not override it silently. The operator's own sign-in outranks a literal
-// that was written before it.
+// it, and its key is that endpoint's. The resolution is the settings'
+// endpointKey, so one rule answers for a model whichever layer declared it.
 func (r *Runtime) EndpointKey(model poo.ModelInfo) string {
 	endpoint, ok := r.Catalog.Endpoints()[model.Provider]
 	if !ok {
 		return ""
 	}
-	if endpoint.Credential.Source == catalog.CredentialEnv {
-		if key := os.Getenv(endpoint.Credential.Env); key != "" {
-			return key
-		}
-		// The environment variable's name is the one fact an endpoint's declaration and a
-		// provider's declaration both carry, so it is the join: an endpoint that reads the
-		// variable a provider stores its key under is served by that provider's credential,
-		// and no endpoint name is hardcoded here.
-		for _, provider := range auth.KeyProviders() {
-			if endpoint.Credential.Env != provider.Env {
-				continue
-			}
-			// An absent or unreadable credential is not a failure here: the next rung answers.
-			stored, err := (auth.Credentials{Path: r.Settings.CredentialFile()}).Read(provider)
-			if err == nil && stored.Key != "" {
-				return stored.Key
-			}
-		}
-	}
-	if settings, ok := r.Settings.Endpoints[model.Provider]; ok {
-		return settings.APIKey
-	}
-	return ""
+	return r.Settings.EndpointKey(model.Provider, endpoint.Credential)
 }
 
 // expandHome expands the leading ~ of a path.
