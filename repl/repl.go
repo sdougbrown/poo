@@ -1187,6 +1187,10 @@ func (m *machine) event(evt protocol.Event, runID string, state *runState) bool 
 				m.mutateStatus(func(s *status) { s.setTokens(usage.InputTokens) })
 			}
 		}
+	case "model.output_limit":
+		if message, _ := evt.Payload["message"].(string); message != "" {
+			m.r.warning(message)
+		}
 	case "turn.ended":
 		state.turns++
 	case "run.settled":

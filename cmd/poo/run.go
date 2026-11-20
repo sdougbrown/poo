@@ -217,6 +217,7 @@ func handleRun(parent context.Context, inv clicontract.Invocation, stdout, stder
 	runtime.Options.ReasoningEffort = o.reasoningEffort
 	runtime.Options.ToolsMode = string(model.Tools.Mode)
 	runtime.Options.Prompt = append(runtime.Options.Prompt, promptMutation(runtime, model))
+	runtime.Options.Observers = append(runtime.Options.Observers, warningObserver{w: stderr})
 
 	if deciderModel, decider, err := runtime.Decider(); err == nil {
 		runtime.Options.DeciderModel = deciderModel
@@ -282,6 +283,25 @@ func handleRun(parent context.Context, inv clicontract.Invocation, stdout, stder
 	// close, and the wait error is on stderr - so it does not add a
 	// code of its own.
 	return exit{combinedExitCode(sess.SettleCodes())}
+}
+
+// warningObserver prints the session warnings the run itself reports.
+//
+// The one-shot prints no events, so a warning the session learned while
+// it ran would otherwise reach the discard logger and no one else.
+type warningObserver struct{ w io.Writer }
+
+// Observe prints the warnings the one-shot cares about.
+func (o warningObserver) Observe(ev poo.Event) error {
+	if ev.Name != poo.EventModelOutputLimit {
+		return nil
+	}
+	message, _ := ev.Payload["message"].(string)
+	if message == "" {
+		return nil
+	}
+	_, err := fmt.Fprintf(o.w, "poo run: warning: %s\n", message)
+	return err
 }
 
 // The exit code a second interrupt leaves: the one a cancelled run

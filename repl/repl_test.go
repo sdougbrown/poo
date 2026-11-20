@@ -287,6 +287,30 @@ func TestARunRendersTheReplyTheToolsAndTheSettle(t *testing.T) {
 	}
 }
 
+// TestALearnedOutputLimitIsShownAsAWarning covers the event the session
+// emits when an endpoint rejects its max_tokens: the repl prints the
+// session's own message, the way it prints the warnings a session
+// reports at creation.
+func TestALearnedOutputLimitIsShownAsAWarning(t *testing.T) {
+	const message = "the endpoint rejected max_tokens 32768; asking for 16384 from now on. Set models.big.max_output to declare the limit."
+	server := &fakeServer{t: t, script: func(s *fakeServer) {
+		s.event("turn.started", map[string]any{"run_id": "r1", "turn": 1})
+		s.event("model.output_limit", map[string]any{
+			"run_id": "r1", "turn": 1, "request": 1,
+			"previous": 32768, "limit": 16384,
+			"setting": "models.big.max_output", "message": message,
+		})
+		s.event("message.delta", map[string]any{
+			"run_id": "r1", "message_id": "m1", "kind": "text", "text": "Hello.",
+		})
+		s.event("run.settled", map[string]any{"run_id": "r1", "reason": "end_turn", "turns": 1})
+	}}
+	out, _ := startReplServer(t, "say hello\n/quit\n", server)
+	if !strings.Contains(out, "⚠ "+message) {
+		t.Errorf("the transcript does not warn about the learned limit:\n%s", out)
+	}
+}
+
 // TestAnAskWaitsForTheDecisionItWasGiven covers the permission ask:
 // the client answers it on the wire, and the answer is what the person
 // typed.

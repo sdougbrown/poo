@@ -18,9 +18,12 @@ import (
 // fakeEndpoint is a scripted chat endpoint.
 type fakeEndpoint struct {
 	*httptest.Server
-	// bodies holds the raw SSE bodies the endpoint sends, one per
-	// request. The last one repeats.
+	// bodies holds the raw bodies the endpoint sends, one per request.
+	// The last one repeats.
 	bodies []string
+	// statuses holds the HTTP status of each body. A missing status is
+	// 200.
+	statuses []int
 	// requests holds the request bodies the endpoint received.
 	requests []map[string]any
 }
@@ -35,7 +38,14 @@ func newFakeEndpoint(t *testing.T, body string) *fakeEndpoint {
 // per request.
 func newFakeEndpointSequence(t *testing.T, bodies []string) *fakeEndpoint {
 	t.Helper()
-	e := &fakeEndpoint{bodies: bodies}
+	return newFakeEndpointStatusSequence(t, nil, bodies)
+}
+
+// newFakeEndpointStatusSequence starts an endpoint that answers with one
+// body and status per request.
+func newFakeEndpointStatusSequence(t *testing.T, statuses []int, bodies []string) *fakeEndpoint {
+	t.Helper()
+	e := &fakeEndpoint{bodies: bodies, statuses: statuses}
 	e.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
 		var decoded map[string]any
@@ -46,7 +56,16 @@ func newFakeEndpointSequence(t *testing.T, bodies []string) *fakeEndpoint {
 		if i >= len(e.bodies) {
 			i = len(e.bodies) - 1
 		}
-		w.Header().Set("Content-Type", "text/event-stream")
+		status := http.StatusOK
+		if i < len(e.statuses) {
+			status = e.statuses[i]
+		}
+		if status == http.StatusOK {
+			w.Header().Set("Content-Type", "text/event-stream")
+		} else {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(status)
+		}
 		_, _ = io.WriteString(w, e.bodies[i])
 	}))
 	t.Cleanup(e.Close)
@@ -147,6 +166,41 @@ func TestARunWritesItsLogAndSettles(t *testing.T) {
 	}
 	if _, ok := usage["ttft_ms"]; !ok {
 		t.Error("the usage record has no ttft_ms")
+	}
+}
+
+// TestARunThatLearnsAnOutputLimitWarns covers the one-shot's report of
+// the cap it learned: the run sends the request again under the endpoint's
+// limit and says so on stderr, the way the build's own warnings are said.
+func TestARunThatLearnsAnOutputLimitWarns(t *testing.T) {
+	rejection := `{"error":{"message":"max_tokens is too large: 32768. This model supports at most 16384 completion tokens."}}`
+	answer := "data: " + `{"choices":[{"index":0,"delta":{"role":"assistant","content":"done"},"finish_reason":"stop"}]}` + "\n\n" +
+		"data: [DONE]\n\n"
+	endpoint := newFakeEndpointStatusSequence(t, []int{http.StatusBadRequest, http.StatusOK}, []string{rejection, answer})
+
+	dir := t.TempDir()
+	code, stderr := runCLI(t,
+		"run",
+		"--endpoint", endpoint.URL+"/v1",
+		"--model-id", "test-model",
+		"--context-limit", "262144",
+		"--working-dir", dir,
+		"say hello",
+	)
+	if code != 0 {
+		t.Fatalf("the exit code is %d, want 0; stderr: %s", code, stderr)
+	}
+	if !strings.Contains(stderr, "poo run: warning: the endpoint rejected max_tokens 32768; asking for 16384 from now on.") {
+		t.Errorf("the run did not report the learned limit; stderr: %s", stderr)
+	}
+	if len(endpoint.requests) != 2 {
+		t.Fatalf("the endpoint got %d requests, want 2", len(endpoint.requests))
+	}
+	if got := endpoint.requests[0]["max_tokens"]; got != float64(32768) {
+		t.Errorf("the first request asked for max_tokens %v, want 32768", got)
+	}
+	if got := endpoint.requests[1]["max_tokens"]; got != float64(16384) {
+		t.Errorf("the resend asked for max_tokens %v, want 16384", got)
 	}
 }
 
