@@ -867,8 +867,8 @@ const (
 	MinCharsPerToken = 2.0
 	MaxCharsPerToken = 5.0
 	// ContextNoticeText is the notice the model reads when the
-	// context window is filling up.
-	ContextNoticeText = "[Context notice: ~80% of the context window used. Prefer narrow reads; finish or report soon.]"
+	// context's prompt limit is filling up.
+	ContextNoticeText = "[Context notice: ~80% of the context limit used. Prefer narrow reads; finish or report soon.]"
 )
 
 // State returns where the session is in the FSM.

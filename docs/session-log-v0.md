@@ -137,9 +137,14 @@ The first record of a log.
 | `decider` | object | The decision model. Absent when the session had none. |
 
 A role holds model info: its `name`, its `model_id`, its `endpoint`,
-its `api`, its `ops` and its `context_limit`. The roles are the ones the
-session ran with, not the ones the current settings would pick: a session
-loaded by another binary keeps the roles it was made with.
+its `api`, its `ops`, its `context_limit` and its `input_limit`. The roles
+are the ones the session ran with, not the ones the current settings would
+pick: a session loaded by another binary keeps the roles it was made with.
+
+`context_limit` is the whole window the prompt and the answer share, and
+`input_limit` is the largest prompt the endpoint accepts, absent when it
+takes its whole window. The prompt is bounded by the smaller of the two,
+so a consumer that measures a prompt reads both.
 
 `model` holds:
 
@@ -755,7 +760,7 @@ before the model finished, and both settle `cancelled`.
 | `empty_turns` | The model reached the bound on consecutive turns that asked for tool calls and sent none. The detail's text says how many turns. A run that mixed the two kinds of unusable turn is named for its last turn. |
 | `unparsed_calls` | The model reached the bound on consecutive turns whose tool calls did not parse. The detail's text says how many turns. A run that mixed the two kinds of unusable turn is named for its last turn. |
 | `no_output_room` | The computed `max_tokens` was under 256, so the request was never sent. |
-| `hard_limit` | The estimate crossed the hard ratio of the context window. |
+| `hard_limit` | The estimate crossed the hard ratio of the prompt limit: the smaller of the context window and the endpoint's input cap. |
 | `compaction_failed` | The compactor failed at or above the hard ratio. |
 | `provider:context_length` | The endpoint reported that the request was too long. It is recognised whatever status the endpoint sent it with, including a 5xx. |
 | `provider:<kind>` | The provider request failed with that kind. |

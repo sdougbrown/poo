@@ -319,7 +319,8 @@ type Context struct {
 
 // Handoff are the handoff strategy's settings.
 type Handoff struct {
-	// Ratio is the share of the window at which the handoff happens.
+	// Ratio is the share of the prompt limit at which the handoff
+	// happens.
 	Ratio *float64 `json:"ratio,omitempty"`
 	// MaxTokens is the handoff's configured limit, in tokens.
 	MaxTokens *int `json:"max_tokens,omitempty"`
@@ -327,7 +328,8 @@ type Handoff struct {
 
 // Summary are the summary strategy's settings.
 type Summary struct {
-	// Ratio is the share of the window at which the view is summarized.
+	// Ratio is the share of the prompt limit at which the view is
+	// summarized.
 	Ratio *float64 `json:"ratio,omitempty"`
 	// KeepRecentTokens is how much of the newest history stays verbatim.
 	KeepRecentTokens *int `json:"keep_recent_tokens,omitempty"`
