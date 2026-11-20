@@ -23,13 +23,20 @@ func (s *Settings) importProfilesFiles(dir string) error {
 		if err != nil {
 			return s.profilesFileError(err)
 		}
+		// The file's directory answers for the prompt files it names, so it
+		// is made absolute here: a resolved prompt file is one the settings'
+		// own resolution pass reads once and never joins again.
+		fileDir, err := filepath.Abs(filepath.Dir(path))
+		if err != nil {
+			return s.profilesFileError(err)
+		}
 		document, err := readProfilesDocument(path)
 		if err != nil {
 			return s.profilesFileError(err)
 		}
-		layer, err := profilesLayer(path, document)
+		layer, err := profilesLayer(fileDir, document)
 		if err != nil {
-			return s.profilesFileError(err)
+			return s.profilesFileError(fmt.Errorf("%s: %w", path, err))
 		}
 		s.mergeProfiles(layer)
 	}
@@ -65,28 +72,29 @@ type profilesFile struct {
 }
 
 // profilesLayer reads a profiles file and returns the definitions it
-// declares.
+// declares. fileDir is the absolute directory the file's prompt files
+// answer to.
 //
 // A file that declares nothing is refused rather than read as an empty
 // layer: a profiles file that imports halfway is worse than one that
 // says what is wrong with it.
-func profilesLayer(path string, document []byte) (map[string]ProfileSettings, error) {
+func profilesLayer(fileDir string, document []byte) (map[string]ProfileSettings, error) {
 	var file profilesFile
 	decoder := json.NewDecoder(bytes.NewReader(document))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&file); err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
+		return nil, err
 	}
 	if len(file.Profiles) == 0 {
-		return nil, fmt.Errorf("%s: the file declares no profiles", path)
+		return nil, fmt.Errorf("the file declares no profiles")
 	}
 	for name, definition := range file.Profiles {
 		if definition.PromptFile == "" {
 			continue
 		}
-		resolved, err := resolveBeside(definition.PromptFile, filepath.Dir(path))
+		resolved, err := resolveBeside(definition.PromptFile, fileDir)
 		if err != nil {
-			return nil, fmt.Errorf("%s: the profile %s's prompt_file cannot be resolved: %w", path, name, err)
+			return nil, fmt.Errorf("the profile %s's prompt_file cannot be resolved: %w", name, err)
 		}
 		definition.PromptFile = resolved
 		file.Profiles[name] = definition
