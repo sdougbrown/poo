@@ -34,7 +34,9 @@ func TestFeedFilterDropsOnlyAConfidentNo(t *testing.T) {
         "{\"from\":\"ci\",\"text\":\"uncertain\"}",
         "{\"text\":\"unavailable\"}",
         "{\"text\":\"required check failed\"}",
-        "{\"text\":\"slow\"}"],
+        "{\"text\":\"bad mass\"}",
+        "{\"text\":\"slow\"}",
+        "{\"text\":\"` + strings.Repeat("x", 8300) + `\"}"],
       "on_idle": "wake",
       "filter": {"question": "` + question + `", "min_no_probability": 0.9}
     }
@@ -48,7 +50,7 @@ func TestFeedFilterDropsOnlyAConfidentNo(t *testing.T) {
 		t.Fatal(err)
 	}
 	runtime := build(t, settings, config.Overrides{})
-	transport := pootest.NewTransport(pootest.Turn{Text: "ack"}, pootest.Turn{Text: "ack"}, pootest.Turn{Text: "ack"})
+	transport := pootest.NewTransport(pootest.Turn{Text: "ack"}, pootest.Turn{Text: "ack"}, pootest.Turn{Text: "ack"}, pootest.Turn{Text: "ack"})
 	sink := pootest.NewSink()
 	runtime.Options.Transport = transport
 	runtime.Options.Sink = sink
@@ -72,6 +74,11 @@ func TestFeedFilterDropsOnlyAConfidentNo(t *testing.T) {
 			return nil, decide.ErrDeferred
 		case "required check failed":
 			no = 0.01
+		case "bad mass":
+			// A mass outside [0, 1] is not scaled onto the probability:
+			// the message delivers, and the answer's no stays 0.94.
+			mass := 1.5
+			answer.LabelMass = &mass
 		case "slow":
 			// A decider that hangs must not stall the feed: the filter's
 			// own budget ends the call, and the message is delivered.
@@ -96,6 +103,12 @@ func TestFeedFilterDropsOnlyAConfidentNo(t *testing.T) {
 	waitUntil(t, "the message the decider hung on to reach the chat model", func() bool {
 		return theModelRead(transport, `<feed name="inbox">slow</feed>`, poo.FeedOrigin("inbox"))
 	})
+	// The oversized message is delivered unasked: the decider is never
+	// given a message past the byte cap, so a confident no cannot drop it.
+	oversized := strings.Repeat("x", 8300)
+	waitUntil(t, "the oversized message to reach the chat model", func() bool {
+		return theModelRead(transport, `<feed name="inbox">`+oversized+`</feed>`, poo.FeedOrigin("inbox"))
+	})
 	var queued []string
 	var decisions int
 	for _, rec := range sink.Records() {
@@ -108,9 +121,23 @@ func TestFeedFilterDropsOnlyAConfidentNo(t *testing.T) {
 			decisions++
 		}
 	}
-	want := []string{`<feed name="inbox" from="ci">uncertain</feed>`, `<feed name="inbox">unavailable</feed>`, `<feed name="inbox">required check failed</feed>`, `<feed name="inbox">slow</feed>`}
-	if !reflect.DeepEqual(queued, want) || decisions != 5 {
-		t.Errorf("queued %v and recorded %d decisions; want %v and 5", queued, decisions, want)
+	want := []string{
+		`<feed name="inbox" from="ci">uncertain</feed>`,
+		`<feed name="inbox">unavailable</feed>`,
+		`<feed name="inbox">required check failed</feed>`,
+		`<feed name="inbox">bad mass</feed>`,
+		`<feed name="inbox">slow</feed>`,
+		`<feed name="inbox">` + strings.Repeat("x", 8300) + `</feed>`,
+	}
+	// The oversized message never reaches the decider, so the six
+	// decisions are the six the filter asked about.
+	if len(queued) != len(want) || decisions != 6 {
+		t.Fatalf("queued %d inputs and recorded %d decisions; want %d inputs and 6 decisions", len(queued), decisions, len(want))
+	}
+	for i := range want {
+		if queued[i] != want[i] {
+			t.Errorf("input %d is %.60q, want %.60q", i, queued[i], want[i])
+		}
 	}
 }
 
