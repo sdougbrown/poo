@@ -150,10 +150,10 @@ func (c *Compactor) ShouldCompact(view poo.View, budget poo.ContextBudget) bool 
 //
 // The input a compaction would leave is the input now, less the turns the
 // cut replaces, plus a summary as long as the strategy allows. That check
-// asks whether a compaction restores room for the next answer, so it leaves
-// the turn growth out: a summary that frees room for the answer but not for
-// one more turn would be refused, and the run would end when it could have
-// carried on.
+// asks whether a compaction restores room for the next answer, so it reads
+// RoomShortAfter and leaves the turn growth out: a summary that frees room for
+// the answer but not for one more turn would be refused, and the run would end
+// when it could have carried on.
 func (c *Compactor) restoresRoom(view poo.View, budget poo.ContextBudget) bool {
 	if !budget.RoomShort(budget.OutputLimit) {
 		return false
@@ -163,11 +163,9 @@ func (c *Compactor) restoresRoom(view poo.View, budget poo.ContextBudget) bool {
 	if !ok {
 		return false
 	}
-	after := budget
-	after.TurnGrowth = 0
-	after.EstimatedInput = budget.EstimatedInput - turnTokens(messages[cut.Start:cut.End], budget) +
+	after := budget.EstimatedInput - turnTokens(messages[cut.Start:cut.End], budget) +
 		c.maxTokens + c.replacementCarriageTokens(cut, messages[cut.Start:cut.End], budget)
-	return !after.RoomShort(after.OutputLimit)
+	return !budget.RoomShortAfter(after, budget.OutputLimit)
 }
 
 // replacementCarriageTokens estimates what the replacement carries besides

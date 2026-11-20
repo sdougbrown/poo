@@ -137,10 +137,11 @@ func (b ContextBudget) PromptLimit() int {
 // window, or the prompt, the growth and the reserve exceed the endpoint's input
 // cap.
 //
-// It is the trigger for a compaction strategy. A strategy checks whether a
-// compaction would end the shortage with the same rule, on a budget that
-// carries the input the compaction would leave. A budget with no window and no
-// cap, or whose run has asked the model nothing, is never short.
+// It is the trigger for a compaction strategy. A strategy that asks whether a
+// compaction would end the shortage reads RoomShortAfter instead: that check
+// asks about the input the compaction would leave, and one more turn's growth
+// is not part of it. A budget with no window and no cap, or whose run has asked
+// the model nothing, is never short.
 func (b ContextBudget) RoomShort(need int) bool {
 	if b.Turns < 1 {
 		return false
@@ -149,6 +150,19 @@ func (b ContextBudget) RoomShort(need int) bool {
 		return true
 	}
 	return b.InputLimit > 0 && b.EstimatedInput+b.TurnGrowth+OutputReserve > b.InputLimit
+}
+
+// RoomShortAfter reports that a budget whose input is the given one would be
+// short, with the turn growth left out.
+//
+// It is the check a strategy makes about the input a compaction would leave:
+// whether the room the compaction frees is enough for the next answer. One more
+// turn's growth is not part of that question, because a compaction that frees
+// room for the answer but not for the turn after it has still bought a turn.
+func (b ContextBudget) RoomShortAfter(input, need int) bool {
+	b.EstimatedInput = input
+	b.TurnGrowth = 0
+	return b.RoomShort(need)
 }
 
 // RequestBlocked reports that the next request cannot go out. Either the
