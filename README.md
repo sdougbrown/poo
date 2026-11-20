@@ -271,6 +271,25 @@ signature the response carried, returned unchanged in the history that
 answers it. An effort level rides as the output config's effort with
 adaptive thinking, and a budget rides in the thinking field itself.
 
+**The TypeSafe provider.** The decisions provider `typesafe` is built
+in. Jev answers the questions a run asks about its state and serves no
+chat turns, so it can be the decider and not the chat model. `poo login
+typesafe` stores the console's key, and the `TYPESAFE_API_KEY` variable
+reaches the same endpoint from the environment:
+
+```yaml
+roles:
+  chat: opencode-go/glm-5.3
+  decider: typesafe/jev-latest
+```
+
+The endpoint answers what each question asks and rejects a
+request-level instructions field, so the decider folds the call's
+framing into each question when it asks. Its model list is not the
+OpenAI shape the probe reads, so the endpoint is not probed: the
+built-in record is the word on what it serves, and a newer model than
+the record names is a `models` entry away under the same endpoint.
+
 **Native compaction.** `context.strategy: native` asks the provider to compact
 its own conversation and gives the model the provider's compacted state back.
 It is opt-in: the default stays `summary`, which writes its own summary of the

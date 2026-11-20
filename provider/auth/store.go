@@ -58,6 +58,11 @@ const (
 	// key belongs to one workspace and the workspace says which plan it runs.
 	ProviderOpencode = "opencode"
 
+	// ProviderTypesafe is the provider id the TypeSafe key is stored under. It
+	// is also the name the built-in record declares the provider's endpoint
+	// under, so a stored credential is read by the endpoint that shares it.
+	ProviderTypesafe = "typesafe"
+
 	// DefaultTokenURL is the endpoint pi trades a Codex refresh token at.
 	DefaultTokenURL = "https://auth.openai.com/oauth/token"
 

@@ -2446,11 +2446,16 @@ func (r *Runtime) newDecider(model poo.ModelInfo) (decide.Decider, error) {
 	if r.Settings.Decider.TimeoutMS != nil {
 		timeout = time.Duration(*r.Settings.Decider.TimeoutMS) * time.Millisecond
 	}
+	// The TypeSafe endpoint answers what each question asks and rejects a
+	// request-level instructions field, so the call's framing is folded
+	// into the questions when it asks.
+	questionInstructions := model.Provider == auth.ProviderTypesafe
 	decider, err := openai.NewSystemOneDeciderFor(model, openai.SystemOneConfig{
-		APIKey:     r.EndpointKey(model),
-		Timeout:    timeout,
-		HTTPClient: r.httpClient,
-		UserAgent:  r.Build.UserAgent(),
+		APIKey:               r.EndpointKey(model),
+		Timeout:              timeout,
+		HTTPClient:           r.httpClient,
+		UserAgent:            r.Build.UserAgent(),
+		QuestionInstructions: questionInstructions,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("config: %w", err)

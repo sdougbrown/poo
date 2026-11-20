@@ -1228,6 +1228,48 @@ session:
 	}
 }
 
+// TestAModelsFileDeclaresTheOperations covers the ops key: a model the file
+// names with its own operations serves them, and a model named without any
+// keeps the catalog's own answer, which is a chat model.
+func TestAModelsFileDeclaresTheOperations(t *testing.T) {
+	dir := tempUserConfigDir(t)
+	writePooModels(t, dir, `endpoints:
+  jev:
+    endpoint: http://127.0.0.1:1/v1
+    api_key_env: JEVA
+    skip_probe: true
+    models:
+      jev-latest:
+        ops: [systemone]
+      jev-preview: {}
+`)
+	path := writeSettings(t, dir, `version: 1
+session:
+  mode: ephemeral
+`)
+	settings, err := Load(path)
+	if err != nil {
+		t.Fatalf("loading the settings: %v", err)
+	}
+	model, err := catalog.New(settings.CatalogOptions()).Resolve("jev/jev-latest")
+	if err != nil {
+		t.Fatalf("resolving jev/jev-latest: %v", err)
+	}
+	if !model.HasOp(poo.OpSystemOne) || model.HasOp(poo.OpChat) {
+		t.Errorf("the model's ops are %v, want the systemone operation alone", model.Ops)
+	}
+	if model.Source["ops"] != catalog.LayerModelsFile {
+		t.Errorf("the ops came from %q, want the models file", model.Source["ops"])
+	}
+	preview, err := catalog.New(settings.CatalogOptions()).Resolve("jev/jev-preview")
+	if err != nil {
+		t.Fatalf("resolving jev/jev-preview: %v", err)
+	}
+	if !preview.HasOp(poo.OpChat) {
+		t.Errorf("the unnamed model's ops are %v, want the catalog's default chat", preview.Ops)
+	}
+}
+
 // TestCatalogOptionsReadTheCachedLayer covers the settings' answer on the cached layer:
 // CatalogOptions asks for it, so a model only the endpoint's last report knows is a model a
 // build resolves. A regression that drops Cached from CatalogOptions fails this test — the

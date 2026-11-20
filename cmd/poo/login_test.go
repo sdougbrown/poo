@@ -791,6 +791,7 @@ func TestThePickerTakesTheNumberOfASignIn(t *testing.T) {
 		{"1\n", auth.CodexLogin.Provider.ID},
 		{"2\n", ollamaCloud.Provider.ID},
 		{"3\n", opencode.Provider.ID},
+		{"4\n", typesafe.Provider.ID},
 	} {
 		t.Run(c.want, func(t *testing.T) {
 			var o loginOptions
@@ -813,7 +814,7 @@ func TestThePickerRefusesWhatIsNotASignIn(t *testing.T) {
 		input string
 		want  string
 	}{
-		{"4\n", "that is not one of the sign-ins"},
+		{"5\n", "that is not one of the sign-ins"},
 		{"0\n", "that is not one of the sign-ins"},
 		{"abc\n", "that is not one of the sign-ins"},
 		{"", "nothing was chosen"},

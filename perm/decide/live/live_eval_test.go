@@ -16,6 +16,12 @@ import (
 // apart from the stub tests. It is skipped unless the environment names
 // an endpoint, and a decision model that is unavailable is a failure of
 // the evaluation, never a refusal.
+//
+// POO_DECIDE_QUESTION_INSTRUCTIONS=true names an endpoint that answers
+// what each question asks and rejects a request-level instructions
+// field — the shape the built-in typesafe provider has — so the decider
+// folds the call's framing into the questions the way the runtime does
+// for a model that endpoint serves.
 
 // case is one call the asker is asked about.
 type evalCase struct {
@@ -91,9 +97,10 @@ func TestTheLiveEvaluationOfThePermissionAsker(t *testing.T) {
 		t.Skip("POO_DECIDE_URL and POO_DECIDE_MODEL are not set")
 	}
 	decider := openai.NewSystemOneDecider(openai.SystemOneConfig{
-		Endpoint: url,
-		Model:    model,
-		APIKey:   os.Getenv("POO_DECIDE_API_KEY"),
+		Endpoint:             url,
+		Model:                model,
+		APIKey:               os.Getenv("POO_DECIDE_API_KEY"),
+		QuestionInstructions: os.Getenv("POO_DECIDE_QUESTION_INSTRUCTIONS") == "true",
 	})
 	asker := permissive.New(decider, permissive.Options{Timeout: 10 * time.Second})
 

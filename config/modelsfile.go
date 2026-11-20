@@ -451,6 +451,9 @@ type modelsModel struct {
 	// ModelID is what the endpoint calls the model. Empty takes the key the
 	// model is declared under.
 	ModelID string `json:"model_id,omitempty"`
+	// Ops are the operations the model serves. Empty means the catalog's
+	// own answer, which is a chat model.
+	Ops []poo.Op `json:"ops,omitempty"`
 	// Inputs are the modalities the model reads.
 	Inputs []string `json:"inputs,omitempty"`
 	// ContextLimit is the model's context window.
@@ -539,6 +542,7 @@ func (f modelsFile) layer() (catalog.FileSettings, error) {
 				ModelID:         modelID,
 				API:             poo.API(endpoint.API),
 				ToolsMode:       model.ToolsMode,
+				Ops:             model.Ops,
 				Inputs:          inputs,
 				ContextLimit:    model.ContextLimit,
 				MaxOutput:       model.MaxOutput,

@@ -39,6 +39,11 @@ type SystemOneConfig struct {
 	// client that says nothing is named by the HTTP library alone. Empty
 	// sends none.
 	UserAgent string
+	// QuestionInstructions says the endpoint answers what each question
+	// asks and rejects a request-level instructions field. The call's
+	// instructions are folded into every question that does not already
+	// say them, so the framing a caller sent still reaches the model.
+	QuestionInstructions bool
 }
 
 // SystemOneDecider asks a decision model over a systemone endpoint.
@@ -240,8 +245,12 @@ func (d *SystemOneDecider) post(ctx context.Context, body []byte) ([]byte, error
 }
 
 // buildBody turns the state and the questions into the wire payload.
+//
+// The call's instructions ride the way the endpoint reads them: a
+// request-level field, or folded into the questions when the endpoint
+// takes them there.
 func (d *SystemOneDecider) buildBody(state any, instructions string, qs []decide.Question) ([]byte, error) {
-	questions, err := encodeQuestions(qs)
+	questions, err := d.encodeQuestions(instructions, qs)
 	if err != nil {
 		return nil, err
 	}
@@ -249,12 +258,15 @@ func (d *SystemOneDecider) buildBody(state any, instructions string, qs []decide
 	if err != nil {
 		return nil, fmt.Errorf("the state does not encode: %w", err)
 	}
-	return json.Marshal(systemOneRequest{
-		Model:        d.cfg.Model,
-		State:        raw,
-		Instructions: instructions,
-		Questions:    questions,
-	})
+	req := systemOneRequest{
+		Model:     d.cfg.Model,
+		State:     raw,
+		Questions: questions,
+	}
+	if !d.cfg.QuestionInstructions {
+		req.Instructions = instructions
+	}
+	return json.Marshal(req)
 }
 
 // SystemOneURL returns the systemone endpoint of a base URL.
@@ -345,10 +357,12 @@ type systemOneUsage struct {
 
 // encodeQuestions encodes the questions as the wire's question object.
 //
+// encodeQuestions encodes the questions as the wire's question object.
+//
 // The wire shape is an object, and an object's keys have no order of
 // their own: the body is written by hand, so the questions read the way
 // they were asked.
-func encodeQuestions(qs []decide.Question) (json.RawMessage, error) {
+func (d *SystemOneDecider) encodeQuestions(instructions string, qs []decide.Question) (json.RawMessage, error) {
 	var b bytes.Buffer
 	b.WriteByte('{')
 	for i, q := range qs {
@@ -361,7 +375,7 @@ func encodeQuestions(qs []decide.Question) (json.RawMessage, error) {
 		}
 		b.Write(key)
 		b.WriteByte(':')
-		body, err := encodeQuestion(q)
+		body, err := d.encodeQuestion(instructions, q)
 		if err != nil {
 			return nil, err
 		}
@@ -376,16 +390,28 @@ func encodeQuestions(qs []decide.Question) (json.RawMessage, error) {
 // The three kinds map to the three question types the endpoint knows: a
 // bool question is a noul, a choice question is a choice and a score
 // question is a score.
-func encodeQuestion(q decide.Question) (json.RawMessage, error) {
+func (d *SystemOneDecider) encodeQuestion(instructions string, q decide.Question) (json.RawMessage, error) {
 	kind, criteria, err := questionCriteria(q)
 	if err != nil {
 		return nil, err
 	}
 	return json.Marshal(systemOneQuestion{
 		Type:         kind,
-		Instructions: q.Instructions,
+		Instructions: d.folded(instructions, q),
 		Criteria:     criteria,
 	})
+}
+
+// folded returns the instructions a question carries on the wire.
+//
+// An endpoint that takes its instructions per question carries the call's
+// framing with each one, unless the question already says it: the caller
+// that passes one sentence both ways sends it once.
+func (d *SystemOneDecider) folded(instructions string, q decide.Question) string {
+	if !d.cfg.QuestionInstructions || instructions == "" || instructions == q.Instructions {
+		return q.Instructions
+	}
+	return instructions + " " + q.Instructions
 }
 
 // questionCriteria returns the question's type and its criteria.
