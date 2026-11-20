@@ -861,3 +861,67 @@ func TestARestoredWindowLeavesTheTurnsAfterItInTheView(t *testing.T) {
 		}
 	}
 }
+
+// TestARestoredSessionSendsTheLearnedOutputLimit covers the restore's
+// promise for a model that declares none: the cap the original session
+// learned is applied to the restored model, so its first request carries
+// the cap and takes no second rejection.
+func TestARestoredSessionSendsTheLearnedOutputLimit(t *testing.T) {
+	original := scripted([]fakeResponse{
+		{err: outputLimitRejection(4096)},
+		{text: "answer"},
+	})
+	sink := &recordingSink{}
+	s := newTestSession(t, testOptions(t, original, &echoTool{}, sink))
+	runSession(t, s, "hello")
+	records := append([]poo.Record{header("s1")}, sink.allRecords()...)
+
+	restoredTransport := scripted([]fakeResponse{{text: "ok"}})
+	session, _, err := poo.Restore(restoreOptions(t, restoredTransport, &recordingSink{}), records)
+	if err != nil {
+		t.Fatalf("restoring the session: %v", err)
+	}
+	t.Cleanup(func() { session.Close() })
+
+	runSession(t, session, "more")
+	requests := restoredTransport.Requests()
+	if len(requests) != 1 {
+		t.Fatalf("the restored session made %d requests, want 1", len(requests))
+	}
+	if got := requests[0].MaxTokens; got != 4096 {
+		t.Errorf("the restored request carried max_tokens %d, want the learned 4096", got)
+	}
+}
+
+// TestTheRestoredModelIgnoresAnotherModelsOutputLimit covers the model id:
+// a learned cap belongs to the model that was rejected, so a record that
+// names another model leaves the restored model's own settings alone.
+func TestTheRestoredModelIgnoresAnotherModelsOutputLimit(t *testing.T) {
+	records := []poo.Record{
+		header("s1"),
+		&poo.OutputLimitLearnedRecord{
+			RecordMeta: poo.NewRecordMeta("model.output_limit"),
+			ModelID:    "other-model",
+			Previous:   8192,
+			Limit:      4096,
+		},
+	}
+	tr := scripted([]fakeResponse{{text: "ok"}})
+	session, _, err := poo.Restore(restoreOptions(t, tr, &recordingSink{}), records)
+	if err != nil {
+		t.Fatalf("restoring the session: %v", err)
+	}
+	t.Cleanup(func() { session.Close() })
+
+	if got := session.ChatModel().MaxOutput; got != 0 {
+		t.Errorf("the restored model carries max_output %d, want 0", got)
+	}
+	runSession(t, session, "hello")
+	requests := tr.Requests()
+	if len(requests) != 1 {
+		t.Fatalf("the restored session made %d requests, want 1", len(requests))
+	}
+	if got := requests[0].MaxTokens; got != 8192 {
+		t.Errorf("the restored request carried max_tokens %d, want the default 8192", got)
+	}
+}

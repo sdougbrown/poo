@@ -23,12 +23,40 @@ const (
 	ReasoningPathToggle = "chat_template_kwargs.enable_thinking"
 )
 
+// fallbackOutputLimit is the output limit a session asks for after an
+// endpoint rejects max_tokens without saying what it allows. It is the
+// smallest default, so a model that takes any default takes it.
+const fallbackOutputLimit = 8192
+
+// DefaultMaxOutputFor returns the output limit of a model that declares
+// none, from the model's context window in tokens.
+//
+// The limit grows with the window because a reasoning model's thinking
+// counts against max_tokens, and the large-window models publish output
+// limits to match: none with a window of 128k or more has a limit under
+// 32000, and current hosted models allow at least 16k. A window under
+// 64k gets 8192, a window from 64k up to 128k gets 16384, and a window
+// of 128k or more gets 32768. An unknown window (zero or less) gets
+// 16384.
+func DefaultMaxOutputFor(contextLimit int) int {
+	switch {
+	case contextLimit <= 0:
+		return 16384
+	case contextLimit < 65536:
+		return 8192
+	case contextLimit < 131072:
+		return 16384
+	default:
+		return 32768
+	}
+}
+
 // OutputLimitSource names which limit a response stopped on.
 type OutputLimitSource string
 
 const (
-	// OutputLimitDefault is DefaultMaxOutput, used because the model
-	// declares no output limit.
+	// OutputLimitDefault is DefaultMaxOutputFor the model's context
+	// window, used because the model declares no output limit.
 	OutputLimitDefault OutputLimitSource = "default"
 	// OutputLimitModel is the output limit the model declares.
 	OutputLimitModel OutputLimitSource = "model"
@@ -72,16 +100,8 @@ func (l OutputLimit) Truncation(info ModelInfo, sent int) SettleDetail {
 	case OutputLimitEndpoint:
 		detail.Text = "the response stopped on the endpoint's own output limit; poo sends this endpoint none"
 	case OutputLimitDefault:
-		detail.Text = fmt.Sprintf("the response stopped at max_tokens %d, poo's default for a model with no max_output; ", l.Tokens)
-		if info.DeclaredInSettings() {
-			name := info.Name
-			if name == "" {
-				name = info.ModelID
-			}
-			detail.Text += fmt.Sprintf("set models.%s.max_output to raise it", name)
-		} else {
-			detail.Text += "declare the model in settings with its endpoint, model_id and max_output to raise it"
-		}
+		detail.Text = fmt.Sprintf("the response stopped at max_tokens %d, poo's default for a model with no max_output; %s to raise it",
+			l.Tokens, outputSettingHint(info).clause)
 	case OutputLimitContext:
 		detail.Text = fmt.Sprintf("the response stopped at max_tokens %d, all the room the context window had left (about %d of %d tokens in use)",
 			l.Tokens, l.Input, l.Window)
@@ -91,22 +111,66 @@ func (l OutputLimit) Truncation(info ModelInfo, sent int) SettleDetail {
 	return detail
 }
 
+// outputSetting is how the user sets a model's own output limit.
+type outputSetting struct {
+	// clause names the setting, without a verb: "set models.X.max_output"
+	// or the declaration that would create it.
+	clause string
+	// path is the settings path the clause sets, empty when the settings
+	// declare no model for the clause to name.
+	path string
+}
+
+// outputSettingHint names the setting that fixes a model's output limit.
+//
+// A model the settings declare gets its own max_output. Any other model has
+// no entry to edit, so it gets the declaration that would create one with
+// its endpoint, model_id and max_output. The truncation notice and the
+// learned-limit warning both append the clause, so the setting is named the
+// same way wherever a run explains an output limit.
+func outputSettingHint(info ModelInfo) outputSetting {
+	if !info.DeclaredInSettings() {
+		return outputSetting{clause: "declare the model in settings with its endpoint, model_id and max_output"}
+	}
+	name := info.Name
+	if name == "" {
+		name = info.ModelID
+	}
+	path := fmt.Sprintf("models.%s.max_output", name)
+	return outputSetting{clause: "set " + path, path: path}
+}
+
+// OutputCeiling returns the most output tokens a request for the model
+// asks for before the room the window leaves is taken into account: the
+// model's own limit, or DefaultMaxOutputFor its window when the model
+// declares none.
+func (m ModelInfo) OutputCeiling() int {
+	if m.MaxOutput > 0 {
+		return m.MaxOutput
+	}
+	return DefaultMaxOutputFor(m.ContextLimit)
+}
+
 // MaxTokens computes the output room for a request against a model.
 //
-// The room is the model's own output limit, or DefaultMaxOutput when
-// the model declares none, and it never exceeds the window that is left
-// after the prompt. The value is always computed, so a request always
-// carries a max_tokens and never the endpoint's own default.
+// The room is the model's OutputLimit, and it never exceeds the window
+// that is left after the prompt. The value is always computed, so a
+// request always carries a max_tokens and never the endpoint's own
+// default.
 func MaxTokens(info ModelInfo, estimatedInput int) int {
 	return info.OutputLimit(estimatedInput).Tokens
 }
 
 // OutputLimit computes the output room for a request against the model,
 // and names the limit that set it.
+//
+// The model's own limit, or DefaultMaxOutputFor the model's context
+// window when it declares none, gives the room; the room the window
+// leaves after the prompt clamps it.
 func (m ModelInfo) OutputLimit(estimatedInput int) OutputLimit {
 	limit := OutputLimit{Tokens: m.MaxOutput, Source: OutputLimitModel, Input: estimatedInput, Window: m.ContextLimit}
 	if limit.Tokens <= 0 {
-		limit.Tokens, limit.Source = DefaultMaxOutput, OutputLimitDefault
+		limit.Tokens, limit.Source = DefaultMaxOutputFor(m.ContextLimit), OutputLimitDefault
 	}
 	if m.ContextLimit > 0 {
 		room := m.ContextLimit - estimatedInput - OutputReserve

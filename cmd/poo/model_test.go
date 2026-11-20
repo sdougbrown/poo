@@ -148,7 +148,7 @@ func TestTheRequestBodyCarriesTheModelAndTheCeiling(t *testing.T) {
 	if err := json.Unmarshal(decoded["max_tokens"], &ceiling); err != nil {
 		t.Fatalf("decoding the ceiling: %v", err)
 	}
-	if ceiling != poo.DefaultMaxOutput {
-		t.Errorf("the ceiling is %d, want %d", ceiling, poo.DefaultMaxOutput)
+	if ceiling != 8192 {
+		t.Errorf("the ceiling is %d, want 8192 for a 32768-token window", ceiling)
 	}
 }

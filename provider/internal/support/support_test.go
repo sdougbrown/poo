@@ -1,8 +1,11 @@
 package support_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"testing"
 	"time"
@@ -55,6 +58,183 @@ func TestTheFailureClassTheUnionAdded(t *testing.T) {
 				t.Errorf("the failure is %q, want %q", got, c.wantKind)
 			}
 		})
+	}
+}
+
+// TestAnOutputCapRejectionIsItsOwnKind covers the 400s and 422s a hosted API
+// sends when max_tokens is above its cap: the failure is an output_limit, and
+// it carries the largest value the message allows. A context overflow that
+// mentions max_tokens stays a context_length failure, and a message that only
+// says the input plus max_tokens is too long is not an output limit at all.
+func TestAnOutputCapRejectionIsItsOwnKind(t *testing.T) {
+	cases := []struct {
+		name      string
+		status    int
+		message   string
+		wantKind  poo.ProviderKind
+		wantLimit int
+	}{
+		{
+			name:      "OpenAI",
+			message:   "max_tokens is too large: 32768. This model supports at most 16384 completion tokens, whereas you provided 32768.",
+			wantKind:  poo.ProviderKindOutputLimit,
+			wantLimit: 16384,
+		},
+		{
+			name:      "DeepSeek",
+			message:   "Invalid max_tokens value, the valid range of max_tokens is [1, 8192]",
+			wantKind:  poo.ProviderKindOutputLimit,
+			wantLimit: 8192,
+		},
+		{
+			name:      "Anthropic",
+			message:   "max_tokens: 32768 > 8192, which is the maximum allowed number of output tokens for claude-3-5-sonnet-20241022",
+			wantKind:  poo.ProviderKindOutputLimit,
+			wantLimit: 8192,
+		},
+		{
+			name:      "DashScope",
+			message:   "Range of max_tokens should be [1, 8192]",
+			wantKind:  poo.ProviderKindOutputLimit,
+			wantLimit: 8192,
+		},
+		{
+			name:      "a cap in max_completion_tokens",
+			message:   "Invalid 'max_completion_tokens': integer above maximum value. Expected a value less than or equal to 4096, but got 32768 instead.",
+			wantKind:  poo.ProviderKindOutputLimit,
+			wantLimit: 4096,
+		},
+		{
+			name:      "a 422 that calls max_tokens too large",
+			status:    http.StatusUnprocessableEntity,
+			message:   "max_tokens is too large: 32768. This model supports at most 16384 completion tokens.",
+			wantKind:  poo.ProviderKindOutputLimit,
+			wantLimit: 16384,
+		},
+		{
+			name:     "a cap the message does not state",
+			message:  "max_tokens is too large for this model",
+			wantKind: poo.ProviderKindOutputLimit,
+		},
+		{
+			name:     "an input plus max_tokens that exceeds the model's limit",
+			message:  "This request's input plus max_tokens exceeds the model's limit",
+			wantKind: poo.ProviderKindInvalidRequest,
+		},
+		{
+			name:     "a context overflow that names max_tokens",
+			message:  "'max_tokens' or 'max_completion_tokens' is too large: 32768. This model's maximum context length is 40960 tokens and your request has 12000 input tokens (32768 > 40960 - 12000).",
+			wantKind: poo.ProviderKindContextLength,
+		},
+		{
+			name:     "a context overflow in the OpenAI words",
+			message:  "This model's maximum context length is 8192 tokens. However, you requested 9000 tokens (5000 in the messages, 4000 in the completion).",
+			wantKind: poo.ProviderKindContextLength,
+		},
+		{
+			name:     "a max_tokens that is not a number",
+			message:  "max_tokens must be a positive integer",
+			wantKind: poo.ProviderKindInvalidRequest,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			body, err := json.Marshal(map[string]any{"error": map[string]any{"message": c.message}})
+			if err != nil {
+				t.Fatalf("encoding the body: %v", err)
+			}
+			status := c.status
+			if status == 0 {
+				status = http.StatusBadRequest
+			}
+			resp := &http.Response{
+				StatusCode: status,
+				Status:     http.StatusText(status),
+				Header:     http.Header{},
+				Body:       io.NopCloser(bytes.NewReader(body)),
+			}
+			var perr *poo.ProviderError
+			if err := support.ClassifyStatus(resp); !errors.As(err, &perr) {
+				t.Fatalf("the failure is %v, want a provider error", err)
+			}
+			if perr.Kind != c.wantKind {
+				t.Errorf("the failure is %q, want %q", perr.Kind, c.wantKind)
+			}
+			if perr.OutputLimit != c.wantLimit {
+				t.Errorf("the output limit is %d, want %d", perr.OutputLimit, c.wantLimit)
+			}
+		})
+	}
+}
+
+// TestAContextRejectionCarriesItsPromptCount covers the words a
+// context-length refusal uses for the prompt's own count. The session reads
+// the count to ask for the room it leaves, so a shape read as the whole
+// request or as the completion is a smaller max_tokens than the window can
+// spare.
+func TestAContextRejectionCarriesItsPromptCount(t *testing.T) {
+	cases := []struct {
+		name     string
+		message  string
+		wantKind poo.ProviderKind
+		want     int
+	}{
+		{
+			name:     "vLLM states the prompt's share of the request",
+			message:  "This model's maximum context length is 4096 tokens. However, you requested 5829 tokens (3000 in the messages, 2829 in the completion). Please reduce the length of the messages or completion.",
+			wantKind: poo.ProviderKindContextLength,
+			want:     3000,
+		},
+		{
+			name:     "the Messages API states the prompt and the completion",
+			message:  "input length and max_tokens exceed context limit: 3000 + 2829 > 4096",
+			wantKind: poo.ProviderKindContextLength,
+			want:     3000,
+		},
+		{
+			name:     "a refusal that states no count",
+			message:  "the prompt is too long",
+			wantKind: poo.ProviderKindContextLength,
+		},
+		{
+			name:     "an output cap states no prompt",
+			message:  "max_tokens is too large: 32768. This model supports at most 16384 completion tokens.",
+			wantKind: poo.ProviderKindOutputLimit,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			body, err := json.Marshal(map[string]any{"error": map[string]any{"message": c.message}})
+			if err != nil {
+				t.Fatalf("encoding the body: %v", err)
+			}
+			resp := &http.Response{
+				StatusCode: http.StatusBadRequest,
+				Status:     http.StatusText(http.StatusBadRequest),
+				Header:     http.Header{},
+				Body:       io.NopCloser(bytes.NewReader(body)),
+			}
+			var perr *poo.ProviderError
+			if err := support.ClassifyStatus(resp); !errors.As(err, &perr) {
+				t.Fatalf("the failure is %v, want a provider error", err)
+			}
+			if perr.Kind != c.wantKind {
+				t.Errorf("the failure is %q, want %q", perr.Kind, c.wantKind)
+			}
+			if perr.PromptTokens != c.want {
+				t.Errorf("the prompt count is %d, want %d", perr.PromptTokens, c.want)
+			}
+		})
+	}
+}
+
+// TestAnOutputCapRejectionNeedsABadRequest covers the status: the same
+// words under a 500 are a server failure, because only a 400 is the
+// endpoint rejecting the request's own max_tokens.
+func TestAnOutputCapRejectionNeedsABadRequest(t *testing.T) {
+	got := support.FailureKind(http.StatusInternalServerError, "", "", "max_tokens is too large: 32768", poo.ProviderKindServer)
+	if got != poo.ProviderKindServer {
+		t.Errorf("the failure is %q, want %q", got, poo.ProviderKindServer)
 	}
 }
 

@@ -54,9 +54,9 @@ func (c *Compactor) Ratio() float64 { return c.ratio }
 // ShouldCompact reports that the run has reached the point that compacts
 // the provider's state.
 //
-// The strategy waits for the same share of the window as summary. It also
-// waits for the run to have asked the model something: there is no
-// conversation to compact before the first request.
+// The strategy waits for its own ratio only. It also waits for the run
+// to have asked the model something: there is no conversation to compact
+// before the first request.
 func (c *Compactor) ShouldCompact(view poo.View, budget poo.ContextBudget) bool {
 	return budget.Reached(c.ratio)
 }

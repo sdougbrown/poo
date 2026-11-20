@@ -17,6 +17,9 @@ const (
 	// ProviderKindContextLength means the request exceeded the model's
 	// context window.
 	ProviderKindContextLength ProviderKind = "context_length"
+	// ProviderKindOutputLimit means the endpoint rejected the request's
+	// max_tokens as above the most it writes in one response.
+	ProviderKindOutputLimit ProviderKind = "output_limit"
 	// ProviderKindAuthFailed means the endpoint rejected the credentials.
 	ProviderKindAuthFailed ProviderKind = "auth_failed"
 	// ProviderKindInvalidRequest means the endpoint rejected the request.
@@ -61,6 +64,14 @@ type ProviderError struct {
 	// holds the kind a failure had before it was reclassified: an
 	// interrupted stream keeps the kind it broke in here.
 	Code string
+	// OutputLimit is the most output tokens the endpoint says it allows,
+	// when the failure is an output_limit that states one. Zero means the
+	// endpoint named no number.
+	OutputLimit int
+	// PromptTokens is the prompt's token count the endpoint reported when
+	// it refused the request for its context length. Zero means the
+	// endpoint stated none.
+	PromptTokens int
 	// RetryAfter is how long the endpoint asked the client to wait, when
 	// it said so.
 	RetryAfter time.Duration

@@ -650,11 +650,7 @@ func (r *Reader) responseFailure(ev event) error {
 	if code == "" {
 		code = ev.Code
 	}
-	return &poo.ProviderError{
-		Kind:    support.FailureKind(0, code, "", message, poo.ProviderKindServer),
-		Message: message,
-		Code:    code,
-	}
+	return support.NewProviderError(0, code, "", message, poo.ProviderKindServer)
 }
 
 // eventFailure is the failure an in-band error event names.
@@ -671,11 +667,7 @@ func (r *Reader) eventFailure(ev event) error {
 	if message == "" {
 		message = "the endpoint reported an error"
 	}
-	return &poo.ProviderError{
-		Kind:    support.FailureKind(0, code, "", message, poo.ProviderKindServer),
-		Message: message,
-		Code:    code,
-	}
+	return support.NewProviderError(0, code, "", message, poo.ProviderKindServer)
 }
 
 // setUsage records the token accounting the terminal event carried.

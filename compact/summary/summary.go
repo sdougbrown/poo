@@ -135,11 +135,52 @@ func (c *Compactor) MaxTokens() int { return c.maxTokens }
 // turn older than the newest one. A single turn has nothing older to
 // summarize, so starting a compaction would only fail: the same guard
 // Compact applies belongs here, before the run is told one started.
+//
+// It also acts before the ratio when the room left in the window is under
+// the output limit, because every request then asks for exactly the room
+// left and an estimate that runs low gets the request rejected. That
+// trigger fires only when a summary would give the room back: a window so
+// small that the verbatim tail and the summary alone leave less room than
+// the output limit would summarize on every turn and gain nothing.
 func (c *Compactor) ShouldCompact(view poo.View, budget poo.ContextBudget) bool {
 	if len(liveTurns(view.Turns())) < 2 {
 		return false
 	}
-	return budget.Reached(c.ratio)
+	return budget.Reached(c.ratio) || c.restoresOutputRoom(view, budget)
+}
+
+// restoresOutputRoom reports that the output room is short and a summary
+// would end the shortage.
+//
+// The input a compaction would leave is the input now, less the turns the
+// cut replaces, plus a summary as long as the strategy allows.
+func (c *Compactor) restoresOutputRoom(view poo.View, budget poo.ContextBudget) bool {
+	if !budget.OutputRoomShort() {
+		return false
+	}
+	messages := view.Messages()
+	cut, ok := c.cut(messages, view.Turns(), budget)
+	if !ok {
+		return false
+	}
+	after := budget
+	after.EstimatedInput = budget.EstimatedInput - turnTokens(messages[cut.Start:cut.End], budget) +
+		c.maxTokens + c.replacementCarriageTokens(cut, messages[cut.Start:cut.End], budget)
+	return !after.OutputRoomShort()
+}
+
+// replacementCarriageTokens estimates what the replacement carries besides
+// the summary text: the marker line and the file list.
+//
+// The estimate is the one the replacement itself gets, through the same
+// builder, so a file list the summary would add is not missing from the
+// room the compaction promises to give back.
+func (c *Compactor) replacementCarriageTokens(cut cutRange, covered []poo.Message, budget poo.ContextBudget) int {
+	text := marker(cut.Cut)
+	if files := fileList(c.files, covered); files != "" {
+		text += "\n\n" + files
+	}
+	return turnTokens([]poo.Message{poo.NewTextMessage(poo.RoleUser, text)}, budget)
 }
 
 // Compact summarizes the turns the view can spare and replaces them with

@@ -98,6 +98,7 @@ A record that someone produced also carries an `origin`:
 | `turn.interrupted` | Once per turn an interrupt cut short. |
 | `compaction` | Once per compaction a compactor produced. |
 | `session.models_changed` | Once per model switch, between the runs. |
+| `model.output_limit` | Once per learned output cap, when an endpoint rejects a request's `max_tokens`. |
 | `decision` | Once per decision call, failures included. |
 | `permission.asked` | Once per permission ask, when the run starts waiting for an answer. |
 | `permission.answered` | Once per permission ask, when the answer arrives. |
@@ -595,6 +596,21 @@ reader of the log knows which model answered which turn.
 The history is never truncated by a switch. A view that does not fit the
 new window is a warning, and the next run settles `context_exhausted`.
 
+## `model.output_limit`
+
+The session learned a model's output cap from an endpoint that rejected a
+request whose `max_tokens` was above it. The session keeps the cap for the
+requests that follow, and the record says why the value dropped.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `model_id` | string | The identifier of the model the endpoint rejected. |
+| `previous` | integer | The `max_tokens` the rejected request asked for. |
+| `limit` | integer | The `max_tokens` the endpoint accepts, which the session asks for from now on. |
+
+A restored session applies the last record for the model it talks to,
+unless that model declares its own limit.
+
 ## `decision`
 
 One decision call. The record is written whatever the outcome was, so a
@@ -729,7 +745,7 @@ before the model finished, and both settle `cancelled`.
 | Source | Meaning |
 |---|---|
 | `end_turn` | The model stopped on its own. |
-| `output_truncated:default` | The provider stopped on the output-token limit, and the request carried poo's default (8192) because the model declares no `max_output`. The detail's text names the `max_tokens` the request carried and the setting that raises it. |
+| `output_truncated:default` | The provider stopped on the output-token limit, and the request carried poo's default for the model's context window, because the model declares no `max_output`. The detail's text names the `max_tokens` the request carried and the setting that raises it. |
 | `output_truncated:model` | The provider stopped on the output-token limit, and the request carried the model's own `max_output`. |
 | `output_truncated:context` | The provider stopped on the output-token limit, and the request carried the room the context window had left, which was under the model's output limit. The detail's text gives the estimated prompt size and the window. |
 | `output_truncated:endpoint` | The provider stopped on the endpoint's own output limit: the request body carried no `max_tokens`, because the endpoint takes none. |

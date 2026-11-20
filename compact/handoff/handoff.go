@@ -73,9 +73,12 @@ func (c *Compactor) MaxTokens() int { return c.maxTokens }
 //
 // The strategy acts when the window is nearly full, and only after the
 // run has asked the model something: a handoff is a note about work
-// that happened.
+// that happened. It also acts when the room left in the window is under
+// the output limit, because a request then asks for exactly the room
+// left and an estimate that runs low gets the request rejected. The
+// handoff ends the run, so that trigger cannot repeat.
 func (c *Compactor) ShouldCompact(view poo.View, budget poo.ContextBudget) bool {
-	return budget.Reached(c.ratio)
+	return budget.Reached(c.ratio) || budget.OutputRoomShort()
 }
 
 // Compact asks the model to write a handoff.

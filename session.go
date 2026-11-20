@@ -852,9 +852,6 @@ const (
 	DefaultHardRatio = 0.97
 	// DefaultHookTimeout bounds one hook call.
 	DefaultHookTimeout = 30 * time.Second
-	// DefaultMaxOutput is the output-token limit a model without one
-	// gets.
-	DefaultMaxOutput = 8192
 	// MinOutputTokens is the smallest output room a request may ask
 	// for. Below it, the context is effectively full.
 	MinOutputTokens = 256
@@ -1226,6 +1223,7 @@ func (s *Session) budgetLocked() ContextBudget {
 		NoticeRatio:    s.opts.NoticeRatio,
 		HardRatio:      s.opts.HardRatio,
 		CharsPerToken:  s.est.charsPerToken,
+		OutputLimit:    min(s.opts.Model.OutputCeiling(), DefaultMaxOutputFor(s.opts.Model.ContextLimit)),
 		Turns:          turns,
 	}
 }

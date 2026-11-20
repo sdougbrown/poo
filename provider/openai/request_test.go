@@ -32,9 +32,9 @@ func TestTheMaxTokensAreComputed(t *testing.T) {
 			want: 4096,
 		},
 		{
-			name: "a model with no ceiling of its own",
+			name: "a model with no ceiling or window of its own",
 			info: poo.ModelInfo{},
-			want: poo.DefaultMaxOutput,
+			want: 16384,
 		},
 		{
 			name: "a model with a context window that is smaller",

@@ -308,6 +308,30 @@ func TestTheStrategyWaitsForARequest(t *testing.T) {
 	}
 }
 
+// TestTheRoomTriggerAsksForAHandoffBelowTheRatio covers the second
+// reason to hand off: a window with less output room left than the
+// output limit, even when its share is under the strategy's ratio. The
+// handoff ends the run, so the trigger cannot repeat.
+func TestTheRoomTriggerAsksForAHandoffBelowTheRatio(t *testing.T) {
+	c := handoff.New(handoff.Options{})
+	budget := poo.ContextBudget{
+		ContextLimit:   100000,
+		EstimatedInput: 80000,
+		OutputLimit:    32768,
+		Turns:          1,
+	}
+	if budget.Reached(c.Ratio()) {
+		t.Fatal("the budget already reached the ratio, so the room is not what is tested")
+	}
+	if !c.ShouldCompact(nil, budget) {
+		t.Error("the strategy declined with the output room short")
+	}
+	budget.OutputLimit = 0
+	if c.ShouldCompact(nil, budget) {
+		t.Error("the strategy acted with no output limit to protect")
+	}
+}
+
 // TestTheForkFailureSettlesAtTheHardLimit covers the rule: a
 // fork that failed is a compactor failure.
 func TestTheForkFailureSettlesAtTheHardLimit(t *testing.T) {

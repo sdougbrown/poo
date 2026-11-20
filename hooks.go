@@ -76,6 +76,11 @@ type ContextBudget struct {
 	HardRatio float64
 	// CharsPerToken is the calibrated characters-per-token ratio.
 	CharsPerToken float64
+	// OutputLimit is the output limit the next request carries before
+	// it is clamped to the room the window leaves: the model's own
+	// limit, or the default for its window, whichever is lower. Zero
+	// means unknown.
+	OutputLimit int
 	// Turns is the number of provider requests the run has made.
 	//
 	// A compaction strategy needs it: the handoff strategy asks for a
@@ -97,6 +102,22 @@ func (b ContextBudget) Reached(ratio float64) bool {
 		return false
 	}
 	return float64(b.EstimatedInput) >= ratio*float64(b.ContextLimit)
+}
+
+// OutputRoomShort reports that the room the window leaves after the
+// estimated input and the output reserve is under the output limit, so the
+// next request's max_tokens is clamped to the room.
+//
+// It is the trigger for a strategy that compacts to give the output its
+// room: a strategy checks whether a compaction would end the shortage with
+// the same rule, on a budget whose input is the one it would leave. A budget
+// that knows no window or no output limit, or whose run has asked the model
+// nothing, is never short.
+func (b ContextBudget) OutputRoomShort() bool {
+	if b.Turns < 1 || b.ContextLimit <= 0 || b.OutputLimit <= 0 {
+		return false
+	}
+	return b.ContextLimit-b.EstimatedInput-OutputReserve < b.OutputLimit
 }
 
 // HookContext is what a hook is given.
@@ -420,6 +441,10 @@ const (
 	// is a record-only diagnostic, never delivered to observers; the
 	// event bus writes the coalesced record.
 	EventObserverDropped EventName = "observer.dropped"
+	// EventModelOutputLimit is emitted when the endpoint rejects a
+	// request's default max_tokens and the session learns a lower limit
+	// for the model.
+	EventModelOutputLimit EventName = "model.output_limit"
 	// EventModelsChanged is emitted when the session switches models.
 	EventModelsChanged EventName = "session.models_changed"
 )

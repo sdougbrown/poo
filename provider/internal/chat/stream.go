@@ -273,11 +273,7 @@ func (r *Reader) providerError(body *support.ErrorBody) error {
 	if message == "" {
 		message = "the endpoint returned an error"
 	}
-	return &poo.ProviderError{
-		Kind:    support.FailureKind(0, code, body.Type, message, poo.ProviderKindServer),
-		Message: message,
-		Code:    code,
-	}
+	return support.NewProviderError(0, code, body.Type, message, poo.ProviderKindServer)
 }
 
 // events turns one chunk into the events it carries.

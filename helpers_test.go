@@ -29,6 +29,8 @@ type fakeResponse struct {
 	finish poo.FinishReason
 	// err is the failure the request returns, if any.
 	err error
+	// fail is the failure the stream reports after its events, if any.
+	fail error
 	// usage is the accounting the stream reports, if any.
 	usage *poo.UsageReport
 }
@@ -93,6 +95,7 @@ func (r fakeResponse) turn() pootest.Turn {
 		Thinking: r.thinking,
 		Finish:   string(r.finish),
 		Err:      r.err,
+		Fail:     r.fail,
 	}
 	for _, c := range r.calls {
 		t.Calls = append(t.Calls, pootest.Call{Name: c.Name, Arguments: c.Arguments, ID: c.CallID})

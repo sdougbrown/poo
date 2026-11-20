@@ -34,7 +34,8 @@ type ModelInfo struct {
 	ContextLimit int `json:"context_limit,omitempty"`
 	// MaxOutput is the most tokens the model writes in one response. Zero
 	// means unknown, and the computed max_tokens is then capped at
-	// DefaultMaxOutput, never left to the endpoint's default.
+	// DefaultMaxOutputFor the context window, never left to the
+	// endpoint's default.
 	MaxOutput int `json:"max_output,omitempty"`
 	// Sampling holds the model's default sampling parameters.
 	Sampling Sampling `json:"sampling,omitempty"`
