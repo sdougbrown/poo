@@ -435,6 +435,9 @@ func (s *Session) estimatedInputLocked() int {
 // plan's bounds and kept for the session. The characters are the
 // request's own, not the view's now: the view also holds the reply the
 // request produced, which the report does not count.
+//
+// A retried report is not calibrated from: its input sums the request's
+// attempts, which would drag the ratio down and double the baseline.
 func (s *Session) observeUsage(report *UsageReport, requestChars int) {
 	if report == nil || report.InputTokens <= 0 {
 		return

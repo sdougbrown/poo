@@ -1981,10 +1981,13 @@ func (s *Session) chargeUsageLocked(run *runState, usage *UsageReport) {
 // see. A turn's request says nothing about its origin, so the event keeps
 // the shape it had, and a request a compaction made says what it was for.
 //
-// A report the transport retried covers more than one attempt, so the notes
-// that measure the view are told about it and skip it.
+// A report the transport retried covers more than one attempt. The notes that
+// measure the view are told about it and skip it, and the calibration is left
+// alone.
 func (s *Session) recordUsage(run *runState, meta RecordMeta, turn, request int, usage *UsageReport, requestChars int, retried bool) bool {
-	s.observeUsage(usage, requestChars)
+	if !retried {
+		s.observeUsage(usage, requestChars)
+	}
 	s.noteCompactedInput(meta, usage, retried)
 	s.noteTurnInput(meta, usage, retried)
 	if err := s.write(run.ctx, &UsageRecord{

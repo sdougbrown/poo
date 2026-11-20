@@ -8,6 +8,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -409,6 +410,9 @@ type wireAnswer struct {
 	text string
 	// input and output are the tokens the endpoint bills the request.
 	input, output int
+	// noUsage reports that the answer's stream carries no usage chunk, so the
+	// session hears no report for the request.
+	noUsage bool
 	// fail reports that the answer breaks after its usage, so the transport
 	// tries the request again.
 	fail bool
@@ -424,8 +428,10 @@ func (a wireAnswer) events() string {
 	if a.text != "" {
 		out += `data: {"choices":[{"index":0,"delta":{"content":"` + a.text + `"},"finish_reason":"stop"}]}` + "\n\n"
 	}
-	out += fmt.Sprintf(`data: {"choices":[{"index":0,"delta":{}}],"usage":{"prompt_tokens":%d,"completion_tokens":%d}}`+"\n\n",
-		a.input, a.output)
+	if !a.noUsage {
+		out += fmt.Sprintf(`data: {"choices":[{"index":0,"delta":{}}],"usage":{"prompt_tokens":%d,"completion_tokens":%d}}`+"\n\n",
+			a.input, a.output)
+	}
 	if a.fail {
 		out += `data: {"error":{"message":"the endpoint failed","type":"server_error","code":"internal_error"}}` + "\n\n"
 	}
@@ -551,6 +557,110 @@ func TestARetriedReportAfterACompactionLeavesTheGuardUnarmed(t *testing.T) {
 	// The next report is the view's own, and the guard arms on it.
 	if got := probe.compacted[4]; got != next {
 		t.Errorf("the gate after the next report carries a compacted input of %d, want %d", got, next)
+	}
+}
+
+// calibrationProbe records the estimator's state at every gate.
+type calibrationProbe struct {
+	// inner is the strategy the run compacts with.
+	inner poo.Compactor
+	// charsPerToken is the budget's calibration at every gate, in call order.
+	charsPerToken []float64
+	// estimated is the budget's estimated input at every gate, in call order.
+	estimated []int
+}
+
+// ShouldCompact records the budget's calibration and asks the strategy it
+// wraps.
+func (p *calibrationProbe) ShouldCompact(view poo.View, budget poo.ContextBudget) bool {
+	p.charsPerToken = append(p.charsPerToken, budget.CharsPerToken)
+	p.estimated = append(p.estimated, budget.EstimatedInput)
+	return p.inner.ShouldCompact(view, budget)
+}
+
+// Compact asks the strategy it wraps.
+func (p *calibrationProbe) Compact(ctx context.Context, in poo.CompactionEnv) (poo.Compaction, error) {
+	return p.inner.Compact(ctx, in)
+}
+
+// calibrationScript is the answers the calibration test serves: four turns, and
+// the third request tried twice when retry is set.
+//
+// A retried report is no report, so without the retry the third answer carries
+// no usage. That run is the calibration a retried report must leave alone. The
+// token counts are hundreds and the tool's result is long, so the ratio lands
+// inside its clamp rather than on its floor.
+func calibrationScript(retry bool) []wireAnswer {
+	const (
+		first = 400
+		step  = 50
+		// prompt is the input the third request carries, reported once by
+		// each of its attempts.
+		prompt = first + 2*step
+	)
+	out := []wireAnswer{
+		{call: "echo", input: first, output: 5},
+		{call: "echo", input: first + step, output: 5},
+	}
+	if retry {
+		out = append(out,
+			wireAnswer{input: prompt, output: 5, fail: true},
+			wireAnswer{call: "echo", input: prompt, output: 5},
+		)
+	} else {
+		out = append(out, wireAnswer{call: "echo", output: 5, noUsage: true})
+	}
+	return append(out,
+		wireAnswer{call: "echo", input: prompt + step, output: 5},
+		wireAnswer{text: "the answer"},
+	)
+}
+
+// runCalibrationScript runs one calibration script and returns what the probe
+// recorded.
+func runCalibrationScript(t *testing.T, answers []wireAnswer) *calibrationProbe {
+	t.Helper()
+	probe := &calibrationProbe{inner: pootest.NewCompactor(false, poo.Compaction{})}
+	opts := testOptions(t, wireTransport(t, answers), &echoTool{result: strings.Repeat("x", 1000)}, &recordingSink{})
+	opts.Settings.ObservationCapChars = 4000
+	opts.Compactor = probe
+	s := newTestSession(t, opts)
+
+	if res := runSession(t, s, "do the thing"); res.Reason != poo.ReasonEndTurn {
+		t.Fatalf("the run settled %q, want end_turn", res.Reason)
+	}
+	return probe
+}
+
+// TestARetriedReportDoesNotFeedTheTokenCalibration covers the estimator: a
+// request the transport tried twice reports the sum of its attempts' input, and
+// that sum is no calibration. The ratio and the baseline stay where the last
+// unretried report put them. The gate after the retry then estimates the view as
+// the run with no report there estimates it.
+func TestARetriedReportDoesNotFeedTheTokenCalibration(t *testing.T) {
+	reference := runCalibrationScript(t, calibrationScript(false))
+	retried := runCalibrationScript(t, calibrationScript(true))
+
+	// The gate before the fourth request is the first that sees the third
+	// request's report. When retry is set, that report is the retried one.
+	const after = 3
+	if len(reference.estimated) <= after || len(retried.estimated) <= after {
+		t.Fatalf("the runs were given %d and %d gates, want the gate after the retried report at %d",
+			len(reference.estimated), len(retried.estimated), after)
+	}
+	// Both runs see the same reports before the retried one, so it is the only
+	// difference the gate below can carry.
+	for i := 0; i < after; i++ {
+		if reference.charsPerToken[i] != retried.charsPerToken[i] || reference.estimated[i] != retried.estimated[i] {
+			t.Fatalf("the gates before the retried report differ at %d: %v/%d against %v/%d",
+				i, reference.charsPerToken[i], reference.estimated[i], retried.charsPerToken[i], retried.estimated[i])
+		}
+	}
+	if got, want := retried.charsPerToken[after], reference.charsPerToken[after]; got != want {
+		t.Errorf("the gate after the retried report carries %v characters per token, want the %v the last report set", got, want)
+	}
+	if got, want := retried.estimated[after], reference.estimated[after]; got != want {
+		t.Errorf("the gate after the retried report estimates %d input tokens, want the %d the last report set", got, want)
 	}
 }
 
