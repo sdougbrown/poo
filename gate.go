@@ -27,10 +27,12 @@ type requestGateResult struct {
 // The request gate never opens a request while a candidate is pending.
 func (s *Session) requestGate(run *runState) requestGateResult {
 	// The compactor gets one chance in a request gate pass. An interrupt that
-	// ends the compaction restarts the request gate for the candidates, the
-	// budget and the notice, but not for a second compaction the
-	// interrupt already ended.
+	// ends the compaction restarts the request gate for the candidates and the
+	// budget, but not for a second compaction the interrupt already ended.
 	compactionTried := false
+	// A request the endpoint refused for its length asks for one compaction
+	// the strategy itself may decline.
+	forced, refusal := s.takeForcedCompaction(run)
 requestGateLoop:
 	for {
 		// Step 0: a pending candidate settles the run.
@@ -49,13 +51,14 @@ requestGateLoop:
 		//
 		// An interrupt that ends the compaction is not a compaction
 		// failure: the request gate restarts from its first step, so the pending
-		// candidates, the compactor, the budget and the notice are all
-		// checked again instead of the interrupt opening a request by
-		// itself.
+		// candidates and the budget are checked again instead of the interrupt
+		// opening a request by itself.
 		for s.opts.Compactor != nil && !compactionTried {
 			compactionTried = true
-			should := s.opts.Compactor.ShouldCompact(s.view(), s.budget())
-			if !should {
+			// A forced compaction skips the strategy's decision: the
+			// endpoint has already said the prompt is too long, which is
+			// what the strategy's guard exists to guess.
+			if !forced && !s.opts.Compactor.ShouldCompact(s.view(), s.budget()) {
 				break
 			}
 			s.transition(StateCompacting)
@@ -79,6 +82,11 @@ requestGateLoop:
 				return requestGateResult{held: true}
 			}
 			if err != nil {
+				// A compaction the refusal asked for is the request's last
+				// chance: one that failed settles the run with the refusal.
+				if forced {
+					return requestGateResult{candidates: []candidate{refusal}}
+				}
 				// The compactor failed. When the next request can still go
 				// out the run continues uncompacted; when it cannot, the run
 				// settles context_exhausted.

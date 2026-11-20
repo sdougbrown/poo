@@ -303,6 +303,17 @@ type runState struct {
 	lastRendered Rendered
 	// hasRendered reports that lastRendered holds a snapshot.
 	hasRendered bool
+	// forceCompaction asks the next-request gate to compact once even when
+	// the strategy declines. The endpoint refused the request's length, so
+	// the gate compacts and the run sends the request again.
+	forceCompaction bool
+	// refusal is the settle candidate the refusal that asked for the forced
+	// compaction produced, so the run settles with its own detail when the
+	// compaction cannot help.
+	refusal *candidate
+	// refusalForced reports that the refusal the run is compacting for has
+	// already had its one forced compaction.
+	refusalForced bool
 
 	// activityCtx is the current activity's context. The activity is
 	// the request, the tool batch, the compaction or the turn-end

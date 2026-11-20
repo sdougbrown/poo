@@ -505,7 +505,7 @@ func (s *Session) loop(run *runState) []candidate {
 
 		s.events.emit(EventTurnStarted, map[string]any{"run_id": run.id, "turn": turn})
 
-		resp, rendered, err := s.request(run, turn)
+		resp, rendered, requestChars, err := s.request(run, turn)
 		// The run may have settled while the request was in flight.
 		// What the request produced then is a late completion: it
 		// never mutates the history, the records or the events. The
@@ -555,8 +555,19 @@ func (s *Session) loop(run *runState) []candidate {
 			if resp != nil && resp.usage != nil {
 				s.writeUsage(run, turn, resp.usage, resp.requestChars)
 			}
-			return []candidate{newCandidate(reason, detail)}
+			refusal := newCandidate(reason, detail)
+			// An endpoint that refused the prompt's own length is the
+			// authority on whether the next request fits: the run compacts
+			// once and sends the request again through the gate.
+			if s.compactForRefusal(run, err, resp, requestChars, refusal) {
+				continue
+			}
+			return []candidate{refusal}
 		}
+
+		// A request that went out ends the refusal before it: a later
+		// refusal gets the one forced compaction of its own.
+		s.clearRefusal(run)
 
 		// The model's response is part of the history whether or not
 		// it asked for tool calls.
@@ -1250,7 +1261,11 @@ func originForMode(mode InputMode) Origin {
 // prompt count leaves. One request is sent twice at most. The rejected
 // attempt says another one followed, and the resend's attempts carry on the
 // same request's numbering.
-func (s *Session) request(run *runState, turn int) (*response, Rendered, error) {
+//
+// The request's own size comes back with it, so a failure that carries the
+// endpoint's prompt count can calibrate the estimate against what the
+// endpoint measured.
+func (s *Session) request(run *runState, turn int) (*response, Rendered, int, error) {
 	res := s.requestOnce(run, turn, 0, 0)
 	reportLast := func(retried bool) (Attempt, bool) {
 		attempt, ok := res.last.take()
@@ -1264,7 +1279,7 @@ func (s *Session) request(run *runState, turn int) (*response, Rendered, error) 
 	resend, ok := s.resendLimit(run, turn, res)
 	if !ok {
 		reportLast(false)
-		return res.resp, res.rendered, res.err
+		return res.resp, res.rendered, res.requestChars, res.err
 	}
 	base := 0
 	if attempt, ok := reportLast(true); ok {
@@ -1272,7 +1287,75 @@ func (s *Session) request(run *runState, turn int) (*response, Rendered, error) 
 	}
 	res = s.requestOnce(run, turn, base, resend)
 	reportLast(false)
-	return res.resp, res.rendered, res.err
+	return res.resp, res.rendered, res.requestChars, res.err
+}
+
+// compactForRefusal asks the next-request gate to compact once for a request
+// the endpoint refused for its context length, and reports whether the run
+// goes on.
+//
+// A smaller max_tokens cannot shrink a prompt, so a compaction is the only
+// thing that can make the refused request fit. The endpoint's own count of the
+// prompt is the prompt's real size, and it calibrates the estimate the gate
+// sizes the compaction with.
+//
+// A refused request gets one forced compaction. A run with no compactor, a run
+// that is winding down and a run with an interrupt pending are ending or
+// already had their say: they settle the way the refusal always did.
+func (s *Session) compactForRefusal(run *runState, err error, resp *response, requestChars int, refusal candidate) bool {
+	var perr *ProviderError
+	if !errors.As(err, &perr) || perr.Kind != ProviderKindContextLength {
+		return false
+	}
+	// A refusal that carried part of an answer is not a request the run may
+	// send again: the model already read what it said.
+	if resp != nil && (len(resp.content) > 0 || len(resp.calls) > 0) {
+		return false
+	}
+	if s.opts.Compactor == nil || s.interruptPending(run) || s.runWindingDown(run) {
+		return false
+	}
+	s.mu.Lock()
+	forced := run.refusalForced
+	run.refusalForced = true
+	if !forced {
+		run.forceCompaction = true
+		run.refusal = &refusal
+	}
+	s.mu.Unlock()
+	if forced {
+		return false
+	}
+	if perr.PromptTokens > 0 {
+		s.observeUsage(&UsageReport{InputTokens: perr.PromptTokens}, requestChars)
+	}
+	return true
+}
+
+// clearRefusal forgets the refusal the run compacted for, so a later refusal
+// gets the one forced compaction of its own.
+func (s *Session) clearRefusal(run *runState) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	run.refusalForced = false
+	run.refusal = nil
+	run.forceCompaction = false
+}
+
+// takeForcedCompaction returns the compaction a refused request asked for,
+// with the settle candidate the refusal produced, and consumes both: one
+// refusal buys one compaction.
+func (s *Session) takeForcedCompaction(run *runState) (bool, candidate) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	refusal := run.refusal
+	forced := run.forceCompaction && refusal != nil
+	run.forceCompaction = false
+	run.refusal = nil
+	if !forced {
+		return false, candidate{}
+	}
+	return true, *refusal
 }
 
 // resendLimit decides whether a rejected request is worth one more attempt

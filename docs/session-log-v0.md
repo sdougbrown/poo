@@ -762,7 +762,7 @@ before the model finished, and both settle `cancelled`.
 | `no_output_room` | The computed `max_tokens` was under 256, so the request was never sent. |
 | `prompt_limit` | The estimate plus the reserve was over the endpoint's input cap, so the request was never sent. |
 | `compaction_failed` | The compactor failed when the next request could not go out. |
-| `provider:context_length` | The endpoint reported that the request was too long. It is recognised whatever status the endpoint sent it with, including a 5xx. |
+| `provider:context_length` | The endpoint reported that the request was too long. It is recognised whatever status the endpoint sent it with, including a 5xx. The run compacts once and sends the request again before it settles with this source. |
 | `provider:<kind>` | The provider request failed with that kind. |
 | `finish` | The model called the `finish` tool with a valid result. |
 | `before_settle` | A `BeforeSettle` hook stopped the run, or the run asked for more continuations than it allows. |
