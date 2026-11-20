@@ -186,10 +186,12 @@ const wrapper = `(() => {
       const value = program(call, gather, print);
       active = false;
       if (value instanceof promise) throw new Error("codemode scripts must be synchronous");
-      const encoded = encode(value);
+      // A script that returns nothing is a clean no-value result, like a
+      // Starlark script that never exits: undefined passes to the host.
+      const encoded = value === undefined ? undefined : encode(value);
       // The guest measures its own return value, so an oversized one never
       // crosses into host memory: the host would copy it several times.
-      if (encoded.length > 1048576) throw new Error("codemode: the return value is over 1048576 characters; print a summary instead");
+      if (typeof encoded === "string" && encoded.length > 1048576) throw new Error("codemode: the return value is over 1048576 characters; print a summary instead");
       return encoded;
     } finally {
       active = false;

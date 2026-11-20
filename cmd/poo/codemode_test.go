@@ -18,7 +18,13 @@ func TestCodemodeSettingsSelectScriptLanguage(t *testing.T) {
 		{"unknown", "", "", "tools.codemode.engine"},
 		{"quickjs", "", "", "tools.codemode.exec_steps"},
 	} {
-		t.Run(test.engine, func(t *testing.T) {
+		name := test.engine
+		if name == "" {
+			// The unset-engine case proves the Starlark default, and a
+			// failure of it must be distinguishable in the test output.
+			name = "default"
+		}
+		t.Run(name, func(t *testing.T) {
 			args, err := json.Marshal(map[string]string{"script": test.script})
 			if err != nil {
 				t.Fatal(err)

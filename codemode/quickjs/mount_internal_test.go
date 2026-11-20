@@ -50,6 +50,28 @@ if (f !== null) throw new Error("the mount opened a host file");
 	}
 }
 
+// TestTheGuestSeesNoHostEnvironment pins the other half of the boundary
+// the wrapper's deletion backs: `std` still exists here, and the guest's
+// environment holds nothing the host set.
+func TestTheGuestSeesNoHostEnvironment(t *testing.T) {
+	t.Setenv("POO_CODEMODE_TEST_SECRET", "not for JavaScript")
+	vm, err := newVM(t.Context())
+	if err != nil {
+		t.Fatalf("building the guest: %v", err)
+	}
+	defer vm.Close()
+	res, evalErr := vm.Context().Eval("env.js", qjs.Code(`
+if (std.getenv("POO_CODEMODE_TEST_SECRET") !== undefined) throw new Error("the guest sees the host's environment");
+0`))
+	if evalErr != nil {
+		t.Fatalf("the probe failed: %v", evalErr)
+	}
+	defer res.Free()
+	if got := res.String(); got != "0" {
+		t.Fatalf("the probe returned %s", got)
+	}
+}
+
 // probe runs one script on a guest built the way every run builds one.
 // It reports whether the run trapped the runtime, and the eval error
 // when it did not.
