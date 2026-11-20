@@ -31,6 +31,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/reeflective/readline"
 
+	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/wire/protocol"
 )
 
@@ -478,7 +479,7 @@ func (m *machine) gone() int {
 }
 
 // start starts the server, does the handshake, opens the session and
-// reads the model's window for the statusline.
+// reads the model's prompt limit for the statusline.
 func (m *machine) start() error {
 	stdin, stdout, wait, err := m.server()
 	if err != nil {
@@ -534,8 +535,9 @@ func (m *machine) start() error {
 	}
 
 	// The catalog names every model the session may switch to, and
-	// the chat model's entry carries the window the statusline shows
-	// the fill against and the reasoning levels /thinking cycles.
+	// the chat model's entry carries the window and the input cap the
+	// statusline bounds the fill by, and the reasoning levels /thinking
+	// cycles.
 	var catalog protocol.ModelsResult
 	if err := m.conn.call(protocol.MethodModelsList, protocol.ModelsParams{}, &catalog); err != nil {
 		return err
@@ -544,7 +546,8 @@ func (m *machine) start() error {
 	for _, model := range catalog.Models {
 		m.catalog[model.Name] = model
 		if model.Name == session.Models.Chat {
-			m.mutateStatus(func(s *status) { s.setContextLimit(model.ContextLimit) })
+			limit := poo.PromptLimitOf(model.ContextLimit, model.InputLimit)
+			m.mutateStatus(func(s *status) { s.setPromptLimit(limit) })
 		}
 	}
 
@@ -950,7 +953,7 @@ func (m *machine) listModels(names []string, hint string) {
 }
 
 // configureModel points the session's chat role at a model the catalog
-// holds, and takes the new model's window for the statusline.
+// holds, and takes the new model's prompt limit for the statusline.
 //
 // The switch is the wire's own: session/configure changes the models
 // between runs, and the answer names what the session talks to now.
@@ -967,7 +970,8 @@ func (m *machine) configureModel(name string) {
 	}
 	m.mutateStatus(func(s *status) { s.model = res.Models.Chat })
 	if info, ok := m.catalog[res.Models.Chat]; ok {
-		m.mutateStatus(func(s *status) { s.setContextLimit(info.ContextLimit) })
+		limit := poo.PromptLimitOf(info.ContextLimit, info.InputLimit)
+		m.mutateStatus(func(s *status) { s.setPromptLimit(limit) })
 	}
 	m.r.notice("model → %s", res.Models.Chat)
 	// The level is the new model's to take, so the wire says where the

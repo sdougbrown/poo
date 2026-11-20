@@ -46,9 +46,11 @@ type model struct {
 	Modalities struct {
 		Input []string `json:"input"`
 	} `json:"modalities"`
-	// Limit is the model's context window and output limit.
+	// Limit is the model's context window, the largest prompt the endpoint
+	// accepts and the output limit.
 	Limit struct {
 		Context int `json:"context"`
+		Input   int `json:"input"`
 		Output  int `json:"output"`
 	} `json:"limit"`
 }
@@ -61,6 +63,7 @@ type entry struct {
 	Endpoint     string
 	Env          []string
 	ContextLimit int
+	InputLimit   int
 	MaxOutput    int
 	Reasoning    bool
 	ToolCall     bool
@@ -131,6 +134,7 @@ func collect(providers map[string]provider) []entry {
 				Endpoint:     p.API,
 				Env:          p.Env,
 				ContextLimit: m.Limit.Context,
+				InputLimit:   m.Limit.Input,
 				MaxOutput:    m.Limit.Output,
 				Reasoning:    m.Reasoning,
 				ToolCall:     m.ToolCall,
@@ -158,6 +162,9 @@ func writeEntry(b *strings.Builder, e entry) {
 	}
 	if e.ContextLimit > 0 {
 		fmt.Fprintf(b, "\t\tContextLimit: %d,\n", e.ContextLimit)
+	}
+	if e.InputLimit > 0 {
+		fmt.Fprintf(b, "\t\tInputLimit:   %d,\n", e.InputLimit)
 	}
 	if e.MaxOutput > 0 {
 		fmt.Fprintf(b, "\t\tMaxOutput:    %d,\n", e.MaxOutput)

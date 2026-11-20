@@ -82,3 +82,18 @@ func TestTheNativeStrategyRequestsAProviderWindow(t *testing.T) {
 		t.Errorf("the compaction holds another form: %+v", compaction)
 	}
 }
+
+// TestTheNativeStrategyActsAtARatioOfTheInputCap covers an endpoint that
+// takes a smaller prompt than its window: the ratio is a share of the prompt
+// the endpoint accepts.
+func TestTheNativeStrategyActsAtARatioOfTheInputCap(t *testing.T) {
+	strategy := native.New(native.Options{Ratio: 0.5})
+	budget := poo.ContextBudget{ContextLimit: 1000, InputLimit: 400, EstimatedInput: 200, Turns: 1}
+	if !strategy.ShouldCompact(nil, budget) {
+		t.Error("the strategy waited for half of the window, not half of the input cap")
+	}
+	budget.EstimatedInput = 199
+	if strategy.ShouldCompact(nil, budget) {
+		t.Error("the strategy compacted below half of the input cap")
+	}
+}

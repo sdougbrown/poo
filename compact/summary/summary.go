@@ -41,9 +41,9 @@ const (
 	// Strategy is the name the compaction carries.
 	Strategy = "summary"
 
-	// DefaultRatio is the share of the context window at which the
+	// DefaultRatio is the share of the prompt limit at which the
 	// strategy summarizes. It sits under the handoff strategy's ratio,
-	// so a summary has room to be written before the window is full.
+	// so a summary has room to be written before the prompt is full.
 	DefaultRatio = 0.85
 
 	// DefaultKeepRecentTokens is how much of the newest history the
@@ -53,9 +53,9 @@ const (
 	// DefaultMaxTokens is the output limit of the summarization request.
 	DefaultMaxTokens = 4096
 
-	// tailShare is the share of a window a verbatim tail may fill. A
-	// window smaller than twice the configured tail keeps this share
-	// instead, so a small-window model still compacts.
+	// tailShare is the share of the prompt limit a verbatim tail may
+	// fill. A prompt limit smaller than twice the configured tail keeps
+	// this share instead, so a small-prompt model still compacts.
 	tailShare = 0.5
 
 	// markerPrefix starts every replacement the strategy writes. The
@@ -66,7 +66,7 @@ const (
 
 // Options configure the strategy.
 type Options struct {
-	// Ratio is the share of the context window at which the strategy
+	// Ratio is the share of the prompt limit at which the strategy
 	// summarizes. It defaults to DefaultRatio.
 	Ratio float64
 	// KeepRecentTokens is how much of the newest history the strategy
@@ -91,7 +91,7 @@ type FileOp func(name string, arguments json.RawMessage) (path string, changed b
 
 // Compactor is the summary strategy.
 type Compactor struct {
-	// ratio is the share of the window at which the strategy acts.
+	// ratio is the share of the prompt limit at which the strategy acts.
 	ratio float64
 	// keepRecent is how much of the newest history the strategy keeps.
 	keepRecent int
@@ -295,8 +295,8 @@ func liveTurns(turns []poo.TurnSummary) []poo.TurnSummary {
 // tailTokens returns how many tokens the verbatim tail may hold.
 func (c *Compactor) tailTokens(budget poo.ContextBudget) int {
 	keep := c.keepRecent
-	if budget.ContextLimit > 0 {
-		if share := int(float64(budget.ContextLimit) * tailShare); share < keep {
+	if limit := budget.PromptLimit(); limit > 0 {
+		if share := int(float64(limit) * tailShare); share < keep {
 			keep = share
 		}
 	}

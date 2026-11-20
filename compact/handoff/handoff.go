@@ -23,7 +23,7 @@ import (
 
 // The defaults the plan fixes.
 const (
-	// DefaultRatio is the share of the context window at which the
+	// DefaultRatio is the share of the prompt limit at which the
 	// strategy asks for a handoff.
 	DefaultRatio = 0.90
 	// DefaultMaxTokens is the output limit of the fork that asks for
@@ -35,7 +35,7 @@ const (
 
 // Options configure the strategy.
 type Options struct {
-	// Ratio is the share of the context window at which the strategy
+	// Ratio is the share of the prompt limit at which the strategy
 	// asks for a handoff. It defaults to DefaultRatio.
 	Ratio float64
 	// MaxTokens is the output limit of the fork that asks for the
@@ -45,7 +45,7 @@ type Options struct {
 
 // Compactor is the handoff strategy.
 type Compactor struct {
-	// ratio is the share of the window at which the strategy acts.
+	// ratio is the share of the prompt limit at which the strategy acts.
 	ratio float64
 	// maxTokens is the output limit of the fork.
 	maxTokens int

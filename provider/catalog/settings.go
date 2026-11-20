@@ -78,6 +78,8 @@ type ModelSettings struct {
 	Inputs []poo.Modality
 	// ContextLimit is the model's context window.
 	ContextLimit int
+	// InputLimit is the largest prompt the endpoint accepts.
+	InputLimit int
 	// MaxOutput is the model's output limit.
 	MaxOutput int
 	// Reasoning is how the model's reasoning is controlled.
@@ -113,6 +115,7 @@ func (m ModelSettings) layer(name, endpointURL string) poo.ModelInfo {
 		Ops:             m.Ops,
 		Inputs:          m.Inputs,
 		ContextLimit:    m.ContextLimit,
+		InputLimit:      m.InputLimit,
 		MaxOutput:       m.MaxOutput,
 		PrefixCache:     m.PrefixCache,
 		Temperature:     m.Temperature,

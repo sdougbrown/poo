@@ -95,6 +95,7 @@ func hostedLayer(hosted hostedEntry) (poo.ModelInfo, Endpoint) {
 		Ops:          []poo.Op{poo.OpChat},
 		Inputs:       modalities(hosted.Inputs),
 		ContextLimit: hosted.ContextLimit,
+		InputLimit:   hosted.InputLimit,
 		MaxOutput:    hosted.MaxOutput,
 		Temperature:  poo.TempFree,
 		Tools:        poo.ToolCalling{Mode: poo.ToolsNative},

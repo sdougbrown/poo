@@ -317,6 +317,108 @@ func TestTheProbeReadsTheLimitsEachGatewayShapeReports(t *testing.T) {
 	}
 }
 
+// TestTheProbeReadsTheInputCapAGatewayReports covers the largest prompt an
+// endpoint takes when it is smaller than the window: the opencode limit
+// object's input and LiteLLM's max_input_tokens. The cap is its own limit, and
+// the context window stays what the list says it is.
+func TestTheProbeReadsTheInputCapAGatewayReports(t *testing.T) {
+	cases := []struct {
+		name        string
+		item        map[string]any
+		wantInput   int
+		wantContext int
+	}{
+		{
+			name:        "opencode",
+			item:        map[string]any{"id": "opencode", "limit": map[string]any{"context": 400000, "input": 272000, "output": 128000}},
+			wantInput:   272000,
+			wantContext: 400000,
+		},
+		{
+			name:        "litellm",
+			item:        map[string]any{"id": "litellm", "max_input_tokens": 262144, "max_output_tokens": 65536},
+			wantInput:   262144,
+			wantContext: 0,
+		},
+		{
+			name:        "both-shapes",
+			item:        map[string]any{"id": "both-shapes", "limit": map[string]any{"input": 200000}, "max_input_tokens": 100000},
+			wantInput:   200000,
+			wantContext: 0,
+		},
+		{
+			name:        "no-cap",
+			item:        map[string]any{"id": "no-cap", "limit": map[string]any{"context": 131072}},
+			wantInput:   0,
+			wantContext: 131072,
+		},
+		{
+			name:        "malformed-cap",
+			item:        map[string]any{"id": "malformed-cap", "limit": map[string]any{"context": 131072, "input": -1}, "max_input_tokens": "lots"},
+			wantInput:   0,
+			wantContext: 131072,
+		},
+	}
+
+	items := make([]map[string]any, 0, len(cases))
+	for _, tc := range cases {
+		items = append(items, tc.item)
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"object": "list", "data": items})
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	settings := catalog.Settings{
+		Endpoints: map[string]catalog.EndpointSettings{
+			"gateway": {Endpoint: server.URL + "/v1"},
+		},
+	}
+	stateDir := t.TempDir()
+	c := catalog.New(catalog.Options{Settings: settings, StateDir: stateDir})
+	if err := c.Refresh(context.Background()); err != nil {
+		t.Fatalf("the refresh: %v", err)
+	}
+	cached := catalog.New(catalog.Options{Settings: settings, StateDir: stateDir, Cached: true})
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			for label, cat := range map[string]*catalog.Catalog{"the probe": c, "the cache": cached} {
+				model, err := cat.Resolve("gateway/" + tc.name)
+				if err != nil {
+					t.Fatalf("%s: the model: %v", label, err)
+				}
+				if model.InputLimit != tc.wantInput || model.ContextLimit != tc.wantContext {
+					t.Errorf("%s: the limits are %d input / %d context, want %d / %d", label, model.InputLimit, model.ContextLimit, tc.wantInput, tc.wantContext)
+				}
+			}
+		})
+	}
+
+	explained, fields, err := c.Explain("gateway/opencode")
+	if err != nil {
+		t.Fatalf("explaining the model: %v", err)
+	}
+	if explained.InputLimit != 272000 {
+		t.Fatalf("the explained input limit is %d, want 272000", explained.InputLimit)
+	}
+	var found bool
+	for _, field := range fields {
+		if field.Field == "input_limit" {
+			found = true
+			if field.Value != "272000" || field.Layer != catalog.LayerDiscovery {
+				t.Errorf("the input_limit row is %q from %q, want 272000 from discovery", field.Value, field.Layer)
+			}
+		}
+	}
+	if !found {
+		t.Error("the explanation has no input_limit row")
+	}
+}
+
 // TestAMalformedLimitCostsOnlyThatLimit covers a gateway that writes a token
 // budget in a form the plain integer does not take. A whole float, an
 // exponent and a numeric string read as the number they spell. A negative,

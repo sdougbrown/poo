@@ -66,13 +66,16 @@ type ToolCallSummary struct {
 type ContextBudget struct {
 	// ContextLimit is the model's context window, in tokens.
 	ContextLimit int
+	// InputLimit is the largest prompt the endpoint accepts, in tokens.
+	// Zero means no cap beyond the window.
+	InputLimit int
 	// EstimatedInput is the estimated number of prompt tokens of the
 	// next request.
 	EstimatedInput int
-	// NoticeRatio is the share of the window at which the model is told
-	// that the context is filling up.
+	// NoticeRatio is the share of the prompt limit at which the model is
+	// told that the context is filling up.
 	NoticeRatio float64
-	// HardRatio is the share of the window at which the run stops.
+	// HardRatio is the share of the prompt limit at which the run stops.
 	HardRatio float64
 	// CharsPerToken is the calibrated characters-per-token ratio.
 	CharsPerToken float64
@@ -91,17 +94,25 @@ type ContextBudget struct {
 }
 
 // Reached reports that the estimated input is at or above the share of
-// the window the ratio names, and that the run has asked the model
+// the prompt limit the ratio names, and that the run has asked the model
 // something.
 //
 // It is the trigger every compaction strategy acts on: a strategy picks
 // the ratio, and the rule that turns a ratio into a decision lives here,
 // where the budget does.
 func (b ContextBudget) Reached(ratio float64) bool {
-	if b.Turns < 1 || b.ContextLimit <= 0 {
+	limit := b.PromptLimit()
+	if b.Turns < 1 || limit <= 0 {
 		return false
 	}
-	return float64(b.EstimatedInput) >= ratio*float64(b.ContextLimit)
+	return float64(b.EstimatedInput) >= ratio*float64(limit)
+}
+
+// PromptLimit is the largest prompt the next request may carry: the smaller
+// of the window and the endpoint's input cap, ignoring the one that is
+// unknown.
+func (b ContextBudget) PromptLimit() int {
+	return PromptLimitOf(b.ContextLimit, b.InputLimit)
 }
 
 // OutputRoomShort reports that the room the window leaves after the

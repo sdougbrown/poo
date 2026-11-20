@@ -2,9 +2,9 @@
 // Cap names a bound the code truncates with; Max names the constant bound
 // of a Cap.
 //
-// A tool's output is capped relative to the model's context window: the
-// cap is a fraction of the window in characters, and never above a fixed
-// maximum. The fractions and the maximums are here; the caller supplies
+// A tool's output is capped relative to a token limit the caller names, the
+// prompt limit for the settings that size it: the cap is a fraction of that
+// limit in characters, and never above a fixed maximum. The fractions and the maximums are here; the caller supplies
 // the characters-per-token scale, so the one estimate lives with the
 // session's estimator (poo.CharsPerToken) and a recalibration moves
 // every consumer.

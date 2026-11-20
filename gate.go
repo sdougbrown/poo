@@ -110,8 +110,8 @@ requestGateLoop:
 	if s.overHardLimit() {
 		return requestGateResult{candidates: []candidate{newCandidate(ReasonContextExhausted, SettleDetail{
 			Source: "hard_limit",
-			Text: fmt.Sprintf("the estimated input of %d tokens is at or above %d%% of the %d-token window",
-				s.estimatedInput(), int(s.opts.HardRatio*100), s.opts.Model.ContextLimit),
+			Text: fmt.Sprintf("the estimated input of %d tokens is at or above %d%% of the %d-token prompt limit",
+				s.estimatedInput(), int(s.opts.HardRatio*100), s.opts.Model.PromptLimit()),
 		})}}
 	}
 
@@ -134,9 +134,9 @@ requestGateLoop:
 }
 
 // overHardLimit reports that the estimated input is at or above the hard
-// ratio of the context window.
+// ratio of the prompt limit.
 func (s *Session) overHardLimit() bool {
-	limit := s.opts.Model.ContextLimit
+	limit := s.opts.Model.PromptLimit()
 	if limit <= 0 {
 		return false
 	}
@@ -144,12 +144,12 @@ func (s *Session) overHardLimit() bool {
 	return float64(estimated) >= s.opts.HardRatio*float64(limit)
 }
 
-// maybeNotice tells the model that the context window is filling up.
+// maybeNotice tells the model that the prompt limit is filling up.
 //
 // The notice fires at most once per run, and it fires again in a later
 // run only if the estimate has dropped back below the notice ratio.
 func (s *Session) maybeNotice(run *runState) {
-	limit := s.opts.Model.ContextLimit
+	limit := s.opts.Model.PromptLimit()
 	if limit <= 0 {
 		return
 	}
@@ -173,7 +173,7 @@ func (s *Session) maybeNotice(run *runState) {
 	// The ratio in the model's notice is the configured one: a
 	// consumer that fires the notice at 60% does not tell the model
 	// the window is ~80% used.
-	msg := NewTextMessage(RoleUser, fmt.Sprintf("[Context notice: ~%d%% of the context window used. Prefer narrow reads; finish or report soon.]", int(s.opts.NoticeRatio*100)))
+	msg := NewTextMessage(RoleUser, fmt.Sprintf("[Context notice: ~%d%% of the context limit used. Prefer narrow reads; finish or report soon.]", int(s.opts.NoticeRatio*100)))
 	msg.Origin = OriginNotice
 	s.appendMessages(msg)
 	if err := s.write(run.ctx, &MessageRecord{

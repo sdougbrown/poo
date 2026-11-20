@@ -41,6 +41,9 @@ type Discovered struct {
 	ModelID string `json:"model_id"`
 	// ContextLimit is the model's context window. Zero means unknown.
 	ContextLimit int `json:"context_limit,omitempty"`
+	// InputLimit is the largest prompt the endpoint accepts. Zero means
+	// unknown.
+	InputLimit int `json:"input_limit,omitempty"`
 	// MaxOutput is the most tokens the model writes in one response. Zero
 	// means unknown.
 	MaxOutput int `json:"max_output,omitempty"`
@@ -296,6 +299,9 @@ func (c *Catalog) probeEndpoint(ctx context.Context, endpoint Endpoint, modelIDs
 		if model.ContextLimit == 0 {
 			model.ContextLimit = item.ContextLimit
 		}
+		if model.InputLimit == 0 {
+			model.InputLimit = item.InputLimit
+		}
 		if model.MaxOutput == 0 {
 			model.MaxOutput = item.MaxOutput
 		}
@@ -401,8 +407,8 @@ func (n *tokenCount) UnmarshalJSON(data []byte) error {
 // there: capabilities for the tools and the reasoning, modalities for the
 // inputs, and the token budgets in whichever shape the gateway uses:
 //
-//   - an opencode limit object, {"limit":{"context":N,"output":N}};
-//   - LiteLLM's max_output_tokens;
+//   - an opencode limit object, {"limit":{"context":N,"input":N,"output":N}};
+//   - LiteLLM's max_input_tokens and max_output_tokens;
 //   - OpenRouter's context_length and top_provider, which carries its own
 //     context_length and max_completion_tokens;
 //   - vLLM's max_model_len.
@@ -410,9 +416,11 @@ func (n *tokenCount) UnmarshalJSON(data []byte) error {
 // The output limit is the first of limit.output, max_output_tokens and
 // top_provider.max_completion_tokens. The context limit is the first of
 // limit.context, context_length, top_provider.context_length and
-// max_model_len. A field the endpoint does not send stays unknown. A server that does not serve the
-// list answers with an error, and the probe reports that the shape is not
-// there.
+// max_model_len. The input limit is the largest prompt the endpoint takes,
+// which can be under the context: the first of limit.input and
+// max_input_tokens. A field the endpoint does not send stays unknown. A
+// server that does not serve the list answers with an error, and the probe
+// reports that the shape is not there.
 func (c *Catalog) probeOpenAI(ctx context.Context, client *http.Client, baseURL string) (map[string]Discovered, error) {
 	body, err := c.get(ctx, client, openAIBase(baseURL)+"/models")
 	if err != nil {
@@ -425,11 +433,13 @@ func (c *Catalog) probeOpenAI(ctx context.Context, client *http.Client, baseURL 
 		Data []struct {
 			ID              string     `json:"id"`
 			MaxModelLen     tokenCount `json:"max_model_len"`
+			MaxInputTokens  tokenCount `json:"max_input_tokens"`
 			MaxOutputTokens tokenCount `json:"max_output_tokens"`
 			ContextLength   tokenCount `json:"context_length"`
 			PrefixCaching   *bool      `json:"prefix_caching"`
 			Limit           struct {
 				Context tokenCount `json:"context"`
+				Input   tokenCount `json:"input"`
 				Output  tokenCount `json:"output"`
 			} `json:"limit"`
 			TopProvider struct {
@@ -460,6 +470,7 @@ func (c *Catalog) probeOpenAI(ctx context.Context, client *http.Client, baseURL 
 		reasoning := item.Capabilities.Reasoning.Effort
 		model := Discovered{
 			ModelID:     item.ID,
+			InputLimit:  int(cmp.Or(item.Limit.Input, item.MaxInputTokens)),
 			MaxOutput:   int(cmp.Or(item.Limit.Output, item.MaxOutputTokens, item.TopProvider.MaxCompletionTokens)),
 			PrefixCache: item.PrefixCaching,
 			Inputs:      modalities(item.Modalities.Input),
@@ -622,6 +633,7 @@ func discoveredLayer(model Discovered, endpointURL string) poo.ModelInfo {
 		Endpoint:        endpointURL,
 		ModelID:         model.ModelID,
 		ContextLimit:    model.ContextLimit,
+		InputLimit:      model.InputLimit,
 		MaxOutput:       model.MaxOutput,
 		PrefixCache:     model.PrefixCache,
 		Tools:           poo.ToolCalling{Mode: model.Tools},

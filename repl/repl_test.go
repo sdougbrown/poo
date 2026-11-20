@@ -190,7 +190,7 @@ func (s *fakeServer) waitCancels(t *testing.T, want int) []string {
 }
 
 func TestUsageUpdatesTheStatus(t *testing.T) {
-	m := &machine{status: &status{contextLimit: 262144}}
+	m := &machine{status: &status{promptLimit: 262144}}
 	m.event(protocol.Event{Type: "usage", Payload: map[string]any{"run_id": "r1", "input_tokens": 12300}}, "r1", &runState{})
 	if line := m.status.line(); !strings.Contains(line, "ctx 12.3k/262.1k") {
 		t.Fatalf("the statusline lacks the run's usage: %s", line)
@@ -204,7 +204,7 @@ func TestUsageUpdatesTheStatus(t *testing.T) {
 // the settle leaves it alone.
 func TestTheSettleDoesNotStealTheStatusline(t *testing.T) {
 	var out bytes.Buffer
-	m := &machine{status: &status{contextLimit: 262144}, r: newRenderer(&out)}
+	m := &machine{status: &status{promptLimit: 262144}, r: newRenderer(&out)}
 	m.event(protocol.Event{Type: "usage", Payload: map[string]any{"run_id": "r1", "input_tokens": 12300}}, "r1", &runState{})
 	m.event(protocol.Event{
 		Type: "run.settled",
@@ -223,7 +223,7 @@ func TestTheSettleDoesNotStealTheStatusline(t *testing.T) {
 // count is not the conversation's fill.
 func TestAnotherRunsUsageLeavesTheStatuslineAlone(t *testing.T) {
 	var out bytes.Buffer
-	m := &machine{status: &status{contextLimit: 262144}, r: newRenderer(&out)}
+	m := &machine{status: &status{promptLimit: 262144}, r: newRenderer(&out)}
 	m.event(protocol.Event{Type: "usage", Payload: map[string]any{"run_id": "r1", "input_tokens": 12300}}, "r1", &runState{})
 	m.event(protocol.Event{Type: "usage", Payload: map[string]any{"run_id": "job-7", "input_tokens": 99000}}, "r1", &runState{})
 	if line := m.status.line(); !strings.Contains(line, "ctx 12.3k/262.1k") {
@@ -808,6 +808,21 @@ func TestAModelSwitchTakesTheNewModelAndItsWindow(t *testing.T) {
 	defer server.mu.Unlock()
 	if len(server.switches) != 1 || server.switches[0] != "qwen" {
 		t.Errorf("the server got the switches %v, want one to qwen", server.switches)
+	}
+}
+
+// TestTheStatuslineBoundsTheFillByTheInputCap covers an endpoint that takes a
+// smaller prompt than its window: the hard stop and the compaction measure
+// against the prompt the endpoint accepts, so the line shows that bound, not
+// the window's whole 400k.
+func TestTheStatuslineBoundsTheFillByTheInputCap(t *testing.T) {
+	server := &fakeServer{t: t, models: []fakeModel{
+		{name: "gemma4", modelID: "gemma4", window: 400000, input: 272000, levels: []string{"off", "low"}},
+	}}
+	out, _ := startReplServer(t, "say hi\n/quit\n", server)
+
+	if line := ansi.Strip(out); !strings.Contains(line, "ctx 12.3k/272.0k") {
+		t.Errorf("the statusline does not bound the fill by the 272000-token input cap:\n%s", out)
 	}
 }
 

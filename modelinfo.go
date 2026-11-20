@@ -32,6 +32,9 @@ type ModelInfo struct {
 	Inputs []Modality `json:"inputs,omitempty"`
 	// ContextLimit is the model's context window in tokens.
 	ContextLimit int `json:"context_limit,omitempty"`
+	// InputLimit is the largest prompt the endpoint accepts, in tokens. Zero
+	// means the endpoint takes a prompt as large as the window.
+	InputLimit int `json:"input_limit,omitempty"`
 	// MaxOutput is the most tokens the model writes in one response. Zero
 	// means unknown, and the computed max_tokens is then capped at
 	// DefaultMaxOutputFor the context window, never left to the

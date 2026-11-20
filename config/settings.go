@@ -172,6 +172,9 @@ type Model struct {
 	Inputs []string `json:"inputs,omitempty"`
 	// ContextLimit is the model's context window.
 	ContextLimit int `json:"context_limit,omitempty"`
+	// InputLimit is the largest prompt the endpoint accepts, for a model
+	// whose endpoint takes less than its window.
+	InputLimit int `json:"input_limit,omitempty"`
 	// MaxOutput is the most tokens the model writes in one response.
 	MaxOutput int `json:"max_output,omitempty"`
 	// Reasoning is how the model's reasoning is controlled.
@@ -299,10 +302,11 @@ type PromptSettings struct {
 
 // Context are the context window's settings.
 type Context struct {
-	// NoticeRatio is the share of the window at which the model is
-	// told that the context is filling up.
+	// NoticeRatio is the share of the prompt limit at which the model
+	// is told that the context is filling up.
 	NoticeRatio *float64 `json:"notice_ratio,omitempty"`
-	// HardRatio is the share of the window at which the run stops.
+	// HardRatio is the share of the prompt limit at which the run
+	// stops.
 	HardRatio *float64 `json:"hard_ratio,omitempty"`
 	// Strategy is how the view is compacted: summary, handoff, native or
 	// none.
@@ -315,7 +319,8 @@ type Context struct {
 
 // Handoff are the handoff strategy's settings.
 type Handoff struct {
-	// Ratio is the share of the window at which the handoff happens.
+	// Ratio is the share of the prompt limit at which the handoff
+	// happens.
 	Ratio *float64 `json:"ratio,omitempty"`
 	// MaxTokens is the handoff's configured limit, in tokens.
 	MaxTokens *int `json:"max_tokens,omitempty"`
@@ -323,7 +328,8 @@ type Handoff struct {
 
 // Summary are the summary strategy's settings.
 type Summary struct {
-	// Ratio is the share of the window at which the view is summarized.
+	// Ratio is the share of the prompt limit at which the view is
+	// summarized.
 	Ratio *float64 `json:"ratio,omitempty"`
 	// KeepRecentTokens is how much of the newest history stays verbatim.
 	KeepRecentTokens *int `json:"keep_recent_tokens,omitempty"`

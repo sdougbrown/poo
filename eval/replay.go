@@ -202,6 +202,10 @@ func Replay(path string, opts ReplayOptions) (*ReplayResult, error) {
 	if contextLimit <= 0 {
 		contextLimit = DefaultReplayContextLimit
 	}
+	// The cap follows the window: the recorded role names the largest
+	// prompt its endpoint took, and a replay that dropped it would bound
+	// the prompt by the window alone.
+	inputLimit := log.InputLimit()
 	maxTurns := opts.MaxTurns
 	if maxTurns <= 0 {
 		maxTurns = log.SettleTurns()
@@ -232,6 +236,7 @@ func Replay(path string, opts ReplayOptions) (*ReplayResult, error) {
 			ModelID:      "replay",
 			API:          poo.APIChatCompletions,
 			ContextLimit: contextLimit,
+			InputLimit:   inputLimit,
 			// The replay model applies the provider windows the recording
 			// holds, so it declares the operation a window needs.
 			Ops: []poo.Op{poo.OpChat, poo.OpCompact},

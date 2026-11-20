@@ -76,6 +76,44 @@ func TestTheNoticeFiresOncePerRun(t *testing.T) {
 	}
 }
 
+// TestTheNoticeMeasuresTheInputCap covers an endpoint that takes a smaller
+// prompt than its window: the notice fires at the ratio of the prompt limit,
+// so a view that is over half of the 12000-token input cap and under half of
+// the 40000-token window is noticed.
+func TestTheNoticeMeasuresTheInputCap(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{
+			calls: []poo.ToolCall{{
+				CallID:    "call_1",
+				Name:      "echo",
+				Arguments: []byte(`{"text":"hello"}`),
+			}},
+			usage: &poo.UsageReport{InputTokens: 8000},
+		},
+		{text: "the answer"},
+	})
+	sink := &recordingSink{}
+	tool := &echoTool{result: "echoed"}
+
+	opts := testOptions(t, tr, tool, sink)
+	opts.Model.ContextLimit = 40000
+	opts.Model.InputLimit = 12000
+	opts.NoticeRatio = 0.5
+
+	s := newTestSession(t, opts)
+	runSession(t, s, "do the thing")
+
+	notices := 0
+	for _, ev := range s.Events() {
+		if ev.Name == poo.EventContextNotice {
+			notices++
+		}
+	}
+	if notices != 1 {
+		t.Errorf("the run emitted %d context notices, want 1: the 8000-token estimate is over half of the 12000-token input cap", notices)
+	}
+}
+
 // TestTheNoticeRearmsAfterTheUsageDrops covers the other half of the
 // rule: the notice fires again in a later run only if the usage has
 // dropped back below the notice ratio.
@@ -656,5 +694,80 @@ func TestMaxDurationCoversTheBeforeRunHook(t *testing.T) {
 	_, _ = s.Wait(context.Background())
 	if !settled {
 		t.Error("MaxDuration=10ms did not settle a blocked BeforeRun within 60ms")
+	}
+}
+
+// TestThePromptLimitIsTheSmallerBoundOfTheWindowAndTheInputCap covers the one
+// rule every prompt-side check reads: an absent bound is no bound.
+func TestThePromptLimitIsTheSmallerBoundOfTheWindowAndTheInputCap(t *testing.T) {
+	for _, test := range []struct {
+		name          string
+		window, input int
+		want          int
+	}{
+		{"no cap", 400000, 0, 400000},
+		{"a cap under the window", 400000, 272000, 272000},
+		{"a cap over the window", 100000, 272000, 100000},
+		{"no window", 0, 272000, 272000},
+		{"neither", 0, 0, 0},
+	} {
+		info := poo.ModelInfo{ContextLimit: test.window, InputLimit: test.input}
+		if got := info.PromptLimit(); got != test.want {
+			t.Errorf("%s: the model's prompt limit is %d, want %d", test.name, got, test.want)
+		}
+		budget := poo.ContextBudget{ContextLimit: test.window, InputLimit: test.input}
+		if got := budget.PromptLimit(); got != test.want {
+			t.Errorf("%s: the budget's prompt limit is %d, want %d", test.name, got, test.want)
+		}
+	}
+}
+
+// TestAnInputCapSettlesTheHardLimitBeforeTheWindow covers the hard stop on
+// an endpoint that takes a smaller prompt than its window: the estimate is
+// far under the hard ratio of the window and over the hard ratio of the cap.
+func TestAnInputCapSettlesTheHardLimitBeforeTheWindow(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{{CallID: "call_1", Name: "echo", Arguments: []byte(`{"text":"hello"}`)}}},
+		{text: "the answer"},
+	})
+	sink := &recordingSink{}
+	tool := &echoTool{result: strings.Repeat("x", 40000)}
+
+	opts := testOptions(t, tr, tool, sink)
+	opts.Model.ContextLimit = 40000
+	opts.Model.InputLimit = 12000
+	opts.HardRatio = 0.5
+
+	s := newTestSession(t, opts)
+	res := runSession(t, s, "do the thing")
+
+	if res.Reason != poo.ReasonContextExhausted {
+		t.Fatalf("the run settled %q, want context_exhausted", res.Reason)
+	}
+	if res.Detail.Source != "hard_limit" {
+		t.Errorf("the settle source is %q, want hard_limit", res.Detail.Source)
+	}
+}
+
+// TestAnInputCapLeavesTheOutputRoomToTheWindow covers max_tokens: the cap
+// bounds the prompt, and the answer is bounded by the window the prompt
+// leaves.
+func TestAnInputCapLeavesTheOutputRoomToTheWindow(t *testing.T) {
+	tr := scripted([]fakeResponse{{text: "the answer"}})
+	opts := testOptions(t, tr, &echoTool{}, &recordingSink{})
+	opts.Model.ContextLimit = 20000
+	opts.Model.InputLimit = 5000
+	opts.Model.MaxOutput = 100000
+
+	s := newTestSession(t, opts)
+	runSession(t, s, "hello")
+
+	reqs := tr.Requests()
+	if len(reqs) != 1 {
+		t.Fatalf("the transport got %d requests, want 1", len(reqs))
+	}
+	if reqs[0].MaxTokens <= opts.Model.InputLimit {
+		t.Errorf("the request's max_tokens is %d, want the room the %d-token window leaves, over the %d-token input cap",
+			reqs[0].MaxTokens, opts.Model.ContextLimit, opts.Model.InputLimit)
 	}
 }

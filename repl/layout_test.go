@@ -225,7 +225,7 @@ func TestAStatuslineWiderThanTheScreenClipsToTheRow(t *testing.T) {
 	l := aLayout(t, vt, 12, 12)
 	// The payload is the real dim-wrapped shape the statusline paints:
 	// the clip must not leave the terminal styling unbalanced.
-	s := &status{dir: "/home/me/Code/a-really-long-folder-name", model: "gemma4", contextLimit: 262144}
+	s := &status{dir: "/home/me/Code/a-really-long-folder-name", model: "gemma4", promptLimit: 262144}
 	s.setTokens(12300)
 	l.setStatus(s.line())
 	l.ensure(1)

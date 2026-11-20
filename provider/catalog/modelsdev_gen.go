@@ -52,6 +52,7 @@ var hostedModels = []hostedEntry{
 		Endpoint:     "https://api.openai.com/v1",
 		Env:          []string{"OPENAI_API_KEY"},
 		ContextLimit: 400000,
+		InputLimit:   272000,
 		MaxOutput:    128000,
 		Reasoning:    true,
 		ToolCall:     true,

@@ -240,6 +240,7 @@ func (s *fakeServer) line(line []byte) {
 				"name":             model.name,
 				"model_id":         model.modelID,
 				"context_limit":    model.window,
+				"input_limit":      model.input,
 				"reasoning_levels": model.levels,
 				"reasoning_mode":   model.mode,
 			})
@@ -344,6 +345,9 @@ type fakeModel struct {
 	modelID string
 	// window is the model's context limit in tokens.
 	window int
+	// input is the largest prompt the model's endpoint takes, in tokens.
+	// Zero says the endpoint takes the whole window.
+	input int
 	// levels are the reasoning levels the model takes, lowest first.
 	levels []string
 	// mode is how the model's reasoning is controlled, empty when the

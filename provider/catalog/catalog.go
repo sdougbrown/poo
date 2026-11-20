@@ -40,6 +40,7 @@ const (
 	fieldOps             = "ops"
 	fieldInputs          = "inputs"
 	fieldContextLimit    = "context_limit"
+	fieldInputLimit      = "input_limit"
 	fieldMaxOutput       = "max_output"
 	fieldSampling        = "sampling"
 	fieldPrefixCache     = "prefix_cache"
@@ -427,6 +428,7 @@ func (c *Catalog) Explain(name string) (poo.ModelInfo, []Explanation, error) {
 		{Field: fieldOps, Value: joinOps(info.Ops), Layer: source[fieldOps]},
 		{Field: fieldInputs, Value: joinInputs(info.Inputs), Layer: source[fieldInputs]},
 		{Field: fieldContextLimit, Value: itoa(info.ContextLimit), Layer: source[fieldContextLimit]},
+		{Field: fieldInputLimit, Value: itoa(info.InputLimit), Layer: source[fieldInputLimit]},
 		{Field: fieldMaxOutput, Value: itoa(info.MaxOutput), Layer: source[fieldMaxOutput]},
 		{Field: "sampling.temperature", Value: ftoa(info.Sampling.Temperature), Layer: source["sampling.temperature"]},
 		{Field: "sampling.top_p", Value: ftoa(info.Sampling.TopP), Layer: source["sampling.top_p"]},
@@ -674,6 +676,10 @@ func applyLayer(dst *poo.ModelInfo, source map[string]string, layer string, src 
 	if src.ContextLimit > 0 {
 		dst.ContextLimit = src.ContextLimit
 		source[fieldContextLimit] = layer
+	}
+	if src.InputLimit > 0 {
+		dst.InputLimit = src.InputLimit
+		source[fieldInputLimit] = layer
 	}
 	if src.MaxOutput > 0 {
 		dst.MaxOutput = src.MaxOutput

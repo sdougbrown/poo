@@ -713,6 +713,7 @@ func (f *Server) Models(ctx context.Context, refresh bool) ([]protocol.ModelInfo
 			Ops:             opNames(model.Ops),
 			Inputs:          modalityNames(model.Inputs),
 			ContextLimit:    model.ContextLimit,
+			InputLimit:      model.InputLimit,
 			MaxOutput:       model.MaxOutput,
 			ToolsMode:       string(model.Tools.Mode),
 			ReasoningLevels: model.ReasoningLevels,

@@ -565,3 +565,28 @@ func fieldOfBody(body map[string]any, field string) string {
 	}
 	return strings.TrimSpace(string(raw))
 }
+
+// TestTheSessionWarnsWhenTheViewDoesNotFitTheNewModelsInputCap covers the
+// check against an endpoint that takes a smaller prompt than its window: the
+// window would hold the view, and the input cap does not.
+func TestTheSessionWarnsWhenTheViewDoesNotFitTheNewModelsInputCap(t *testing.T) {
+	opts := testOptions(t, pootest.NewTransport(), &echoTool{}, &recordingSink{})
+	opts.Model.ContextLimit = 8000
+	opts.SystemPrompt = ""
+	s := newTestSession(t, opts, poo.WithSessionStart(&bigHistoryHook{}))
+
+	capped := chatModel("capped", 8000)
+	capped.InputLimit = 2000
+	outcome, err := s.SetModel(capped)
+	if err != nil {
+		t.Fatalf("switching the model: %v", err)
+	}
+	if len(outcome.Warnings) == 0 {
+		t.Fatal("the switch carried no warning for a view over the input cap")
+	}
+
+	result := runSession(t, s, "hello")
+	if result.Reason != poo.ReasonContextExhausted {
+		t.Errorf("the run settled %q, want context_exhausted", result.Reason)
+	}
+}

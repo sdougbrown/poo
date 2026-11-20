@@ -389,6 +389,39 @@ roles:
 	}
 }
 
+// TestAnInputLimitInTheSettingsReachesTheModel covers the key beside
+// context_limit: the settings declare the largest prompt an endpoint takes,
+// and the model the catalog resolves carries it with the window untouched.
+func TestAnInputLimitInTheSettingsReachesTheModel(t *testing.T) {
+	path := writeCodexSettings(t, t.TempDir(), `version: 1
+session:
+  mode: ephemeral
+endpoints:
+  home:
+    endpoint: http://home:4000/v1
+    skip_probe: true
+models:
+  home/gpt:
+    endpoint: home
+    model_id: gpt
+    context_limit: 400000
+    input_limit: 272000
+roles:
+  chat: home/gpt
+`)
+	settings, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("loading the settings: %v", err)
+	}
+	model := catalogModel(t, settings, "home/gpt")
+	if model.ContextLimit != 400000 || model.InputLimit != 272000 {
+		t.Errorf("the limits are %d window / %d input, want 400000 / 272000", model.ContextLimit, model.InputLimit)
+	}
+	if model.Source["input_limit"] != catalog.LayerSettings {
+		t.Errorf("the input limit comes from %q, want the settings", model.Source["input_limit"])
+	}
+}
+
 // TestABuiltinProviderNeedsTheAuthFileItReads covers the gate. A models file
 // on its own is a provider list, not a pi login, so pi's Codex models need
 // pi's auth.json beside it.

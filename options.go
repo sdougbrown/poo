@@ -199,11 +199,11 @@ func WithBudgets(maxTurns, maxRunTokens int, maxDuration time.Duration) Option {
 	}
 }
 
-// WithContextRatios sets the context window's ratios.
+// WithContextRatios sets the prompt's ratios.
 //
-// The notice ratio is the share of the window at which the model is
-// told that the context is filling up, and the hard ratio is the share
-// at which the run stops.
+// The notice ratio is the share of the prompt limit at which the model
+// is told that the context is filling up, and the hard ratio is the
+// share at which the run stops.
 func WithContextRatios(notice, hard float64) Option {
 	return func(opts *Options) {
 		opts.NoticeRatio = notice

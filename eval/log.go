@@ -31,6 +31,11 @@ type LogRecord struct {
 	WorkingDir   string `json:"working_dir"`
 	ContextLimit int    `json:"context_limit"`
 	ToolsMode    string `json:"tools_mode"`
+	// Roles are the models the session ran with. The runner reads the
+	// chat model's limits from it.
+	Roles struct {
+		Chat *poo.ModelInfo `json:"chat"`
+	} `json:"roles"`
 
 	// The run's fields.
 	RunID   string `json:"run_id"`
@@ -262,6 +267,20 @@ func (l *Log) ContextLimit() int {
 	for _, r := range l.Records {
 		if r.Record == "session.created" && r.ContextLimit > 0 {
 			return r.ContextLimit
+		}
+	}
+	return 0
+}
+
+// InputLimit returns the largest prompt the session's chat model took, as
+// the chat role records it.
+//
+// A log written before the cap existed, or by a model whose endpoint takes
+// its whole window, names none, and the answer is zero.
+func (l *Log) InputLimit() int {
+	for _, r := range l.Records {
+		if r.Record == "session.created" && r.Roles.Chat != nil && r.Roles.Chat.InputLimit > 0 {
+			return r.Roles.Chat.InputLimit
 		}
 	}
 	return 0
