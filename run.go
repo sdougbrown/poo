@@ -1243,20 +1243,42 @@ func originForMode(mode InputMode) Origin {
 //
 // A request that the endpoint rejects because its default max_tokens is
 // above the endpoint's cap is sent once more under the lower cap, and
-// the session keeps the cap for the requests that follow.
+// the session keeps the cap for the requests that follow. The rejected
+// attempt says another one followed, and the resend's attempts carry on
+// the same request's numbering.
 func (s *Session) request(run *runState, turn int) (*response, Rendered, error) {
-	resp, rendered, sent, err := s.requestOnce(run, turn)
+	resp, rendered, sent, last, err := s.requestOnce(run, turn, 0)
+	reportLast := func(retried bool) {
+		if !last.ok {
+			return
+		}
+		last.attempt.Retried = retried
+		s.reportAttempt(run, turn, last.attempt)
+	}
 	var perr *ProviderError
 	if !errors.As(err, &perr) || perr.Kind != ProviderKindOutputLimit {
+		reportLast(false)
 		return resp, rendered, err
 	}
 	if resp != nil && (len(resp.content) > 0 || len(resp.calls) > 0) {
+		reportLast(false)
+		return resp, rendered, err
+	}
+	if s.interruptPending(run) || s.runWindingDown(run) {
+		reportLast(false)
 		return resp, rendered, err
 	}
 	if !s.learnOutputLimit(run, turn, perr, sent) {
+		reportLast(false)
 		return resp, rendered, err
 	}
-	resp, rendered, _, err = s.requestOnce(run, turn)
+	reportLast(true)
+	base := 0
+	if last.ok {
+		base = last.attempt.Number
+	}
+	resp, rendered, _, last, err = s.requestOnce(run, turn, base)
+	reportLast(false)
 	return resp, rendered, err
 }
 
@@ -1267,7 +1289,8 @@ func (s *Session) request(run *runState, turn int) (*response, Rendered, error) 
 // A declared limit is the user's word and is never replaced. The limit is
 // the endpoint's own number, or the smallest default when the rejection
 // named none. A limit that is not below what the request asked for would
-// get the same rejection, so it is not learned.
+// get the same rejection, so it is not learned. Nor is one under the
+// smallest output room a request may ask for: it is no limit at all.
 func (s *Session) learnOutputLimit(run *runState, turn int, perr *ProviderError, sent int) bool {
 	limit := perr.OutputLimit
 	if limit <= 0 {
@@ -1275,7 +1298,7 @@ func (s *Session) learnOutputLimit(run *runState, turn int, perr *ProviderError,
 	}
 	s.mu.Lock()
 	model := s.opts.Model
-	learn := model.MaxOutput <= 0 && limit < sent
+	learn := model.MaxOutput <= 0 && limit < sent && limit >= MinOutputTokens
 	if learn {
 		s.opts.Model.MaxOutput = limit
 	}
@@ -1305,8 +1328,13 @@ func (s *Session) learnOutputLimit(run *runState, turn int, perr *ProviderError,
 
 // requestOnce sends one provider request and reads the whole response.
 //
-// It also returns the max_tokens the request carried.
-func (s *Session) requestOnce(run *runState, turn int) (*response, Rendered, int, error) {
+// It also returns the max_tokens the request carried and the attempt that
+// ended the request without another one following it. The caller reports
+// that attempt once it knows whether a resend follows. Attempts that the
+// transport itself retried are reported as they arrive. attemptBase is
+// the number of attempts already reported for the request, so a resend's
+// attempts carry on the same numbering.
+func (s *Session) requestOnce(run *runState, turn int, attemptBase int) (*response, Rendered, int, pendingAttempt, error) {
 	// The model is read once, here: the request's body, its token limit and
 	// every model info-derived decision come from this one value, so a
 	// switch between runs cannot reach a request half way.
@@ -1325,6 +1353,7 @@ func (s *Session) requestOnce(run *runState, turn int) (*response, Rendered, int
 	actCtx, _ := s.startActivity(run)
 	defer s.endActivity(run)
 
+	var last pendingAttempt
 	reader, rendered, err := s.opts.Transport.Stream(actCtx, ChatRequest{
 		Model:     model.ModelID,
 		ModelInfo: model,
@@ -1333,10 +1362,17 @@ func (s *Session) requestOnce(run *runState, turn int) (*response, Rendered, int
 		MaxTokens: maxTokens,
 		SessionID: s.ID(),
 		Reasoning: reasoning,
-		OnAttempt: func(a Attempt) { s.reportAttempt(run, turn, a) },
+		OnAttempt: func(a Attempt) {
+			a.Number += attemptBase
+			if !a.Retried {
+				last = pendingAttempt{attempt: a, ok: true}
+				return
+			}
+			s.reportAttempt(run, turn, a)
+		},
 	})
 	if err != nil {
-		return nil, rendered, maxTokens, err
+		return nil, rendered, maxTokens, last, err
 	}
 	defer reader.Close()
 
@@ -1365,14 +1401,24 @@ func (s *Session) requestOnce(run *runState, turn int) (*response, Rendered, int
 			}
 		}
 	}
-	return resp, rendered, maxTokens, err
+	return resp, rendered, maxTokens, last, err
+}
+
+// pendingAttempt is the last attempt a request made: the one that ended
+// it without another attempt following within the same stream.
+type pendingAttempt struct {
+	// attempt is the attempt, numbered for its request.
+	attempt Attempt
+	// ok reports that the request reported an attempt at all.
+	ok bool
 }
 
 // reportAttempt writes the record of an attempt that failed.
 //
 // The attempts are written for the audit: a reader of the log sees what
-// the request tried and what every attempt failed with. The failure
-// that ended the request is in the run's settle record as well.
+// the request tried and what every attempt failed with. The failure that
+// ended the request is in the run's settle record as well, unless a
+// resend followed the attempt.
 func (s *Session) reportAttempt(run *runState, turn int, attempt Attempt) {
 	rec := &ProviderAttemptRecord{
 		RecordMeta: NewRecordMeta("provider.attempt"),

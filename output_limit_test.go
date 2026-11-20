@@ -1,12 +1,46 @@
 package poo_test
 
 import (
+	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/pootest"
 )
+
+// reportingTransport is a transport that reports the attempt a request
+// ends with, the way a wire transport does.
+type reportingTransport struct {
+	*pootest.Transport
+}
+
+func (t *reportingTransport) Stream(ctx context.Context, req poo.ChatRequest) (poo.StreamReader, poo.Rendered, error) {
+	reader, rendered, err := t.Transport.Stream(ctx, req)
+	if err != nil && req.OnAttempt != nil {
+		req.OnAttempt(poo.Attempt{Number: 1, Err: err})
+	}
+	return reader, rendered, err
+}
+
+// interruptAttemptTransport interrupts the run on its first request.
+type interruptAttemptTransport struct {
+	*pootest.Transport
+	session *poo.Session
+	t       *testing.T
+	once    sync.Once
+}
+
+func (tr *interruptAttemptTransport) Stream(ctx context.Context, req poo.ChatRequest) (poo.StreamReader, poo.Rendered, error) {
+	tr.once.Do(func() {
+		if _, err := tr.session.Send("stop", poo.Interrupt); err != nil {
+			tr.t.Errorf("interrupting the run: %v", err)
+		}
+	})
+	return tr.Transport.Stream(ctx, req)
+}
 
 // outputLimitRejection is the 400 a hosted API sends when max_tokens is
 // above its cap.
@@ -122,6 +156,106 @@ func TestADeclaredMaxOutputIsNotRetried(t *testing.T) {
 	}
 	if got := len(outputLimitEvents(s)); got != 0 {
 		t.Errorf("the session announced %d output limits, want 0", got)
+	}
+}
+
+// TestACapUnderTheMinimumIsNotLearned covers a rejection that names a cap
+// no request could ask for: it is not the endpoint's output limit, so the
+// request is not sent again and the model keeps no cap.
+func TestACapUnderTheMinimumIsNotLearned(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{err: outputLimitRejection(100)},
+		{text: "never"},
+	})
+	opts := testOptions(t, tr, &echoTool{}, &recordingSink{})
+	opts.Model.ContextLimit = 262144
+	s := newTestSession(t, opts)
+
+	res := runSession(t, s, "one")
+	if res.Reason != poo.ReasonProviderError {
+		t.Errorf("the run settled %q, want provider_error", res.Reason)
+	}
+	if got := len(tr.Requests()); got != 1 {
+		t.Errorf("the transport got %d requests, want 1", got)
+	}
+	if got := s.ChatModel().MaxOutput; got != 0 {
+		t.Errorf("the model's max_output is %d, want it unchanged at 0", got)
+	}
+	if got := len(outputLimitEvents(s)); got != 0 {
+		t.Errorf("the session announced %d output limits, want 0", got)
+	}
+}
+
+// TestAnInterruptBeforeTheResendKeepsTheFirstResult covers an interrupt
+// that arrives with the rejection: the request is not sent again, and the
+// interrupted turn follows instead of a learned cap.
+func TestAnInterruptBeforeTheResendKeepsTheFirstResult(t *testing.T) {
+	tr := &interruptAttemptTransport{Transport: scripted([]fakeResponse{
+		{err: outputLimitRejection(16384)},
+		{text: "never"},
+	}), t: t}
+	opts := testOptions(t, tr, &echoTool{}, &recordingSink{})
+	opts.Model.ContextLimit = 262144
+	s := newTestSession(t, opts)
+	tr.session = s
+
+	runSession(t, s, "one")
+	interrupted := false
+	for _, ev := range s.Events() {
+		if ev.Name == poo.EventTurnInterrupted {
+			interrupted = true
+		}
+	}
+	if !interrupted {
+		t.Error("the interrupt did not end the first turn")
+	}
+	if got := s.ChatModel().MaxOutput; got != 0 {
+		t.Errorf("the interrupted request learned a max_output of %d, want 0", got)
+	}
+}
+
+// TestARejectedAttemptAndItsResendShareOneRequestNumbering covers the
+// record contract: the rejected attempt says a retry followed it, and the
+// resend's attempts carry on the same request's numbering.
+func TestARejectedAttemptAndItsResendShareOneRequestNumbering(t *testing.T) {
+	tr := &reportingTransport{Transport: scripted([]fakeResponse{
+		{err: outputLimitRejection(16384)},
+		{err: outputLimitRejection(8192)},
+		{text: "never"},
+	})}
+	sink := &recordingSink{}
+	opts := testOptions(t, tr, &echoTool{}, sink)
+	opts.Model.ContextLimit = 262144
+	s := newTestSession(t, opts)
+
+	res := runSession(t, s, "one")
+	if res.Reason != poo.ReasonProviderError {
+		t.Errorf("the run settled %q, want provider_error", res.Reason)
+	}
+	records := attemptRecords(sink)
+	if len(records) != 2 {
+		t.Fatalf("the sink kept %d attempt records, want 2", len(records))
+	}
+	for i, rec := range records {
+		if rec.Request != 1 {
+			t.Errorf("the attempt %d names request %d, want 1", i+1, rec.Request)
+		}
+		if rec.Attempt != i+1 {
+			t.Errorf("the attempt is %d, want %d", rec.Attempt, i+1)
+		}
+	}
+	var retries int
+	for _, ev := range s.Events() {
+		if ev.Name != poo.EventProviderRetry {
+			continue
+		}
+		retries++
+		if ev.Payload["attempt"] != 1 {
+			t.Errorf("the retry names the attempt %v, want 1", ev.Payload["attempt"])
+		}
+	}
+	if retries != 1 {
+		t.Errorf("the session announced %d retries, want 1", retries)
 	}
 }
 
