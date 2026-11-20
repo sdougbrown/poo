@@ -48,7 +48,7 @@ roles:
 // operations.
 func TestTheModelsCommandListsTheCatalog(t *testing.T) {
 	dir := t.TempDir()
-	settings := theSettings(t, dir, "http://localhost:4000/v1")
+	settings := theSettings(t, dir, "http://127.0.0.1:1/v1")
 
 	out := captureStdout(t, func() {
 		if code := run([]string{"models", "--settings", settings}); code != 0 {
@@ -146,7 +146,7 @@ func TestTheModelsCommandAsksEvenWhenTheCacheIsFresh(t *testing.T) {
 // printed as JSON, and a consumer reads them.
 func TestTheModelsCommandPrintsJSON(t *testing.T) {
 	dir := t.TempDir()
-	settings := theSettings(t, dir, "http://localhost:4000/v1")
+	settings := theSettings(t, dir, "http://127.0.0.1:1/v1")
 
 	out := captureStdout(t, func() {
 		if code := run([]string{"models", "--settings", settings, "--json"}); code != 0 {
@@ -172,26 +172,40 @@ func TestTheModelsCommandPrintsJSON(t *testing.T) {
 // says which layer set each field.
 func TestTheModelsCommandExplainsAModel(t *testing.T) {
 	dir := t.TempDir()
-	settings := theSettings(t, dir, "http://localhost:4000/v1")
+	settings := theSettings(t, dir, "http://127.0.0.1:1/v1")
 
 	out := captureStdout(t, func() {
 		if code := run([]string{"models", "--settings", settings, "--explain", "test-model"}); code != 0 {
 			t.Errorf("poo models exited with %d", code)
 		}
 	})
-	if !strings.Contains(out, "model_id") {
-		t.Errorf("the explanation is %q, want it to name the fields", out)
+	// The layer a field carries is its row's last cell, so the
+	// assertion is per field: one row misattributed to another layer
+	// fails, however many rows still say settings.
+	for _, field := range []string{"model_id", "context_limit"} {
+		if layer, ok := layerFor(out, field); !ok || layer != "settings" {
+			t.Errorf("the explanation is %q, want %q set by the settings layer", out, field)
+		}
 	}
-	if !strings.Contains(out, "settings") {
-		t.Errorf("the explanation is %q, want it to name the layer", out)
+}
+
+// layerFor returns the layer the explanation's row for the field
+// names.
+func layerFor(out, field string) (string, bool) {
+	for _, line := range strings.Split(out, "\n") {
+		cells := strings.Fields(line)
+		if len(cells) == 3 && cells[0] == field {
+			return cells[2], true
+		}
 	}
+	return "", false
 }
 
 // TestThePruneWithoutAPolicyFails covers the opt-in rule: retention is
 // opt-in, and a prune with no policy says so and does nothing.
 func TestThePruneWithoutAPolicyFails(t *testing.T) {
 	dir := t.TempDir()
-	settings := theSettings(t, dir, "http://localhost:4000/v1")
+	settings := theSettings(t, dir, "http://127.0.0.1:1/v1")
 
 	code, stderr := runCLI(t, "sessions", "prune", "--settings", settings, "--session-dir", dir)
 	if code != 2 {
