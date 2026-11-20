@@ -26,8 +26,9 @@ func (s *Settings) importProfilesFiles(dir string) error {
 			return s.profilesFileError(err)
 		}
 		// The file's directory answers for the prompt files it names, so it
-		// is made absolute here. A resolved prompt file is one the settings'
-		// own resolution pass reads once and never joins again.
+		// is recorded here. The settings' own resolution pass reads it, and
+		// reports a failure under the same field a settings-declared
+		// profile's failure carries.
 		fileDir, err := filepath.Abs(filepath.Dir(path))
 		if err != nil {
 			return s.profilesFileError(err)
@@ -36,24 +37,29 @@ func (s *Settings) importProfilesFiles(dir string) error {
 		if err != nil {
 			return s.profilesFileError(err)
 		}
-		layer, err := profilesLayer(fileDir, document)
+		layer, err := profilesLayer(document)
 		if err != nil {
 			return s.profilesFileError(fmt.Errorf("%s: %w", path, err))
 		}
-		s.mergeProfiles(layer)
+		s.mergeProfiles(layer, fileDir)
 	}
 	return nil
 }
 
 // mergeProfiles folds a layer below the profiles already held: a name
-// the settings or an earlier file declared keeps its definition.
-func (s *Settings) mergeProfiles(layer map[string]ProfileSettings) {
+// the settings or an earlier file declared keeps its definition. fileDir
+// is the directory the definitions' relative paths answer to.
+func (s *Settings) mergeProfiles(layer map[string]ProfileSettings, fileDir string) {
 	if s.Profiles == nil {
 		s.Profiles = map[string]ProfileSettings{}
 	}
 	for name, definition := range layer {
 		if _, held := s.Profiles[name]; !held {
 			s.Profiles[name] = definition
+			if s.profilesFileDirs == nil {
+				s.profilesFileDirs = map[string]string{}
+			}
+			s.profilesFileDirs[name] = fileDir
 		}
 	}
 }
@@ -74,13 +80,12 @@ type profilesFile struct {
 }
 
 // profilesLayer reads a profiles file and returns the definitions it
-// declares. fileDir is the absolute directory the file's prompt files
-// answer to.
+// declares.
 //
 // A file that declares nothing is refused rather than read as an empty
 // layer. A profiles file that imports halfway is worse than one that
 // says what is wrong with it.
-func profilesLayer(fileDir string, document []byte) (map[string]ProfileSettings, error) {
+func profilesLayer(document []byte) (map[string]ProfileSettings, error) {
 	var file profilesFile
 	decoder := json.NewDecoder(bytes.NewReader(document))
 	decoder.DisallowUnknownFields()
@@ -89,17 +94,6 @@ func profilesLayer(fileDir string, document []byte) (map[string]ProfileSettings,
 	}
 	if len(file.Profiles) == 0 {
 		return nil, fmt.Errorf("the file declares no profiles")
-	}
-	for name, definition := range file.Profiles {
-		if definition.PromptFile == "" {
-			continue
-		}
-		resolved, err := resolveBeside(definition.PromptFile, fileDir)
-		if err != nil {
-			return nil, fmt.Errorf("the profile %s's prompt_file cannot be resolved: %w", name, err)
-		}
-		definition.PromptFile = resolved
-		file.Profiles[name] = definition
 	}
 	return file.Profiles, nil
 }

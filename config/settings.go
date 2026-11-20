@@ -109,6 +109,11 @@ type Settings struct {
 	// credentialPath is the resolved path of the file the Codex credential is
 	// read from, empty when a Settings built by hand named none.
 	credentialPath string
+	// profilesFileDirs are the directories the profiles files' own
+	// relative paths answer to, by the profile name a file declared. The
+	// settings' own profiles are not here: their prompt files answer to
+	// the settings file's directory.
+	profilesFileDirs map[string]string
 	// modelsFileLayer is the catalog layer the models file declares, below the
 	// settings: the built-in provider when a credential file is there, then what the
 	// models file names folded over it, in either shape. It is empty when neither
