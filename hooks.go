@@ -100,6 +100,10 @@ type ContextBudget struct {
 	// largest recent increase between two usage reports, or before there
 	// is one, the observation cap in tokens. It is zero unless the
 	// session measures turn growth.
+	//
+	// A restored session does not rebuild the tracker: the growth falls
+	// back to the observation cap until two of the session's own reports
+	// arrive.
 	TurnGrowth int
 	// Turns is the number of provider requests the run has made.
 	//
