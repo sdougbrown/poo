@@ -136,9 +136,10 @@ type machine struct {
 	catalog map[string]protocol.ModelInfo
 
 	// gate asks the reader for the next line, and lines carries what
-	// it read. One goroutine owns the input for the whole session:
-	// the editor refuses a second reader, and the Escape that stops a
-	// run has to arrive while the run streams.
+	// it read. One goroutine owns the input for the whole session,
+	// and the gate keeps it to one read in flight — which is what
+	// lets the editor's close wait that one read out. The Escape
+	// that stops a run has to arrive while the run streams.
 	gate  chan struct{}
 	lines chan lineResult
 	// reading says a read is in flight. Only the main loop sets it.
@@ -198,7 +199,11 @@ type input interface {
 	prompt(p string)
 	// read reads one line. An end of input is io.EOF.
 	read() (string, error)
-	// close releases the terminal.
+	// close releases the input. It runs with a read possibly still
+	// blocked. An input that can abort the read must not return
+	// until it has left, for Run returns behind the close. One that
+	// cannot leaves its reader parked on its stream until the
+	// process leaves.
 	close()
 }
 

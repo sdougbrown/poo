@@ -35,11 +35,29 @@ type editorInput struct {
 	promptText  string
 	framePrompt string
 	line        []rune
+
+	// readMu guards the read/close handshake. A session that ends
+	// while the editor holds a read must not leave its goroutine in
+	// the terminal. Run returns behind close, and whatever tears the
+	// terminal down after — a test closing its pty — races a reader
+	// still inside. readHeld reports the one read in flight; the
+	// session's gate is what keeps it to one. closed reports that
+	// close has shut the read gate. close aborts the held read and
+	// waits until it has left; a read that arrives after close is the
+	// interrupt, without entering the terminal at all. raceHooks holds
+	// the seams the handshake is tested at, installed by
+	// SetEditorRaceHooks; readMu guards the pointer.
+	readMu    sync.Mutex
+	readCond  *sync.Cond
+	readHeld  bool
+	closed    bool
+	raceHooks *editorRaceHooks
 }
 
 // newEditor builds the line editor for the session.
 func newEditor(m *machine) *editorInput {
 	i := &editorInput{m: m, promptText: promptMark, framePrompt: promptMark}
+	i.readCond = sync.NewCond(&i.readMu)
 
 	sh := readline.NewShell()
 	i.rl = sh
@@ -233,20 +251,62 @@ func (i *editorInput) prompt(p string) {
 }
 
 // read reads one line, newlines inside a draft included. An end of
-// input is io.EOF; an interrupt is readline.ErrInterrupt.
+// input is io.EOF; an interrupt is readline.ErrInterrupt. A close is
+// an interrupt for a read that starts after it; a read the close
+// aborts in flight returns the editor's own end, io.EOF. A read that
+// claimed the handshake before the close and enters the editor behind
+// the abort ends the same way: the abort latches in the editor's key
+// engine, so a read that starts behind it reads the end instead of
+// parking in the terminal.
 func (i *editorInput) read() (string, error) {
+	i.readMu.Lock()
+	if i.closed {
+		i.readMu.Unlock()
+		return "", readline.ErrInterrupt
+	}
+	i.readHeld = true
+	hooks := i.raceHooks
+	i.readMu.Unlock()
+	if hooks != nil && hooks.BeforeReadline != nil {
+		hooks.BeforeReadline()
+	}
 	line, err := i.rl.Readline()
+	if hooks != nil && hooks.AfterReadline != nil {
+		hooks.AfterReadline()
+	}
+	i.readMu.Lock()
+	i.readHeld = false
+	i.readCond.Broadcast()
+	i.readMu.Unlock()
 	return strings.TrimSuffix(line, "\n"), err
 }
 
 // close puts the terminal back. A read still blocked at session end
 // holds raw mode; the state captured at construction is what a cooked
-// terminal was. The blocked read is aborted first: without it, a session
-// that ended while the editor held the read leaves the reader parked on
-// the terminal, where it reads the next session's keystrokes.
+// terminal was. The blocked read is aborted first: without it, a
+// session that ended while the editor held the read leaves the
+// reader parked on the terminal, where it reads the next session's
+// keystrokes. The close is not done until that reader has left: Run
+// returns behind it, so a reader still in the terminal races
+// whatever tears the terminal down after the session. The wait has
+// no deadline — a reader that will not leave holds the exit with
+// it. The abort does not stop a read that has not entered yet from
+// entering, so the close also shuts the read gate, and a read that
+// starts after it is the interrupt. A second close finds the gate
+// shut and the reader gone, and puts the same captured terminal
+// back.
 func (i *editorInput) close() {
 	readline.SetRenderOutput(nil)
+	i.readMu.Lock()
+	i.closed = true
 	i.rl.Keys.Abort()
+	for i.readHeld {
+		if h := i.raceHooks; h != nil && h.BeforeWait != nil {
+			h.BeforeWait()
+		}
+		i.readCond.Wait()
+	}
+	i.readMu.Unlock()
 	if i.restore != nil {
 		_ = i.restore()
 	}
