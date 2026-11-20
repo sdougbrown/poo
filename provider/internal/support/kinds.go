@@ -168,6 +168,11 @@ var outputFields = []string{"max_tokens", "max_completion_tokens", "max_output_t
 
 // outputLimitPhrases are the words an endpoint uses to say the output-token
 // field is above what it allows.
+//
+// "Exceeds" alone is not one: "the input plus max_tokens exceeds the
+// model's limit" is a request that is too long, not an output limit, and a
+// cap read from it would be the wrong number. The phrase has to sit near the
+// field name for the same reason.
 var outputLimitPhrases = []string{
 	"too large",
 	"too high",
@@ -175,31 +180,55 @@ var outputLimitPhrases = []string{
 	"range of",
 	"at most",
 	"maximum allowed",
-	"less than or equal",
-	"exceeds",
+	"less than or equal to",
 }
+
+// outputLimitProximity is how many characters may separate the field name
+// from the phrase that calls it too large.
+const outputLimitProximity = 80
 
 // isOutputLimit reports whether a rejection says the request's output-token
 // field is above what the endpoint allows.
 //
 // Only a 400 or a 422 is the endpoint rejecting the request itself, and the
-// message has to name the output-token field and say it is too large. A
-// context overflow is checked before this and stays a context-length
-// failure, even when its message names max_tokens.
+// message has to name the output-token field and say it is too large near
+// the field's name. A context overflow is checked before this and stays a
+// context-length failure, even when its message names max_tokens.
 func isOutputLimit(status int, message string) bool {
 	if status != http.StatusBadRequest && status != http.StatusUnprocessableEntity {
 		return false
 	}
 	lower := strings.ToLower(message)
-	return containsAny(lower, outputFields) && containsAny(lower, outputLimitPhrases)
+	for _, field := range outputFields {
+		for _, phrase := range outputLimitPhrases {
+			if nearText(lower, field, phrase, outputLimitProximity) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
-// containsAny reports whether the text holds any of the needles.
-func containsAny(text string, needles []string) bool {
-	for _, needle := range needles {
-		if strings.Contains(text, needle) {
+// nearText reports whether two pieces of text are within distance
+// characters of each other.
+func nearText(text, a, b string, distance int) bool {
+	for start := 0; start <= len(text)-len(a); {
+		i := strings.Index(text[start:], a)
+		if i < 0 {
+			return false
+		}
+		i += start
+		lo, hi := i-distance, i+len(a)+distance
+		if lo < 0 {
+			lo = 0
+		}
+		if hi > len(text) {
+			hi = len(text)
+		}
+		if strings.Contains(text[lo:hi], b) {
 			return true
 		}
+		start = i + 1
 	}
 	return false
 }

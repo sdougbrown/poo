@@ -61,14 +61,15 @@ func TestTheFailureClassTheUnionAdded(t *testing.T) {
 	}
 }
 
-// TestAnOutputCapRejectionIsItsOwnKind covers the 400s a hosted API sends
-// when max_tokens is above its cap: the failure is an output_limit, and it
-// carries the largest value the message allows. A context overflow that
-// mentions max_tokens stays a context_length failure, and a 400 that is not
-// about the size of max_tokens stays an invalid request.
+// TestAnOutputCapRejectionIsItsOwnKind covers the 400s and 422s a hosted API
+// sends when max_tokens is above its cap: the failure is an output_limit, and
+// it carries the largest value the message allows. A context overflow that
+// mentions max_tokens stays a context_length failure, and a message that only
+// says the input plus max_tokens is too long is not an output limit at all.
 func TestAnOutputCapRejectionIsItsOwnKind(t *testing.T) {
 	cases := []struct {
 		name      string
+		status    int
 		message   string
 		wantKind  poo.ProviderKind
 		wantLimit int
@@ -104,9 +105,21 @@ func TestAnOutputCapRejectionIsItsOwnKind(t *testing.T) {
 			wantLimit: 4096,
 		},
 		{
+			name:      "a 422 that calls max_tokens too large",
+			status:    http.StatusUnprocessableEntity,
+			message:   "max_tokens is too large: 32768. This model supports at most 16384 completion tokens.",
+			wantKind:  poo.ProviderKindOutputLimit,
+			wantLimit: 16384,
+		},
+		{
 			name:     "a cap the message does not state",
 			message:  "max_tokens is too large for this model",
 			wantKind: poo.ProviderKindOutputLimit,
+		},
+		{
+			name:     "an input plus max_tokens that exceeds the model's limit",
+			message:  "This request's input plus max_tokens exceeds the model's limit",
+			wantKind: poo.ProviderKindInvalidRequest,
 		},
 		{
 			name:     "a context overflow that names max_tokens",
@@ -130,9 +143,13 @@ func TestAnOutputCapRejectionIsItsOwnKind(t *testing.T) {
 			if err != nil {
 				t.Fatalf("encoding the body: %v", err)
 			}
+			status := c.status
+			if status == 0 {
+				status = http.StatusBadRequest
+			}
 			resp := &http.Response{
-				StatusCode: http.StatusBadRequest,
-				Status:     "400 Bad Request",
+				StatusCode: status,
+				Status:     http.StatusText(status),
 				Header:     http.Header{},
 				Body:       io.NopCloser(bytes.NewReader(body)),
 			}
