@@ -61,7 +61,7 @@ const (
 	// LayerModelsFile is what the operator's models file declares.
 	LayerModelsFile = "models_file"
 	// LayerSettings is the user's own configuration.
-	LayerSettings = "settings"
+	LayerSettings = poo.LayerSettings
 	// LayerDefault is a value no layer set and the catalog filled in.
 	LayerDefault = "default"
 )

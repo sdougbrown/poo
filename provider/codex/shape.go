@@ -17,7 +17,8 @@ import (
 //
 // The endpoint refuses the fields the plain Responses API takes for tuning. It
 // rejects an output limit, a temperature and a top-p, so the body carries none
-// of them. The request's MaxTokens stays the core's business.
+// of them. The request's MaxTokens stays the core's business, and the
+// snapshot's own is zero: the body carried no output limit.
 
 // defaultInstructions is the instruction the request carries when the
 // history holds no system message.

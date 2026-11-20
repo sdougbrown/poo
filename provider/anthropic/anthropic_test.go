@@ -114,7 +114,7 @@ func TestTheMessagesRequestCarriesItsOwnShape(t *testing.T) {
 		APIKey:        "oc_sk_test",
 		SessionHeader: "x-opencode-session",
 	})
-	reader, _, err := tr.Stream(context.Background(), request("ses_one", msgs...))
+	reader, rendered, err := tr.Stream(context.Background(), request("ses_one", msgs...))
 	if err != nil {
 		t.Fatalf("starting the request: %v", err)
 	}
@@ -131,6 +131,9 @@ func TestTheMessagesRequestCarriesItsOwnShape(t *testing.T) {
 	}
 	if sent["max_tokens"] != float64(32) {
 		t.Errorf("the output limit is %v, want the request's", sent["max_tokens"])
+	}
+	if float64(rendered.MaxTokens) != sent["max_tokens"] {
+		t.Errorf("the snapshot's output limit is %d, want the body's %v", rendered.MaxTokens, sent["max_tokens"])
 	}
 	if sent["stream"] != true {
 		t.Errorf("the request does not stream: %v", sent)

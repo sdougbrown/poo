@@ -10,6 +10,9 @@ import (
 	"unicode/utf8"
 
 	"github.com/charmbracelet/glamour"
+	"github.com/charmbracelet/x/ansi"
+
+	"github.com/sdougbrown/poo/wire/protocol"
 )
 
 // TestAMessageRendersItsMarkdown covers the replies: a code fence
@@ -106,13 +109,48 @@ func TestAFailedResultReadsAsAFailure(t *testing.T) {
 func TestTheSettleNamesTheAccounting(t *testing.T) {
 	var out bytes.Buffer
 	r := newRenderer(&out)
-	r.settle("end_turn", 3, 12300, 1100)
+	r.settle("end_turn", 3, 12300, 1100, "")
 
 	rendered := out.String()
 	for _, want := range []string{"end_turn", "3 turn(s)", "12.3k in", "1.1k out"} {
 		if !strings.Contains(rendered, want) {
 			t.Errorf("the settle lacks %q:\n%s", want, rendered)
 		}
+	}
+}
+
+// TestATruncatedSettleCarriesItsExplanationAsANotice covers the settle
+// of a run that hit the output limit: the settle line stands as it is,
+// and the explanation is a warning under it. A settle that ended any
+// other way writes no warning, whatever its detail says.
+func TestATruncatedSettleCarriesItsExplanationAsANotice(t *testing.T) {
+	const why = "the response stopped at max_tokens 8192"
+	var out bytes.Buffer
+	r := newRenderer(&out)
+	r.settle(protocol.ReasonOutputTruncated, 1, 64300, 8200, why)
+
+	lines := strings.Split(strings.TrimRight(ansi.Strip(out.String()), "\n"), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("the settle wrote %d lines, want the settle and the notice:\n%s", len(lines), out.String())
+	}
+	if !strings.HasPrefix(lines[0], "✓ "+protocol.ReasonOutputTruncated+" · 1 turn(s)") {
+		t.Errorf("the settle line is %q", lines[0])
+	}
+	if lines[1] != "⚠ "+why {
+		t.Errorf("the notice is %q, want the warning with %q", lines[1], why)
+	}
+
+	out.Reset()
+	r.settle(protocol.ReasonOutputTruncated, 1, 64300, 8200, "stopped at \x1b[31mmodel\x1b]0;title\x07 id")
+	written := strings.NewReplacer(ansiDim, "", ansiYellow, "", ansiReset, "").Replace(out.String())
+	if strings.ContainsAny(written, "\x1b\x07") || !strings.Contains(written, "⚠ stopped at model id") {
+		t.Errorf("the notice let a model's escape sequence through:\n%q", out.String())
+	}
+
+	out.Reset()
+	r.settle("end_turn", 1, 1000, 100, why)
+	if strings.Contains(out.String(), why) {
+		t.Errorf("a settle that is not truncated carries the notice:\n%s", out.String())
 	}
 }
 

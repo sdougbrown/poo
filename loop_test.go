@@ -3,10 +3,12 @@ package poo_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/pootest"
 )
 
 func TestARunThatEndsOnItsOwnSettlesEndTurn(t *testing.T) {
@@ -228,6 +230,111 @@ func TestAFinishReasonOfLengthReachesBeforeSettle(t *testing.T) {
 	res := runSession(t, s, "do the thing")
 	if res.Reason != poo.ReasonOutputTruncated {
 		t.Errorf("the run settled %q, want output_truncated", res.Reason)
+	}
+}
+
+// unlimitedTransport renders every request without an output limit, the
+// way a transport for an endpoint that takes none does.
+type unlimitedTransport struct {
+	*pootest.Transport
+}
+
+func (t unlimitedTransport) Stream(ctx context.Context, req poo.ChatRequest) (poo.StreamReader, poo.Rendered, error) {
+	reader, rendered, err := t.Transport.Stream(ctx, req)
+	rendered.MaxTokens = 0
+	return reader, rendered, err
+}
+
+func TestATruncatedRunSaysWhichLimitItHit(t *testing.T) {
+	settingsModel := map[string]string{"model_id": poo.LayerSettings}
+	discoveredModel := map[string]string{"model_id": "discovery"}
+	tests := []struct {
+		name  string
+		setup func(m *poo.ModelInfo)
+		// unlimited makes the transport render the request with no
+		// output limit.
+		unlimited bool
+		// source is the settle's source.
+		source string
+		// want is the text the settle carries, built from the max_tokens
+		// the transport rendered.
+		want func(sent int) string
+	}{
+		{
+			name:   "the default for a settings model that declares no max_output",
+			setup:  func(m *poo.ModelInfo) { m.Source = settingsModel },
+			source: "output_truncated:default",
+			want: func(sent int) string {
+				return "the response stopped at max_tokens 8192, poo's default for a model with no max_output; set models.glm-flash.max_output to raise it"
+			},
+		},
+		{
+			name:   "the default for a model the settings do not declare",
+			setup:  func(m *poo.ModelInfo) { m.Source = discoveredModel },
+			source: "output_truncated:default",
+			want: func(sent int) string {
+				return "the response stopped at max_tokens 8192, poo's default for a model with no max_output; declare the model in settings with its endpoint, model_id and max_output to raise it"
+			},
+		},
+		{
+			name: "the model's own max_output",
+			setup: func(m *poo.ModelInfo) {
+				m.Source = settingsModel
+				m.MaxOutput = 512
+			},
+			source: "output_truncated:model",
+			want: func(sent int) string {
+				return "the response stopped at max_tokens 512, the model's max_output"
+			},
+		},
+		{
+			name: "the room the context window leaves",
+			setup: func(m *poo.ModelInfo) {
+				m.ContextLimit = 4096
+			},
+			source: "output_truncated:context",
+			want: func(sent int) string {
+				used := 4096 - sent - poo.OutputReserve
+				return fmt.Sprintf("the response stopped at max_tokens %d, all the room the context window had left (about %d of 4096 tokens in use)", sent, used)
+			},
+		},
+		{
+			name:      "an endpoint that takes no output limit",
+			setup:     func(m *poo.ModelInfo) { m.Source = settingsModel },
+			unlimited: true,
+			source:    "output_truncated:endpoint",
+			want: func(sent int) string {
+				return "the response stopped on the endpoint's own output limit; poo sends this endpoint none"
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := scripted([]fakeResponse{{text: "a truncated ans", finish: poo.FinishLength}})
+			opts := testOptions(t, tr, &echoTool{result: "echoed"}, &recordingSink{})
+			if tc.unlimited {
+				opts.Transport = unlimitedTransport{tr}
+			}
+			opts.Model.Name = "glm-flash"
+			opts.Model.ContextLimit = 262144
+			opts.Model.MaxOutput = 0
+			tc.setup(&opts.Model)
+
+			s := newTestSession(t, opts)
+			res := runSession(t, s, "a short prompt")
+			if res.Reason != poo.ReasonOutputTruncated {
+				t.Fatalf("the run settled %q, want output_truncated", res.Reason)
+			}
+			if res.Detail.Source != tc.source {
+				t.Errorf("the settle source is %q, want %q", res.Detail.Source, tc.source)
+			}
+			// The transport's own rendering is the limit the request
+			// carried: the explanation names what went out.
+			sent := tr.Rendered()[0].MaxTokens
+			if want := tc.want(sent); res.Detail.Text != want {
+				t.Errorf("the settle text is\n  %q\nwant\n  %q", res.Detail.Text, want)
+			}
+		})
 	}
 }
 

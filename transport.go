@@ -263,6 +263,13 @@ type Rendered struct {
 	// transport whose own model info names another must not disagree about
 	// the shape of a message.
 	Quirks []string
+	// MaxTokens is the output limit the body carried, and zero when it
+	// carried none.
+	//
+	// A transport for an endpoint that takes no output limit leaves it
+	// zero, and the endpoint's own limit is the one a truncated response
+	// hit.
+	MaxTokens int
 }
 
 // ChatTransport sends a chat request to a provider.

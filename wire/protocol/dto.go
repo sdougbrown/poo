@@ -519,6 +519,10 @@ type SettleUsage struct {
 	CacheReadTokens int `json:"cache_read_tokens,omitempty"`
 }
 
+// ReasonOutputTruncated is the settle reason of a run the provider stopped
+// on the output-token limit.
+const ReasonOutputTruncated = "output_truncated"
+
 // SettleDetail explains how a run settled.
 //
 // It is the detail object of the settle reasons: the source says what

@@ -138,6 +138,7 @@ func (t *Transport) Stream(ctx context.Context, req poo.ChatRequest) (poo.Stream
 		Messages:  len(req.Messages),
 		Quirks:    settings.info.Quirks,
 		SessionID: settings.sessionID,
+		MaxTokens: t.maxTokens(req, settings.info),
 	}
 
 	open := func(ctx context.Context) (support.Reader, error) {

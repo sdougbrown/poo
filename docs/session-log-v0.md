@@ -729,7 +729,10 @@ before the model finished, and both settle `cancelled`.
 | Source | Meaning |
 |---|---|
 | `end_turn` | The model stopped on its own. |
-| `output_truncated` | The provider stopped on the output-token limit. |
+| `output_truncated:default` | The provider stopped on the output-token limit, and the request carried poo's default (8192) because the model declares no `max_output`. The detail's text names the `max_tokens` the request carried and the setting that raises it. |
+| `output_truncated:model` | The provider stopped on the output-token limit, and the request carried the model's own `max_output`. |
+| `output_truncated:context` | The provider stopped on the output-token limit, and the request carried the room the context window had left, which was under the model's output limit. The detail's text gives the estimated prompt size and the window. |
+| `output_truncated:endpoint` | The provider stopped on the endpoint's own output limit: the request body carried no `max_tokens`, because the endpoint takes none. |
 | `max_turns` | The run hit its turn limit. |
 | `max_run_tokens` | The run hit its token budget. |
 | `max_duration` | The run hit its wall-clock budget. |

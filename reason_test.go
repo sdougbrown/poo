@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/wire/protocol"
 )
 
 // The v1 exit-code table: the codes the poo run CLI reports, one per
@@ -25,5 +26,20 @@ func TestExitCodeMapsTheV1Table(t *testing.T) {
 		if got := poo.ExitCode(c.reason); got != c.want {
 			t.Errorf("ExitCode(%q) is %d, want %d", c.reason, got, c.want)
 		}
+	}
+}
+
+// TestTheProtocolSettleReasonMatchesTheCore pins the truncation reason's
+// two copies to each other: the client shows the warning under a settle
+// it reads from the wire, so a core reason the wire spells differently is
+// a warning that never appears.
+//
+// The core may not import wire/protocol, which the dependency rules hold
+// the core to, so the two literals are kept apart and this test is what
+// keeps them together.
+func TestTheProtocolSettleReasonMatchesTheCore(t *testing.T) {
+	if poo.ReasonOutputTruncated != protocol.ReasonOutputTruncated {
+		t.Errorf("the core's reason is %q, the protocol's is %q",
+			poo.ReasonOutputTruncated, protocol.ReasonOutputTruncated)
 	}
 }

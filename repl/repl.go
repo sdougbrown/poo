@@ -1207,7 +1207,7 @@ func (m *machine) event(evt protocol.Event, runID string, state *runState) bool 
 			if detail.Usage != nil {
 				input, output = detail.Usage.InputTokens, detail.Usage.OutputTokens
 			}
-			m.r.settle(reason, state.turns, input, output)
+			m.r.settle(reason, state.turns, input, output, detail.Text)
 			m.reportUndelivered(detail.UndeliveredInput)
 			return true
 		}
