@@ -26,6 +26,7 @@ func filterEmit(ctx context.Context, io poo.FeedIO, name string, filter feed.Fil
 		Instructions: filter.Question,
 		Kind:         decide.Bool{True: "deliver the message", False: "do not deliver the message"},
 	}}
+	warned := false
 	return func(from, text string) error {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -35,6 +36,13 @@ func filterEmit(ctx context.Context, io poo.FeedIO, name string, filter feed.Fil
 		}
 		model := io.Decider()
 		if model == nil {
+			// A manifest that names a filter the session cannot run must
+			// not be silent about it. One warning per attempt: the feed's
+			// log names the feed, and every message still delivers.
+			if !warned {
+				warned = true
+				io.Log.Warn("the feed has a filter, but the session has no decision model; messages are delivered unfiltered")
+			}
 			return io.Emit(from, text)
 		}
 		state := map[string]string{"feed": name, "from": from, "text": text}

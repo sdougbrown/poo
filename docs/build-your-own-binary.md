@@ -339,7 +339,9 @@ logged session, the decision record still names the question and answer.
 
 An answer the filter cannot use leaves the message on the feed's normal
 delivery path. That covers a missing decider, a failed or invalid answer,
-invalid label mass, and a probability below the threshold. Messages whose
+invalid label mass, and a probability below the threshold. A session with no
+decision model warns once on the feed's log, after the first message, and
+delivers unfiltered from then on. Messages whose
 sender and text total more than 8 KiB are delivered unasked. One decision is
 bounded by a 1.5-second budget, and a decision that runs past it is
 undecidable. The feed waits for each answer before it reads the next message.

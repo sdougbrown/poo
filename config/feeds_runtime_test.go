@@ -114,6 +114,89 @@ func TestFeedFilterDropsOnlyAConfidentNo(t *testing.T) {
 	}
 }
 
+// warnCapture records the warn records a session's log dispatches.
+type warnCapture struct {
+	mu      sync.Mutex
+	records []slog.Record
+}
+
+func (c *warnCapture) Enabled(context.Context, slog.Level) bool { return true }
+
+func (c *warnCapture) Handle(_ context.Context, r slog.Record) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.records = append(c.records, r)
+	return nil
+}
+
+func (c *warnCapture) WithAttrs([]slog.Attr) slog.Handler { return c }
+
+func (c *warnCapture) WithGroup(string) slog.Handler { return c }
+
+// filterWarns returns the warns that name the missing decision model.
+func (c *warnCapture) filterWarns() []slog.Record {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var out []slog.Record
+	for _, r := range c.records {
+		if r.Level == slog.LevelWarn && strings.Contains(r.Message, "no decision model") {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// TestAFeedFilterWithoutADeciderWarnsOnceAndDelivers covers the signal: a
+// manifest filter the session cannot run is not silent, and every message
+// still delivers.
+func TestAFeedFilterWithoutADeciderWarnsOnceAndDelivers(t *testing.T) {
+	manifest := `{
+  "version": 1,
+  "feeds": {
+    "chat": {
+      "command": ["` + feedScript(t, "chat") + `"],
+      "on_idle": "wake",
+      "filter": {"question": "Does this message need attention?", "min_no_probability": 0.9}
+    }
+  }
+}`
+	path := filepath.Join(t.TempDir(), "feed.json")
+	if err := os.WriteFile(path, []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	settings, err := config.Parse([]byte(theFeedsSettings(path)), config.FormatYAML)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+	transport := pootest.NewTransport(pootest.Turn{Text: "ack"}, pootest.Turn{Text: "ack"})
+	sink := pootest.NewSink()
+	runtime.Options.Transport = transport
+	runtime.Options.Sink = sink
+	capture := &warnCapture{}
+	runtime.Options.Logger = slog.New(capture)
+	sess, err := poo.New(runtime.Options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sess.Close() })
+
+	// Both messages deliver: with no decider the filter fails open.
+	waitUntil(t, "the first message to reach the chat model", func() bool {
+		return theModelRead(transport, `<feed name="chat" from="alice">the first message</feed>`, poo.FeedOrigin("chat"))
+	})
+	waitUntil(t, "the second message to reach the chat model", func() bool {
+		return theModelRead(transport, `<feed name="chat">the second message</feed>`, poo.FeedOrigin("chat"))
+	})
+	// The missing decider is named once on the feed's log, not per message.
+	waitUntil(t, "the missing decider to be named", func() bool {
+		return len(capture.filterWarns()) >= 1
+	})
+	if got := capture.filterWarns(); len(got) != 1 {
+		t.Errorf("the feed warned %d times about the missing decider, want 1", len(got))
+	}
+}
+
 // The runtime's feeds: the manifest a settings file names is a command
 // the session runs, beside the session, for as long as the session is
 // open.
