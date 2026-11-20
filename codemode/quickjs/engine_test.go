@@ -94,6 +94,36 @@ func TestQuickJSRunawayStopsAndNextScriptRuns(t *testing.T) {
 	}
 }
 
+// TestGatherRefusesAnEntryItCannotRead mirrors the Starlark test of the
+// same name: a malformed batch fails the run before any call reaches the
+// seam, and the failure names the entry it could not read.
+func TestGatherRefusesAnEntryItCannotRead(t *testing.T) {
+	for _, test := range []struct{ script, want string }{
+		{`gather("read");`, "gather expects an array"},
+		{`gather(["read"]);`, "is not a [name, args] pair"},
+		{`gather([["read"]]);`, "is not a [name, args] pair"},
+		{`gather([[1, {}]]);`, "needs a tool name"},
+		{`gather([["", {}]]);`, "needs a tool name"},
+	} {
+		t.Run(test.script, func(t *testing.T) {
+			handed := 0
+			_, err := quickjs.New().Run(t.Context(), codemode.RunOptions{
+				Script: test.script,
+				Nested: nested(func(context.Context, []poo.NestedCall) ([]poo.NestedResult, error) {
+					handed++
+					return nil, nil
+				}),
+			})
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("run error = %v; want %q", err, test.want)
+			}
+			if handed != 0 {
+				t.Fatalf("the seam received %d batches", handed)
+			}
+		})
+	}
+}
+
 func TestQuickJSBoundsGuestExecution(t *testing.T) {
 	for _, test := range []struct {
 		name, script string
