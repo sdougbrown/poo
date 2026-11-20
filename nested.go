@@ -51,6 +51,18 @@ const NestedArgumentMaxBytes = 1 << 20
 // a session plans for. It is the largest observation the model ever sees.
 const defaultObservationCapChars = 30000
 
+// observationCapChars returns the cap on one observation, in characters: the
+// session's own setting, or the default when it sets none.
+//
+// The settings do not change while the session runs, so the helper reads the
+// same value with or without the session's lock.
+func (s *Session) observationCapChars() int {
+	if chars := s.opts.Settings.ObservationCapChars; chars > 0 {
+		return chars
+	}
+	return defaultObservationCapChars
+}
+
 // callParent returns the handle of the call that made the call with
 // the handle, or the empty string for a call the model made.
 func (s *Session) callParent(handle string) string {
@@ -76,11 +88,7 @@ const NestedElisionNote = "\n… %d more characters went to the calling tool"
 // to the session's observation cap, and the record's structured
 // payload stays whole.
 func (s *Session) nestedRecordText(text string) (string, int) {
-	limit := s.opts.Settings.ObservationCapChars
-	if limit <= 0 {
-		limit = defaultObservationCapChars
-	}
-	head, elided := cutRuneHead(text, limit)
+	head, elided := cutRuneHead(text, s.observationCapChars())
 	if elided == 0 {
 		return head, 0
 	}

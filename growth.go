@@ -105,10 +105,6 @@ func (s *Session) noteTurnInput(meta RecordMeta, usage *UsageReport, retried boo
 //
 // The caller holds the session's lock.
 func (s *Session) observationCapTokensLocked() int {
-	chars := s.opts.Settings.ObservationCapChars
-	if chars <= 0 {
-		chars = defaultObservationCapChars
-	}
 	// The cap is rounded up, so a cap of one character is still some growth.
-	return int(math.Ceil(float64(chars) / s.est.ratio()))
+	return int(math.Ceil(float64(s.observationCapChars()) / s.est.ratio()))
 }
