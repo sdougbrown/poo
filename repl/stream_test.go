@@ -332,15 +332,15 @@ func TestATruncatedRunsExplanationReachesTheScreenOverTheWire(t *testing.T) {
 		s.event("turn.started", map[string]any{"run_id": "r1", "turn": 1})
 		s.event("turn.ended", map[string]any{"run_id": "r1", "turn": 1})
 		s.event("run.settled", map[string]any{
-			"run_id": "r1", "reason": "output_truncated", "turns": 1,
-			"detail": map[string]any{"source": "output_truncated:default", "text": why},
+			"run_id": "r1", "reason": protocol.ReasonOutputTruncated, "turns": 1,
+			"detail": map[string]any{"source": protocol.ReasonOutputTruncated + ":default", "text": why},
 		})
 	}
 	out, _ := startReplServer(t, "think hard\n/quit\n", server)
 
 	lines := strings.Split(ansi.Strip(out), "\n")
 	for i, line := range lines {
-		if strings.HasPrefix(line, "✓ output_truncated") {
+		if strings.HasPrefix(line, "✓ "+protocol.ReasonOutputTruncated) {
 			if i+1 >= len(lines) || lines[i+1] != "⚠ "+why {
 				t.Fatalf("the line under the settle is not the warning with the explanation:\n%s", ansi.Strip(out))
 			}

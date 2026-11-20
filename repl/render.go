@@ -14,6 +14,8 @@ import (
 	"github.com/yuin/goldmark/ast"
 	goldmarktext "github.com/yuin/goldmark/text"
 	"golang.org/x/term"
+
+	"github.com/sdougbrown/poo/wire/protocol"
 )
 
 // Colors and glyphs the transcript uses. Everything a person reads
@@ -974,7 +976,7 @@ func (r *renderer) settle(reason string, turns int, input, output int, text stri
 	line := ansiDim + fmt.Sprintf("✓ %s · %d turn(s) · %s in · %s out",
 		reason, turns, shortTokens(input), shortTokens(output)) + ansiReset
 	r.write(line + "\n")
-	if reason == "output_truncated" && text != "" {
+	if reason == protocol.ReasonOutputTruncated && text != "" {
 		r.warning(text)
 	}
 }

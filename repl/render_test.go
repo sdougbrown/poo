@@ -11,6 +11,8 @@ import (
 
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/sdougbrown/poo/wire/protocol"
 )
 
 // TestAMessageRendersItsMarkdown covers the replies: a code fence
@@ -125,13 +127,13 @@ func TestATruncatedSettleCarriesItsExplanationAsANotice(t *testing.T) {
 	const why = "the response stopped at max_tokens 8192"
 	var out bytes.Buffer
 	r := newRenderer(&out)
-	r.settle("output_truncated", 1, 64300, 8200, why)
+	r.settle(protocol.ReasonOutputTruncated, 1, 64300, 8200, why)
 
 	lines := strings.Split(strings.TrimRight(ansi.Strip(out.String()), "\n"), "\n")
 	if len(lines) != 2 {
 		t.Fatalf("the settle wrote %d lines, want the settle and the notice:\n%s", len(lines), out.String())
 	}
-	if !strings.HasPrefix(lines[0], "✓ output_truncated · 1 turn(s)") {
+	if !strings.HasPrefix(lines[0], "✓ "+protocol.ReasonOutputTruncated+" · 1 turn(s)") {
 		t.Errorf("the settle line is %q", lines[0])
 	}
 	if lines[1] != "⚠ "+why {
@@ -139,7 +141,7 @@ func TestATruncatedSettleCarriesItsExplanationAsANotice(t *testing.T) {
 	}
 
 	out.Reset()
-	r.settle("output_truncated", 1, 64300, 8200, "stopped at \x1b[31mmodel\x1b]0;title\x07 id")
+	r.settle(protocol.ReasonOutputTruncated, 1, 64300, 8200, "stopped at \x1b[31mmodel\x1b]0;title\x07 id")
 	written := strings.NewReplacer(ansiDim, "", ansiYellow, "", ansiReset, "").Replace(out.String())
 	if strings.ContainsAny(written, "\x1b\x07") || !strings.Contains(written, "⚠ stopped at model id") {
 		t.Errorf("the notice let a model's escape sequence through:\n%q", out.String())
