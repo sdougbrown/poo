@@ -1,14 +1,17 @@
 package catalog
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -366,15 +369,50 @@ func (c *Catalog) candidates(modelIDs []string, list map[string]Discovered) []st
 	return out
 }
 
+// tokenCount is a token budget as a model list reports it.
+//
+// Gateways write the same number as 128000, 128000.0, 1e5, "128000" or
+// null. The count reads all of them, and anything that is not a whole
+// number of tokens, such as a negative, a fraction, text or a value past
+// what a context window can be, reads as zero, which means unknown. One
+// odd field costs that field, not the whole list.
+type tokenCount int
+
+// UnmarshalJSON reads a token budget, and never fails.
+func (n *tokenCount) UnmarshalJSON(data []byte) error {
+	*n = 0
+	text := strings.TrimSpace(string(data))
+	if unquoted, err := strconv.Unquote(text); err == nil {
+		text = strings.TrimSpace(unquoted)
+	}
+	value, err := strconv.ParseFloat(text, 64)
+	if err != nil || value < 1 || value > math.MaxInt32 || value != math.Trunc(value) {
+		return nil
+	}
+	*n = tokenCount(value)
+	return nil
+}
+
 // probeOpenAI reads the OpenAI-compatible model list.
 //
 // The shape every OpenAI-compatible endpoint serves is
 // {"data":[{"id":"...","max_model_len":32768}]}. A gateway that knows its
 // models better says more in the same place, and the probe reads what is
-// there: a limit object for the two token budgets, capabilities for the
-// tools and the reasoning, modalities for the inputs. A field the endpoint
-// does not send stays unknown. A server that does not serve the list
-// answers with an error, and the probe reports that the shape is not there.
+// there: capabilities for the tools and the reasoning, modalities for the
+// inputs, and the token budgets in whichever shape the gateway uses:
+//
+//   - an opencode limit object, {"limit":{"context":N,"output":N}};
+//   - LiteLLM's max_output_tokens;
+//   - OpenRouter's context_length and top_provider, which carries its own
+//     context_length and max_completion_tokens;
+//   - vLLM's max_model_len.
+//
+// The output limit is the first of limit.output, max_output_tokens and
+// top_provider.max_completion_tokens. The context limit is the first of
+// limit.context, context_length, top_provider.context_length and
+// max_model_len. A field the endpoint does not send stays unknown. A server that does not serve the
+// list answers with an error, and the probe reports that the shape is not
+// there.
 func (c *Catalog) probeOpenAI(ctx context.Context, client *http.Client, baseURL string) (map[string]Discovered, error) {
 	body, err := c.get(ctx, client, openAIBase(baseURL)+"/models")
 	if err != nil {
@@ -385,13 +423,19 @@ func (c *Catalog) probeOpenAI(ctx context.Context, client *http.Client, baseURL 
 	}
 	var list struct {
 		Data []struct {
-			ID            string `json:"id"`
-			MaxModelLen   int    `json:"max_model_len"`
-			PrefixCaching *bool  `json:"prefix_caching"`
-			Limit         struct {
-				Context int `json:"context"`
-				Output  int `json:"output"`
+			ID              string     `json:"id"`
+			MaxModelLen     tokenCount `json:"max_model_len"`
+			MaxOutputTokens tokenCount `json:"max_output_tokens"`
+			ContextLength   tokenCount `json:"context_length"`
+			PrefixCaching   *bool      `json:"prefix_caching"`
+			Limit           struct {
+				Context tokenCount `json:"context"`
+				Output  tokenCount `json:"output"`
 			} `json:"limit"`
+			TopProvider struct {
+				ContextLength       tokenCount `json:"context_length"`
+				MaxCompletionTokens tokenCount `json:"max_completion_tokens"`
+			} `json:"top_provider"`
 			Capabilities struct {
 				Tools struct {
 					Supported *bool `json:"supported"`
@@ -416,7 +460,7 @@ func (c *Catalog) probeOpenAI(ctx context.Context, client *http.Client, baseURL 
 		reasoning := item.Capabilities.Reasoning.Effort
 		model := Discovered{
 			ModelID:     item.ID,
-			MaxOutput:   item.Limit.Output,
+			MaxOutput:   int(cmp.Or(item.Limit.Output, item.MaxOutputTokens, item.TopProvider.MaxCompletionTokens)),
 			PrefixCache: item.PrefixCaching,
 			Inputs:      modalities(item.Modalities.Input),
 		}
@@ -430,11 +474,9 @@ func (c *Catalog) probeOpenAI(ctx context.Context, client *http.Client, baseURL 
 			model.ReasoningLevels = reasoning
 		}
 		// The limit object wins when the list carries one; max_model_len is
-		// the plain shape's answer, read only when the object is absent.
-		model.ContextLimit = item.Limit.Context
-		if model.ContextLimit == 0 {
-			model.ContextLimit = item.MaxModelLen
-		}
+		// the plain shape's answer, read only when nothing else names the
+		// context.
+		model.ContextLimit = int(cmp.Or(item.Limit.Context, item.ContextLength, item.TopProvider.ContextLength, item.MaxModelLen))
 		if item.Capabilities.Tools.Supported != nil {
 			model.Tools = poo.ToolsNone
 			if *item.Capabilities.Tools.Supported {

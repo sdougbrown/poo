@@ -652,8 +652,8 @@ func TestTheRestoreFillsAnUnknownMaxOutputFromTheSettings(t *testing.T) {
 		tr := scripted([]fakeResponse{{text: "done"}})
 		opts := restoreOptions(t, tr, &recordingSink{})
 		opts.Models["fast"] = poo.ModelInfo{Name: "fast", ModelID: "other-model", ContextLimit: 32768, MaxOutput: 16384}
-		if got := restoredMaxTokens(t, header("s1"), opts, tr); got != poo.DefaultMaxOutput {
-			t.Errorf("the restored request's max_tokens is %d, want the default %d: the entry names another model_id", got, poo.DefaultMaxOutput)
+		if got := restoredMaxTokens(t, header("s1"), opts, tr); got != poo.DefaultMaxOutputFor(opts.Model.ContextLimit) {
+			t.Errorf("the restored request's max_tokens is %d, want the default %d: the entry names another model_id", got, poo.DefaultMaxOutputFor(opts.Model.ContextLimit))
 		}
 	})
 	t.Run("an unknown context limit", func(t *testing.T) {
@@ -663,8 +663,8 @@ func TestTheRestoreFillsAnUnknownMaxOutputFromTheSettings(t *testing.T) {
 		created := header("s1")
 		created.Roles.Chat.ContextLimit = 0
 		created.ContextLimit = 0
-		if got := restoredMaxTokens(t, created, opts, tr); got != poo.DefaultMaxOutput {
-			t.Errorf("the restored request's max_tokens is %d, want %d: the room is the settings' window, not another model's", got, poo.DefaultMaxOutput)
+		if got := restoredMaxTokens(t, created, opts, tr); got != poo.DefaultMaxOutputFor(opts.Model.ContextLimit) {
+			t.Errorf("the restored request's max_tokens is %d, want %d: the room is the settings' window, not another model's", got, poo.DefaultMaxOutputFor(opts.Model.ContextLimit))
 		}
 	})
 	t.Run("a recorded limit", func(t *testing.T) {

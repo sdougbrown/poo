@@ -213,6 +213,189 @@ func TestTheProbeReadsTheLimitsAndCapabilitiesAGatewayReports(t *testing.T) {
 	}
 }
 
+// TestTheProbeReadsTheLimitsEachGatewayShapeReports covers the places
+// gateways put the token budgets: LiteLLM's max_output_tokens, OpenRouter's
+// context_length and top_provider, and the opencode limit object. An input
+// cap is not the context window, so it never sets the context limit.
+func TestTheProbeReadsTheLimitsEachGatewayShapeReports(t *testing.T) {
+	cases := []struct {
+		name        string
+		item        map[string]any
+		wantContext int
+		wantOutput  int
+	}{
+		{
+			name:        "litellm",
+			item:        map[string]any{"id": "litellm", "object": "model", "owned_by": "openai", "max_input_tokens": 262144, "max_output_tokens": 65536},
+			wantContext: 0,
+			wantOutput:  65536,
+		},
+		{
+			name: "openrouter",
+			item: map[string]any{
+				"id":             "openrouter",
+				"context_length": 200000,
+				"top_provider":   map[string]any{"context_length": 180000, "max_completion_tokens": 32000},
+			},
+			wantContext: 200000,
+			wantOutput:  32000,
+		},
+		{
+			name: "openrouter-unlimited-completion",
+			item: map[string]any{
+				"id":           "openrouter-unlimited-completion",
+				"top_provider": map[string]any{"context_length": 131072, "max_completion_tokens": nil},
+			},
+			wantContext: 131072,
+			wantOutput:  0,
+		},
+		{
+			name:        "opencode-input-cap",
+			item:        map[string]any{"id": "opencode-input-cap", "limit": map[string]any{"context": 400000, "input": 272000, "output": 128000}},
+			wantContext: 400000,
+			wantOutput:  128000,
+		},
+		{
+			name: "two-sources-per-budget",
+			item: map[string]any{
+				"id":                "two-sources-per-budget",
+				"limit":             map[string]any{"context": 300000, "output": 50000},
+				"context_length":    900000,
+				"max_output_tokens": 70000,
+				"top_provider":      map[string]any{"context_length": 800000, "max_completion_tokens": 60000},
+			},
+			wantContext: 300000,
+			wantOutput:  50000,
+		},
+		{
+			name: "two-sources-without-limit-object",
+			item: map[string]any{
+				"id":                "two-sources-without-limit-object",
+				"context_length":    900000,
+				"max_output_tokens": 70000,
+				"top_provider":      map[string]any{"context_length": 800000, "max_completion_tokens": 60000},
+			},
+			wantContext: 900000,
+			wantOutput:  70000,
+		},
+	}
+
+	items := make([]map[string]any, 0, len(cases))
+	for _, tc := range cases {
+		items = append(items, tc.item)
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"object": "list", "data": items})
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	c := catalog.New(catalog.Options{
+		Settings: catalog.Settings{
+			Endpoints: map[string]catalog.EndpointSettings{
+				"gateway": {Endpoint: server.URL + "/v1"},
+			},
+		},
+		StateDir: t.TempDir(),
+	})
+	if err := c.Refresh(context.Background()); err != nil {
+		t.Fatalf("the refresh: %v", err)
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			model, err := c.Resolve("gateway/" + tc.name)
+			if err != nil {
+				t.Fatalf("the model: %v", err)
+			}
+			if model.ContextLimit != tc.wantContext || model.MaxOutput != tc.wantOutput {
+				t.Errorf("the limits are %d/%d, want %d/%d", model.ContextLimit, model.MaxOutput, tc.wantContext, tc.wantOutput)
+			}
+		})
+	}
+}
+
+// TestAMalformedLimitCostsOnlyThatLimit covers a gateway that writes a token
+// budget in a form the plain integer does not take. A whole float, an
+// exponent and a numeric string read as the number they spell. A negative,
+// a fraction, text, a value past what a window can be and a non-numeric
+// type read as unknown, and the model beside them still resolves.
+func TestAMalformedLimitCostsOnlyThatLimit(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"object":"list","data":[
+			{"id":"valid","limit":{"context":131072,"output":16384}},
+			{"id":"spelled","limit":{"context":1e5,"output":"8192"}},
+			{"id":"whole-float","limit":{"context":65536.0,"output":4096.0}},
+			{"id":"malformed","limit":{"context":-1,"output":12.5},"max_output_tokens":99999999999,"context_length":true,"max_model_len":"lots",
+			 "top_provider":{"context_length":{"n":1},"max_completion_tokens":[1]}}
+		]}`))
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	c := catalog.New(catalog.Options{
+		Settings: catalog.Settings{
+			Endpoints: map[string]catalog.EndpointSettings{
+				"gateway": {Endpoint: server.URL + "/v1"},
+			},
+		},
+		StateDir: t.TempDir(),
+	})
+	if err := c.Refresh(context.Background()); err != nil {
+		t.Fatalf("the refresh: %v", err)
+	}
+
+	for name, want := range map[string][2]int{
+		"valid":       {131072, 16384},
+		"spelled":     {100000, 8192},
+		"whole-float": {65536, 4096},
+		"malformed":   {0, 0},
+	} {
+		model, err := c.Resolve("gateway/" + name)
+		if err != nil {
+			t.Fatalf("the model %s: %v", name, err)
+		}
+		if model.ContextLimit != want[0] || model.MaxOutput != want[1] {
+			t.Errorf("%s: the limits are %d/%d, want %d/%d", name, model.ContextLimit, model.MaxOutput, want[0], want[1])
+		}
+	}
+}
+
+// TestAnUnknownListedLimitLeavesTheContextToLlamaCPP covers a list that
+// sends -1 for a model's context: the limit reads as unknown, so the
+// server's n_ctx still fills it.
+func TestAnUnknownListedLimitLeavesTheContextToLlamaCPP(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"gemma4","max_model_len":-1,"limit":{"context":-1}}]}`))
+	})
+	mux.HandleFunc("/props", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"default_generation_settings": map[string]any{"n_ctx": 32768},
+		})
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	c := catalog.New(catalog.Options{Settings: settingsFor(server.URL + "/v1"), StateDir: t.TempDir()})
+	if err := c.Refresh(context.Background()); err != nil {
+		t.Fatalf("the refresh: %v", err)
+	}
+	model, err := c.Resolve("gemma4")
+	if err != nil {
+		t.Fatalf("the model: %v", err)
+	}
+	if model.ContextLimit != 32768 {
+		t.Errorf("the context limit is %d, want llama.cpp's 32768", model.ContextLimit)
+	}
+}
+
 // TestADiscoveredModelSpeaksItsEndpointsAPI covers the inheritance: a model
 // no layer gave an API to speaks the one its endpoint declares, and a model
 // on an endpoint that declares none keeps the chat-completions default.
