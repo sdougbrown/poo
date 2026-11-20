@@ -11,12 +11,14 @@ import (
 // importProfilesFiles reads the files the settings name as holding
 // profile definitions and folds them below the settings' own profiles.
 //
-// The files layer in the order they are named: the settings' word on a
+// The files layer in the order they are named. The settings' word on a
 // profile name wins over a file's, and the first file that names one
-// wins over the later files. A profile a file declares lands in the
-// same map a profile the settings declared does, so everything that
-// reads the profiles — the base's resolution, the tool exclusions, the
-// prompt file — reads it the same way.
+// wins over the later files.
+//
+// A profile a file declares lands in the same map a profile the
+// settings declare does. Everything that reads the profiles reads it
+// the same way: the base's resolution, the tool exclusions, the prompt
+// file.
 func (s *Settings) importProfilesFiles(dir string) error {
 	for _, named := range s.ProfilesFiles {
 		path, err := resolveBeside(named, dir)
@@ -24,7 +26,7 @@ func (s *Settings) importProfilesFiles(dir string) error {
 			return s.profilesFileError(err)
 		}
 		// The file's directory answers for the prompt files it names, so it
-		// is made absolute here: a resolved prompt file is one the settings'
+		// is made absolute here. A resolved prompt file is one the settings'
 		// own resolution pass reads once and never joins again.
 		fileDir, err := filepath.Abs(filepath.Dir(path))
 		if err != nil {
@@ -76,7 +78,7 @@ type profilesFile struct {
 // answer to.
 //
 // A file that declares nothing is refused rather than read as an empty
-// layer: a profiles file that imports halfway is worse than one that
+// layer. A profiles file that imports halfway is worse than one that
 // says what is wrong with it.
 func profilesLayer(fileDir string, document []byte) (map[string]ProfileSettings, error) {
 	var file profilesFile
@@ -105,8 +107,8 @@ func profilesLayer(fileDir string, document []byte) (map[string]ProfileSettings,
 // readProfilesDocument reads a profiles file and returns it as JSON.
 //
 // One codec over two encodings, the pipeline the models file reads
-// through: the file is YAML, which is what an operator edits, and JSON
-// is YAML that an operator may also write.
+// through. The file is YAML, which is what an operator edits, and JSON
+// is YAML an operator can also write.
 func readProfilesDocument(path string) ([]byte, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {

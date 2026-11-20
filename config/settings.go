@@ -41,14 +41,14 @@ type Settings struct {
 	Profile  string                     `json:"profile,omitempty"`
 	Profiles map[string]ProfileSettings `json:"profiles,omitempty"`
 	// ProfilesFiles name the files that hold profile definitions, read as
-	// layers below the settings' own profiles: the settings' word on a
+	// layers below the settings' own profiles. The settings' word on a
 	// profile name wins over a file's, and the first file that names one
 	// wins over the later files. Each file uses the settings' own
-	// vocabulary under a `profiles` key, and its name's extension says its
-	// format, with YAML the shape an operator writes and JSON read as an
+	// vocabulary under a `profiles` key. Its name's extension says its
+	// format: YAML the shape an operator writes, with JSON read as an
 	// alternative spelling of it. A relative path resolves against the
-	// settings file's own directory, and a prompt_file inside a file
-	// answers to that file's own directory.
+	// settings file's own directory. A prompt_file inside a file answers
+	// to that file's own directory.
 	ProfilesFiles []string `json:"profiles_files,omitempty"`
 	// Permission are the permission policy's settings.
 	Permission Permission `json:"permission,omitempty"`
