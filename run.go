@@ -8,6 +8,7 @@ import (
 	"math"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -1248,12 +1249,14 @@ func originForMode(mode InputMode) Origin {
 // the same request's numbering.
 func (s *Session) request(run *runState, turn int) (*response, Rendered, error) {
 	resp, rendered, sent, last, err := s.requestOnce(run, turn, 0)
-	reportLast := func(retried bool) {
-		if !last.ok {
-			return
+	reportLast := func(retried bool) (Attempt, bool) {
+		attempt, ok := last.take()
+		if !ok {
+			return Attempt{}, false
 		}
-		last.attempt.Retried = retried
-		s.reportAttempt(run, turn, last.attempt)
+		attempt.Retried = retried
+		s.reportAttempt(run, turn, attempt)
+		return attempt, true
 	}
 	var perr *ProviderError
 	if !errors.As(err, &perr) || perr.Kind != ProviderKindOutputLimit {
@@ -1272,10 +1275,9 @@ func (s *Session) request(run *runState, turn int) (*response, Rendered, error) 
 		reportLast(false)
 		return resp, rendered, err
 	}
-	reportLast(true)
 	base := 0
-	if last.ok {
-		base = last.attempt.Number
+	if attempt, ok := reportLast(true); ok {
+		base = attempt.Number
 	}
 	resp, rendered, _, last, err = s.requestOnce(run, turn, base)
 	reportLast(false)
@@ -1334,7 +1336,7 @@ func (s *Session) learnOutputLimit(run *runState, turn int, perr *ProviderError,
 // transport itself retried are reported as they arrive. attemptBase is
 // the number of attempts already reported for the request, so a resend's
 // attempts carry on the same numbering.
-func (s *Session) requestOnce(run *runState, turn int, attemptBase int) (*response, Rendered, int, pendingAttempt, error) {
+func (s *Session) requestOnce(run *runState, turn int, attemptBase int) (*response, Rendered, int, *pendingAttempt, error) {
 	// The model is read once, here: the request's body, its token limit and
 	// every model info-derived decision come from this one value, so a
 	// switch between runs cannot reach a request half way.
@@ -1353,7 +1355,7 @@ func (s *Session) requestOnce(run *runState, turn int, attemptBase int) (*respon
 	actCtx, _ := s.startActivity(run)
 	defer s.endActivity(run)
 
-	var last pendingAttempt
+	last := &pendingAttempt{}
 	reader, rendered, err := s.opts.Transport.Stream(actCtx, ChatRequest{
 		Model:     model.ModelID,
 		ModelInfo: model,
@@ -1365,7 +1367,7 @@ func (s *Session) requestOnce(run *runState, turn int, attemptBase int) (*respon
 		OnAttempt: func(a Attempt) {
 			a.Number += attemptBase
 			if !a.Retried {
-				last = pendingAttempt{attempt: a, ok: true}
+				last.hold(a)
 				return
 			}
 			s.reportAttempt(run, turn, a)
@@ -1406,11 +1408,33 @@ func (s *Session) requestOnce(run *runState, turn int, attemptBase int) (*respon
 
 // pendingAttempt is the last attempt a request made: the one that ended
 // it without another attempt following within the same stream.
+//
+// A transport may report a late attempt after the request has returned,
+// so the hold is guarded: the request takes the attempt once, and an
+// attempt that lands after that is the seal's to drop.
 type pendingAttempt struct {
+	// mu guards attempt and held.
+	mu sync.Mutex
 	// attempt is the attempt, numbered for its request.
 	attempt Attempt
-	// ok reports that the request reported an attempt at all.
-	ok bool
+	// held reports that the request reported an attempt at all.
+	held bool
+}
+
+// hold keeps an attempt for the request to report.
+func (p *pendingAttempt) hold(a Attempt) {
+	p.mu.Lock()
+	p.attempt, p.held = a, true
+	p.mu.Unlock()
+}
+
+// take returns the held attempt, if there is one, and forgets it.
+func (p *pendingAttempt) take() (Attempt, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	a, ok := p.attempt, p.held
+	p.attempt, p.held = Attempt{}, false
+	return a, ok
 }
 
 // reportAttempt writes the record of an attempt that failed.
