@@ -102,6 +102,12 @@ func parse(data []byte, format Format, dir string) (*Settings, error) {
 		return nil, decodeError(err)
 	}
 	settings.Permission.askersNamed = namesAskers(normalized)
+	// The profiles files are read here, where the document's directory is
+	// known: a relative name is beside the settings file, and a prompt file
+	// inside one answers to the profiles file's own directory.
+	if err := settings.importProfilesFiles(dir); err != nil {
+		return nil, err
+	}
 	// The prompt and schema files are resolved here, where the document's
 	// directory is known: a relative name is beside the settings file, and
 	// every reader — the check and the build — sees one path.
