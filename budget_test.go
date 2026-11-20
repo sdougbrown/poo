@@ -76,6 +76,44 @@ func TestTheNoticeFiresOncePerRun(t *testing.T) {
 	}
 }
 
+// TestTheNoticeMeasuresTheInputCap covers an endpoint that takes a smaller
+// prompt than its window: the notice fires at the ratio of the prompt limit,
+// so a view that is over half of the 12000-token input cap and under half of
+// the 40000-token window is noticed.
+func TestTheNoticeMeasuresTheInputCap(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{
+			calls: []poo.ToolCall{{
+				CallID:    "call_1",
+				Name:      "echo",
+				Arguments: []byte(`{"text":"hello"}`),
+			}},
+			usage: &poo.UsageReport{InputTokens: 8000},
+		},
+		{text: "the answer"},
+	})
+	sink := &recordingSink{}
+	tool := &echoTool{result: "echoed"}
+
+	opts := testOptions(t, tr, tool, sink)
+	opts.Model.ContextLimit = 40000
+	opts.Model.InputLimit = 12000
+	opts.NoticeRatio = 0.5
+
+	s := newTestSession(t, opts)
+	runSession(t, s, "do the thing")
+
+	notices := 0
+	for _, ev := range s.Events() {
+		if ev.Name == poo.EventContextNotice {
+			notices++
+		}
+	}
+	if notices != 1 {
+		t.Errorf("the run emitted %d context notices, want 1: the 8000-token estimate is over half of the 12000-token input cap", notices)
+	}
+}
+
 // TestTheNoticeRearmsAfterTheUsageDrops covers the other half of the
 // rule: the notice fires again in a later run only if the usage has
 // dropped back below the notice ratio.
