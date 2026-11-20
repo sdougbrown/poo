@@ -527,7 +527,7 @@ func (s *Session) loop(run *runState) []candidate {
 			// does not count against the retry budget.
 			if s.interruptPending(run) {
 				// An interrupted request is not a request that went out, so
-				// the refusal the run was compacting for is over: a later
+				// the refusal the run was compacting for is over. A later
 				// refusal gets its own compaction.
 				s.clearRefusal(run)
 				// The aborted request is still charged once before the
@@ -561,7 +561,7 @@ func (s *Session) loop(run *runState) []candidate {
 			}
 			refusal := newCandidate(reason, detail)
 			// An endpoint that refused the prompt's own length is the
-			// authority on whether the next request fits: the run compacts
+			// authority on whether the next request fits. The run compacts
 			// once and sends the request again through the gate.
 			if s.compactForRefusal(run, err, resp, requestChars, refusal) {
 				// The refused turn ends the way every turn does: its end, the
@@ -684,8 +684,8 @@ type turnOutcome struct {
 }
 
 // turnEndSteps runs the turn-end steps every turn takes, before the turn-end
-// algorithm decides what comes next: the end event, the drained queues, the
-// AfterTurn hooks, and every stop condition.
+// algorithm decides what comes next. The steps are the end event, the drained
+// queues, the AfterTurn hooks and every stop condition.
 //
 // It reports what the turn appended, the candidates that settle the run, and
 // whether an interrupt ended the turn during the hooks. An interrupt at that
@@ -736,10 +736,10 @@ func (s *Session) turnEndSteps(run *runState, turn int, note turnNote) (appended
 
 // turnEnd runs the plan's turn-end algorithm.
 //
-// The steps are normative: emit turn.ended, drain the queues, run the
-// AfterTurn hooks, evaluate the stop conditions, and then either settle
-// or go to the next-request gate. The first steps are the ones every turn end
-// runs, so a turn that produced no response runs them through turnEndSteps.
+// The steps are normative: emit turn.ended, drain the queues and run the
+// AfterTurn hooks. Then evaluate the stop conditions, and either settle or go
+// to the next-request gate. The first steps are the ones every turn end runs,
+// so a turn that produced no response runs them through turnEndSteps.
 func (s *Session) turnEnd(run *runState, turn int, processed bool, resp *response, note turnNote) turnOutcome {
 	// Steps 1 to 5: the end, the queues, the hooks and every stop condition.
 	appended, cands, interrupted := s.turnEndSteps(run, turn, note)
@@ -1292,8 +1292,8 @@ func originForMode(mode InputMode) Origin {
 // attempt says another one followed, and the resend's attempts carry on the
 // same request's numbering.
 //
-// The request's own size comes back with it, so a failure that carries the
-// endpoint's prompt count can calibrate the estimate against what the
+// The request's own size comes back with it. A failure that carries the
+// endpoint's prompt count can then calibrate the estimate against what the
 // endpoint measured.
 func (s *Session) request(run *runState, turn int) (*response, Rendered, int, error) {
 	res := s.requestOnce(run, turn, 0, 0)
@@ -1330,8 +1330,8 @@ func (s *Session) request(run *runState, turn int) (*response, Rendered, int, er
 // sizes the compaction with.
 //
 // A refused request gets one forced compaction. A run with no compactor, a run
-// that is winding down and a run with an interrupt pending are ending or
-// already had their say: they settle the way the refusal always did.
+// that is winding down and a run with an interrupt pending settle the way the
+// refusal always did. They are ending, or already had their say.
 func (s *Session) compactForRefusal(run *runState, err error, resp *response, requestChars int, refusal candidate) bool {
 	var perr *ProviderError
 	if !errors.As(err, &perr) || perr.Kind != ProviderKindContextLength {

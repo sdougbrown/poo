@@ -57,9 +57,9 @@ requestGateLoop:
 		forced, refusal := s.takeForcedCompaction(run)
 		for s.opts.Compactor != nil && !compactionTried {
 			compactionTried = true
-			// A forced compaction skips the strategy's decision: the
-			// endpoint has already said the prompt is too long, which is
-			// what the strategy's guard exists to guess.
+			// A forced compaction skips the strategy's decision. The endpoint
+			// has already said the prompt is too long, and that guess is what
+			// the strategy's guard exists to make.
 			if !forced && !s.opts.Compactor.ShouldCompact(s.view(), s.budget()) {
 				break
 			}

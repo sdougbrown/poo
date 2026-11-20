@@ -82,18 +82,19 @@ type ContextBudget struct {
 	OutputLimit int
 	// CompactedInput is the input the first usage report after the
 	// latest compaction reported, in the provider's own tokens. It is
-	// zero when there has been no compaction, when the endpoint sends no
-	// usage reports at all, and after a model switch that changes the
-	// window or the endpoint's input cap, because the value belongs to
-	// the window that measured it. A restored session clears the value
-	// after any switch, the same-window one included: the switch's record
-	// carries only the model names, so a load cannot tell the two apart
-	// and clears what it cannot vouch for. A compaction that only ended
-	// the run changes no view, and leaves the value where the compaction
-	// before it left it. A request the transport retried reports the sum
-	// of its attempts, so the value can run high after a retry, and a
-	// strategy that guards on it declines earlier than the next request
-	// would have needed.
+	// zero when there has been no compaction, and when the endpoint sends
+	// no usage reports at all. It is zero again after a model switch that
+	// changes the window or the endpoint's input cap. The value belongs to
+	// the window that measured it.
+	//
+	// A restored session clears the value after any switch, the
+	// same-window one included. The switch's record carries only the model
+	// names, so a load cannot tell the two apart and clears what it cannot
+	// vouch for. A compaction that only ended the run changes no view, and
+	// leaves the value where the compaction before it left it. A request
+	// the transport retried reports the sum of its attempts, so the value
+	// can run high after a retry. A strategy that guards on it then
+	// declines earlier than the next request would have needed.
 	CompactedInput int
 	// Turns is the number of provider requests the run has made.
 	//
@@ -161,11 +162,11 @@ func (b ContextBudget) RequestBlocked() (bool, string, string) {
 // OutputRoom returns the room RequestBlocked measures: the output limit,
 // clamped to the room the window leaves after the input and the reserve.
 //
-// It is not necessarily the max_tokens a request carries: a request starts
+// It is not necessarily the max_tokens a request carries. A request starts
 // from ModelInfo.OutputLimit, which uses the model's own limit before any
-// default, so a model that declares more than the default sends more. The
-// block decision matches the request's anyway, because the room it reads is
-// the one under MinOutputTokens, and DefaultMaxOutputFor is never below it.
+// default. A model that declares more than the default therefore sends more.
+// The block decision matches the request's anyway, because the room it reads
+// is the one under MinOutputTokens, and DefaultMaxOutputFor is never below it.
 func (b ContextBudget) OutputRoom() int {
 	room := b.OutputLimit
 	if room <= 0 {

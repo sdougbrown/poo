@@ -136,8 +136,8 @@ func (s *Session) SetModel(info ModelInfo, transport ...ChatTransport) (ModelSwi
 	info.API = api
 	info.ContextLimit = limit
 	// A native compaction's guard compares the input the last compaction left
-	// against the window that measured it, so a change to the window or to the
-	// endpoint's input cap starts the guard over.
+	// against the window that measured it. A change to the window or to the
+	// endpoint's input cap therefore starts the guard over.
 	if info.ContextLimit != s.opts.Model.ContextLimit || info.InputLimit != s.opts.Model.InputLimit {
 		s.compactedInput = 0
 		s.compactedReportPending = false
@@ -215,7 +215,8 @@ func (s *Session) SetDecider(info ModelInfo, decider decide.Decider) error {
 // The caller holds the session's lock.
 func (s *Session) contextExhaustedLocked(info ModelInfo, limit int) (bool, string) {
 	// The budget the next request reads is the one the model with its final
-	// window gives, so a switch that brings the window with it is judged on it.
+	// window gives. A switch that brings the window with it is judged on that
+	// budget.
 	info.ContextLimit = limit
 	budget := budgetFor(info, s.est.estimate(s.modelMessagesLocked()))
 	if blocked, _, reason := budget.RequestBlocked(); blocked {

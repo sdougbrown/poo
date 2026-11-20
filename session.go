@@ -307,9 +307,9 @@ type runState struct {
 	// the strategy declines. The endpoint refused the request's length, so
 	// the gate compacts and the run sends the request again.
 	forceCompaction bool
-	// refusal is the settle candidate the refusal that asked for the forced
-	// compaction produced, so the run settles with its own detail when the
-	// compaction cannot help.
+	// refusal is the settle candidate of the refusal that asked for the forced
+	// compaction. The run settles with that detail when the compaction cannot
+	// help.
 	refusal *candidate
 	// refusalForced reports that the refusal the run is compacting for has
 	// already had its one forced compaction.
@@ -1213,8 +1213,8 @@ func (s *Session) budgetLocked() ContextBudget {
 
 // budgetFor returns the context budget of a model and an estimated input.
 //
-// Both places that size a request against a model read the budget from here, so
-// a model switch warns on the budget its next request reads.
+// Both places that size a request against a model read the budget from here.
+// A model switch therefore warns on the budget its next request reads.
 func budgetFor(model ModelInfo, estimated int) ContextBudget {
 	return ContextBudget{
 		ContextLimit:   model.ContextLimit,
