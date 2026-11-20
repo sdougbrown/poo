@@ -1447,7 +1447,11 @@ func (r *Runtime) resolveFeedRuns(opts BuildOptions) error {
 			// it calls, so a session created in another directory
 			// than the build's runs its feed there.
 			Run: func(ctx context.Context, io poo.FeedIO) error {
-				return run(ctx, io.Dir, io.Emit, io.Log)
+				emit := io.Emit
+				if spec.Filter != nil {
+					emit = filterEmit(ctx, io, spec.Name, *spec.Filter)
+				}
+				return run(ctx, io.Dir, emit, io.Log)
 			},
 		})
 	}

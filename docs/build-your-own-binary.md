@@ -316,6 +316,38 @@ queues it until a run is going, and a feed without `on_idle` inherits
 `jobs.on_idle`. A run that is woken or prompted takes every queued input,
 held ones included.
 
+**Filter before delivery.** An optional `filter` applies to every message
+from a feed, including messages emitted while a run is active. For example:
+
+```json
+"filter": {
+  "question": "Does this event report a failed required check or an unclear status?",
+  "min_no_probability": 0.95
+}
+```
+
+Configure the question so **yes** means deliver. Set `min_no_probability` to
+a value above 0.5 and at most 1. The session's decider receives the feed's
+name, the sender, and the message text, and never the conversation. Enable a
+filter only when the configured decider may receive that data.
+
+poo drops a message only when the probability of **no** meets or exceeds the
+threshold. When the endpoint reports a label mass, poo multiplies the
+probability by that mass before the comparison. A dropped message never
+enters the queue, so it cannot wake a run or appear in the history. On a
+logged session, the decision record still names the question and answer.
+
+An answer the filter cannot use leaves the message on the feed's normal
+delivery path. That covers a missing decider, a failed or invalid answer,
+invalid label mass, and a probability below the threshold. A session with no
+decision model warns once on the feed's log, after the first message, and
+delivers unfiltered from then on. Messages whose
+sender and text total more than 8 KiB are delivered unasked. One decision is
+bounded by a 1.5-second budget, and a decision that runs past it is
+undecidable. The feed waits for each answer before it reads the next message.
+A stopped feed cancels its pending decision and never delivers the message it
+was assessing.
+
 **The model reads a feed's input as outside input.** The message is one
 XML element: `<feed name="<name>" from="<from>">` around the text, with
 the `from` attribute left out when the input has no sender. In the text,

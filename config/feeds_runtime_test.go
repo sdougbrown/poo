@@ -16,10 +16,213 @@ import (
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/config"
+	"github.com/sdougbrown/poo/decide"
 	"github.com/sdougbrown/poo/exec"
 	"github.com/sdougbrown/poo/pootest"
 	"github.com/sdougbrown/poo/tool/bash"
 )
+
+func TestFeedFilterDropsOnlyAConfidentNo(t *testing.T) {
+	const question = "Does this message need attention?"
+	path := filepath.Join(t.TempDir(), "feed.json")
+	manifest := `{
+  "version": 1,
+  "feeds": {
+    "inbox": {
+      "command": ["sh", "-c", "printf '%s\\n' \"$@\"", "feed",
+        "{\"text\":\"routine\"}",
+        "{\"from\":\"ci\",\"text\":\"uncertain\"}",
+        "{\"text\":\"unavailable\"}",
+        "{\"text\":\"required check failed\"}",
+        "{\"text\":\"bad mass\"}",
+        "{\"text\":\"slow\"}",
+        "{\"text\":\"` + strings.Repeat("x", 8300) + `\"}"],
+      "on_idle": "wake",
+      "filter": {"question": "` + question + `", "min_no_probability": 0.9}
+    }
+  }
+}`
+	if err := os.WriteFile(path, []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	settings, err := config.Parse([]byte(theFeedsSettings(path)), config.FormatYAML)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+	transport := pootest.NewTransport(pootest.Turn{Text: "ack"}, pootest.Turn{Text: "ack"}, pootest.Turn{Text: "ack"}, pootest.Turn{Text: "ack"})
+	sink := pootest.NewSink()
+	runtime.Options.Transport = transport
+	runtime.Options.Sink = sink
+	model := decide.DeciderFunc(func(ctx context.Context, state any, _ string, qs []decide.Question) ([]decide.Answer, error) {
+		fields, ok := state.(map[string]string)
+		if !ok || fields["feed"] != "inbox" || len(fields) != 3 || len(qs) != 1 || qs[0].Instructions != question {
+			t.Errorf("unexpected filter request: %#v, %#v", state, qs)
+			return nil, decide.ErrDeferred
+		}
+		answer := decide.Answer{ID: qs[0].ID}
+		no := 0.94
+		switch fields["text"] {
+		case "routine":
+		case "uncertain":
+			if fields["from"] != "ci" {
+				t.Errorf("filter got sender %q, want ci", fields["from"])
+			}
+			mass := 0.6
+			answer.LabelMass = &mass
+		case "unavailable":
+			return nil, decide.ErrDeferred
+		case "required check failed":
+			no = 0.01
+		case "bad mass":
+			// A mass outside [0, 1] is not scaled onto the probability:
+			// the message delivers, and the answer's no stays 0.94.
+			mass := 1.5
+			answer.LabelMass = &mass
+		case "slow":
+			// A decider that hangs must not stall the feed: the filter's
+			// own budget ends the call, and the message is delivered.
+			<-ctx.Done()
+			return nil, ctx.Err()
+		default:
+			t.Errorf("unexpected message: %q", fields["text"])
+		}
+		answer.Probabilities = map[string]float64{"no": no, "yes": 1 - no}
+		return []decide.Answer{answer}, nil
+	})
+	sess, err := poo.New(runtime.Options, poo.WithDecider(poo.ModelInfo{}, model))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sess.Close() })
+	waitUntil(t, "the relevant message to reach the chat model", func() bool {
+		return theModelRead(transport, `<feed name="inbox">required check failed</feed>`, poo.FeedOrigin("inbox"))
+	})
+	// The slow decision is still running at that point; its message must
+	// arrive after the filter's own budget ends the call.
+	waitUntil(t, "the message the decider hung on to reach the chat model", func() bool {
+		return theModelRead(transport, `<feed name="inbox">slow</feed>`, poo.FeedOrigin("inbox"))
+	})
+	// The oversized message is delivered unasked: the decider is never
+	// given a message past the byte cap, so a confident no cannot drop it.
+	oversized := strings.Repeat("x", 8300)
+	waitUntil(t, "the oversized message to reach the chat model", func() bool {
+		return theModelRead(transport, `<feed name="inbox">`+oversized+`</feed>`, poo.FeedOrigin("inbox"))
+	})
+	var queued []string
+	var decisions int
+	for _, rec := range sink.Records() {
+		switch rec := rec.(type) {
+		case *poo.InputQueuedRecord:
+			if rec.Mode == poo.InputModeFeed {
+				queued = append(queued, rec.Text)
+			}
+		case *poo.DecisionRecord:
+			decisions++
+		}
+	}
+	want := []string{
+		`<feed name="inbox" from="ci">uncertain</feed>`,
+		`<feed name="inbox">unavailable</feed>`,
+		`<feed name="inbox">required check failed</feed>`,
+		`<feed name="inbox">bad mass</feed>`,
+		`<feed name="inbox">slow</feed>`,
+		`<feed name="inbox">` + strings.Repeat("x", 8300) + `</feed>`,
+	}
+	// The oversized message never reaches the decider, so the six
+	// decisions are the six the filter asked about.
+	if len(queued) != len(want) || decisions != 6 {
+		t.Fatalf("queued %d inputs and recorded %d decisions; want %d inputs and 6 decisions", len(queued), decisions, len(want))
+	}
+	for i := range want {
+		if queued[i] != want[i] {
+			t.Errorf("input %d is %.60q, want %.60q", i, queued[i], want[i])
+		}
+	}
+}
+
+// warnCapture records the warn records a session's log dispatches.
+type warnCapture struct {
+	mu      sync.Mutex
+	records []slog.Record
+}
+
+func (c *warnCapture) Enabled(context.Context, slog.Level) bool { return true }
+
+func (c *warnCapture) Handle(_ context.Context, r slog.Record) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.records = append(c.records, r)
+	return nil
+}
+
+func (c *warnCapture) WithAttrs([]slog.Attr) slog.Handler { return c }
+
+func (c *warnCapture) WithGroup(string) slog.Handler { return c }
+
+// filterWarns returns the warns that name the missing decision model.
+func (c *warnCapture) filterWarns() []slog.Record {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var out []slog.Record
+	for _, r := range c.records {
+		if r.Level == slog.LevelWarn && strings.Contains(r.Message, "no decision model") {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// TestAFeedFilterWithoutADeciderWarnsOnceAndDelivers covers the signal: a
+// manifest filter the session cannot run is not silent, and every message
+// still delivers.
+func TestAFeedFilterWithoutADeciderWarnsOnceAndDelivers(t *testing.T) {
+	manifest := `{
+  "version": 1,
+  "feeds": {
+    "chat": {
+      "command": ["` + feedScript(t, "chat") + `"],
+      "on_idle": "wake",
+      "filter": {"question": "Does this message need attention?", "min_no_probability": 0.9}
+    }
+  }
+}`
+	path := filepath.Join(t.TempDir(), "feed.json")
+	if err := os.WriteFile(path, []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	settings, err := config.Parse([]byte(theFeedsSettings(path)), config.FormatYAML)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+	transport := pootest.NewTransport(pootest.Turn{Text: "ack"}, pootest.Turn{Text: "ack"})
+	sink := pootest.NewSink()
+	runtime.Options.Transport = transport
+	runtime.Options.Sink = sink
+	capture := &warnCapture{}
+	runtime.Options.Logger = slog.New(capture)
+	sess, err := poo.New(runtime.Options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sess.Close() })
+
+	// Both messages deliver: with no decider the filter fails open.
+	waitUntil(t, "the first message to reach the chat model", func() bool {
+		return theModelRead(transport, `<feed name="chat" from="alice">the first message</feed>`, poo.FeedOrigin("chat"))
+	})
+	waitUntil(t, "the second message to reach the chat model", func() bool {
+		return theModelRead(transport, `<feed name="chat">the second message</feed>`, poo.FeedOrigin("chat"))
+	})
+	// The missing decider is named once on the feed's log, not per message.
+	waitUntil(t, "the missing decider to be named", func() bool {
+		return len(capture.filterWarns()) >= 1
+	})
+	if got := capture.filterWarns(); len(got) != 1 {
+		t.Errorf("the feed warned %d times about the missing decider, want 1", len(got))
+	}
+}
 
 // The runtime's feeds: the manifest a settings file names is a command
 // the session runs, beside the session, for as long as the session is
