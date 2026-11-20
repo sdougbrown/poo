@@ -225,7 +225,7 @@ func TestTheBuiltinTypesafeModelCannotBeTheChatModel(t *testing.T) {
 // instructions_per_question answers what each question asks, so the
 // call's framing rides with the questions and the request carries no
 // instructions field of its own. The endpoint's name is not the one the
-// built-in record uses, because the declaration is what says it.
+// built-in record uses — the declaration is what says it.
 func TestTheTypesafeDeciderFoldsTheCallInstructions(t *testing.T) {
 	// The variable is pinned empty so the environment a test runs in cannot
 	// decide which key answers.

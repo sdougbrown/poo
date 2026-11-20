@@ -59,7 +59,7 @@ const (
 	ProviderOpencode = "opencode"
 
 	// ProviderTypesafe is the provider id the TypeSafe key is stored
-	// under. It is the entry's name in poo's own credential file; the
+	// under. It is the entry's name in poo's own credential file. The
 	// endpoint reads the credential by declaring the same environment
 	// variable, so the names meet there and nowhere else.
 	ProviderTypesafe = "typesafe"

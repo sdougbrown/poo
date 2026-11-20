@@ -1282,7 +1282,7 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 		scrub.Names = append(scrub.Names, r.Catalog.CredentialEnvNames()...)
 	}
 	// A key provider's variable is scrubbed whether its endpoint is offered
-	// or not: the variable names a credential, and a model-invoked child
+	// or not. The variable names a credential, and a model-invoked child
 	// must not read one because the catalog happens to hold no endpoint
 	// that reads it.
 	for _, provider := range auth.KeyProviders() {
@@ -2456,9 +2456,8 @@ func (r *Runtime) newDecider(model poo.ModelInfo) (decide.Decider, error) {
 	if r.Settings.Decider.TimeoutMS != nil {
 		timeout = time.Duration(*r.Settings.Decider.TimeoutMS) * time.Millisecond
 	}
-	// The endpoint says how a decision call's instructions ride: a
-	// request-level field, or folded into the questions when the endpoint
-	// answers what each one asks and rejects its own.
+	// The endpoint declares how a decision call's instructions ride: a
+	// request-level field, or folded into the questions.
 	perQuestion := false
 	if endpoint, ok := r.Catalog.Endpoints()[model.Provider]; ok {
 		perQuestion = endpoint.InstructionsPerQuestion

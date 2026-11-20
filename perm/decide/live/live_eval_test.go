@@ -20,10 +20,10 @@ import (
 //
 // POO_DECIDE_INSTRUCTIONS_PER_QUESTION=true names an endpoint that answers
 // what each question asks and rejects a request-level instructions field —
-// the shape the built-in typesafe provider declares — so the decider folds
-// the call's framing into the questions the way the runtime does for an
-// endpoint that declares it. A value that does not parse is a failure, not
-// the default wire.
+// the shape the built-in typesafe provider declares. The decider then
+// folds the call's framing into the questions the way the runtime does for
+// an endpoint that declares it. A value that does not parse is a failure,
+// not the default wire.
 
 // case is one call the asker is asked about.
 type evalCase struct {

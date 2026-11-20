@@ -354,8 +354,8 @@ func TestTheBuildScrubsTheCredentials(t *testing.T) {
 
 // TestTheBuildScrubsTheKeyProvidersVariables covers the rung the catalog
 // cannot name: a provider's key variable is scrubbed whether an endpoint
-// that reads it is offered or not, because the variable names a
-// credential whatever the catalog holds.
+// that reads it is offered or not. The variable names a credential
+// whatever the catalog holds.
 func TestTheBuildScrubsTheKeyProvidersVariables(t *testing.T) {
 	// No endpoint reads the variable here: the settings name none, and the
 	// built-in provider that would is not offered, because no credential

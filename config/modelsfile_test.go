@@ -1230,7 +1230,7 @@ session:
 
 // TestAModelsFileDeclaresTheOperations covers the ops key: a model the file
 // names with its own operations serves them, and a model named without any
-// keeps the catalog's own answer, which is a chat model.
+// keeps the catalog's own answer.
 func TestAModelsFileDeclaresTheOperations(t *testing.T) {
 	dir := tempUserConfigDir(t)
 	writePooModels(t, dir, `endpoints:

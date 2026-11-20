@@ -262,8 +262,8 @@ func TestTheStoredKeyReachesTheModel(t *testing.T) {
 }
 
 // TestATypesafeLoginStoresTheKeyTheDeciderReads covers the sign-in the same
-// way for TypeSafe: the key `poo login typesafe` stores is the key the
-// built-in decider's requests carry, and the entry's name is the one the
+// way for TypeSafe. The key `poo login typesafe` stores is the key the
+// built-in decider's requests carry. The entry's name is the one the
 // endpoint's variable joins, not the name the OpenCode sign-in writes.
 func TestATypesafeLoginStoresTheKeyTheDeciderReads(t *testing.T) {
 	// The variable is pinned empty so the environment a test runs in cannot
