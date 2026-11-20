@@ -331,6 +331,15 @@ func (c *Catalog) addCuratedModels() {
 		served, ok := c.endpoints[endpoint]
 		if ok {
 			if c.opts.KeyPresent != nil && !c.opts.KeyPresent(endpoint, served.Credential) {
+				// The curated model is not offered. An endpoint only poo
+				// declares goes with it: an endpoint the operator declared
+				// is theirs, and stays for the models they wrote against
+				// it.
+				if _, declared := c.opts.File.Endpoints[endpoint]; !declared {
+					if _, declared := c.opts.Settings.Endpoints[endpoint]; !declared {
+						delete(c.endpoints, endpoint)
+					}
+				}
 				continue
 			}
 			curated.Endpoint = served.Endpoint
