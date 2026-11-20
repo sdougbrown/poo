@@ -164,8 +164,23 @@ func (c *Compactor) restoresOutputRoom(view poo.View, budget poo.ContextBudget) 
 		return false
 	}
 	after := budget
-	after.EstimatedInput = budget.EstimatedInput - turnTokens(messages[cut.Start:cut.End], budget) + c.maxTokens
+	after.EstimatedInput = budget.EstimatedInput - turnTokens(messages[cut.Start:cut.End], budget) +
+		c.maxTokens + c.replacementCarriageTokens(cut, messages[cut.Start:cut.End], budget)
 	return !after.OutputRoomShort()
+}
+
+// replacementCarriageTokens estimates what the replacement carries besides
+// the summary text: the marker line and the file list.
+//
+// The estimate is the one the replacement itself gets, through the same
+// builder, so a file list the summary would add is not missing from the
+// room the compaction promises to give back.
+func (c *Compactor) replacementCarriageTokens(cut cutRange, covered []poo.Message, budget poo.ContextBudget) int {
+	text := marker(cut.Cut)
+	if files := fileList(c.files, covered); files != "" {
+		text += "\n\n" + files
+	}
+	return turnTokens([]poo.Message{poo.NewTextMessage(poo.RoleUser, text)}, budget)
 }
 
 // Compact summarizes the turns the view can spare and replaces them with

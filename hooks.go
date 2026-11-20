@@ -77,8 +77,9 @@ type ContextBudget struct {
 	// CharsPerToken is the calibrated characters-per-token ratio.
 	CharsPerToken float64
 	// OutputLimit is the output limit the next request carries before
-	// it is clamped to the room the window leaves: the model's own, or
-	// the default for its window. Zero means unknown.
+	// it is clamped to the room the window leaves: the model's own
+	// limit, or the default for its window, whichever is lower. Zero
+	// means unknown.
 	OutputLimit int
 	// Turns is the number of provider requests the run has made.
 	//

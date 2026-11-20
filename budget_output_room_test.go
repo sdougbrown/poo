@@ -67,6 +67,7 @@ func TestTheSessionsBudgetCarriesTheOutputLimitBeforeTheRoomClamp(t *testing.T) 
 		want  int
 	}{
 		{"a declared limit", poo.ModelInfo{ContextLimit: 131072, MaxOutput: 4096}, 4096},
+		{"a declared limit above the default", poo.ModelInfo{ContextLimit: 200000, MaxOutput: 64000}, 32768},
 		{"the default for a large window", poo.ModelInfo{ContextLimit: 131072}, 32768},
 		{"the default for a small window", poo.ModelInfo{ContextLimit: 16384}, 8192},
 	}

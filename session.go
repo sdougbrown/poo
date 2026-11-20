@@ -1223,7 +1223,7 @@ func (s *Session) budgetLocked() ContextBudget {
 		NoticeRatio:    s.opts.NoticeRatio,
 		HardRatio:      s.opts.HardRatio,
 		CharsPerToken:  s.est.charsPerToken,
-		OutputLimit:    s.opts.Model.OutputCeiling(),
+		OutputLimit:    min(s.opts.Model.OutputCeiling(), DefaultMaxOutputFor(s.opts.Model.ContextLimit)),
 		Turns:          turns,
 	}
 }
