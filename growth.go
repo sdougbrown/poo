@@ -78,12 +78,19 @@ func (g *growthTracker) growth(observationCap int) int {
 //
 // A request a compaction made is not a turn: the input it reports is the
 // request the strategy built, not the view the run is growing.
+//
+// A turn that reported no input ends the reports the tracker measures across:
+// a difference must never span two turns, so the next report is a baseline.
 func (s *Session) noteTurnInput(meta RecordMeta, usage *UsageReport) {
-	if !s.opts.TurnGrowth || meta.Origin == OriginCompaction || usage == nil || usage.InputTokens <= 0 {
+	if !s.opts.TurnGrowth || meta.Origin == OriginCompaction {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if usage == nil || usage.InputTokens <= 0 {
+		s.growth.resetBaseline()
+		return
+	}
 	s.growth.observe(usage.InputTokens)
 }
 

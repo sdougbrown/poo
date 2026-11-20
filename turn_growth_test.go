@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/compact/native"
 )
 
 // Turn growth: the session's measured per-turn input growth, added to the fit
@@ -198,6 +199,188 @@ func (p *growthProbe) ShouldCompact(view poo.View, budget poo.ContextBudget) boo
 // Compact asks the strategy it wraps.
 func (p *growthProbe) Compact(ctx context.Context, in poo.CompactionEnv) (poo.Compaction, error) {
 	return p.inner.Compact(ctx, in)
+}
+
+// TestAModelSwitchStartsTheTurnGrowthOver covers the switch: the new model's
+// tokenizer counts the same view differently, so its first report is a baseline
+// rather than growth measured by the model before it.
+func TestAModelSwitchStartsTheTurnGrowthOver(t *testing.T) {
+	probe := &growthProbe{inner: roomCompactor{}}
+	opts := testOptions(t, scripted([]fakeResponse{
+		{calls: toolCallTurn().calls, usage: &poo.UsageReport{InputTokens: 4000, OutputTokens: 5}},
+		{calls: toolCallTurn().calls, usage: &poo.UsageReport{InputTokens: 6000, OutputTokens: 5}},
+		{text: "the first answer"},
+		// The new model's first report is far above the old model's last one.
+		{calls: toolCallTurn().calls, usage: &poo.UsageReport{InputTokens: 20000, OutputTokens: 5}},
+		{text: "the second answer"},
+	}), &echoTool{result: "echoed"}, &recordingSink{})
+	opts.Model.ContextLimit = 40000
+	opts.Model.MaxOutput = 4096
+	opts.Settings.ObservationCapChars = 400
+	opts.Compactor = probe
+	opts.TurnGrowth = true
+	s := newTestSession(t, opts)
+
+	if res := runSession(t, s, "do the thing"); res.Reason != poo.ReasonEndTurn {
+		t.Fatalf("the first run settled %q, want end_turn", res.Reason)
+	}
+	if len(probe.growth) < 3 || probe.growth[2] != 2000 {
+		t.Fatalf("the first run's turn growth is %v, want a measured 2000 at its third gate", probe.growth)
+	}
+
+	if _, err := s.SetModel(poo.ModelInfo{
+		Name: "next", ModelID: "test-model", ContextLimit: 40000,
+		Ops: []poo.Op{poo.OpChat, poo.OpCompact},
+	}); err != nil {
+		t.Fatalf("switching models: %v", err)
+	}
+	if res := runSession(t, s, "do it again"); res.Reason != poo.ReasonEndTurn {
+		t.Fatalf("the second run settled %q, want end_turn", res.Reason)
+	}
+	if len(probe.growth) < 5 {
+		t.Fatalf("the compactor was given %d budgets, want the second run's two", len(probe.growth))
+	}
+	// The second run's first gate still carries what the first model measured:
+	// a switch starts the baseline over, not the differences.
+	if got := probe.growth[3]; got != 2000 {
+		t.Errorf("the first gate after the switch carries a turn growth of %d, want the measured 2000", got)
+	}
+	// The new model's first report is 14000 above the old model's last one. It
+	// is the new baseline, so it records no difference.
+	if got := probe.growth[4]; got != 2000 {
+		t.Errorf("the gate after the new model's first report carries a turn growth of %d, want 2000: the switch starts the baseline over", got)
+	}
+}
+
+// TestTheFirstTurnAfterACompactionIsTheNewBaseline covers the tracker's reset
+// when a compaction installs its view. The report that follows a compaction is
+// above the last one before it, and it is a baseline: the view the compaction
+// left is what the run grows from, not the input it replaced.
+func TestTheFirstTurnAfterACompactionIsTheNewBaseline(t *testing.T) {
+	probe := &growthProbe{inner: roomCompactor{}}
+	opts := testOptions(t, scripted([]fakeResponse{
+		// The first two turns report the same input, so the tracker records no
+		// difference and the growth stays the observation cap.
+		{calls: toolCallTurn().calls, usage: &poo.UsageReport{InputTokens: 30000, OutputTokens: 5}},
+		{calls: toolCallTurn().calls, usage: &poo.UsageReport{InputTokens: 30000, OutputTokens: 5}},
+		// The report after the compaction is above the one before it.
+		{calls: toolCallTurn().calls, usage: &poo.UsageReport{InputTokens: 31000, OutputTokens: 5}},
+		{text: "the answer"},
+	}), &echoTool{result: "echoed"}, &recordingSink{})
+	opts.Model.ContextLimit = 34000
+	opts.Model.MaxOutput = 4096
+	opts.Settings.ObservationCapChars = 400
+	opts.Compactor = probe
+	opts.TurnGrowth = true
+	s := newTestSession(t, opts)
+
+	if res := runSession(t, s, "do the thing"); res.Reason != poo.ReasonEndTurn {
+		t.Fatalf("the run settled %q, want end_turn", res.Reason)
+	}
+	if len(probe.acted) == 0 || probe.acted[0] != 3 {
+		t.Fatalf("the run compacted at the gates %v, want the third", probe.acted)
+	}
+	if len(probe.growth) < 4 {
+		t.Fatalf("the compactor was given %d budgets, want the gate after the compaction", len(probe.growth))
+	}
+	// The growth at the gate after the compaction is the same as at the gate
+	// of it: no difference was recorded in between. A tracker that measured
+	// across the compaction would have recorded the 1000 tokens the report
+	// grew by.
+	if got := probe.growth[3]; got != probe.growth[2] {
+		t.Errorf("the gate after the compaction carries a turn growth of %d, want the %d the gate of it carried",
+			got, probe.growth[2])
+	}
+}
+
+// runNativeGrowthScript runs the growth script with turn growth on or off and a
+// native compactor, and returns what the compactor saw.
+func runNativeGrowthScript(t *testing.T, turnGrowth bool) growthRun {
+	t.Helper()
+	tr := scripted(growthScript())
+	tr.SetWindow(nativeWindowOf(`{"encrypted_content":"abc"}`))
+	// The compaction reports the input its own request carried. The report is
+	// the strategy's, not the view's, so it is no baseline either.
+	tr.SetWindowUsage(&poo.UsageReport{InputTokens: 100, OutputTokens: 5})
+	probe := &growthProbe{inner: native.New(native.Options{})}
+	opts := testOptions(t, tr, &echoTool{result: "echoed"}, &recordingSink{})
+	opts.Model.Ops = []poo.Op{poo.OpChat, poo.OpCompact}
+	opts.Model.ContextLimit = growthContextLimit
+	opts.Model.MaxOutput = growthOutputLimit
+	opts.Settings.ObservationCapChars = 400
+	opts.Compactor = probe
+	opts.TurnGrowth = turnGrowth
+	s := newTestSession(t, opts)
+
+	runSession(t, s, "do the thing")
+	return growthRun{growth: probe.growth, acted: probe.acted}
+}
+
+// TestANativeCompactionIsNotTheTurnGrowthsBaseline covers the native strategy
+// with turn growth on. The compaction's own usage report is not the view's
+// input, so the turn after it measures from the view the compaction left, and
+// the strategy compacts one report earlier than it does with growth off.
+func TestANativeCompactionIsNotTheTurnGrowthsBaseline(t *testing.T) {
+	off := runNativeGrowthScript(t, false)
+	on := runNativeGrowthScript(t, true)
+
+	if len(off.acted) == 0 || len(on.acted) == 0 {
+		t.Fatalf("the run compacted %d times off and %d times on, want at least once each",
+			len(off.acted), len(on.acted))
+	}
+	if want := off.acted[0] - 1; on.acted[0] != want {
+		t.Errorf("the run compacted at gate %d with the setting on, want %d: one report earlier than the %d the setting off uses",
+			on.acted[0], want, off.acted[0])
+	}
+	// The gate after the compaction still carries the measured step. A tracker
+	// that took the compaction's own 100 tokens as its baseline would measure
+	// the tens of thousands between them as one turn's growth.
+	if len(on.growth) <= on.acted[0] {
+		t.Fatalf("the compactor was given %d budgets, want the gate after the compaction at %d", len(on.growth), on.acted[0])
+	}
+	if got := on.growth[on.acted[0]]; got != growthReportStep {
+		t.Errorf("the gate after the compaction carries a turn growth of %d, want the measured %d", got, growthReportStep)
+	}
+}
+
+// TestAFailedNativeCompactionsReportIsNotTheBaseline covers the report a
+// compaction that installs no view leaves. The request was billed and it
+// reported the input it carried, but the view did not move, so the turn after
+// it measures from the view's last report: the compaction's own tens of tokens
+// are not what the run grew by.
+func TestAFailedNativeCompactionsReportIsNotTheBaseline(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{calls: toolCallTurn().calls, usage: &poo.UsageReport{InputTokens: 30000, OutputTokens: 5}},
+		{calls: toolCallTurn().calls, usage: &poo.UsageReport{InputTokens: 30000, OutputTokens: 5}},
+		{calls: toolCallTurn().calls, usage: &poo.UsageReport{InputTokens: 31000, OutputTokens: 5}},
+		{text: "the answer"},
+	})
+	tr.SetWindowError(errors.New("the endpoint refused the window"))
+	tr.SetWindowBilled(true)
+	tr.SetWindowUsage(&poo.UsageReport{InputTokens: 50, OutputTokens: 5})
+	probe := &growthProbe{inner: native.New(native.Options{})}
+	opts := testOptions(t, tr, &echoTool{result: "echoed"}, &recordingSink{})
+	opts.Model.Ops = []poo.Op{poo.OpChat, poo.OpCompact}
+	opts.Model.ContextLimit = 34000
+	opts.Model.MaxOutput = 4096
+	opts.Settings.ObservationCapChars = 400
+	opts.Compactor = probe
+	opts.TurnGrowth = true
+	s := newTestSession(t, opts)
+
+	runSession(t, s, "do the thing")
+	if len(probe.acted) == 0 {
+		t.Fatal("the run never asked for a window, want the first turn to fail its compaction")
+	}
+	if len(probe.growth) < 3 {
+		t.Fatalf("the compactor was given %d budgets, want the gate after the failed compaction", len(probe.growth))
+	}
+	// The two turns reported the same input, so the growth is still the
+	// observation cap. A tracker that took the compaction's 50 tokens as its
+	// baseline would report the whole 30000 as one turn's growth.
+	if got, want := probe.growth[2], probe.growth[1]; got != want {
+		t.Errorf("the gate after the failed compaction carries a turn growth of %d, want the %d the gate of it carried", got, want)
+	}
 }
 
 // roomCompactor compacts when the next answer no longer fits, and replaces

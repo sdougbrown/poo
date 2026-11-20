@@ -74,6 +74,77 @@ func TestTheFirstReportAfterACompactionAddsNoDifference(t *testing.T) {
 	}
 }
 
+// TestACompactionsOwnReportIsNotATurn covers the origin the session leaves
+// out: the input a compaction's own request reported is the strategy's, not
+// the view's, so it neither measures a difference nor replaces the baseline.
+func TestACompactionsOwnReportIsNotATurn(t *testing.T) {
+	s := &Session{}
+	s.opts.TurnGrowth = true
+	s.growth.observe(100)
+	s.growth.observe(200)
+	if got := s.growth.growth(1); got != 100 {
+		t.Fatalf("the turn growth is %d, want 100 before the compaction", got)
+	}
+
+	// The compaction's request reported far more input than the view holds.
+	s.noteTurnInput(RecordMeta{Record: "usage", Origin: OriginCompaction}, &UsageReport{InputTokens: 5000})
+	if got := s.growth.growth(1); got != 100 {
+		t.Errorf("the turn growth is %d, want 100: a compaction's report measures nothing", got)
+	}
+
+	// The next turn measures against the view's last report, not against the
+	// compaction's.
+	s.noteTurnInput(RecordMeta{Record: "usage"}, &UsageReport{InputTokens: 400})
+	if got := s.growth.growth(1); got != 200 {
+		t.Errorf("the turn growth is %d, want the 200 the turn after the compaction added", got)
+	}
+
+	// A compaction that reports nothing leaves the tracker as it found it, so
+	// the turn after it still measures against the turn before it.
+	s.noteTurnInput(RecordMeta{Record: "usage", Origin: OriginCompaction}, nil)
+	s.noteTurnInput(RecordMeta{Record: "usage"}, &UsageReport{InputTokens: 800})
+	if got := s.growth.growth(1); got != 400 {
+		t.Errorf("the turn growth is %d, want the 400 the turn after the silent compaction added", got)
+	}
+}
+
+// TestATurnThatReportsNoInputStartsTheBaselineOver covers a turn whose usage
+// says nothing about the view. A difference must never span two turns, so the
+// report after such a turn is a baseline rather than growth measured across the
+// gap.
+func TestATurnThatReportsNoInputStartsTheBaselineOver(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		usage *UsageReport
+	}{
+		{"no usage at all", nil},
+		{"no input tokens", &UsageReport{InputTokens: 0}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			s := &Session{}
+			s.opts.TurnGrowth = true
+			// The first two turns measure a difference of 2000.
+			s.noteTurnInput(RecordMeta{Record: "usage"}, &UsageReport{InputTokens: 1000})
+			s.noteTurnInput(RecordMeta{Record: "usage"}, &UsageReport{InputTokens: 3000})
+			if got := s.growth.growth(1); got != 2000 {
+				t.Fatalf("the turn growth is %d, want 2000 before the silent turn", got)
+			}
+
+			s.noteTurnInput(RecordMeta{Record: "usage"}, test.usage)
+			s.noteTurnInput(RecordMeta{Record: "usage"}, &UsageReport{InputTokens: 9000})
+			if got := s.growth.growth(1); got != 2000 {
+				t.Errorf("the turn growth is %d, want the earlier 2000: the input across the silent turn is no difference", got)
+			}
+			// The report after the silent turn is the baseline, so the next turn
+			// measures against it.
+			s.noteTurnInput(RecordMeta{Record: "usage"}, &UsageReport{InputTokens: 12000})
+			if got := s.growth.growth(1); got != 3000 {
+				t.Errorf("the turn growth is %d, want the 3000 the turn after the new baseline added", got)
+			}
+		})
+	}
+}
+
 // TestTheObservationCapStandsInBeforeADifferenceExists covers the start of a
 // run: until two reports give the tracker a difference, the growth is the
 // observation cap, because one tool result is what a turn can add unseen.
