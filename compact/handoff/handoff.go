@@ -66,9 +66,8 @@ func (c *Compactor) MaxTokens() int { return c.maxTokens }
 
 // ShouldCompact reports whether the run should ask for a handoff.
 //
-// The strategy acts when the next answer no longer fits, and only after
-// the run has asked the model something: a handoff is a note about work
-// that happened. The note needs room of its own, so the need is at least
+// The strategy acts when the next answer no longer fits. It waits for the
+// run's first request: a handoff is a note about work that happened. The note needs room of its own, so the need is at least
 // the fork's output limit. The handoff ends the run, so the trigger cannot
 // repeat.
 //

@@ -76,10 +76,9 @@ func (s *suite) summary() {
 		return
 	}
 	// Two turns run before the gate can compact, and the third answer
-	// is what the run finally says. Each turn's answer is large, so the
-	// oldest turn is worth summarising: the summary has to give the room
-	// for the next answer back, and the prompt alone is not what a
-	// compaction can remove.
+	// is what the run finally says. Each turn's answer is large, so a
+	// summary of the oldest turn gives the next answer its room back. A
+	// compaction cuts turns, never the prompt.
 	filler := strings.Repeat(handoffFiller, 40000/len(handoffFiller))
 	turns := []ScriptedAnswer{
 		{Text: filler, ToolCalls: []ToolCall{{Name: "bash", Arguments: map[string]any{"command": "echo hello"}}}},

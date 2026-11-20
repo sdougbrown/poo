@@ -97,8 +97,8 @@ type ContextBudget struct {
 // the prompt limit the ratio names, and that the run has asked the model
 // something.
 //
-// It is the explicit early trigger a strategy offers: a strategy that has
-// a configured ratio acts at that share as well as when the next answer no
+// It is the explicit early trigger a strategy offers. A strategy with a
+// configured ratio acts at that share, and also when the next answer no
 // longer fits.
 func (b ContextBudget) Reached(ratio float64) bool {
 	limit := b.PromptLimit()
@@ -115,13 +115,13 @@ func (b ContextBudget) PromptLimit() int {
 	return PromptLimitOf(b.ContextLimit, b.InputLimit)
 }
 
-// RoomShort reports that the next request does not fit: the prompt plus the
-// output need and the reserve is over the window, or the prompt plus the
-// reserve is over the endpoint's input cap.
+// RoomShort reports that the next request does not fit. Either the prompt,
+// the output need and the reserve exceed the window, or the prompt and the
+// reserve exceed the endpoint's input cap.
 //
-// It is the trigger for a compaction strategy: a strategy checks whether a
-// compaction would end the shortage with the same rule, on a budget whose
-// input is the one it would leave. A budget with no window and no cap, or
+// It is the trigger for a compaction strategy. A strategy checks whether a
+// compaction would end the shortage with the same rule, on a budget that
+// carries the input the compaction would leave. A budget with no window and no cap, or
 // whose run has asked the model nothing, is never short.
 func (b ContextBudget) RoomShort(need int) bool {
 	if b.Turns < 1 {
@@ -133,8 +133,8 @@ func (b ContextBudget) RoomShort(need int) bool {
 	return b.InputLimit > 0 && b.EstimatedInput+OutputReserve > b.InputLimit
 }
 
-// RequestBlocked reports that the next request cannot go out: the room the
-// window leaves is under MinOutputTokens, or the prompt is over the
+// RequestBlocked reports that the next request cannot go out. Either the
+// room the window leaves is under MinOutputTokens, or the prompt is over the
 // endpoint's input cap. It names the settle detail's source and text.
 func (b ContextBudget) RequestBlocked() (bool, string, string) {
 	if room := b.OutputRoom(); room < MinOutputTokens {

@@ -132,10 +132,9 @@ func (c *Compactor) MaxTokens() int { return c.maxTokens }
 // A configured ratio is an explicit override: when it is set, the strategy
 // also acts at that share of the prompt limit.
 //
-// The room trigger fires only when a summary would give the room back: a
-// window so small that the verbatim tail and the summary alone leave less
-// room than the output limit would summarize on every turn and gain
-// nothing.
+// The room trigger fires only when a summary would give the room back. On
+// a window so small that the verbatim tail and the summary alone leave less
+// room than the output limit, a summary on every turn would gain nothing.
 func (c *Compactor) ShouldCompact(view poo.View, budget poo.ContextBudget) bool {
 	if len(liveTurns(view.Turns())) < 2 {
 		return false
