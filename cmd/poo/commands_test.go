@@ -48,7 +48,7 @@ roles:
 // operations.
 func TestTheModelsCommandListsTheCatalog(t *testing.T) {
 	dir := t.TempDir()
-	settings := theSettings(t, dir, "http://localhost:4000/v1")
+	settings := theSettings(t, dir, "http://127.0.0.1:1/v1")
 
 	out := captureStdout(t, func() {
 		if code := run([]string{"models", "--settings", settings}); code != 0 {
@@ -146,7 +146,7 @@ func TestTheModelsCommandAsksEvenWhenTheCacheIsFresh(t *testing.T) {
 // printed as JSON, and a consumer reads them.
 func TestTheModelsCommandPrintsJSON(t *testing.T) {
 	dir := t.TempDir()
-	settings := theSettings(t, dir, "http://localhost:4000/v1")
+	settings := theSettings(t, dir, "http://127.0.0.1:1/v1")
 
 	out := captureStdout(t, func() {
 		if code := run([]string{"models", "--settings", settings, "--json"}); code != 0 {
@@ -172,7 +172,7 @@ func TestTheModelsCommandPrintsJSON(t *testing.T) {
 // says which layer set each field.
 func TestTheModelsCommandExplainsAModel(t *testing.T) {
 	dir := t.TempDir()
-	settings := theSettings(t, dir, "http://localhost:4000/v1")
+	settings := theSettings(t, dir, "http://127.0.0.1:1/v1")
 
 	out := captureStdout(t, func() {
 		if code := run([]string{"models", "--settings", settings, "--explain", "test-model"}); code != 0 {
@@ -191,7 +191,7 @@ func TestTheModelsCommandExplainsAModel(t *testing.T) {
 // opt-in, and a prune with no policy says so and does nothing.
 func TestThePruneWithoutAPolicyFails(t *testing.T) {
 	dir := t.TempDir()
-	settings := theSettings(t, dir, "http://localhost:4000/v1")
+	settings := theSettings(t, dir, "http://127.0.0.1:1/v1")
 
 	code, stderr := runCLI(t, "sessions", "prune", "--settings", settings, "--session-dir", dir)
 	if code != 2 {
