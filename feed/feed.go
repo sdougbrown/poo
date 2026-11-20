@@ -63,13 +63,21 @@ type Spec struct {
 	// OnIdle is the feed's idle policy, or the empty string to inherit
 	// the session's.
 	OnIdle string
-	// Filter is the manifest's delivery filter. Config applies it before Emit.
+	// Filter is the manifest's optional delivery screen. The config
+	// layer applies it to each emitted message; the runner ignores it.
 	Filter *Filter
 }
 
-// Filter describes when a message should be dropped before delivery.
+// Filter is a feed's delivery screen. The config layer asks the
+// session's decision model the question about each message, and drops
+// the message when the answer is no with at least MinNoProbability. A
+// consumer that wires the runner itself applies no filter.
 type Filter struct {
-	Question         string  `json:"question"`
+	// Question is asked about each message. Phrase it so yes means
+	// deliver.
+	Question string `json:"question"`
+	// MinNoProbability is the probability of no at which the message is
+	// dropped. It is greater than 0.5 and at most 1.
 	MinNoProbability float64 `json:"min_no_probability"`
 }
 

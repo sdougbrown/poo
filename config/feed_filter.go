@@ -8,6 +8,8 @@ import (
 	"github.com/sdougbrown/poo/feed"
 )
 
+// maxFeedFilterBytes is the most sender and text bytes a filter is asked
+// about. A larger message is delivered unasked.
 const maxFeedFilterBytes = 8 << 10
 
 // filterEmit wraps delivery for a feed with a validated manifest filter.

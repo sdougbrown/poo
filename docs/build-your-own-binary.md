@@ -326,23 +326,23 @@ from a feed, including messages emitted while a run is active. For example:
 }
 ```
 
-Phrase the question so **yes** means deliver. Set `min_no_probability`
-above 0.5 and at most 1. The session decider
-receives the feed name, sender, and text, not the conversation. Enable this
-only if the configured decider is allowed to receive that data.
+Configure the question so **yes** means deliver. Set `min_no_probability` to
+a value above 0.5 and at most 1. The session's decider receives the feed's
+name, the sender, and the message text, and never the conversation. Enable a
+filter only when the configured decider may receive that data.
 
-Poo drops a message only when the probability of **no** meets the threshold.
-If the endpoint reports label mass, poo multiplies the probability by that
-mass before comparing it. Poo does not queue dropped messages, so they
-cannot wake a run or appear in its history. The usual decision record still
-captures the question and answer on logged sessions.
+poo drops a message only when the probability of **no** meets or exceeds the
+threshold. When the endpoint reports a label mass, poo multiplies the
+probability by that mass before the comparison. A dropped message never
+enters the queue, so it cannot wake a run or appear in the history. On a
+logged session, the decision record still names the question and answer.
 
-A missing decider, failed or invalid answer, or probability below the
-threshold leaves the feed's normal delivery policy in place. Invalid label
-mass also leaves the message unfiltered. Messages whose
-sender and text total more than 8 KiB bypass the filter. The feed waits for
-each answer before processing the next message. Stopping the feed cancels
-any pending decision without delivering the message it was assessing.
+An answer the filter cannot use leaves the message on the feed's normal
+delivery path. That covers a missing decider, a failed or invalid answer,
+invalid label mass, and a probability below the threshold. Messages whose
+sender and text total more than 8 KiB are delivered unasked. The feed waits
+for each answer before it reads the next message. A stopped feed cancels its
+pending decision and never delivers the message it was assessing.
 
 **The model reads a feed's input as outside input.** The message is one
 XML element: `<feed name="<name>" from="<from>">` around the text, with
