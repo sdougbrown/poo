@@ -570,7 +570,9 @@ func (s *Session) loop(run *runState) []candidate {
 				// compaction.
 				_, cands, interrupted := s.turnEndSteps(run, turn, turnNote{})
 				if interrupted {
-					s.clearRefusal(run)
+					// The interrupt ended the turn's steps, not the refusal:
+					// the gate compacts for it, and the resend carries the
+					// interrupt's message.
 					continue
 				}
 				if len(cands) > 0 {

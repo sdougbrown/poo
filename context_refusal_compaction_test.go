@@ -592,3 +592,84 @@ func TestAForcedCompactionThatFailsSettlesWithTheRefusal(t *testing.T) {
 		t.Errorf("the compactor ran %d times, want the one the refusal asked for", got)
 	}
 }
+
+// interruptingAfterTurn holds one turn's AfterTurn hook open until the test
+// sends its interrupt.
+type interruptingAfterTurn struct {
+	// turn is the turn the hook holds open.
+	turn int
+	// entered closes when the hook reaches its turn.
+	entered chan struct{}
+	// release lets the hook return.
+	release chan struct{}
+}
+
+// AfterTurn holds the turn open.
+func (h *interruptingAfterTurn) AfterTurn(ctx poo.HookContext) (poo.TurnDecision, error) {
+	if ctx.Turn != h.turn {
+		return poo.TurnDecision{}, nil
+	}
+	close(h.entered)
+	<-h.release
+	return poo.TurnDecision{}, nil
+}
+
+// TestAnInterruptDuringTheRefusedTurnsHooksStillCompacts covers the refused
+// turn's own interrupt: the turn end is cut short, and the refusal it was
+// compacting for is still the run's next answer. The gate compacts, and the
+// request that goes out carries the interrupt's message.
+func TestAnInterruptDuringTheRefusedTurnsHooksStillCompacts(t *testing.T) {
+	turns := append(refusedTurns(0), fakeResponse{text: "## Goal\nfinish"}, fakeResponse{text: "the answer"})
+	hook := &interruptingAfterTurn{turn: 3, entered: make(chan struct{}), release: make(chan struct{})}
+	tr := scripted(turns)
+	sink := &recordingSink{}
+	opts := testOptions(t, tr, &echoTool{result: "echoed"}, sink)
+	opts.Compactor = summary.New(summary.Options{KeepRecentTokens: 1})
+	s := newTestSession(t, opts, poo.WithAfterTurn(hook))
+
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	<-hook.entered
+	if _, err := s.Send("carry on with this", poo.Interrupt); err != nil {
+		t.Fatalf("sending the interrupt: %v", err)
+	}
+	close(hook.release)
+	res, err := s.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	if res.Reason != poo.ReasonEndTurn {
+		t.Fatalf("the run settled %q (%s), want end_turn", res.Reason, res.Detail.Text)
+	}
+	if got := len(compactionRecords(sink)); got != 1 {
+		t.Fatalf("the log holds %d compactions, want the one the refusal asked for", got)
+	}
+	// The two turns, the refused request, the compaction's own request and the
+	// resend: a run that sent the refused request again would have made four.
+	requests := tr.Requests()
+	if len(requests) != 5 {
+		t.Fatalf("the transport got %d requests, want the compaction before the resend", len(requests))
+	}
+	// No request carries the interrupt's message before the compaction: the
+	// refused request is not sent again uncompacted.
+	for i, req := range requests {
+		compacted, steered := false, false
+		for _, m := range req.Messages {
+			if m.Origin == poo.OriginCompaction {
+				compacted = true
+			}
+			if strings.Contains(m.Text(), "carry on with this") {
+				steered = true
+			}
+		}
+		if !steered {
+			continue
+		}
+		if !compacted {
+			t.Fatalf("request %d carries the interrupt's message and no compaction", i+1)
+		}
+		return
+	}
+	t.Errorf("no request carries the interrupt's message; the transport got %d requests", len(requests))
+}
