@@ -51,7 +51,7 @@ func runUI() int {
 			fmt.Fprintln(os.Stderr, "poo: nothing is configured yet: run `poo` from a terminal to set a sign-in and a chat model up, or `poo login` and a settings file on their own")
 			return operationalExitCode
 		}
-		written, ok := runWelcome(os.Stdout, os.Stderr)
+		written, ok := runWelcome(settings, os.Stdout, os.Stderr)
 		if !ok {
 			return operationalExitCode
 		}

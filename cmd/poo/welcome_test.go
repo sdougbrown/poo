@@ -14,6 +14,16 @@ import (
 	"github.com/sdougbrown/poo/provider/auth"
 )
 
+// defaultsFor resolves the settings the front door hands the flow.
+func defaultsFor(t *testing.T) *config.Settings {
+	t.Helper()
+	settings, err := config.LoadDefaults()
+	if err != nil {
+		t.Fatalf("the defaults do not load: %v", err)
+	}
+	return settings
+}
+
 // noAmbientKeys empties the environment keys a provider's credential can
 // be read from, so the catalog a test's flow sees is the one the test's
 // own fixtures wake.
@@ -37,7 +47,7 @@ func TestTheWelcomeFlowWritesTheSettings(t *testing.T) {
 	withStdin(t, "2\nollama-key\n1\n\n")
 	var stdout, stderr bytes.Buffer
 
-	path, ok := runWelcome(&stdout, &stderr)
+	path, ok := runWelcome(defaultsFor(t), &stdout, &stderr)
 	if !ok {
 		t.Fatalf("the welcome flow did not finish; stderr: %s", stderr.String())
 	}
@@ -92,7 +102,7 @@ func TestAWelcomeRecoversFromASignInWithNoChatModel(t *testing.T) {
 	withStdin(t, "4\ntypesafe-key\ny\n3\nopencode-key\n1\n\n")
 	var stdout, stderr bytes.Buffer
 
-	path, ok := runWelcome(&stdout, &stderr)
+	path, ok := runWelcome(defaultsFor(t), &stdout, &stderr)
 	if !ok {
 		t.Fatalf("the flow did not finish after the re-sign-in; stderr: %s", stderr.String())
 	}
@@ -127,7 +137,7 @@ func TestAWelcomeWithNoChatModelStopsWhenDeclined(t *testing.T) {
 	withStdin(t, "4\ntypesafe-key\nn\n")
 	var stdout, stderr bytes.Buffer
 
-	if _, ok := runWelcome(&stdout, &stderr); ok {
+	if _, ok := runWelcome(defaultsFor(t), &stdout, &stderr); ok {
 		t.Fatalf("the flow finished after the re-sign-in was declined")
 	}
 	if strings.Count(stderr.String(), "Sign in with:") != 1 {
@@ -209,7 +219,7 @@ func TestAWelcomeWithACredentialSkipsTheSignIn(t *testing.T) {
 	withStdin(t, "1\n\n")
 	var stdout, stderr bytes.Buffer
 
-	path, ok := runWelcome(&stdout, &stderr)
+	path, ok := runWelcome(defaultsFor(t), &stdout, &stderr)
 	if !ok {
 		t.Fatalf("the flow did not finish; stderr: %s", stderr.String())
 	}
@@ -239,7 +249,7 @@ func TestThePickerOffersOnlyModelsTheCredentialRuns(t *testing.T) {
 		storeCredential(t, auth.Opencode, auth.Credential{Kind: auth.KindAPIKey, Key: "oc-key"})
 		withStdin(t, "1\n\n")
 		var stderr bytes.Buffer
-		if _, ok := runWelcome(io.Discard, &stderr); !ok {
+		if _, ok := runWelcome(defaultsFor(t), io.Discard, &stderr); !ok {
 			t.Fatalf("the flow did not finish; stderr: %s", stderr.String())
 		}
 		if strings.Contains(stderr.String(), "openai-codex/") {
@@ -262,7 +272,7 @@ func TestThePickerOffersOnlyModelsTheCredentialRuns(t *testing.T) {
 		storeCredential(t, auth.Codex, auth.Credential{Access: "access", Refresh: "refresh", AccountID: "acc"})
 		withStdin(t, "1\n\n")
 		var stderr bytes.Buffer
-		path, ok := runWelcome(io.Discard, &stderr)
+		path, ok := runWelcome(defaultsFor(t), io.Discard, &stderr)
 		if !ok {
 			t.Fatalf("the flow did not finish with a Codex credential; stderr: %s", stderr.String())
 		}
@@ -299,7 +309,7 @@ func TestAWelcomeDoesNotClobberExistingSettings(t *testing.T) {
 	withStdin(t, "1\n\n")
 	var stdout, stderr bytes.Buffer
 
-	if _, ok := runWelcome(&stdout, &stderr); ok {
+	if _, ok := runWelcome(defaultsFor(t), &stdout, &stderr); ok {
 		t.Fatalf("the flow finished over a settings file that was already there")
 	}
 	if !strings.Contains(stderr.String(), path) {
@@ -326,7 +336,7 @@ func TestAWelcomeRefusesWhatIsNotAnAnswer(t *testing.T) {
 		t.Setenv("POO_SETTINGS", "")
 		withStdin(t, input)
 		var stdout, stderr bytes.Buffer
-		if _, ok := runWelcome(&stdout, &stderr); ok {
+		if _, ok := runWelcome(defaultsFor(t), &stdout, &stderr); ok {
 			t.Fatalf("the flow finished on %q; stderr: %s", input, stderr.String())
 		}
 		if !strings.Contains(stderr.String(), want) {
@@ -361,7 +371,7 @@ func TestAWelcomeRefusesWhatIsNotAnAnswer(t *testing.T) {
 		t.Setenv("POO_SETTINGS", "")
 		withStdin(t, "3\noc-key\n1\n")
 		var stdout, stderr bytes.Buffer
-		if _, ok := runWelcome(&stdout, &stderr); ok {
+		if _, ok := runWelcome(defaultsFor(t), &stdout, &stderr); ok {
 			t.Fatalf("the flow finished on an answer that never came")
 		}
 		if !strings.Contains(stderr.String(), "no profile was chosen") {

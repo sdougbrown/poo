@@ -24,11 +24,13 @@ import (
 // chat model, a starting profile. It writes the settings file that records
 // the answers. The front door that follows opens on what was just set up.
 
-// runWelcome walks an operator through their first run. It returns the
-// settings file it wrote. The boolean says whether the front door carries
-// on to the interface it names. Every answer is read from in, so the whole
-// flow works with one scan of the input.
-func runWelcome(stdout, stderr io.Writer) (string, bool) {
+// runWelcome walks an operator through their first run. The settings are
+// the ones the front door resolved; the flow works from them and resolves
+// them again only when a sign-in wrote the credential file they read. It
+// returns the settings file it wrote. The boolean says whether the front
+// door carries on to the interface it names. Every answer is read from
+// in, so the whole flow works with one scan of the input.
+func runWelcome(settings *config.Settings, stdout, stderr io.Writer) (string, bool) {
 	ctx := context.Background()
 	in := bufio.NewScanner(os.Stdin)
 
@@ -39,10 +41,23 @@ func runWelcome(stdout, stderr io.Writer) (string, bool) {
 	// a provider whose models can run chat.
 	again := false
 	for {
-		if !welcomeSignIn(ctx, in, stdout, stderr, again) {
+		signedIn, ok := welcomeSignIn(ctx, in, stdout, stderr, settings, again)
+		if !ok {
 			return "", false
 		}
-		model, ok, stalled := welcomeModel(stderr, in)
+		if signedIn {
+			// The credential file the defaults read changed with the
+			// sign-in, so the settings resolve once more: the picker's
+			// catalog is the one the session the front door opens would
+			// run on what is now on disk.
+			resolved, err := config.LoadDefaults()
+			if err != nil {
+				fmt.Fprintf(stderr, "poo: %v\n", err)
+				return "", false
+			}
+			settings = resolved
+		}
+		model, ok, stalled := welcomeModel(settings, stderr, in)
 		if ok {
 			return welcomeFinish(stderr, in, model)
 		}
@@ -79,32 +94,27 @@ func welcomeFinish(stderr io.Writer, in *bufio.Scanner, model string) (string, b
 // list the login command offers, and the flow runs it. Again is a
 // re-sign-in: a credential is already in the file. The flow is here
 // because it serves no chat model. The operator's pick replaces it.
-func welcomeSignIn(ctx context.Context, in *bufio.Scanner, stdout, stderr io.Writer, again bool) bool {
+func welcomeSignIn(ctx context.Context, in *bufio.Scanner, stdout, stderr io.Writer, settings *config.Settings, again bool) (bool, bool) {
 	// The credential file resolves the way the picker's catalog does: the
-	// same defaults answer both, so a sign-in writes where the picker reads.
-	settings, err := config.LoadDefaults()
-	if err != nil {
-		fmt.Fprintf(stderr, "poo: %v\n", err)
-		return false
-	}
+	// same settings answer both, so a sign-in writes where the picker reads.
 	credPath, err := pooCredentialFile("", settings)
 	if err != nil {
 		fmt.Fprintf(stderr, "poo: %v\n", err)
-		return false
+		return false, false
 	}
 	if !again {
 		if _, err := os.Stat(credPath); err == nil {
 			fmt.Fprintf(stderr, "A credential is already in %s.\n", credPath)
-			return true
+			return false, true
 		}
 	}
 	o := loginOptions{force: again, command: "poo"}
 	flow, ok := o.choose(in, stderr)
 	if !ok {
-		return false
+		return false, false
 	}
 	_, failed := o.signInAndStore(ctx, flow, "", settings, in, stdout, stderr)
-	return !failed
+	return !failed, !failed
 }
 
 // welcomeModel asks which model the chat role runs on. The catalog comes from the
@@ -112,12 +122,7 @@ func welcomeSignIn(ctx context.Context, in *bufio.Scanner, stdout, stderr io.Wri
 // step before put in place. Stalled reports a catalog that holds no chat model the
 // credential can run. A re-sign-in can leave that state. A refused answer is not
 // stalled, and nothing re-runs it.
-func welcomeModel(stderr io.Writer, in *bufio.Scanner) (model string, ok bool, stalled bool) {
-	settings, err := config.LoadDefaults()
-	if err != nil {
-		fmt.Fprintf(stderr, "poo: %v\n", err)
-		return "", false, false
-	}
+func welcomeModel(settings *config.Settings, stderr io.Writer, in *bufio.Scanner) (model string, ok bool, stalled bool) {
 	options := settings.CatalogOptions()
 	options.UserAgent = userAgent()
 	credentials := auth.Credentials{Path: settings.CredentialFile()}
