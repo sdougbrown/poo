@@ -186,6 +186,64 @@ func TestARefusedRequestWithoutACompactorSettlesAsBefore(t *testing.T) {
 	}
 }
 
+// TestARefusalAfterAPartialAnswerSettlesWithoutCompacting covers the refusal
+// that arrives after the endpoint already sent part of an answer: the model
+// read what it said, so the refused request is not one the run may send
+// again. The run settles with the refusal, as it did before the gate forced a
+// compaction, and the partial answer stays in the history.
+func TestARefusalAfterAPartialAnswerSettlesWithoutCompacting(t *testing.T) {
+	// The two turns a forced compaction would summarize, the one refused for
+	// the prompt's length after it streamed part of an answer, and the answers
+	// the compaction and its resend would get if the run compacted anyway.
+	turns := []fakeResponse{
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c2", Name: "echo", Arguments: []byte(`{"text":"two"}`)}}},
+		{text: "half an answer", fail: contextLengthRejection("the prompt is too long", 0)},
+		{text: "## Goal\nfinish"},
+		{text: "the answer"},
+	}
+	tr := scripted(turns)
+	sink := &recordingSink{}
+	s := newTestSession(t, refusalCompactionOptions(t, tr, sink))
+
+	res := runSession(t, s, "do the thing")
+	if res.Reason != poo.ReasonContextExhausted {
+		t.Fatalf("the run settled %q (%s), want context_exhausted", res.Reason, res.Detail.Text)
+	}
+	if res.Detail.Source != "provider:context_length" {
+		t.Errorf("the settle source is %q, want provider:context_length", res.Detail.Source)
+	}
+	if got := len(compactionRecords(sink)); got != 0 {
+		t.Errorf("the log holds %d compactions, want none for a refusal that already carried an answer", got)
+	}
+	if got := len(tr.Requests()); got != 3 {
+		t.Errorf("the transport got %d requests, want the refused one to be the last", got)
+	}
+	// The text the stream carried belongs to the history, with the cause the
+	// refusal gave it.
+	var partial *poo.MessageRecord
+	for _, rec := range sink.messages() {
+		if rec.Role == poo.RoleAssistant && rec.Partial {
+			partial = rec
+		}
+	}
+	if partial == nil {
+		t.Fatalf("the record holds no partial assistant message; the records are %v", sink.Names())
+	}
+	if partial.Cause != poo.CauseProviderError {
+		t.Errorf("the partial message's cause is %q, want %q", partial.Cause, poo.CauseProviderError)
+	}
+	text := ""
+	for _, block := range partial.Content {
+		if block.Kind == poo.ContentText {
+			text += block.Text
+		}
+	}
+	if text != "half an answer" {
+		t.Errorf("the partial message holds %q, want the text the stream carried", text)
+	}
+}
+
 // TestARefusedPromptCountCalibratesBeforeTheCompaction covers the count: the
 // endpoint's own number is the prompt's size, so the compaction is sized
 // against it rather than against the estimate the refusal proved wrong.
