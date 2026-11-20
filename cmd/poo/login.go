@@ -19,6 +19,7 @@ import (
 
 	clicontract "github.com/sdougbrown/cli-contract"
 
+	"github.com/sdougbrown/poo/config"
 	"github.com/sdougbrown/poo/internal/term"
 	"github.com/sdougbrown/poo/provider/auth"
 )
@@ -109,25 +110,38 @@ func handleLogin(ctx context.Context, inv clicontract.Invocation, stdout, stderr
 		fmt.Fprintf(stderr, "poo login: %v\n", err)
 		return exit{usageExitCode}
 	}
+	if _, failed := o.signInAndStore(ctx, flow, settingsPath, settings, nil, stdout, stderr); failed {
+		return exit{operationalExitCode}
+	}
+	return exit{}
+}
+
+// signInAndStore runs the sign-in the flow names and writes the credential to poo's
+// own file. It is the middle the login command and the welcome front door share. It
+// resolves the file the settings name, asks the replace question, runs the sign-in,
+// and writes the credential. The operator hears where it went. The lines the key
+// flows read come from in, which a multi-step flow owns so one scan of its input
+// feeds every answer. A caller with no flow of its own passes nil, and a sign-in
+// reads the terminal's own input.
+func (o *loginOptions) signInAndStore(ctx context.Context, flow auth.Flow, settingsPath string, settings *config.Settings, in *bufio.Scanner, stdout, stderr io.Writer) (auth.Status, bool) {
 	target, err := pooCredentialFile(settingsPath, settings)
 	if err != nil {
 		fmt.Fprintf(stderr, "poo login: %v\n", err)
-		return exit{usageExitCode}
+		return auth.Status{}, true
 	}
 	credentials := auth.Credentials{Path: target}
 	mayReplace, failed := replace(credentials, flow.Provider, o.force, "poo login", stderr)
 	if failed {
-		return exit{operationalExitCode}
+		return auth.Status{}, true
 	}
-
-	entry, failed := o.signIn(ctx, flow, stdout, stderr)
+	entry, failed := o.signIn(ctx, flow, in, stdout, stderr)
 	if failed {
-		return exit{operationalExitCode}
+		return auth.Status{}, true
 	}
 	status, err := credentials.Set(ctx, flow.Provider, entry, mayReplace)
 	if err != nil {
 		fmt.Fprintf(stderr, "poo login: %v\n", err)
-		return exit{operationalExitCode}
+		return auth.Status{}, true
 	}
 	fmt.Fprintf(stdout, "Signed in to %s", status.Provider)
 	if status.AccountID != "" {
@@ -139,7 +153,7 @@ func handleLogin(ctx context.Context, inv clicontract.Invocation, stdout, stderr
 	if reads := settings.CredentialFile(); reads != "" && !sameFile(reads, status.Path) {
 		fmt.Fprintf(stdout, "\nThe settings still resolve the credential to %s. Point poo at the copy:\n  auth_file: %s\n", reads, status.Path)
 	}
-	return exit{}
+	return status, false
 }
 
 // refuseBrowserFlags refuses the flags a browser sign-in takes when the chosen sign-in is not one.
@@ -192,9 +206,9 @@ func (o *loginOptions) choose(in io.Reader, stderr io.Writer) (auth.Flow, bool) 
 }
 
 // signIn runs the flow the operator chose.
-func (o *loginOptions) signIn(ctx context.Context, flow auth.Flow, stdout, stderr io.Writer) (auth.Credential, bool) {
+func (o *loginOptions) signIn(ctx context.Context, flow auth.Flow, in *bufio.Scanner, stdout, stderr io.Writer) (auth.Credential, bool) {
 	if flow.Method == auth.MethodKey {
-		return keyCredential(flow, os.Stdin, stderr)
+		return keyCredential(flow, os.Stdin, in, stderr)
 	}
 	attempt, err := flow.Authorize()
 	if err != nil {
@@ -234,7 +248,7 @@ func (o *loginOptions) signIn(ctx context.Context, flow auth.Flow, stdout, stder
 // The two reads are exclusive: one input is one of them. A terminal that ends its prompt with
 // nothing typed has given no key, and asking the same terminal again would sit on a prompt that
 // is not there.
-func keyCredential(flow auth.Flow, stdin *os.File, stderr io.Writer) (auth.Credential, bool) {
+func keyCredential(flow auth.Flow, stdin *os.File, in *bufio.Scanner, stderr io.Writer) (auth.Credential, bool) {
 	key := ""
 	if interactive() {
 		fmt.Fprintf(stderr, "%s key: ", flow.Name)
@@ -243,7 +257,10 @@ func keyCredential(flow auth.Flow, stdin *os.File, stderr io.Writer) (auth.Crede
 			fmt.Fprintln(stderr)
 		}
 	} else {
-		scanner := bufio.NewScanner(stdin)
+		scanner := in
+		if scanner == nil {
+			scanner = bufio.NewScanner(stdin)
+		}
 		if scanner.Scan() {
 			key = strings.TrimSpace(scanner.Text())
 		}

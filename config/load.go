@@ -42,6 +42,26 @@ func FormatFor(path string) Format {
 	}
 }
 
+// LoadDefaults returns the settings a run has when discovery finds no
+// file.
+//
+// They are what a written settings file in poo's own directory would
+// load with. The credential file resolves where poo keeps its own, and
+// the built-in providers apply. A machine with no config directory
+// answers the working directory the way a document held in memory does.
+// A credential it cannot resolve is what a request reports.
+func LoadDefaults() (*Settings, error) {
+	settings := &Settings{Version: 1}
+	dir, err := UserConfigDir()
+	if err != nil {
+		dir = ""
+	}
+	if err := settings.importPi(dir); err != nil {
+		return nil, err
+	}
+	return settings, nil
+}
+
 // Load reads the settings file at path, decodes it and checks it.
 //
 // The file's name says its format. A file that does not decode, or

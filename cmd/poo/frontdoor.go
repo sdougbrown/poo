@@ -41,6 +41,22 @@ func runUI() int {
 		fmt.Fprintf(os.Stderr, "poo: %v\n", err)
 		return usageExitCode
 	}
+	if path == "" {
+		// Nothing is configured, so the welcome flow asks for what a
+		// session needs and writes the settings file that records it. A
+		// run with no terminal to ask on is refused with the commands
+		// that do the same work on their own. A repl that starts and
+		// fails a moment later is no answer.
+		if !interactive() {
+			fmt.Fprintln(os.Stderr, "poo: nothing is configured yet: run `poo` from a terminal to set a sign-in and a chat model up, or `poo login` and a settings file on their own")
+			return operationalExitCode
+		}
+		written, ok := runWelcome(os.Stdout, os.Stderr)
+		if !ok {
+			return operationalExitCode
+		}
+		path = written
+	}
 	name, err := pickUI(settings, defaultUI, frontDoors)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "poo: %v\n", err)
