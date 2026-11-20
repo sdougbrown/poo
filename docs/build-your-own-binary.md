@@ -191,6 +191,8 @@ type ToolOptions struct {
 	ProtectedPaths *protect.Set
 	Registry       *cli.Catalog
 	Search         bool
+	Inputs         []poo.Modality
+	CodemodeEngine string
 }
 ```
 
@@ -199,9 +201,9 @@ use. It must be the name the tool's `Spec` reports. A profile or a
 permission rule that names a tool the binary does not register is a typed
 error. So is a cli registry whose `call_cli` the binary does not link.
 
-Codemode is a tool and an engine. `tool/codemode` is the tool, and
-`poo/codemode/starlark` is the engine that runs the scripts, so the map
-hands the tool the engine the binary links, as `cmd/poo` does:
+Pass the engine the binary links to `tool/codemode`. This example pins
+Starlark and ignores `tools.codemode.engine`. The `poo` command links
+both engines and selects one using `CodemodeEngine`:
 
 ```go
 "codemode": func(config.ToolOptions) poo.Tool {

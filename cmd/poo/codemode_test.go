@@ -10,12 +10,13 @@ import (
 
 func TestCodemodeSettingsSelectScriptLanguage(t *testing.T) {
 	for _, test := range []struct {
-		engine, script, language string
+		engine, script, language, badField string
 	}{
-		{"", `exit(42)`, "Starlark"},
-		{"starlark", `exit(42)`, "Starlark"},
-		{"quickjs", `const xs = [20, 22]; return xs.reduce((a, b) => a + b);`, "QuickJS"},
-		{"unknown", "", ""},
+		{"", `exit(42)`, "Starlark", ""},
+		{"starlark", `exit(42)`, "Starlark", ""},
+		{"quickjs", `const xs = [20, 22]; return xs.reduce((a, b) => a + b);`, "QuickJS", ""},
+		{"unknown", "", "", "tools.codemode.engine"},
+		{"quickjs", "", "", "tools.codemode.exec_steps"},
 	} {
 		t.Run(test.engine, func(t *testing.T) {
 			args, err := json.Marshal(map[string]string{"script": test.script})
@@ -31,6 +32,9 @@ func TestCodemodeSettingsSelectScriptLanguage(t *testing.T) {
 			if test.engine != "" {
 				settings += "tools:\n  codemode:\n    engine: " + test.engine + "\n"
 			}
+			if test.badField == "tools.codemode.exec_steps" {
+				settings += "    exec_steps: 100\n"
+			}
 			path := filepath.Join(dir, "settings.yaml")
 			if err := os.WriteFile(path, []byte(settings), 0600); err != nil {
 				t.Fatal(err)
@@ -38,8 +42,8 @@ func TestCodemodeSettingsSelectScriptLanguage(t *testing.T) {
 			code, stderr := runCLI(t, "run", "--settings", path,
 				"--endpoint", endpoint.URL+"/v1", "--model-id", "test-model", "--context-limit", "32768",
 				"--working-dir", dir, "--ephemeral", "run the script")
-			if test.engine == "unknown" {
-				if code == 0 || !strings.Contains(stderr, "tools.codemode.engine") || len(endpoint.requests) != 0 {
+			if test.badField != "" {
+				if code == 0 || !strings.Contains(stderr, test.badField) || len(endpoint.requests) != 0 {
 					t.Fatalf("invalid engine: exit %d, stderr %q, requests %d", code, stderr, len(endpoint.requests))
 				}
 				return
@@ -56,7 +60,8 @@ func TestCodemodeSettingsSelectScriptLanguage(t *testing.T) {
 			messages, _ := endpoint.requests[1]["messages"].([]any)
 			for _, item := range messages {
 				message, _ := item.(map[string]any)
-				if message["role"] == "tool" && strings.Contains(message["content"].(string), "42") {
+				content, _ := message["content"].(string)
+				if message["role"] == "tool" && strings.Contains(content, "42") {
 					return
 				}
 			}

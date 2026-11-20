@@ -129,6 +129,14 @@ func (s *Settings) checkValues() error {
 	if err := s.checkContext(); err != nil {
 		return err
 	}
+	code := s.Tools.Codemode
+	if code.Engine != nil && *code.Engine == "quickjs" && code.ExecSteps != nil && *code.ExecSteps != 0 {
+		return &Error{
+			Code:    CodeInvalid,
+			Field:   "tools.codemode.exec_steps",
+			Message: "quickjs does not support the exec_steps limit; use timeout_s",
+		}
+	}
 	return s.checkFiles()
 }
 

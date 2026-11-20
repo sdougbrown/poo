@@ -1,4 +1,5 @@
-package internal
+// Package script holds the run limits and output accounting shared by engines.
+package script
 
 import (
 	"fmt"
@@ -17,7 +18,8 @@ const (
 	MaxGatherWidth        = 16
 )
 
-func Limits(opts codemode.RunOptions) (codemode.Limits, error) {
+// CheckRun validates the limits, script size and tool bridge, and fills shared defaults.
+func CheckRun(opts codemode.RunOptions) (codemode.Limits, error) {
 	l := opts.Limits
 	for _, limit := range []struct {
 		name  string

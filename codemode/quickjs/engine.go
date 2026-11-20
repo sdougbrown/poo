@@ -14,7 +14,7 @@ import (
 	"github.com/fastschema/qjs"
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/codemode"
-	"github.com/sdougbrown/poo/codemode/internal"
+	"github.com/sdougbrown/poo/codemode/internal/script"
 )
 
 type Engine struct{}
@@ -22,7 +22,7 @@ type Engine struct{}
 func New() *Engine { return &Engine{} }
 
 func (*Engine) Run(ctx context.Context, opts codemode.RunOptions) (result codemode.RunResult, err error) {
-	limits, err := internal.Limits(opts)
+	limits, err := script.CheckRun(opts)
 	if err != nil {
 		return result, err
 	}
@@ -35,7 +35,7 @@ func (*Engine) Run(ctx context.Context, opts codemode.RunOptions) (result codemo
 	}
 	runCtx, cancel := context.WithTimeout(ctx, time.Duration(limits.TimeoutS)*time.Second)
 	defer cancel()
-	var output internal.Output
+	var output script.Output
 	// qjs panics when a WASM call traps, including after wazero closes a
 	// cancelled guest. Keep guest traps out of the session and its output.
 	defer func() {
@@ -140,13 +140,14 @@ const wrapper = `(() => {
   const gather = (batch) => active ? decode(tools(encode(batch))) : [];
   const call = (name, args = null) => gather([[name, args]])[0];
   const print = (value) => { if (active) log(text(value)); };
-  const compile = Function;
+  const compile = Function, promise = Promise;
   return {run(source) {
     const program = compile("call", "gather", "print", '"use strict";\n' + source);
     active = true;
     try {
       const value = program(call, gather, print);
       active = false;
+      if (value instanceof promise) throw new Error("codemode scripts must be synchronous");
       return encode(value);
     } finally {
       active = false;
@@ -172,8 +173,8 @@ func decodeBatch(raw string) ([]poo.NestedCall, error) {
 	}
 	var calls []poo.NestedCall
 	for dec.More() {
-		if len(calls) == internal.MaxGatherWidth {
-			return nil, fmt.Errorf("gather takes at most %d calls", internal.MaxGatherWidth)
+		if len(calls) == script.MaxGatherWidth {
+			return nil, fmt.Errorf("gather takes at most %d calls", script.MaxGatherWidth)
 		}
 		var pair []json.RawMessage
 		if err := dec.Decode(&pair); err != nil || len(pair) != 2 {
