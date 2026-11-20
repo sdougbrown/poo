@@ -235,11 +235,25 @@ func Restore(opts Options, records []Record, fns ...Option) (*Session, Restored,
 	// the metadata, not from the current defaults.
 	if role := restored.Metadata.Roles.Chat; role != nil {
 		model := *role
+		// A limit the recorded role leaves unknown comes from the current
+		// settings' entry of the same name, when that entry still names
+		// the recorded model_id, and then from the header. An entry that
+		// now names another model supplies nothing.
+		current := opts.Models[modelLabel(model)]
+		if current.ModelID != model.ModelID {
+			current = ModelInfo{}
+		}
 		if model.ContextLimit <= 0 {
-			model.ContextLimit = opts.Model.ContextLimit
+			model.ContextLimit = current.ContextLimit
 		}
 		if model.ContextLimit <= 0 {
 			model.ContextLimit = created.ContextLimit
+		}
+		if model.MaxOutput <= 0 {
+			model.MaxOutput = current.MaxOutput
+		}
+		if model.MaxOutput <= 0 && created.Model.ModelID == model.ModelID {
+			model.MaxOutput = created.Model.MaxOutput
 		}
 		opts.Model = model
 	}
