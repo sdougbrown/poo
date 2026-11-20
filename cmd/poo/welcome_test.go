@@ -254,7 +254,7 @@ func TestThePickerOffersOnlyModelsTheCredentialRuns(t *testing.T) {
 
 	// A Codex credential brings the Codex models back, and naming one
 	// writes it as the chat role.
-	storeCredential(t, auth.Codex, auth.Credential{Access: "access", Refresh: "refresh"})
+	storeCredential(t, auth.Codex, auth.Credential{Access: "access", Refresh: "refresh", AccountID: "acc"})
 	withStdin(t, "1\n\n")
 	stderr.Reset()
 	path, ok := runWelcome(io.Discard, &stderr)
