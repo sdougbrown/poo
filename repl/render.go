@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/charmbracelet/glamour"
@@ -27,6 +28,14 @@ const (
 	ansiYellow = "\x1b[33m"
 	ansiCyan   = "\x1b[36m"
 )
+
+// brailleFrames are the spinner's frames, shown in turn while the
+// model writes or a tool runs.
+var brailleFrames = []rune("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
+
+// streamWriteDelay is how long a tool call runs before its spinner
+// shows: a call that returns within it never gains a row.
+const streamWriteDelay = 2 * time.Second
 
 // maxResultLines is how many body lines of a tool result the
 // transcript shows. A longer result keeps its head and says what was
@@ -89,6 +98,26 @@ type streamBlock struct {
 	// hint says the writing hint stands on the terminal, where the
 	// text will.
 	hint bool
+	// hintFrame counts the spinner frames the writing hint has shown,
+	// so the run loop's frames advance it.
+	hintFrame int
+	// spinner is the running tool call's live row, nil when no tool is
+	// running. The run loop's frames repaint it once the call has run
+	// past streamWriteDelay, and toolResult takes it down.
+	spinner *toolSpinner
+}
+
+// toolSpinner is a tool call the transcript is still waiting on. The
+// run loop paints its row while it waits, after a delay that keeps a
+// fast call's row from ever appearing.
+type toolSpinner struct {
+	// tool names the call.
+	tool string
+	// summary is the call's first summary line, when the event gave
+	// one.
+	summary string
+	// started is when the call's event landed.
+	started time.Time
 }
 
 // streamLive is one message being streamed. It holds the markdown a
@@ -183,6 +212,7 @@ func (r *renderer) setWidth(width int) bool {
 // repl writes for itself — a steer's echo, a notice, a failure — ends
 // the open block first. The screen and the transcript keep one order.
 func (r *renderer) write(s string) {
+	r.takeSpinner()
 	if r.block.hint || r.live.kind != "" {
 		r.finish()
 	}
@@ -266,14 +296,26 @@ func (r *renderer) streams() bool {
 	return r.layout != nil && r.width > 0
 }
 
-// hint shows the dim line that the model is writing, on a row of its
-// own above the prompt, until the message's first delta arrives.
+// hint shows the line that says work is happening, on a row of its own
+// above the prompt, until the message's first delta arrives. The frame
+// is the spinner's first braille cell; the run loop's frames advance
+// it through paintHintFrame.
 func (r *renderer) hint() {
 	if !r.streams() || r.block.hint || r.block.started {
 		return
 	}
-	r.layout.hint(ansiDim + "… writing" + ansiReset)
+	r.layout.hint(ansiDim + string(brailleFrames[r.block.hintFrame]) + " writing" + ansiReset)
 	r.block.hint = true
+}
+
+// paintHintFrame advances the writing hint's braille spinner one
+// frame. It paints nothing when no hint stands.
+func (r *renderer) paintHintFrame() {
+	if !r.streams() || !r.block.hint {
+		return
+	}
+	r.block.hintFrame = (r.block.hintFrame + 1) % len(brailleFrames)
+	r.layout.hint(ansiDim + string(brailleFrames[r.block.hintFrame]) + " writing" + ansiReset)
 }
 
 // takeHint takes the writing hint back off the terminal.
@@ -560,6 +602,7 @@ func isFinalByte(b rune) bool {
 // prompt and stay there; the next write starts below them.
 func (r *renderer) finish() {
 	r.takeHint()
+	r.takeSpinner()
 	r.paintPending()
 	if !r.streams() {
 		body := r.pendingBody()
@@ -856,6 +899,61 @@ func (r *renderer) toolResult(tool, outcome, text string, elided int) {
 		b.WriteString(fmt.Sprintf("%s%s%s: %s%s\n", resultIndent, ansiRed, name, outcome, ansiReset))
 	}
 	r.write(b.String())
+}
+
+// armSpinner records the tool call the transcript is waiting on. Its
+// row stands after streamWriteDelay, and stays until the result, or a
+// write that ends the block, takes it down.
+func (r *renderer) armSpinner(tool, summary string) {
+	if !r.streams() || r.block.started || r.live.kind != "" {
+		return
+	}
+	r.block.spinner = &toolSpinner{tool: tool, summary: summary, started: time.Now()}
+}
+
+// takeSpinner takes the running tool call's row back off the terminal.
+// A block with content standing repaints its own rows, so the clear is
+// its alone to make when nothing else stands.
+func (r *renderer) takeSpinner() {
+	if r.block.spinner == nil {
+		return
+	}
+	r.block.spinner = nil
+	if r.block.hint || r.block.started || r.live.kind != "" {
+		return
+	}
+	r.layout.clearPreview()
+}
+
+// paintSpinner paints the running tool call's row, once the call has
+// run past its delay: the braille frame advances with the wait, and a
+// call past a second names the seconds it has run. It paints nothing
+// while no spinner runs, the delay holds, or the block is stalled on a
+// resize.
+func (r *renderer) paintSpinner() {
+	s := r.block.spinner
+	if s == nil || !r.streams() || r.block.stalled || r.block.started || r.live.kind != "" {
+		return
+	}
+	elapsed := time.Since(s.started)
+	if elapsed < streamWriteDelay {
+		return
+	}
+	tool := clipLine(sanitizeLine(s.tool), max(1, r.previewContentWidth()-4))
+	row := tool
+	suffix := ""
+	if seconds := int(elapsed.Seconds()); seconds >= 1 {
+		suffix = fmt.Sprintf(" · %ds", seconds)
+	}
+	if text := firstLine(s.summary); text != "" {
+		budget := r.previewContentWidth() - ansi.StringWidth(tool) - 3 - ansi.StringWidth(suffix)
+		if budget > 0 {
+			row += " · " + clipLine(sanitizeLine(text), budget)
+		}
+	}
+	row += suffix
+	frame := brailleFrames[int(elapsed/(100*time.Millisecond))%len(brailleFrames)]
+	r.layout.hint(ansiDim + string(frame) + " " + row + ansiReset)
 }
 
 // previewContentWidth is the columns a tool result's line has after the

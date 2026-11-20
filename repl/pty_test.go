@@ -652,7 +652,7 @@ func TestARefusedPromptTakesTheHintBack(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 	emu := vt10x.New(vt10x.WithSize(80, 24))
 	emu.Write([]byte(term.String()))
-	if strings.Contains(emu.String(), "… writing") {
+	if strings.Contains(emu.String(), "writing") {
 		t.Errorf("the hint stood over the refusal:\n%s", emu.String())
 	}
 	if !strings.Contains(emu.String(), "✗") {
