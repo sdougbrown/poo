@@ -590,3 +590,45 @@ func TestTheSessionWarnsWhenTheViewDoesNotFitTheNewModelsInputCap(t *testing.T) 
 		t.Errorf("the run settled %q, want context_exhausted", result.Reason)
 	}
 }
+
+// TestAModelSwitchLetsTheNativeCompactionCompactAgain covers the guard a
+// native compaction keeps: the input the last compaction left belongs to the
+// window that measured it, so a switch that changes the window starts the
+// guard over.
+func TestAModelSwitchLetsTheNativeCompactionCompactAgain(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		// The first run fills the small window and is compacted natively.
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}, usage: &poo.UsageReport{InputTokens: 3600, OutputTokens: 5}},
+		// The report after the compaction is still short, so the guard
+		// suppresses the second compaction and the run settles.
+		{calls: []poo.ToolCall{{CallID: "c2", Name: "echo", Arguments: []byte(`{"text":"two"}`)}}, usage: &poo.UsageReport{InputTokens: 3900, OutputTokens: 5}},
+		// The second run, on the model the session switched to.
+		{calls: []poo.ToolCall{{CallID: "c3", Name: "echo", Arguments: []byte(`{"text":"three"}`)}}, usage: &poo.UsageReport{InputTokens: 4000, OutputTokens: 5}},
+		{text: "the answer"},
+	})
+	tr.SetWindow(nativeWindowOf(`{"encrypted_content":"abc"}`))
+	s := newTestSession(t, nativeOptions(t, tr, "echoed", &recordingSink{}))
+
+	if res := runSession(t, s, "do the thing"); res.Reason != poo.ReasonContextExhausted {
+		t.Fatalf("the first run settled %q (%s), want context_exhausted", res.Reason, res.Detail.Text)
+	}
+	if got := tr.Compactions(); got != 1 {
+		t.Fatalf("the transport served %d native compactions, want 1", got)
+	}
+
+	// The new window is wider than the input the compaction left, so the
+	// guard would read that input as short and never compact again.
+	if _, err := s.SetModel(poo.ModelInfo{
+		Name: "wider", ModelID: "test-model", ContextLimit: 4800, MaxOutput: 1024,
+		Ops: []poo.Op{poo.OpChat, poo.OpCompact},
+	}); err != nil {
+		t.Fatalf("switching to the wider model: %v", err)
+	}
+	res := runSession(t, s, "carry on")
+	if res.Reason != poo.ReasonEndTurn {
+		t.Fatalf("the second run settled %q (%s), want end_turn", res.Reason, res.Detail.Text)
+	}
+	if got := tr.Compactions(); got != 2 {
+		t.Errorf("the transport served %d native compactions, want the switch to let it compact again", got)
+	}
+}

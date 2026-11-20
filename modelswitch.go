@@ -135,6 +135,13 @@ func (s *Session) SetModel(info ModelInfo, transport ...ChatTransport) (ModelSwi
 	info.ModelID = modelID
 	info.API = api
 	info.ContextLimit = limit
+	// A native compaction's guard compares the input the last compaction left
+	// against the window that measured it, so a change to the window or to the
+	// endpoint's input cap starts the guard over.
+	if info.ContextLimit != s.opts.Model.ContextLimit || info.InputLimit != s.opts.Model.InputLimit {
+		s.compactedInput = 0
+		s.compactedReportPending = false
+	}
 	s.opts.Model = info
 	// The level the session runs at is the new model's to take: a level
 	// it refuses would be a configuration error on every request.
