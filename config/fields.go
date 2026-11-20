@@ -41,8 +41,6 @@ func fieldsOf(s *Settings) SettingsFields {
 	f.SystemPromptAppend = text(s.SystemPrompt.Append)
 	f.SystemPromptRemove = list(s.SystemPrompt.Remove)
 
-	f.ContextNoticeRatio = share(s.Context.NoticeRatio)
-	f.ContextHardRatio = share(s.Context.HardRatio)
 	f.ContextStrategy = pointer(s.Context.Strategy)
 	f.ContextHandoffRatio = share(s.Context.Handoff.Ratio)
 	f.ContextHandoffMaxTokens = count(s.Context.Handoff.MaxTokens)

@@ -1755,10 +1755,10 @@ func (r *Runtime) resolveSession(opts BuildOptions, workingDir string) error {
 		r.Options.MaxContinuations = settings.Limits.MaxContinuations
 	}
 	if settings.Context.NoticeRatio != nil {
-		r.Options.NoticeRatio = *settings.Context.NoticeRatio
+		r.warn("context.notice_ratio is removed and no longer has any effect")
 	}
 	if settings.Context.HardRatio != nil {
-		r.Options.HardRatio = *settings.Context.HardRatio
+		r.warn("context.hard_ratio is removed and no longer has any effect")
 	}
 	r.Options.Jobs = poo.JobOptions{
 		MaxRunning:         settings.Jobs.MaxRunning,

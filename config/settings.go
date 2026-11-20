@@ -302,11 +302,9 @@ type PromptSettings struct {
 
 // Context are the context window's settings.
 type Context struct {
-	// NoticeRatio is the share of the prompt limit at which the model
-	// is told that the context is filling up.
+	// NoticeRatio is removed and ignored: it no longer has any effect.
 	NoticeRatio *float64 `json:"notice_ratio,omitempty"`
-	// HardRatio is the share of the prompt limit at which the run
-	// stops.
+	// HardRatio is removed and ignored: it no longer has any effect.
 	HardRatio *float64 `json:"hard_ratio,omitempty"`
 	// Strategy is how the view is compacted: summary, handoff, native or
 	// none.
