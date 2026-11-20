@@ -43,15 +43,17 @@ func handleModels(inv clicontract.Invocation, stdout, stderr io.Writer) exit {
 		fmt.Fprintf(stderr, "poo models: %v\n", err)
 		return exit{usageExitCode}
 	}
-	// The command probes, so the discovery layer comes from Refresh: building the cached
-	// layer too would apply it twice, and warn twice when the cache is unreadable.
+	// The command asks, so the discovery layer comes from a reprobe and
+	// the cached layer is not built: the ask applies it once, and does
+	// not warn twice when the cache is unreadable. The wire's
+	// models/list reprobes too when its caller asks for a refresh.
 	options := settings.CatalogOptions()
 	options.Cached = false
 	options.UserAgent = userAgent()
 	cat := catalog.New(options)
 	// A probe that fails falls back to the cache and then to the
 	// curated catalog, with a warning: the list is still the list.
-	if err := cat.Refresh(context.Background()); err != nil {
+	if err := cat.Reprobe(context.Background()); err != nil {
 		fmt.Fprintf(stderr, "poo models: %v\n", err)
 		return exit{operationalExitCode}
 	}

@@ -100,6 +100,50 @@ func TestTheModelsCommandNamesTheClient(t *testing.T) {
 	}
 }
 
+// TestTheModelsCommandAsksEvenWhenTheCacheIsFresh covers the command's
+// own ask: the endpoints are asked again even when the discovery cache
+// holds a fresh result, the way the wire's models/list reprobe does.
+// The names test caught this only in full-package runs and -count=2,
+// where an earlier probe had freshened the cache the whole process
+// shares.
+func TestTheModelsCommandAsksEvenWhenTheCacheIsFresh(t *testing.T) {
+	var mu sync.Mutex
+	var agents []string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		agents = append(agents, r.Header.Get("User-Agent"))
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"object":"list","data":[{"id":"test-model"}]}`)
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	dir := t.TempDir()
+	settings := theSettings(t, dir, server.URL+"/v1")
+	// Two runs over one endpoint: the first freshens the shared cache,
+	// and the second must ask anyway.
+	for round := 0; round < 2; round++ {
+		captureStdout(t, func() {
+			if code := run([]string{"models", "--settings", settings}); code != 0 {
+				t.Errorf("poo models exited with %d", code)
+			}
+		})
+	}
+	mu.Lock()
+	probed := append([]string(nil), agents...)
+	mu.Unlock()
+	if len(probed) < 2 {
+		t.Fatalf("the command probed %d times in two runs, want the ask made again each time", len(probed))
+	}
+	for _, agent := range probed {
+		if !strings.HasPrefix(agent, "poo/") {
+			t.Errorf("a probe named itself %q, want the binary's own name", agent)
+		}
+	}
+}
+
 // TestTheModelsCommandPrintsJSON covers the flag: the models are
 // printed as JSON, and a consumer reads them.
 func TestTheModelsCommandPrintsJSON(t *testing.T) {
