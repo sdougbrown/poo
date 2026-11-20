@@ -1309,12 +1309,8 @@ func (s *Session) learnOutputLimit(run *runState, turn int, perr *ProviderError,
 		return false
 	}
 
-	name := model.Name
-	if name == "" {
-		name = model.ModelID
-	}
-	setting := fmt.Sprintf("models.%s.max_output", name)
-	message := fmt.Sprintf("the endpoint rejected max_tokens %d; asking for %d from now on. Set %s to declare the limit.", sent, limit, setting)
+	setting := outputSettingHint(model)
+	message := fmt.Sprintf("the endpoint rejected max_tokens %d and asks for %d from now on; %s to keep it.", sent, limit, setting.clause)
 	rec := &OutputLimitLearnedRecord{
 		RecordMeta: NewRecordMeta("model.output_limit"),
 		ModelID:    modelIdentifier(model),
@@ -1331,7 +1327,7 @@ func (s *Session) learnOutputLimit(run *runState, turn int, perr *ProviderError,
 		"request":  run.requests,
 		"previous": sent,
 		"limit":    limit,
-		"setting":  setting,
+		"setting":  setting.path,
 		"message":  message,
 	})
 	return true

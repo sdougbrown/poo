@@ -85,6 +85,7 @@ func TestAnEndpointCapLearnedFromARejectionServesTheRetryAndTheNextTurn(t *testi
 	})
 	opts := testOptions(t, tr, &echoTool{}, &recordingSink{})
 	opts.Model.Name = "big"
+	opts.Model.Source = map[string]string{"model_id": poo.LayerSettings}
 	opts.Model.ContextLimit = 262144
 	s := newTestSession(t, opts)
 
@@ -112,6 +113,39 @@ func TestAnEndpointCapLearnedFromARejectionServesTheRetryAndTheNextTurn(t *testi
 	}
 	if text, _ := payload["message"].(string); !strings.Contains(text, "16384") || !strings.Contains(text, "models.big.max_output") {
 		t.Errorf("the event's message %q names neither the cap nor the setting", text)
+	}
+}
+
+// TestALearnedCapOnADiscoveredModelNamesTheDeclaration covers a model the
+// settings do not declare: there is no models entry to set, so the warning
+// asks for a declaration instead of naming a setting that does not exist.
+func TestALearnedCapOnADiscoveredModelNamesTheDeclaration(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{err: outputLimitRejection(16384)},
+		{text: "answer"},
+	})
+	opts := testOptions(t, tr, &echoTool{}, &recordingSink{})
+	opts.Model.Name = "big"
+	opts.Model.Source = map[string]string{"model_id": "discovery"}
+	opts.Model.ContextLimit = 262144
+	s := newTestSession(t, opts)
+
+	if res := runSession(t, s, "one"); res.Reason != poo.ReasonEndTurn {
+		t.Fatalf("the run settled %q, want end_turn", res.Reason)
+	}
+	events := outputLimitEvents(s)
+	if len(events) != 1 {
+		t.Fatalf("the session announced %d output limits, want 1", len(events))
+	}
+	if setting, _ := events[0].Payload["setting"].(string); setting != "" {
+		t.Errorf("the event names the setting %q, want none: the settings declare no model", setting)
+	}
+	text, _ := events[0].Payload["message"].(string)
+	if want := "declare the model in settings with its endpoint, model_id and max_output"; !strings.Contains(text, want) {
+		t.Errorf("the event's message %q does not ask for a declaration", text)
+	}
+	if strings.Contains(text, "models.big.max_output") {
+		t.Errorf("the event's message %q names a setting no settings entry has", text)
 	}
 }
 

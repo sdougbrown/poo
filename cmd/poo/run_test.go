@@ -190,7 +190,7 @@ func TestARunThatLearnsAnOutputLimitWarns(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("the exit code is %d, want 0; stderr: %s", code, stderr)
 	}
-	if !strings.Contains(stderr, "poo run: warning: the endpoint rejected max_tokens 32768; asking for 16384 from now on.") {
+	if !strings.Contains(stderr, "poo run: warning: the endpoint rejected max_tokens 32768 and asks for 16384 from now on; set models.test-model.max_output to keep it.") {
 		t.Errorf("the run did not report the learned limit; stderr: %s", stderr)
 	}
 	if len(endpoint.requests) != 2 {

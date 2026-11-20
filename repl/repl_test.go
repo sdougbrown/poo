@@ -292,7 +292,7 @@ func TestARunRendersTheReplyTheToolsAndTheSettle(t *testing.T) {
 // session's own message, the way it prints the warnings a session
 // reports at creation.
 func TestALearnedOutputLimitIsShownAsAWarning(t *testing.T) {
-	const message = "the endpoint rejected max_tokens 32768; asking for 16384 from now on. Set models.big.max_output to declare the limit."
+	const message = "the endpoint rejected max_tokens 32768 and asks for 16384 from now on; set models.big.max_output to keep it."
 	server := &fakeServer{t: t, script: func(s *fakeServer) {
 		s.event("turn.started", map[string]any{"run_id": "r1", "turn": 1})
 		s.event("model.output_limit", map[string]any{

@@ -100,16 +100,8 @@ func (l OutputLimit) Truncation(info ModelInfo, sent int) SettleDetail {
 	case OutputLimitEndpoint:
 		detail.Text = "the response stopped on the endpoint's own output limit; poo sends this endpoint none"
 	case OutputLimitDefault:
-		detail.Text = fmt.Sprintf("the response stopped at max_tokens %d, poo's default for a model with no max_output; ", l.Tokens)
-		if info.DeclaredInSettings() {
-			name := info.Name
-			if name == "" {
-				name = info.ModelID
-			}
-			detail.Text += fmt.Sprintf("set models.%s.max_output to raise it", name)
-		} else {
-			detail.Text += "declare the model in settings with its endpoint, model_id and max_output to raise it"
-		}
+		detail.Text = fmt.Sprintf("the response stopped at max_tokens %d, poo's default for a model with no max_output; %s to raise it",
+			l.Tokens, outputSettingHint(info).clause)
 	case OutputLimitContext:
 		detail.Text = fmt.Sprintf("the response stopped at max_tokens %d, all the room the context window had left (about %d of %d tokens in use)",
 			l.Tokens, l.Input, l.Window)
@@ -117,6 +109,35 @@ func (l OutputLimit) Truncation(info ModelInfo, sent int) SettleDetail {
 		detail.Text = fmt.Sprintf("the response stopped at max_tokens %d, the model's max_output", l.Tokens)
 	}
 	return detail
+}
+
+// outputSetting is how the user sets a model's own output limit.
+type outputSetting struct {
+	// clause names the setting, without a verb: "set models.X.max_output"
+	// or the declaration that would create it.
+	clause string
+	// path is the settings path the clause sets, empty when the settings
+	// declare no model for the clause to name.
+	path string
+}
+
+// outputSettingHint names the setting that fixes a model's output limit.
+//
+// A model the settings declare gets its own max_output. Any other model has
+// no entry to edit, so it gets the declaration that would create one with
+// its endpoint, model_id and max_output. The truncation notice and the
+// learned-limit warning both append the clause, so the setting is named the
+// same way wherever a run explains an output limit.
+func outputSettingHint(info ModelInfo) outputSetting {
+	if !info.DeclaredInSettings() {
+		return outputSetting{clause: "declare the model in settings with its endpoint, model_id and max_output"}
+	}
+	name := info.Name
+	if name == "" {
+		name = info.ModelID
+	}
+	path := fmt.Sprintf("models.%s.max_output", name)
+	return outputSetting{clause: "set " + path, path: path}
 }
 
 // OutputCeiling returns the most output tokens a request for the model
