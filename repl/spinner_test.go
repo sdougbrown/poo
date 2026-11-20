@@ -117,3 +117,28 @@ func TestANoticeTakesTheSpinnerDown(t *testing.T) {
 		t.Fatalf("the spinner came back after the notice:\n%s", scr.text())
 	}
 }
+
+// TestASpinnerRowIsSanitized covers the spinner's row: a tool call
+// whose payload carries escape sequences and control runes is
+// sanitized and clipped before it stands, the way the call's own
+// line is, so nothing but the clean name and summary reaches the
+// terminal.
+func TestASpinnerRowIsSanitized(t *testing.T) {
+	scr, r := aScreen(t, 40)
+	r.toolCall("bash", "ls")
+	r.armSpinner("\x1b]0;evil\x07bash\x1b[2J", "sum\x07mary")
+	ageSpinner(r, 2500*time.Millisecond)
+	r.paintSpinner()
+	if rowOf(t, scr, "bash") < 0 {
+		t.Fatalf("the spinner never showed the sanitized tool:\n%s", scr.text())
+	}
+	if rowOf(t, scr, "summary") < 0 {
+		t.Fatalf("the spinner never showed the sanitized summary:\n%s", scr.text())
+	}
+	if seqs := nonStylingEscape(scr.text()); len(seqs) > 0 {
+		t.Fatalf("the spinner leaked an escape to the terminal: %v\n%s", seqs, scr.text())
+	}
+	if ctrls := controlBytes(scr.text()); len(ctrls) > 0 {
+		t.Fatalf("the spinner leaked a control rune to the terminal: %v\n%s", ctrls, scr.text())
+	}
+}

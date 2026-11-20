@@ -939,9 +939,13 @@ func (r *renderer) paintSpinner() {
 	if elapsed < streamWriteDelay {
 		return
 	}
-	row := s.tool
+	tool := clipLine(sanitizeLine(s.tool), max(1, r.previewContentWidth()-4))
+	row := tool
 	if text := firstLine(s.summary); text != "" {
-		row += " · " + text
+		budget := r.previewContentWidth() - ansi.StringWidth(tool) - 3
+		if budget > 0 {
+			row += " · " + clipLine(sanitizeLine(text), budget)
+		}
 	}
 	if seconds := int(elapsed.Seconds()); seconds >= 1 {
 		row += fmt.Sprintf(" · %ds", seconds)
