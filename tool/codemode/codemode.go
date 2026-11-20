@@ -27,13 +27,19 @@ var sectionText string
 // section is the guidance the tool brings to the system prompt.
 var section = prompt.MustCompile("codemode", sectionText, nil)
 
+//go:embed quickjs.md
+var quickJSSectionText string
+
+var quickJSSection = prompt.MustCompile("codemode", quickJSSectionText, nil)
+
 // Tool is the codemode tool.
 type Tool struct {
 	// Engine runs the scripts.
 	Engine codemode.Engine
 	// Limits override the session's, for a binary that pins them.
 	// Zero fields take the session's, or the engine's defaults.
-	Limits codemode.Limits
+	Limits  codemode.Limits
+	quickJS bool
 }
 
 // New returns a codemode tool that runs its scripts on the engine.
@@ -41,8 +47,17 @@ func New(engine codemode.Engine) *Tool {
 	return &Tool{Engine: engine}
 }
 
+// NewQuickJS returns the tool with JavaScript guidance for a QuickJS engine.
+func NewQuickJS(engine codemode.Engine) *Tool {
+	return &Tool{Engine: engine, quickJS: true}
+}
+
 // Spec describes the tool.
 func (t *Tool) Spec() poo.ToolSpec {
+	script := `"A Starlark script. It can call(name, args), gather([(name, args), ...]), print(x) and exit(value)."`
+	if t.quickJS {
+		script = `"A JavaScript function body for QuickJS. Use call(name, args), gather([[name, args], ...]), print(x), and return a JSON value."`
+	}
 	return poo.ToolSpec{
 		Name: "codemode",
 		Description: "Run a short script whose only capability is calling your other tools. " +
@@ -50,7 +65,7 @@ func (t *Tool) Spec() poo.ToolSpec {
 		Schema: json.RawMessage(`{
   "type": "object",
   "properties": {
-    "script": {"type": "string", "description": "The script. It can call(name, args), gather([(name, args), ...]), print(x) and exit(value)."}
+    "script": {"type": "string", "description": ` + script + `}
   },
   "required": ["script"]
 ,"additionalProperties":false}`),
@@ -164,5 +179,8 @@ func resultText(result codemode.RunResult, err error) string {
 
 // PromptSection renders the tool's own section of the system prompt.
 func (t *Tool) PromptSection(env prompt.Env) string {
+	if t.quickJS {
+		return quickJSSection.Render(env)
+	}
 	return section.Render(env)
 }

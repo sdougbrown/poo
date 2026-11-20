@@ -56,6 +56,7 @@ func fieldsOf(s *Settings) SettingsFields {
 	f.ToolsEditAskOutsideWorkingDir = flag(s.Tools.Edit.AskOutsideWorkingDir)
 	f.ToolsBashTimeoutS = count(s.Tools.Bash.TimeoutS)
 	f.ToolsBashExecutor = pointer(s.Tools.Bash.Executor)
+	f.ToolsCodemodeEngine = pointer(s.Tools.Codemode.Engine)
 	f.ToolsCodemodeTimeoutS = count(s.Tools.Codemode.TimeoutS)
 	f.ToolsCodemodeScriptMaxBytes = count(s.Tools.Codemode.ScriptMaxBytes)
 	f.ToolsCodemodeOutputCapChars = count(s.Tools.Codemode.OutputCapChars)

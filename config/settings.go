@@ -395,6 +395,8 @@ type Bash struct {
 
 // Codemode are the codemode tool's settings.
 type Codemode struct {
+	// Engine selects the script runtime. An unset engine uses Starlark.
+	Engine *string `json:"engine,omitempty"`
 	// TimeoutS is a script run's wall-clock limit, in seconds.
 	TimeoutS *int `json:"timeout_s,omitempty"`
 	// ScriptMaxBytes is the longest script a run accepts.
