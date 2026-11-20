@@ -21,7 +21,7 @@ const (
 // A key is read from the environment or it is written in the settings. An
 // endpoint that reads an environment variable also takes the credential the
 // operator stored for the provider declaring that variable, and config's
-// EndpointKey is the one place that order is applied.
+// endpoint key resolution is the one place that order is applied.
 type CredentialSource string
 
 const (
@@ -133,7 +133,8 @@ func servesRole(info poo.ModelInfo, role Role) bool {
 // unqualified name and a models file that was not read are told apart by that
 // list.
 type UnresolvedError struct {
-	// Name is the model's name, as the settings wrote it.
+	// Name is the model's name, as the settings wrote it. It is empty
+	// when no model was assigned to the role at all.
 	Name string
 	// Role is the role the model was assigned to. It is empty when the
 	// model is not assigned to one.
@@ -148,15 +149,21 @@ func (e *UnresolvedError) Error() string {
 	if e.Role == "" {
 		return fmt.Sprintf("catalog: the model %q is not in the catalog", e.Name)
 	}
-	known := ""
-	switch len(e.Known) {
-	case 0:
-		known = fmt.Sprintf(", and no model in the catalog serves the %q role", e.Role)
-	default:
-		known = fmt.Sprintf(", and the models that serve the %q role are %s", e.Role, quoteList(e.Known))
+	if e.Name == "" {
+		return fmt.Sprintf("catalog: no model is assigned to the %q role%s", e.Role, knownSuffix(e.Role, e.Known))
 	}
+	known := knownSuffix(e.Role, e.Known)
 	return fmt.Sprintf("catalog: the model %q assigned to the %q role is not in the catalog%s",
 		e.Name, e.Role, known)
+}
+
+// knownSuffix names the models that serve a role, for an error that says what
+// is missing: the list, or that the catalog holds none.
+func knownSuffix(role Role, known []string) string {
+	if len(known) == 0 {
+		return fmt.Sprintf(", and no model in the catalog serves the %q role", role)
+	}
+	return fmt.Sprintf(", and the models that serve the %q role are %s", role, quoteList(known))
 }
 
 // quoteList renders names for an error, quoted and separated.

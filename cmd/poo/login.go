@@ -19,6 +19,7 @@ import (
 
 	clicontract "github.com/sdougbrown/cli-contract"
 
+	"github.com/sdougbrown/poo/config"
 	"github.com/sdougbrown/poo/internal/term"
 	"github.com/sdougbrown/poo/provider/auth"
 )
@@ -65,6 +66,10 @@ type loginOptions struct {
 	waitSet bool
 	// provider is the sign-in named on the command line, if one was.
 	provider string
+	// command is the name the shared sign-in's diagnostics answer by: the
+	// command that runs them, so a picker the welcome front door shares
+	// does not answer as a command the operator never typed.
+	command string
 }
 
 // bind reads the login command's flags out of a parsed invocation.
@@ -90,13 +95,14 @@ func (o *loginOptions) bind(inv clicontract.Invocation) {
 func handleLogin(ctx context.Context, inv clicontract.Invocation, stdout, stderr io.Writer) exit {
 	var o loginOptions
 	o.bind(inv)
+	o.command = "poo login"
 	// The list is the question, and a run with no terminal to ask on has no answer to it, so it
 	// says what to type instead of guessing.
 	if o.provider == "" && !interactive() {
 		fmt.Fprintf(stderr, "poo login: name a provider: %s\n", strings.Join(loginNames(), ", "))
 		return exit{usageExitCode}
 	}
-	flow, ok := o.choose(os.Stdin, stderr)
+	flow, ok := o.choose(bufio.NewScanner(os.Stdin), stderr)
 	if !ok {
 		return exit{usageExitCode}
 	}
@@ -109,25 +115,38 @@ func handleLogin(ctx context.Context, inv clicontract.Invocation, stdout, stderr
 		fmt.Fprintf(stderr, "poo login: %v\n", err)
 		return exit{usageExitCode}
 	}
+	if _, failed := o.signInAndStore(ctx, flow, settingsPath, settings, nil, stdout, stderr); failed {
+		return exit{operationalExitCode}
+	}
+	return exit{}
+}
+
+// signInAndStore runs the sign-in the flow names and writes the credential to poo's
+// own file. It is the middle the login command and the welcome front door share. It
+// resolves the file the settings name, asks the replace question, runs the sign-in,
+// and writes the credential. The operator hears where it went. The lines the key
+// flows read come from in, which a multi-step flow owns so one scan of its input
+// feeds every answer. A caller with no flow of its own passes nil, and a sign-in
+// reads the terminal's own input.
+func (o *loginOptions) signInAndStore(ctx context.Context, flow auth.Flow, settingsPath string, settings *config.Settings, in *bufio.Scanner, stdout, stderr io.Writer) (auth.Status, bool) {
 	target, err := pooCredentialFile(settingsPath, settings)
 	if err != nil {
-		fmt.Fprintf(stderr, "poo login: %v\n", err)
-		return exit{usageExitCode}
+		fmt.Fprintf(stderr, "%s: %v\n", o.command, err)
+		return auth.Status{}, true
 	}
 	credentials := auth.Credentials{Path: target}
-	mayReplace, failed := replace(credentials, flow.Provider, o.force, "poo login", stderr)
+	mayReplace, failed := replace(credentials, flow.Provider, o.force, o.command, in, stderr)
 	if failed {
-		return exit{operationalExitCode}
+		return auth.Status{}, true
 	}
-
-	entry, failed := o.signIn(ctx, flow, stdout, stderr)
+	entry, failed := o.signIn(ctx, flow, in, stdout, stderr)
 	if failed {
-		return exit{operationalExitCode}
+		return auth.Status{}, true
 	}
 	status, err := credentials.Set(ctx, flow.Provider, entry, mayReplace)
 	if err != nil {
-		fmt.Fprintf(stderr, "poo login: %v\n", err)
-		return exit{operationalExitCode}
+		fmt.Fprintf(stderr, "%s: %v\n", o.command, err)
+		return auth.Status{}, true
 	}
 	fmt.Fprintf(stdout, "Signed in to %s", status.Provider)
 	if status.AccountID != "" {
@@ -139,7 +158,7 @@ func handleLogin(ctx context.Context, inv clicontract.Invocation, stdout, stderr
 	if reads := settings.CredentialFile(); reads != "" && !sameFile(reads, status.Path) {
 		fmt.Fprintf(stdout, "\nThe settings still resolve the credential to %s. Point poo at the copy:\n  auth_file: %s\n", reads, status.Path)
 	}
-	return exit{}
+	return status, false
 }
 
 // refuseBrowserFlags refuses the flags a browser sign-in takes when the chosen sign-in is not one.
@@ -160,16 +179,17 @@ func (o *loginOptions) refuseBrowserFlags(flow auth.Flow) error {
 	return nil
 }
 
-// choose returns the sign-in the request names, or the one an operator picks from the list it
-// reads the answer on in.
-func (o *loginOptions) choose(in io.Reader, stderr io.Writer) (auth.Flow, bool) {
+// choose returns the sign-in the request names, or the one an operator picks from the list
+// it reads the answer on in. The scanner is the caller's own, so a flow that asks several
+// questions feeds every answer through one scan of its input.
+func (o *loginOptions) choose(in *bufio.Scanner, stderr io.Writer) (auth.Flow, bool) {
 	if o.provider != "" {
 		for _, flow := range logins() {
 			if slices.Contains(providerNames(flow), o.provider) || flow.Name == o.provider {
 				return flow, true
 			}
 		}
-		fmt.Fprintf(stderr, "poo login: %q is not a sign-in poo knows: %s\n", o.provider, strings.Join(loginNames(), ", "))
+		fmt.Fprintf(stderr, "%s: %q is not a sign-in poo knows: %s\n", o.command, o.provider, strings.Join(loginNames(), ", "))
 		return auth.Flow{}, false
 	}
 	fmt.Fprintln(stderr, "Sign in with:")
@@ -177,34 +197,33 @@ func (o *loginOptions) choose(in io.Reader, stderr io.Writer) (auth.Flow, bool) 
 		fmt.Fprintf(stderr, "  %d. %s\n", i+1, flow.Name)
 	}
 	fmt.Fprintf(stderr, "Which one? [1-%d] ", len(logins()))
-	scanner := bufio.NewScanner(in)
-	if !scanner.Scan() {
-		fmt.Fprintln(stderr, "poo login: nothing was chosen")
+	if !in.Scan() {
+		fmt.Fprintf(stderr, "%s: nothing was chosen\n", o.command)
 		return auth.Flow{}, false
 	}
 	var choice int
-	if _, err := fmt.Sscanf(strings.TrimSpace(scanner.Text()), "%d", &choice); err != nil ||
+	if _, err := fmt.Sscanf(strings.TrimSpace(in.Text()), "%d", &choice); err != nil ||
 		choice < 1 || choice > len(logins()) {
-		fmt.Fprintln(stderr, "poo login: that is not one of the sign-ins")
+		fmt.Fprintf(stderr, "%s: that is not one of the sign-ins\n", o.command)
 		return auth.Flow{}, false
 	}
 	return logins()[choice-1], true
 }
 
 // signIn runs the flow the operator chose.
-func (o *loginOptions) signIn(ctx context.Context, flow auth.Flow, stdout, stderr io.Writer) (auth.Credential, bool) {
+func (o *loginOptions) signIn(ctx context.Context, flow auth.Flow, in *bufio.Scanner, stdout, stderr io.Writer) (auth.Credential, bool) {
 	if flow.Method == auth.MethodKey {
-		return keyCredential(flow, os.Stdin, stderr)
+		return keyCredential(flow, o.command, os.Stdin, in, stderr)
 	}
 	attempt, err := flow.Authorize()
 	if err != nil {
-		fmt.Fprintf(stderr, "poo login: %v\n", err)
+		fmt.Fprintf(stderr, "%s: %v\n", o.command, err)
 		return auth.Credential{}, true
 	}
 	fmt.Fprintf(stderr, "Open this URL to sign in:\n\n  %s\n\n", attempt.URL)
 	if !o.noBrowser {
 		if err := openBrowser(attempt.URL); err != nil {
-			fmt.Fprintf(stderr, "poo login: %v\n", err)
+			fmt.Fprintf(stderr, "%s: %v\n", o.command, err)
 		}
 	}
 	if interactive() {
@@ -214,12 +233,12 @@ func (o *loginOptions) signIn(ctx context.Context, flow auth.Flow, stdout, stder
 	}
 	callback, err := waitForCallback(ctx, attempt, o.waitDuration(), nil, stderr)
 	if err != nil {
-		fmt.Fprintf(stderr, "poo login: %v\n", err)
+		fmt.Fprintf(stderr, "%s: %v\n", o.command, err)
 		return auth.Credential{}, true
 	}
 	credential, err := attempt.Exchange(ctx, nil, callback)
 	if err != nil {
-		fmt.Fprintf(stderr, "poo login: %v\n", err)
+		fmt.Fprintf(stderr, "%s: %v\n", o.command, err)
 		return auth.Credential{}, true
 	}
 	return credential, false
@@ -234,7 +253,7 @@ func (o *loginOptions) signIn(ctx context.Context, flow auth.Flow, stdout, stder
 // The two reads are exclusive: one input is one of them. A terminal that ends its prompt with
 // nothing typed has given no key, and asking the same terminal again would sit on a prompt that
 // is not there.
-func keyCredential(flow auth.Flow, stdin *os.File, stderr io.Writer) (auth.Credential, bool) {
+func keyCredential(flow auth.Flow, command string, stdin *os.File, in *bufio.Scanner, stderr io.Writer) (auth.Credential, bool) {
 	key := ""
 	if interactive() {
 		fmt.Fprintf(stderr, "%s key: ", flow.Name)
@@ -243,13 +262,16 @@ func keyCredential(flow auth.Flow, stdin *os.File, stderr io.Writer) (auth.Crede
 			fmt.Fprintln(stderr)
 		}
 	} else {
-		scanner := bufio.NewScanner(stdin)
+		scanner := in
+		if scanner == nil {
+			scanner = bufio.NewScanner(stdin)
+		}
 		if scanner.Scan() {
 			key = strings.TrimSpace(scanner.Text())
 		}
 	}
 	if key == "" {
-		fmt.Fprintln(stderr, "poo login: no key was given")
+		fmt.Fprintf(stderr, "%s: no key was given\n", command)
 		return auth.Credential{}, true
 	}
 	return auth.Credential{Kind: auth.KindAPIKey, Key: key}, false

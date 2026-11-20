@@ -128,7 +128,14 @@ func resolveSettings(explicit, workingDir string) (string, *config.Settings, err
 		return "", nil, err
 	}
 	if path == "" {
-		return "", &config.Settings{Version: 1}, nil
+		// The defaults are what a written settings file in poo's own
+		// directory would load with. A command with no file reports on
+		// the catalog that the welcome front door and the next run see.
+		settings, err := config.LoadDefaults()
+		if err != nil {
+			return "", nil, err
+		}
+		return "", settings, nil
 	}
 	settings, err := config.Load(path)
 	return path, settings, err

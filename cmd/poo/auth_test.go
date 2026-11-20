@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -589,7 +590,7 @@ func TestTheConfirmationReadsAnAnswer(t *testing.T) {
 		{name: "no input", input: ""},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			if got := confirmed(strings.NewReader(c.input)); got != c.want {
+			if got := confirmed(bufio.NewScanner(strings.NewReader(c.input))); got != c.want {
 				t.Errorf("the answer %q reads as %t, want %t", c.input, got, c.want)
 			}
 		})

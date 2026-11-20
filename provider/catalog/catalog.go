@@ -469,7 +469,7 @@ func (c *Catalog) Notes(name string) []string {
 func (c *Catalog) Role(role Role) (poo.ModelInfo, error) {
 	name, ok := c.roles[role]
 	if !ok {
-		return poo.ModelInfo{}, c.unresolved(string(role), role)
+		return poo.ModelInfo{}, c.unassignedRole(role)
 	}
 	if _, ok := c.entries[name]; !ok {
 		return poo.ModelInfo{}, c.unresolved(name, role)
@@ -498,6 +498,11 @@ func (c *Catalog) Roles() map[Role]string {
 // that would have served the role.
 func (c *Catalog) unresolved(name string, role Role) *UnresolvedError {
 	return &UnresolvedError{Name: name, Role: role, Known: c.servable(role)}
+}
+
+// unassignedRole is the error for a role no model is assigned to.
+func (c *Catalog) unassignedRole(role Role) *UnresolvedError {
+	return &UnresolvedError{Role: role, Known: c.servable(role)}
 }
 
 // servable returns the models that serve a role's operations, lowest name
