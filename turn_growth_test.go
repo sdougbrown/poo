@@ -360,10 +360,14 @@ func TestANativeCompactionIsNotTheTurnGrowthsBaseline(t *testing.T) {
 // it measures from the view's last report: the compaction's own tens of tokens
 // are not what the run grew by.
 func TestAFailedNativeCompactionsReportIsNotTheBaseline(t *testing.T) {
+	// Every turn after the second reports growthStep more than the one before
+	// it, so the step is what the gates after the failed compaction measure.
+	const growthStep = 2000
 	tr := scripted([]fakeResponse{
 		{calls: toolCallTurn().calls, usage: &poo.UsageReport{InputTokens: 30000, OutputTokens: 5}},
 		{calls: toolCallTurn().calls, usage: &poo.UsageReport{InputTokens: 30000, OutputTokens: 5}},
-		{calls: toolCallTurn().calls, usage: &poo.UsageReport{InputTokens: 31000, OutputTokens: 5}},
+		{calls: toolCallTurn().calls, usage: &poo.UsageReport{InputTokens: 30000 + growthStep, OutputTokens: 5}},
+		{calls: toolCallTurn().calls, usage: &poo.UsageReport{InputTokens: 30000 + 2*growthStep, OutputTokens: 5}},
 		{text: "the answer"},
 	})
 	tr.SetWindowError(errors.New("the endpoint refused the window"))
@@ -383,14 +387,16 @@ func TestAFailedNativeCompactionsReportIsNotTheBaseline(t *testing.T) {
 	if len(probe.acted) == 0 {
 		t.Fatal("the run never asked for a window, want the first turn to fail its compaction")
 	}
-	if len(probe.growth) < 3 {
-		t.Fatalf("the compactor was given %d budgets, want the gate after the failed compaction", len(probe.growth))
+	if len(probe.growth) < 4 {
+		t.Fatalf("the compactor was given %d budgets, want the gate after the failed compaction and the one after it", len(probe.growth))
 	}
-	// The two turns reported the same input, so the growth is still the
-	// observation cap. A tracker that took the compaction's 50 tokens as its
-	// baseline would report the whole 30000 as one turn's growth.
-	if got, want := probe.growth[2], probe.growth[1]; got != want {
-		t.Errorf("the gate after the failed compaction carries a turn growth of %d, want the %d the gate of it carried", got, want)
+	// The two turns before the compaction reported the same input, so the
+	// gates up to it carry the observation cap. The gate after the compaction
+	// measures the step between the reports. A tracker that took the
+	// compaction's 50 tokens as its baseline would report the whole 30000 as
+	// one turn's growth.
+	if got := probe.growth[3]; got != growthStep {
+		t.Errorf("the gate after the failed compaction carries a turn growth of %d, want the measured step of %d", got, growthStep)
 	}
 }
 
