@@ -78,6 +78,37 @@ profiles_files:
 	}
 }
 
+func TestProfilesFilePromptAnswersToTheFileFromARelativeSettingsPath(t *testing.T) {
+	dir := t.TempDir()
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chdir(cwd) })
+	if err := os.MkdirAll(filepath.Join(dir, ".poo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeProfilesFixture(t, filepath.Join(dir, ".poo", "profiles.yaml"), `
+profiles:
+  reviewer:
+    base: code
+    prompt_file: reviewer.md
+`)
+	writeProfilesFixture(t, filepath.Join(dir, ".poo", "reviewer.md"), "Reviewer prompt.")
+	writeProfilesFixture(t, filepath.Join(dir, ".poo", "settings.yaml"), theModelSettings+"profiles_files: [profiles.yaml]\n")
+
+	settings, err := config.Load(".poo/settings.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := renderedProfilePrompt(t, settings, "reviewer"); !strings.Contains(got, "Reviewer prompt.") {
+		t.Errorf("the reviewer profile's prompt is missing %q", "Reviewer prompt.")
+	}
+}
+
 func TestProfilesFilesLayerBelowTheSettings(t *testing.T) {
 	dir := t.TempDir()
 	writeProfilesFixture(t, filepath.Join(dir, "first.yaml"), `
@@ -124,10 +155,37 @@ profiles_files: [first.yaml, second.yaml]
 	}
 }
 
+func TestProfilesFileProfilesAreValidatedLikeTheSettingsOnes(t *testing.T) {
+	for _, tt := range []struct {
+		name, body, field, code string
+	}{
+		{"unknown base", "profiles:\n  reviewer:\n    base: missing\n", "profiles.reviewer.base", config.CodeInvalid},
+		{"core tool", "profiles:\n  reviewer:\n    base: code\n    tools:\n      disabled: [finish]\n", "profiles.reviewer.tools.disabled", config.CodeUnsupported},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeProfilesFixture(t, filepath.Join(dir, "profiles.yaml"), tt.body)
+			settings, err := loadSettingsWithExtra(t, dir, "profiles_files: [profiles.yaml]\n")
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = config.Build(config.BuildOptions{
+				Settings: settings, DefaultProfile: "code", WorkingDir: t.TempDir(),
+				Tools: theTools(), Profiles: theProfiles(), Executors: theExecutors(),
+			})
+			field, _ := config.FieldOf(err)
+			code, _ := config.CodeOf(err)
+			if field != tt.field || code != tt.code {
+				t.Fatalf("got %v; want %s at %s", err, tt.code, tt.field)
+			}
+		})
+	}
+}
+
 func TestProfilesFilesThatDoNotReadFailTheLoad(t *testing.T) {
 	for _, tt := range []struct{ name, body string }{
 		{"unknown key", "profiles:\n  reviewer:\n    base: code\n    prompt: reviewer.md\n"},
-		{"unknown top key", "version: 1\n"},
+		{"unknown top key", "profiles:\n  reviewer:\n    base: code\nversion: 1\n"},
 		{"no profiles", "profiles: {}\n"},
 		{"empty file", ""},
 		{"not yaml", "\tprofiles: [\n"},
