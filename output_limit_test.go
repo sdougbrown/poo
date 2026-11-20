@@ -149,6 +149,30 @@ func TestALearnedCapOnADiscoveredModelNamesTheDeclaration(t *testing.T) {
 	}
 }
 
+// TestACapAnEndpointNamesInsideTheStreamIsLearned covers the same rejection
+// sent as an error event after the stream opened: nothing of the answer was
+// read, so the request is asked again under the cap, and the run ends
+// normally.
+func TestACapAnEndpointNamesInsideTheStreamIsLearned(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{fail: outputLimitRejection(16384)},
+		{text: "answer"},
+	})
+	opts := testOptions(t, tr, &echoTool{}, &recordingSink{})
+	opts.Model.Name = "big"
+	opts.Model.Source = map[string]string{"model_id": poo.LayerSettings}
+	opts.Model.ContextLimit = 262144
+	s := newTestSession(t, opts)
+
+	if res := runSession(t, s, "one"); res.Reason != poo.ReasonEndTurn {
+		t.Fatalf("the run settled %q, want end_turn", res.Reason)
+	}
+	want := []int{32768, 16384}
+	if got := requestedTokens(tr); fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("the requests carried max_tokens %v, want %v", got, want)
+	}
+}
+
 // TestARejectionThatStatesNoCapRetriesUnderTheOlderDefault covers a
 // rejection whose message names no number.
 func TestARejectionThatStatesNoCapRetriesUnderTheOlderDefault(t *testing.T) {

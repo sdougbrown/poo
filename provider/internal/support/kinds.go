@@ -53,7 +53,8 @@ type ErrorResponse struct {
 // The table, one row at a time:
 //
 //	context-length codes                   → context_length
-//	400, 422 naming a too-large max_tokens → output_limit
+//	400, 422, or a stream event            → output_limit when they name a
+//	                                         too-large max_tokens
 //	quota codes                            → usage_limit
 //	429                                    → rate_limited
 //	402, or a billing code                 → plan_inactive
@@ -210,12 +211,17 @@ const outputLimitProximity = 80
 // isOutputLimit reports whether a rejection says the request's output-token
 // field is above what the endpoint allows.
 //
-// Only a 400 or a 422 is the endpoint rejecting the request itself, and the
-// message has to name the output-token field and say it is too large near
-// the field's name. A context overflow is checked before this and stays a
-// context-length failure, even when its message names max_tokens.
+// A 400 or a 422 is the endpoint rejecting the request itself, and an error
+// event inside a stream carries no status at all: the stream is already
+// open. The message is what decides in every case, so the same words
+// classify the same rejection however the endpoint sent it. The message has
+// to name the output-token field and say it is too large near the field's
+// name. A context overflow is checked before this and stays a context-length
+// failure, even when its message names max_tokens.
 func isOutputLimit(status int, message string) bool {
-	if status != http.StatusBadRequest && status != http.StatusUnprocessableEntity {
+	switch status {
+	case 0, http.StatusBadRequest, http.StatusUnprocessableEntity:
+	default:
 		return false
 	}
 	lower := strings.ToLower(message)
