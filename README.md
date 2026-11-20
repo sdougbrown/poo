@@ -300,6 +300,14 @@ record is the word on what it serves, and a newer model than the
 record names is a `models` entry away under the same endpoint,
 declaring `ops: [systemone]`.
 
+**When compaction fires.** Every strategy compacts when the next request no
+longer fits: the prompt plus the answer's output need and a small reserve is
+over the context window, or the prompt plus the reserve is over the endpoint's
+input cap. A `context.summary.ratio` or `context.handoff.ratio` is an optional
+override that adds an earlier trigger at that share of the prompt limit. The
+removed `context.notice_ratio` and `context.hard_ratio` have no effect; a
+settings file that still sets them loads with a warning.
+
 **Native compaction.** `context.strategy: native` asks the provider to compact
 its own conversation and gives the model the provider's compacted state back.
 It is opt-in: the default stays `summary`, which writes its own summary of the
