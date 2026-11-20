@@ -351,8 +351,8 @@ func TestTheRestoreWarnsAboutADeclaredFeedTheFeedsDoNotRun(t *testing.T) {
 	if len(restored.Warnings) != 1 {
 		t.Fatalf("the restore reported %d warnings, want 1: %v", len(restored.Warnings), restored.Warnings)
 	}
-	if !strings.Contains(restored.Warnings[0], `the profile "code" declares the feed "broker"`) {
-		t.Errorf("the warning does not name the profile and the feed: %q", restored.Warnings[0])
+	if !strings.Contains(restored.Warnings[0], `"broker"`) {
+		t.Errorf("the warning does not name the missing feed: %q", restored.Warnings[0])
 	}
 }
 

@@ -186,6 +186,15 @@ func feedRestartDelay(ran, previous time.Duration) time.Duration {
 var feedNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 
 // checkFeeds validates the feeds a session is built with.
+// MissingFeedWarning is what the build and the restore say when a
+// profile declares a feed the settings do not load.
+//
+// The profile declares a need; the operator's feeds.paths still control
+// which feeds load, so the loss is a warning, never a failure.
+func MissingFeedWarning(profile, feed string) string {
+	return fmt.Sprintf("the profile %q declares the feed %q, and the settings load no feed by that name", profile, feed)
+}
+
 func checkFeeds(specs []FeedSpec) error {
 	seen := make(map[string]bool, len(specs))
 	for _, spec := range specs {

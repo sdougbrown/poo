@@ -274,9 +274,10 @@ type Decide struct {
 type ProfileSettings struct {
 	Base string `json:"base"`
 	// Feeds are the feeds the profile declares it needs, by manifest
-	// name. They add to the base's declared feeds, and the settings'
-	// feeds.paths still control which feeds load: a declared feed the
-	// settings do not load is skipped with a warning.
+	// name. They add to the base's declared feeds, kept once each.
+	// The settings' feeds.paths still control which feeds load, and
+	// a declared feed the settings do not load is skipped with a
+	// warning.
 	Feeds      []string     `json:"feeds,omitempty"`
 	PromptFile string       `json:"prompt_file,omitempty"`
 	Tools      ProfileTools `json:"tools,omitempty"`

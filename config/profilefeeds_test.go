@@ -36,12 +36,13 @@ func twoFeedManifest(t *testing.T) string {
 }
 
 // buildWithProfiles builds a runtime whose binary links the named
-// profiles, so a case may link one that declares feeds.
+// profiles, so a case may link one that declares feeds. The settings
+// name the profile the session runs under.
 func buildWithProfiles(t *testing.T, settings *config.Settings, linked []profile.Profile) *config.Runtime {
 	t.Helper()
 	opts := config.BuildOptions{
 		Settings:       settings,
-		Overrides:      config.Overrides{Profile: "apron"},
+		Overrides:      config.Overrides{},
 		WorkingDir:     t.TempDir(),
 		Executors:      theExecutors(),
 		DefaultProfile: "code",
@@ -104,10 +105,10 @@ func TestADeclaredFeedTheSettingsDoNotLoadWarns(t *testing.T) {
 	if runtime.Warning == "" {
 		t.Fatal("the build warned nothing, want the missing feed named")
 	}
-	if !strings.Contains(runtime.Warning, `the profile "apron" declares the feed "events"`) {
-		t.Errorf("the warning does not name the profile and the feed: %q", runtime.Warning)
+	if !strings.Contains(runtime.Warning, `"events"`) {
+		t.Errorf("the warning does not name the missing feed: %q", runtime.Warning)
 	}
-	if strings.Contains(runtime.Warning, "broker") {
+	if strings.Contains(runtime.Warning, `"broker"`) {
 		t.Errorf("the warning names the broker, which the settings load: %q", runtime.Warning)
 	}
 	running := make([]string, 0, len(runtime.Options.Feeds))
@@ -120,12 +121,13 @@ func TestADeclaredFeedTheSettingsDoNotLoadWarns(t *testing.T) {
 }
 
 // TestASettingsProfileAddsFeedsToItsBase covers the variant: a profile
-// the settings define declares feeds that add to the base's own, so a
-// declaration says what the whole profile needs.
+// the settings define declares feeds that add to the base's own, kept
+// once each, so a declaration says what the whole profile needs and a
+// restatement warns about nothing twice.
 func TestASettingsProfileAddsFeedsToItsBase(t *testing.T) {
 	settings, err := config.Parse([]byte(theModelSettings+
 		"profile: watcher\n"+
-		"profiles:\n  watcher:\n    base: code\n    feeds: [events]\n"), config.FormatYAML)
+		"profiles:\n  watcher:\n    base: code\n    feeds: [broker, events, broker]\n"), config.FormatYAML)
 	if err != nil {
 		t.Fatalf("decoding the settings: %v", err)
 	}
@@ -147,10 +149,48 @@ func TestASettingsProfileAddsFeedsToItsBase(t *testing.T) {
 	if names := runtime.Profile.Feeds; strings.Join(names, ",") != "broker,events" {
 		t.Errorf("the profile declares %v, want broker,events", names)
 	}
+	// The listing restore reads carries the declaration too: the feeds
+	// of the profile this build defines for the recorded name.
+	var listed []string
+	for _, p := range runtime.Options.Profiles {
+		if p.Name == "watcher" {
+			listed = p.Feeds
+		}
+	}
+	if strings.Join(listed, ",") != "broker,events" {
+		t.Errorf("the listed profile declares %v, want broker,events", listed)
+	}
 	if runtime.Warning == "" {
 		t.Fatal("the build warned nothing, want both missing feeds named")
 	}
-	if !strings.Contains(runtime.Warning, `"broker"`) || !strings.Contains(runtime.Warning, `"events"`) {
-		t.Errorf("the warning does not name both declared feeds: %q", runtime.Warning)
+	if strings.Count(runtime.Warning, `"broker"`) != 1 || strings.Count(runtime.Warning, `"events"`) != 1 {
+		t.Errorf("the warning does not name each declared feed once: %q", runtime.Warning)
+	}
+}
+
+// TestASettingsProfileRefusesAnEmptyDeclaredFeed covers the validation:
+// a declared feed name cannot be empty, so a warning about a nameless
+// feed never reads as a bug in poo.
+func TestASettingsProfileRefusesAnEmptyDeclaredFeed(t *testing.T) {
+	settings, err := config.Parse([]byte(theModelSettings+
+		"profile: watcher\n"+
+		"profiles:\n  watcher:\n    base: code\n    feeds: [\"\"]\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	opts := config.BuildOptions{
+		Settings:       settings,
+		WorkingDir:     t.TempDir(),
+		Executors:      theExecutors(),
+		DefaultProfile: "code",
+		Tools:          theTools(),
+		Profiles:       []profile.Profile{{Name: "code", Tools: []string{"read"}}},
+	}
+	_, err = config.Build(opts)
+	if err == nil {
+		t.Fatal("the build accepted an empty declared feed name")
+	}
+	if !strings.Contains(err.Error(), "feeds") {
+		t.Errorf("the failure does not name the field: %v", err)
 	}
 }

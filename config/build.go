@@ -495,12 +495,12 @@ func (r *Runtime) resolveProfile(opts BuildOptions) error {
 	}
 	r.Profile = poo.Profile{Name: chosen.Name, Unmatched: chosen.Unmatched, Feeds: slices.Clone(chosen.Feeds)}
 	// The declared feeds are a presence assertion, not a switch: the
-	// operator's feeds.paths still control which feeds run, and a
-	// declared feed the settings do not load is skipped with a warning,
-	// never a failure.
-	for _, name := range chosen.Feeds {
-		if !r.Feeds.Has(name) {
-			r.warn(fmt.Sprintf("the profile %q declares the feed %q, and the settings load no feed by that name", chosen.Name, name))
+	// operator's feeds.paths still control which feeds run. A
+	// declared feed the settings do not load is skipped with a
+	// warning, never a failure.
+	for _, feedName := range chosen.Feeds {
+		if !r.Feeds.Has(feedName) {
+			r.warn(poo.MissingFeedWarning(chosen.Name, feedName))
 		}
 	}
 	// The profile's own prompt section is the profile's, so it goes in
