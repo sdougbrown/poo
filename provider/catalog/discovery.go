@@ -81,8 +81,8 @@ func (c *Catalog) Refresh(ctx context.Context) error {
 // Reprobe probes every endpoint and merges the discovery layer, whatever
 // the cache says.
 //
-// The wire's models/list asks for a refresh, and a refresh means the
-// endpoints are asked again.
+// The wire's models/list reprobes when its caller asks for a refresh,
+// and a refresh means the endpoints are asked again.
 func (c *Catalog) Reprobe(ctx context.Context) error {
 	return c.refresh(ctx, true)
 }
