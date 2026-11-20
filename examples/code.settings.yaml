@@ -114,15 +114,13 @@ permission:
 #             the run ends with it
 #   none    — the run ends when the window is full
 #
-# A strategy's ratio is an optional override: when it is set, the strategy
-# also compacts at that share of the prompt limit.
+# A strategy's `ratio` is an optional early trigger; unset, the fit rule
+# decides when to compact.
 context:
   strategy: summary
   handoff:
-    ratio: 0.90
     max_tokens: 2048
   summary:
-    ratio: 0.85
     # How much of the newest history stays verbatim.
     keep_recent_tokens: 20000
     max_tokens: 4096

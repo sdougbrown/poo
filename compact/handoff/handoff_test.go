@@ -368,6 +368,10 @@ func TestAHandoffNoteLargerThanTheOutputLimitFiresEarlier(t *testing.T) {
 // TestTheRoomTriggerAsksForAHandoffBelowTheRatio covers the trigger: a
 // view whose next answer does not fit hands off, and the handoff ends the
 // run, so the trigger cannot repeat.
+//
+// A budget that carries no output limit still needs room for the note: the
+// fork's own limit is the need, and the line is the window less that limit
+// and the reserve.
 func TestTheRoomTriggerAsksForAHandoffBelowTheRatio(t *testing.T) {
 	c := handoff.New(handoff.Options{})
 	budget := poo.ContextBudget{
@@ -380,8 +384,13 @@ func TestTheRoomTriggerAsksForAHandoffBelowTheRatio(t *testing.T) {
 		t.Error("the strategy declined with the next answer not fitting")
 	}
 	budget.OutputLimit = 0
+	budget.EstimatedInput = 100000 - handoff.DefaultMaxTokens - poo.OutputReserve
 	if c.ShouldCompact(nil, budget) {
-		t.Error("the strategy acted with no output limit to protect")
+		t.Errorf("the strategy compacted one token under the note's line at %d input tokens", budget.EstimatedInput)
+	}
+	budget.EstimatedInput++
+	if !c.ShouldCompact(nil, budget) {
+		t.Error("the strategy declined one token past the note's line")
 	}
 }
 
