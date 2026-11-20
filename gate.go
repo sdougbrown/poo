@@ -30,9 +30,6 @@ func (s *Session) requestGate(run *runState) requestGateResult {
 	// ends the compaction restarts the request gate for the candidates and the
 	// budget, but not for a second compaction the interrupt already ended.
 	compactionTried := false
-	// A request the endpoint refused for its length asks for one compaction
-	// the strategy itself may decline.
-	forced, refusal := s.takeForcedCompaction(run)
 requestGateLoop:
 	for {
 		// Step 0: a pending candidate settles the run.
@@ -49,10 +46,15 @@ requestGateLoop:
 		// rebased onto the new view, and a compaction that refuses to
 		// compact ends the run with its handoff.
 		//
+		// A request the endpoint refused for its length asks for one
+		// compaction the strategy itself may decline. The pass takes it
+		// here, so a compaction an interrupt ended can be given back.
+		//
 		// An interrupt that ends the compaction is not a compaction
 		// failure: the request gate restarts from its first step, so the pending
 		// candidates and the budget are checked again instead of the interrupt
 		// opening a request by itself.
+		forced, refusal := s.takeForcedCompaction(run)
 		for s.opts.Compactor != nil && !compactionTried {
 			compactionTried = true
 			// A forced compaction skips the strategy's decision: the
@@ -70,6 +72,13 @@ requestGateLoop:
 				return requestGateResult{held: true}
 			}
 			if errors.Is(err, errCompactionInterrupted) {
+				// An interrupt that ended the compaction does not spend the
+				// refusal's one compaction: the restarted pass takes it again
+				// and compacts.
+				if forced {
+					s.rearmForcedCompaction(run, refusal)
+					compactionTried = false
+				}
 				s.clearInterrupt(run)
 				s.drainInputs(run, false)
 				s.transition(StateRequesting)

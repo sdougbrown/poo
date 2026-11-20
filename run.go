@@ -526,6 +526,10 @@ func (s *Session) loop(run *runState) []candidate {
 			// and turns it into an interrupted turn. The attempt
 			// does not count against the retry budget.
 			if s.interruptPending(run) {
+				// An interrupted request is not a request that went out, so
+				// the refusal the run was compacting for is over: a later
+				// refusal gets its own compaction.
+				s.clearRefusal(run)
 				// The aborted request is still charged once before the
 				// interrupted turn's budget check.
 				if !s.accountInterruptedRequest(run, turn, resp) {
@@ -560,10 +564,19 @@ func (s *Session) loop(run *runState) []candidate {
 			// authority on whether the next request fits: the run compacts
 			// once and sends the request again through the gate.
 			if s.compactForRefusal(run, err, resp, requestChars, refusal) {
-				// The refused turn carries nothing and never reaches the
-				// turn-end algorithm, so its end is emitted here: a client that
-				// saw the turn start sees it end before the next one.
-				s.events.emit(EventTurnEnded, map[string]any{"run_id": run.id, "turn": turn})
+				// The refused turn ends the way every turn does: its end, the
+				// queues, the hooks and the stop conditions. A turn end that
+				// stops the run stops it here, and the refusal buys no
+				// compaction.
+				_, cands, interrupted := s.turnEndSteps(run, turn, turnNote{})
+				if interrupted {
+					s.clearRefusal(run)
+					continue
+				}
+				if len(cands) > 0 {
+					s.clearRefusal(run)
+					return cands
+				}
 				continue
 			}
 			return []candidate{refusal}
@@ -668,12 +681,15 @@ type turnOutcome struct {
 	candidates []candidate
 }
 
-// turnEnd runs the plan's turn-end algorithm.
+// turnEndSteps runs the turn-end steps every turn takes, before the turn-end
+// algorithm decides what comes next: the end event, the drained queues, the
+// AfterTurn hooks, and every stop condition.
 //
-// The steps are normative: emit turn.ended, drain the queues, run the
-// AfterTurn hooks, evaluate the stop conditions, and then either settle
-// or go to the next-request gate.
-func (s *Session) turnEnd(run *runState, turn int, processed bool, resp *response, note turnNote) turnOutcome {
+// It reports what the turn appended, the candidates that settle the run, and
+// whether an interrupt ended the turn during the hooks. An interrupt at that
+// point discards the hooks' decisions and skips the remaining steps, so the
+// caller must stop there too.
+func (s *Session) turnEndSteps(run *runState, turn int, note turnNote) (appended bool, cands []candidate, interrupted bool) {
 	// Step 1: the turn is over.
 	s.events.emit(EventTurnEnded, map[string]any{"run_id": run.id, "turn": turn})
 
@@ -682,7 +698,7 @@ func (s *Session) turnEnd(run *runState, turn int, processed bool, resp *respons
 	// A follow-up is not drained here: it waits for a natural stop, and
 	// finalize step 1 delivers it. A response note that opened another
 	// turn counts like a steer: the model has something new to read.
-	appended := s.drainInputs(run, false) || note.continued
+	appended = s.drainInputs(run, false) || note.continued
 
 	// Step 3: the AfterTurn hooks run on every turn, tool-free turns
 	// included.
@@ -695,12 +711,11 @@ func (s *Session) turnEnd(run *runState, turn int, processed bool, resp *respons
 	// steps are skipped.
 	if s.interruptPending(run) {
 		s.interruptedTurnEnd(run, turn)
-		return turnOutcome{}
+		return appended, nil, true
 	}
 
 	// Step 4: every stop condition is evaluated, and a run of unusable
 	// turns adds its bound.
-	var cands []candidate
 	if stop != nil {
 		cands = append(cands, *stop)
 	}
@@ -714,10 +729,19 @@ func (s *Session) turnEnd(run *runState, turn int, processed bool, resp *respons
 	}
 	cands = append(cands, s.evaluateStopConditions(run, turn)...)
 	cands = append(cands, s.evaluateBudgets(run, turn)...)
+	return appended, cands, false
+}
 
-	// Step 5: a candidate settles the run, and the highest-precedence
-	// one wins.
-	if len(cands) > 0 {
+// turnEnd runs the plan's turn-end algorithm.
+//
+// The steps are normative: emit turn.ended, drain the queues, run the
+// AfterTurn hooks, evaluate the stop conditions, and then either settle
+// or go to the next-request gate. The first steps are the ones every turn end
+// runs, so a turn that produced no response runs them through turnEndSteps.
+func (s *Session) turnEnd(run *runState, turn int, processed bool, resp *response, note turnNote) turnOutcome {
+	// Steps 1 to 5: the end, the queues, the hooks and every stop condition.
+	appended, cands, interrupted := s.turnEndSteps(run, turn, note)
+	if interrupted || len(cands) > 0 {
 		return turnOutcome{candidates: cands}
 	}
 
@@ -1360,6 +1384,15 @@ func (s *Session) takeForcedCompaction(run *runState) (bool, candidate) {
 		return false, candidate{}
 	}
 	return true, *refusal
+}
+
+// rearmForcedCompaction gives a refused request its forced compaction back
+// after an interrupt ended it, so the restarted gate compacts again.
+func (s *Session) rearmForcedCompaction(run *runState, refusal candidate) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	run.forceCompaction = true
+	run.refusal = &refusal
 }
 
 // resendLimit decides whether a rejected request is worth one more attempt
