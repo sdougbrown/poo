@@ -380,6 +380,45 @@ roles:
 	}
 }
 
+// TestAKeylessSettingsEntryKeepsTheRecordCredential covers the merge's
+// credential keep: a settings entry that re-declares the built-in
+// endpoint and names no key of its own keeps the record's credential,
+// so the stored one still answers.
+func TestAKeylessSettingsEntryKeepsTheRecordCredential(t *testing.T) {
+	// The variable is pinned empty so the environment a test runs in cannot
+	// decide which key answers.
+	t.Setenv("TYPESAFE_API_KEY", "")
+
+	dir := t.TempDir()
+	writeOpencodeAuth(t, dir, map[string]string{"typesafe": "ts_sk_stored"})
+	path := writeCodexSettings(t, dir, `version: 1
+auth_file: auth.json
+session:
+  mode: ephemeral
+endpoints:
+  typesafe:
+    endpoint: https://api.typesafe.ai/v1
+roles:
+  chat: gpt-4o-mini
+  decider: typesafe/jev-latest
+`)
+	settings, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("loading the settings: %v", err)
+	}
+	runtime, err := buildCodex(t, settings, &http.Client{})
+	if err != nil {
+		t.Fatalf("building the runtime: %v", err)
+	}
+	model, _, err := runtime.Decider()
+	if err != nil {
+		t.Fatalf("resolving the decider: %v", err)
+	}
+	if got := runtime.EndpointKey(model); got != "ts_sk_stored" {
+		t.Errorf("the key is %q, want the record's stored credential", got)
+	}
+}
+
 // TestADeciderKeepsTheCallInstructionsOnTheRequest covers the default
 // wire: an endpoint that declares nothing takes the call's instructions
 // as the request's own field, and each question says only what it was
