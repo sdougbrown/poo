@@ -826,9 +826,25 @@ func (s *Session) toolEnvFor(runID, handle string) ToolEnv {
 		RunID:      runID,
 		Handle:     handle,
 		Env:        s.opts.Env,
+		Tools:      s.toolInfos(),
 		Settings:   s.opts.Settings,
 		Decider:    s.Decider(),
 	}
+}
+
+// toolInfos lists the session's tools, in offer order, for a tool that
+// names its siblings to the model.
+func (s *Session) toolInfos() []ToolInfo {
+	infos := make([]ToolInfo, 0, len(s.opts.ToolOrder))
+	for _, name := range s.opts.ToolOrder {
+		tool, ok := s.opts.Tools[name]
+		if !ok {
+			continue
+		}
+		spec := tool.Spec()
+		infos = append(infos, ToolInfo{Name: spec.Name, Class: spec.Class, Background: spec.Background})
+	}
+	return infos
 }
 
 // recordResult records a tool result and appends it to the history.

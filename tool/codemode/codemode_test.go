@@ -272,7 +272,7 @@ func TestTheGuidanceFollowsTheEngine(t *testing.T) {
 		schema, guide string
 	}{
 		{"starlark", starlark.New(), "A Starlark script", "Starlark"},
-		{"quickjs", quickjs.New(), "A JavaScript function body", "QuickJS"},
+		{"quickjs", quickjs.New(), "The body of an async JavaScript function", "QuickJS"},
 		{"unnamed engine", &fakeEngine{}, "A Starlark script", "Starlark"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
