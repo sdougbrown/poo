@@ -79,16 +79,21 @@ func (g *growthTracker) growth(observationCap int) int {
 // A request a compaction made is not a turn. The input it reports is the
 // request the strategy built, not the view the run is growing.
 //
+// A request the transport retried is not a turn either. It reports what its
+// attempts spent together, and no view grew by that much. The next report is
+// a baseline, and the differences measured before it stand: the turns that
+// made them cost what they cost.
+//
 // A turn that reported no input ends the reports the tracker measures
 // across. A difference must never span two turns, so the next report is a
 // baseline.
-func (s *Session) noteTurnInput(meta RecordMeta, usage *UsageReport) {
+func (s *Session) noteTurnInput(meta RecordMeta, usage *UsageReport, retried bool) {
 	if !s.opts.TurnGrowth || meta.Origin == OriginCompaction {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if usage == nil || usage.InputTokens <= 0 {
+	if retried || usage == nil || usage.InputTokens <= 0 {
 		s.growth.resetBaseline()
 		return
 	}

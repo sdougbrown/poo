@@ -3,11 +3,19 @@ package poo_test
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"math"
+	"net/http"
+	"net/http/httptest"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/compact/native"
+	"github.com/sdougbrown/poo/pootest"
+	"github.com/sdougbrown/poo/provider/openai"
 )
 
 // Turn growth: the session's measured per-turn input growth, added to the fit
@@ -182,6 +190,8 @@ type growthProbe struct {
 	inner poo.Compactor
 	// growth is the turn growth of every budget, in call order.
 	growth []int
+	// compacted is the compacted input of every budget, in call order.
+	compacted []int
 	// acted is the call number of every gate the inner strategy said yes at.
 	acted []int
 }
@@ -189,6 +199,7 @@ type growthProbe struct {
 // ShouldCompact records the budget and asks the strategy it wraps.
 func (p *growthProbe) ShouldCompact(view poo.View, budget poo.ContextBudget) bool {
 	p.growth = append(p.growth, budget.TurnGrowth)
+	p.compacted = append(p.compacted, budget.CompactedInput)
 	act := p.inner.ShouldCompact(view, budget)
 	if act {
 		p.acted = append(p.acted, len(p.growth))
@@ -380,6 +391,160 @@ func TestAFailedNativeCompactionsReportIsNotTheBaseline(t *testing.T) {
 	// baseline would report the whole 30000 as one turn's growth.
 	if got, want := probe.growth[2], probe.growth[1]; got != want {
 		t.Errorf("the gate after the failed compaction carries a turn growth of %d, want the %d the gate of it carried", got, want)
+	}
+}
+
+// wireAnswer is one scripted provider answer on the wire: the tool the model
+// calls or the prose it says, and the usage the endpoint reports.
+type wireAnswer struct {
+	// call is the tool the model calls, empty for an answer in prose.
+	call string
+	// text is the prose the model answers with.
+	text string
+	// input and output are the tokens the endpoint bills the request.
+	input, output int
+	// fail reports that the answer breaks after its usage, so the transport
+	// tries the request again.
+	fail bool
+}
+
+// events renders the answer as the wire's server-sent events.
+func (a wireAnswer) events() string {
+	out := ""
+	if a.call != "" {
+		out += `data: {"choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"` +
+			a.call + `","arguments":"{\"text\":\"t\"}"}}]},"finish_reason":"tool_calls"}]}` + "\n\n"
+	}
+	if a.text != "" {
+		out += `data: {"choices":[{"index":0,"delta":{"content":"` + a.text + `"},"finish_reason":"stop"}]}` + "\n\n"
+	}
+	out += fmt.Sprintf(`data: {"choices":[{"index":0,"delta":{}}],"usage":{"prompt_tokens":%d,"completion_tokens":%d}}`+"\n\n",
+		a.input, a.output)
+	if a.fail {
+		out += `data: {"error":{"message":"the endpoint failed","type":"server_error","code":"internal_error"}}` + "\n\n"
+	}
+	return out + "data: [DONE]\n\n"
+}
+
+// wireTransport serves the answers in order and tries a failed request once
+// more, so an attempt marked fail is retried the way a real one is.
+func wireTransport(t *testing.T, answers []wireAnswer) *openai.Transport {
+	t.Helper()
+	var mu sync.Mutex
+	served := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		mu.Lock()
+		n := served
+		served++
+		mu.Unlock()
+		w.Header().Set("Content-Type", "text/event-stream")
+		if n >= len(answers) {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		_, _ = io.WriteString(w, answers[n].events())
+	}))
+	t.Cleanup(srv.Close)
+	return openai.New(openai.Options{
+		Endpoint:  srv.URL,
+		Model:     "m",
+		ToolsMode: "native",
+		Backoff:   []time.Duration{time.Millisecond},
+	})
+}
+
+// TestARetriedRequestDoesNotFeedTheTurnGrowth covers the retry: a request the
+// transport tried more than once reports the sum of its attempts' input, and
+// that sum is no turn's growth. The tracker starts its baseline over instead.
+func TestARetriedRequestDoesNotFeedTheTurnGrowth(t *testing.T) {
+	const (
+		first = 4000
+		step  = 2000
+	)
+	// The retried request's prompt, reported by the attempt that failed and
+	// again by the one that answered.
+	const prompt = first + 2*step
+	probe := &growthProbe{inner: pootest.NewCompactor(false, poo.Compaction{})}
+	opts := testOptions(t, wireTransport(t, []wireAnswer{
+		{call: "echo", input: first, output: 5},
+		{call: "echo", input: first + step, output: 5},
+		// The third turn's request fails before its first delta and is
+		// tried again, so its report is the prompt twice over.
+		{input: prompt, output: 5, fail: true},
+		{call: "echo", input: prompt, output: 5},
+		{call: "echo", input: first + 3*step, output: 5},
+		{text: "the answer"},
+	}), &echoTool{result: "echoed"}, &recordingSink{})
+	opts.Settings.ObservationCapChars = 400
+	opts.Compactor = probe
+	opts.TurnGrowth = true
+	s := newTestSession(t, opts)
+
+	if res := runSession(t, s, "do the thing"); res.Reason != poo.ReasonEndTurn {
+		t.Fatalf("the run settled %q, want end_turn", res.Reason)
+	}
+	if len(probe.growth) < 5 {
+		t.Fatalf("the compactor was given %d budgets, want the five the run's turns made", len(probe.growth))
+	}
+	// The gate of the turn before the retry carries the step it measured.
+	if got := probe.growth[2]; got != step {
+		t.Fatalf("the gate before the retried request carries a turn growth of %d, want the measured %d", got, step)
+	}
+	// The retried report is not a turn, so it records no difference: every
+	// gate from there on carries the step measured before it.
+	for i := 3; i < len(probe.growth); i++ {
+		if got := probe.growth[i]; got != step {
+			t.Errorf("the budget at gate %d carries a turn growth of %d, want the measured %d: a retried report is no turn",
+				i+1, got, step)
+		}
+	}
+}
+
+// TestARetriedReportAfterACompactionLeavesTheGuardUnarmed covers the other
+// seam the retry touches: a compaction's first report is what the native
+// strategy's guard measures. A request that was retried reports the sum of its
+// attempts, so it leaves the guard unarmed and the next report arms it.
+func TestARetriedReportAfterACompactionLeavesTheGuardUnarmed(t *testing.T) {
+	const (
+		// prompt is the input the retried request's prompt carries, and the
+		// transport reports it once for each of its attempts.
+		prompt = 12000
+		next   = 18000
+	)
+	probe := &growthProbe{inner: roomCompactor{}}
+	opts := testOptions(t, wireTransport(t, []wireAnswer{
+		{call: "echo", input: 20000, output: 5},
+		{call: "echo", input: 30000, output: 5},
+		// The first request after the compaction is tried twice, so its
+		// report is the prompt twice over.
+		{input: prompt, output: 5, fail: true},
+		{call: "echo", input: prompt, output: 5},
+		{call: "echo", input: next, output: 5},
+		{text: "the answer"},
+	}), &echoTool{result: "echoed"}, &recordingSink{})
+	opts.Model.ContextLimit = 34000
+	opts.Model.MaxOutput = 4096
+	opts.Compactor = probe
+	s := newTestSession(t, opts)
+
+	if res := runSession(t, s, "do the thing"); res.Reason != poo.ReasonEndTurn {
+		t.Fatalf("the run settled %q, want end_turn", res.Reason)
+	}
+	if len(probe.acted) == 0 || probe.acted[0] != 3 {
+		t.Fatalf("the run compacted at the gates %v, want the third: the one before the retried request", probe.acted)
+	}
+	if len(probe.compacted) < 5 {
+		t.Fatalf("the compactor was given %d budgets, want the five the run's turns made", len(probe.compacted))
+	}
+	// The retried report says nothing about what the view the compaction left
+	// cost, so the guard is still unarmed at the gate after it.
+	if got := probe.compacted[3]; got != 0 {
+		t.Errorf("the gate after the retried report carries a compacted input of %d, want 0: a retried report is no measurement", got)
+	}
+	// The next report is the view's own, and the guard arms on it.
+	if got := probe.compacted[4]; got != next {
+		t.Errorf("the gate after the next report carries a compacted input of %d, want %d", got, next)
 	}
 }
 

@@ -92,18 +92,18 @@ type ContextBudget struct {
 	// names, so a load cannot tell the two apart and clears what it cannot
 	// vouch for. A compaction that only ended the run changes no view, and
 	// leaves the value where the compaction before it left it. A request
-	// the transport retried reports the sum of its attempts, so the value
-	// can run high after a retry. A strategy that guards on it then
-	// declines earlier than the next request would have needed.
+	// the transport retried reports the sum of its attempts, so it is no
+	// measurement: the value waits for the next request's report.
 	CompactedInput int
 	// TurnGrowth is how many prompt tokens a turn adds to the input. It
 	// is the largest recent increase between two usage reports, or before
 	// there is one, the observation cap in tokens. It is zero unless the
 	// session measures turn growth.
 	//
-	// A restored session does not rebuild the tracker: the growth falls
-	// back to the observation cap until two of the session's own reports
-	// arrive.
+	// A request the transport retried reports the sum of its attempts, so
+	// its report is skipped: the next one is the baseline. A restored
+	// session does not rebuild the tracker: the growth falls back to the
+	// observation cap until two of the session's own reports arrive.
 	TurnGrowth int
 	// Turns is the number of provider requests the run has made.
 	//
