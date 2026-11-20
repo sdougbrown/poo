@@ -52,7 +52,9 @@ func (c *Compactor) Ratio() float64 { return c.ratio }
 //
 // A compaction that cannot restore the room must not repeat every turn. When
 // the input the last compaction left is still short, the strategy declines:
-// the run settles no_output_room in the gate instead.
+// the run settles no_output_room in the gate instead. That check asks whether
+// a compaction restores room for the next answer, so it leaves the turn
+// growth out.
 func (c *Compactor) ShouldCompact(view poo.View, budget poo.ContextBudget) bool {
 	if c.ratio > 0 && budget.Reached(c.ratio) {
 		return true
@@ -60,6 +62,7 @@ func (c *Compactor) ShouldCompact(view poo.View, budget poo.ContextBudget) bool 
 	if budget.CompactedInput > 0 {
 		after := budget
 		after.EstimatedInput = budget.CompactedInput
+		after.TurnGrowth = 0
 		if after.RoomShort(budget.OutputLimit) {
 			return false
 		}

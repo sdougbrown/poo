@@ -127,3 +127,30 @@ func TestTheNativeStrategyActsAtARatioOfTheInputCap(t *testing.T) {
 		t.Error("the strategy waited for half of the window, not half of the input cap")
 	}
 }
+
+// TestTheCompactedInputGuardLeavesTheTurnGrowthOut covers the guard with turn
+// growth on: it asks whether a compaction restores the room for the next
+// answer, so a room that fits the answer but not one more turn's growth is
+// still room, and the compaction happens.
+func TestTheCompactedInputGuardLeavesTheTurnGrowthOut(t *testing.T) {
+	strategy := native.New(native.Options{})
+	const need, growth = 4096, 2000
+	budget := poo.ContextBudget{
+		ContextLimit:   40000,
+		EstimatedInput: 40000 - need - poo.OutputReserve + 1,
+		OutputLimit:    need,
+		CompactedInput: 40000 - need - poo.OutputReserve - growth/2,
+		TurnGrowth:     growth,
+		Turns:          2,
+	}
+	if !strategy.ShouldCompact(nil, budget) {
+		t.Error("the strategy declined a compaction whose input left room for the answer")
+	}
+	// The same budget with the input the compaction left under the line
+	// altogether is the guard's own case: it declines, so the run settles
+	// no_output_room instead of compacting every turn.
+	budget.CompactedInput = 40000
+	if strategy.ShouldCompact(nil, budget) {
+		t.Error("the strategy repeated a compaction whose input is still short")
+	}
+}

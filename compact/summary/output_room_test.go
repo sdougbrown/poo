@@ -272,3 +272,41 @@ func TestADeclaredLimitAboveTheWindowDefaultUsesTheDefaultForTheRoom(t *testing.
 		t.Error("the strategy did not compact with under the output limit of room left")
 	}
 }
+
+// TestASummaryThatRestoresOnlyTheAnswerStillHappens covers the guard with turn
+// growth on: the check asks whether a summary restores the room for the next
+// answer, so a summary that frees that room but not one more turn's growth is
+// still worth making. Refusing it would end the run where it could have
+// carried on.
+func TestASummaryThatRestoresOnlyTheAnswerStillHappens(t *testing.T) {
+	const (
+		window = 20000
+		need   = 4096
+		growth = 2000
+		input  = 15000
+	)
+	view := poo.NewHistoryView([]poo.Message{
+		poo.NewTextMessage(poo.RoleSystem, "the system prompt"),
+		poo.NewTextMessage(poo.RoleAssistant, strings.Repeat("x", 19900)),
+		poo.NewTextMessage(poo.RoleAssistant, "the second answer"),
+	}, nil, []poo.TurnSummary{
+		{TurnIndex: 1, Start: 1, End: 2},
+		{TurnIndex: 2, Start: 2, End: 3},
+	})
+	c := summary.New(summary.Options{KeepRecentTokens: 1, MaxTokens: 4096})
+	fits := poo.ContextBudget{
+		ContextLimit:   window,
+		EstimatedInput: input,
+		OutputLimit:    need,
+		CharsPerToken:  4,
+		Turns:          2,
+	}
+	if c.ShouldCompact(view, fits) {
+		t.Fatal("the strategy compacted with room for the next answer and no turn growth")
+	}
+	grown := fits
+	grown.TurnGrowth = growth
+	if !c.ShouldCompact(view, grown) {
+		t.Error("the strategy declined a summary that restores the room for the answer")
+	}
+}
