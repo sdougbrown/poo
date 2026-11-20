@@ -252,17 +252,25 @@ func modelsFileShape(path string, document []byte) (shape, error) {
 }
 
 // readModelsDocument reads a models file and returns it as JSON.
-//
-// One codec over two encodings: the file is YAML, which is what an operator edits,
-// and JSON is YAML that an operator may also write. The document normalizes through
-// the pipeline the settings use, so a change to how a document is read reaches both.
 func readModelsDocument(path string) ([]byte, error) {
+	return readYAMLDocument(path, "the models file")
+}
+
+// readYAMLDocument reads a sidecar document — a models file or a
+// profiles file — and returns it as JSON.
+//
+// One codec over two encodings: the file is YAML, which is what an
+// operator edits, and JSON is YAML an operator can also write. The
+// document normalizes through the pipeline the settings use, so a
+// change to how a document is read reaches every sidecar. what names
+// the document in a failure, because a message about the settings would
+// be a message about a file the operator did not write.
+func readYAMLDocument(path, what string) ([]byte, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("reading %s: %w", path, err)
 	}
-	// YAML reads JSON too, so one format answers for both spellings of the file.
-	document, err := normalize(stripDocumentBOM(data), FormatYAML, "the models file")
+	document, err := normalize(stripDocumentBOM(data), FormatYAML, what)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}

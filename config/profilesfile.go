@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 )
 
@@ -98,19 +97,8 @@ func profilesLayer(document []byte) (map[string]ProfileSettings, error) {
 	return file.Profiles, nil
 }
 
-// readProfilesDocument reads a profiles file and returns it as JSON.
-//
-// One codec over two encodings, the pipeline the models file reads
-// through. The file is YAML, which is what an operator edits, and JSON
-// is YAML an operator can also write.
+// readProfilesDocument reads a profiles file and returns it as JSON,
+// through the reader the models file shares.
 func readProfilesDocument(path string) ([]byte, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("reading %s: %w", path, err)
-	}
-	document, err := normalize(stripDocumentBOM(data), FormatYAML, "the profiles file")
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
-	}
-	return document, nil
+	return readYAMLDocument(path, "the profiles file")
 }
