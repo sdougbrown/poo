@@ -1,0 +1,98 @@
+{
+  "version": 1,
+  "tools": {
+    "avenor_spawn": {
+      "description": "Start an Avenor child whose messages return to this conversation. Use the returned runtime_id with avenor_status or avenor_result.",
+      "command": ["avenor", "spawn"],
+      "env": {
+        "AVENOR_BIND_HOST": "poo",
+        "AVENOR_BIND_SESSION": "session:id"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "prompt": {"type": "string", "description": "The task for the child."},
+          "dir": {"type": "string", "description": "The child's working directory."},
+          "label": {"type": "string", "description": "A short display label."},
+          "agent": {"type": "string", "description": "An optional named agent role."}
+        },
+        "required": ["prompt", "dir"],
+        "additionalProperties": false
+      },
+      "bindings": [
+        {"property": "prompt", "style": "stdin", "flag": "--prompt-stdin"},
+        {"property": "dir", "style": "equals", "flag": "--dir"},
+        {"property": "label", "style": "equals", "flag": "--label"},
+        {"property": "agent", "style": "equals", "flag": "--agent"}
+      ],
+      "output": {"mode": "raw"}
+    },
+    "avenor_status": {
+      "description": "Read an Avenor child's status or wait for it to complete a turn. If the child is waiting for your answer, handle the inbox message before waiting again.",
+      "command": ["avenor", "status", "--timeout-ms=30000"],
+      "env": {
+        "AVENOR_BIND_HOST": "poo",
+        "AVENOR_BIND_SESSION": "session:id"
+      },
+      "timeout": "35s",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "runtime": {"type": "string", "description": "The runtime_id from avenor_spawn."},
+          "wait": {"type": "string", "enum": ["turn_complete"], "description": "Wait up to 30 seconds for the turn to complete."}
+        },
+        "required": ["runtime"],
+        "additionalProperties": false
+      },
+      "bindings": [
+        {"property": "runtime", "style": "equals", "flag": "--runtime"},
+        {"property": "wait", "style": "equals", "flag": "--wait"}
+      ],
+      "output": {"mode": "raw"}
+    },
+    "avenor_result": {
+      "description": "Read an Avenor child's final output after its turn completes.",
+      "command": ["avenor", "result"],
+      "env": {
+        "AVENOR_BIND_HOST": "poo",
+        "AVENOR_BIND_SESSION": "session:id"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "runtime": {"type": "string", "description": "The runtime_id from avenor_spawn."}
+        },
+        "required": ["runtime"],
+        "additionalProperties": false
+      },
+      "bindings": [
+        {"property": "runtime", "style": "equals", "flag": "--runtime"}
+      ],
+      "output": {"mode": "raw"}
+    },
+    "avenor_message": {
+      "description": "Reply to an Avenor message received in this conversation's inbox.",
+      "command": ["avenor", "message"],
+      "env": {
+        "AVENOR_BIND_HOST": "poo",
+        "AVENOR_BIND_SESSION": "session:id"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {"type": "string", "enum": ["reply"]},
+          "reply_to": {"type": "string", "description": "The message ID provided by the inbox."},
+          "message": {"type": "string", "description": "Your answer to the child."}
+        },
+        "required": ["action", "reply_to", "message"],
+        "additionalProperties": false
+      },
+      "bindings": [
+        {"property": "action", "style": "equals", "flag": "--action"},
+        {"property": "reply_to", "style": "equals", "flag": "--reply-to"},
+        {"property": "message", "style": "stdin", "flag": "--message-stdin"}
+      ],
+      "output": {"mode": "raw"}
+    }
+  }
+}

@@ -601,7 +601,8 @@ it prints as input. A feed is listed as `feed:<name>` and stopped with
 `cancel_job`. Its manifest names the command, the environment, the restart
 policy and whether it may wake an idle session. The code is in `poo/feed`;
 [docs/build-your-own-binary.md](docs/build-your-own-binary.md#feeds) has
-the manifest and the protocol.
+the manifest and the protocol. The [Avenor example](examples/avenor/README.md)
+uses a feed and the CLI registry to delegate and reply through a local supervisor.
 
 **Your own binary.** A consumer links only the packages it wants, hands
 its tools, profiles and executors to `server.New`, and serves the result
