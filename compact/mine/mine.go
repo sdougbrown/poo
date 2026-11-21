@@ -278,5 +278,5 @@ func retention(turns poo.TurnRange, sessionID string) string {
 		where = " of session " + sessionID
 	}
 	return "[The turns replaced above are retained in this session's store" + where +
-		" (turns " + strconv.Itoa(turns.First) + "-" + strconv.Itoa(turns.Last) + "): nothing was deleted. If a detail you need is missing, ask for the retained turns to be recovered.]"
+		" (turns " + strconv.Itoa(turns.First) + "-" + strconv.Itoa(turns.Last) + "): nothing was deleted. The history tool reads them: search the retained turns with a pattern, or read one whole with its turn number.]"
 }

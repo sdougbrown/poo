@@ -107,6 +107,11 @@ type ToolEnv struct {
 	Model ModelInfo
 	// Decider is the decision model, or nil when there is none.
 	Decider decide.Decider
+	// History is the record of the session's turns its store retains,
+	// or nil when the store cannot read them back. It is how the
+	// history tool reads what a compaction retained: the store keeps
+	// every original record, and the history is the read side of it.
+	History History
 	// Nested runs nested tool calls, or nil when this call cannot make
 	// one. A call the model made gets the turn's seam, and a background
 	// job's call gets one owned by the job, so its tool keeps calling

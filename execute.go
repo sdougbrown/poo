@@ -838,7 +838,7 @@ func (s *Session) toolEnvFor(runID, handle string) ToolEnv {
 	s.mu.Lock()
 	model := s.opts.Model
 	s.mu.Unlock()
-	return ToolEnv{
+	env := ToolEnv{
 		PrepareEnv: s.prepareEnv(),
 		Model:      model,
 		SessionID:  s.opts.SessionID,
@@ -849,6 +849,12 @@ func (s *Session) toolEnvFor(runID, handle string) ToolEnv {
 		Settings:   s.opts.Settings,
 		Decider:    s.Decider(),
 	}
+	// The history is the store's read side: a sink that can read its
+	// records back lets a tool read what the store retained.
+	if reader, ok := s.opts.Sink.(RecordReader); ok {
+		env.History = lazyHistory{reader: reader}
+	}
+	return env
 }
 
 // toolInfos lists the session's tools, in offer order, for a tool that

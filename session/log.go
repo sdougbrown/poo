@@ -190,6 +190,41 @@ func (l *Log) Flush(ctx context.Context) error {
 	return nil
 }
 
+// Records reads the log's records back, oldest first.
+//
+// The log is flushed first, so a reader sees every record it wrote.
+// The read is the read side of poo.RecordSink: it is how a session's
+// history tool reads what the store retained.
+func (l *Log) Records(ctx context.Context) ([]poo.Record, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("session: reading: %w", err)
+	}
+	if l.f != nil {
+		if err := l.f.Sync(); err != nil {
+			return nil, fmt.Errorf("session: syncing %s: %w", l.path, err)
+		}
+	}
+	data, err := os.ReadFile(l.path)
+	if err != nil {
+		return nil, fmt.Errorf("session: reading %s: %w", l.path, err)
+	}
+	codec := JSONLCodec{}
+	var recs []poo.Record
+	for _, line := range bytesLines(data) {
+		if len(line) == 0 {
+			continue
+		}
+		rec, err := codec.Decode(line)
+		if err != nil {
+			return nil, fmt.Errorf("session: decoding %s: %w", l.path, err)
+		}
+		recs = append(recs, rec)
+	}
+	return recs, nil
+}
+
 // Sync puts the log's records on disk.
 //
 // The sync is what makes a record durable: the file's contents reach the
