@@ -12,8 +12,13 @@
 // and the config layer wires the runner to the session.
 //
 // A feed's environment follows a registered CLI's rules. An entry is a
-// literal, or an `env:NAME` reference. The host resolves a reference
-// against its own scrubbed environment.
+// literal, an `env:NAME` reference to the session's scrubbed
+// environment, or a `session:id` reference to the session's own ID,
+// resolved when the feed starts, not when the settings load. A session
+// reference to any other name fails the load: the feed would never
+// resolve it, and a feed that starts and fails every attempt is worse
+// than a manifest that does not load. The host resolves an environment
+// reference against its own scrubbed environment.
 package feed
 
 import (
@@ -27,6 +32,7 @@ import (
 
 	"github.com/sdougbrown/cli-registry"
 	"github.com/sdougbrown/cli-registry/manifest"
+	"github.com/sdougbrown/poo/exec"
 )
 
 // The idle policies a feed's manifest may name. An entry without one
@@ -85,17 +91,20 @@ type Filter struct {
 	MinNoProbability float64 `json:"min_no_probability"`
 }
 
-// ResolveEnv turns the spec's env bindings into "NAME=value" entries for
-// an executor, using lookup to look host variables up.
+// ResolveEnvScoped resolves the spec's env bindings into "NAME=value"
+// entries for an executor, using lookup to look host variables up, and
+// resolves the manifest's session references through scoped: scope
+// "session", name "id" resolves to the session's ID, and the resolver
+// a caller passes is exec.SessionScope over that ID.
 //
 // The library's benign names are copied first, then the manifest's
 // entries. A manifest reference lookup does not resolve is an error that
 // names the variable: a feed whose environment cannot be assembled
 // whole is not started.
-func (s Spec) ResolveEnv(lookup func(string) (string, bool)) ([]string, error) {
+func (s Spec) ResolveEnvScoped(lookup func(string) (string, bool), scoped func(scope, name string) (string, error)) ([]string, error) {
 	// The library's Plan resolves exactly these bindings, over the
 	// benign names, so the resolution stays the library's.
-	return (&cliregistry.Plan{Env: s.Env}).ResolveEnv(lookup)
+	return (&cliregistry.Plan{Env: s.Env}).ResolveEnvScoped(lookup, scoped)
 }
 
 // Set is the set of feed manifests the settings name.
@@ -273,7 +282,19 @@ func readFeed(path, name string, raw json.RawMessage) (Spec, error) {
 			envs = append(envs, cliregistry.EnvBinding{Name: entry, From: from, Reference: true})
 			continue
 		}
+		if from, ok := strings.CutPrefix(value, cliregistry.SessionScope+":"); ok {
+			envs = append(envs, cliregistry.EnvBinding{Name: entry, From: from, Reference: true, Scope: cliregistry.SessionScope})
+			continue
+		}
 		envs = append(envs, cliregistry.EnvBinding{Name: entry, Value: value})
+	}
+	for _, binding := range envs {
+		if !binding.Reference || binding.Scope == "" {
+			continue
+		}
+		if err := exec.ValidSessionReference(binding.Scope, binding.From); err != nil {
+			return Spec{}, fmt.Errorf("feed manifest %s: feed %q: %w", path, name, err)
+		}
 	}
 	return Spec{
 		Name:        name,

@@ -4,9 +4,12 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/sdougbrown/cli-registry"
+	"github.com/sdougbrown/poo/exec"
 	"github.com/sdougbrown/poo/feed"
 )
 
@@ -132,7 +135,7 @@ func TestResolveEnvCoversLiteralsReferencesAndBenignNames(t *testing.T) {
 		}
 		return "", false
 	}
-	env, err := set.Specs()[0].ResolveEnv(lookup)
+	env, err := set.Specs()[0].ResolveEnvScoped(lookup, nil)
 	if err != nil {
 		t.Fatalf("resolving the env: %v", err)
 	}
@@ -146,7 +149,7 @@ func TestResolveEnvCoversLiteralsReferencesAndBenignNames(t *testing.T) {
 	}
 
 	// A feed with no env entries still gets the benign names.
-	env, err = set.Specs()[1].ResolveEnv(lookup)
+	env, err = set.Specs()[1].ResolveEnvScoped(lookup, nil)
 	if err != nil {
 		t.Fatalf("resolving the env of a feed with none: %v", err)
 	}
@@ -163,7 +166,7 @@ func TestAMissingReferenceNamesTheVariable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loading the manifests: %v", err)
 	}
-	_, err = set.Specs()[0].ResolveEnv(func(string) (string, bool) { return "", false })
+	_, err = set.Specs()[0].ResolveEnvScoped(func(string) (string, bool) { return "", false }, nil)
 	if err == nil {
 		t.Fatal("a missing reference resolved")
 	}
@@ -181,8 +184,56 @@ func TestABareEnvReferenceIsMissing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loading the manifests: %v", err)
 	}
-	if _, err := set.Specs()[0].ResolveEnv(func(string) (string, bool) { return "set", true }); err == nil {
+	if _, err := set.Specs()[0].ResolveEnvScoped(func(string) (string, bool) { return "set", true }, nil); err == nil {
 		t.Fatal("a bare env: reference resolved")
+	}
+}
+
+// TestASessionReferenceStaysUnresolvedUntilTheAttempt covers a
+// manifest's `session:id`: the load keeps it as a session reference,
+// resolving it needs the session's ID, and a reference to a name the
+// session scope does not carry fails with the reference named.
+func TestASessionReferenceStaysUnresolvedUntilTheAttempt(t *testing.T) {
+	set, err := feed.Load(writeManifest(t, map[string]any{
+		"broker": map[string]any{"command": []string{"true"}, "env": map[string]string{"WHINNY_SESSION_ID": "session:id", "TOKEN": "env:TOKEN"}},
+	}))
+	if err != nil {
+		t.Fatalf("loading the manifests: %v", err)
+	}
+	spec := set.Specs()[0]
+	if len(spec.Env) != 2 || !spec.Env[1].Reference || spec.Env[1].Scope != cliregistry.SessionScope || spec.Env[1].From != "id" {
+		t.Fatalf("the session binding is %+v, want a session:id reference", spec.Env)
+	}
+
+	// Without a session resolver, the session reference does not resolve.
+	if _, err := spec.ResolveEnvScoped(func(string) (string, bool) { return "set", true }, nil); err == nil {
+		t.Fatal("a session reference resolved without the session")
+	}
+
+	// With one, it resolves beside the environment reference. The
+	// benign names stay out: the lookup holds only what it declares.
+	env, err := spec.ResolveEnvScoped(
+		func(name string) (string, bool) {
+			return map[string]string{"TOKEN": "the-token"}[name], name == "TOKEN"
+		},
+		exec.SessionScope("sess-01"),
+	)
+	if err != nil {
+		t.Fatalf("resolving the env: %v", err)
+	}
+	want := []string{"TOKEN=the-token", "WHINNY_SESSION_ID=sess-01"}
+	if !slices.Equal(env, want) {
+		t.Errorf("the env is %v, want %v", env, want)
+	}
+
+	// A name the session scope does not carry fails the load: the feed
+	// would never resolve it, and a feed that starts and then fails
+	// every attempt is worse than a manifest that does not load.
+	_, err = feed.Load(writeManifest(t, map[string]any{
+		"broker": map[string]any{"command": []string{"true"}, "env": map[string]string{"SESSION": "session:run_id"}},
+	}))
+	if err == nil || !strings.Contains(err.Error(), "session:run_id") {
+		t.Errorf("the load accepted an unknown session reference: %v", err)
 	}
 }
 

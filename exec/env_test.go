@@ -1,6 +1,7 @@
 package exec_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/sdougbrown/poo/exec"
@@ -68,5 +69,27 @@ func TestTheChildEnvironmentKeepsItsContract(t *testing.T) {
 	got := exec.ChildEnv([]string{"A=1", "B=2"}, []string{"A"})
 	if len(got) != 1 || got[0] != "B=2" {
 		t.Errorf("the environment is %v, want only B", got)
+	}
+}
+
+// TestTheSessionScopeResolvesOnlyTheSessionID covers what a command's
+// session references may ask for: `session:id` resolves to the ID the
+// caller holds, and any other name, or an ID the caller does not have,
+// is an error that names the reference.
+func TestTheSessionScopeResolvesOnlyTheSessionID(t *testing.T) {
+	resolve := exec.SessionScope("sess-01")
+	id, err := resolve("session", "id")
+	if err != nil || id != "sess-01" {
+		t.Errorf("session:id resolved to %q, %v; want the caller's ID", id, err)
+	}
+	// The resolver is reusable: a second attempt resolves the same way.
+	if id, err = resolve("session", "id"); err != nil || id != "sess-01" {
+		t.Errorf("a second resolution gave %q, %v", id, err)
+	}
+	if _, err := resolve("session", "run_id"); err == nil || !strings.Contains(err.Error(), `"session:run_id"`) {
+		t.Errorf("session:run_id resolved: err = %v, want one naming the reference", err)
+	}
+	if _, err := exec.SessionScope("")("session", "id"); err == nil {
+		t.Error("an empty session ID resolved")
 	}
 }

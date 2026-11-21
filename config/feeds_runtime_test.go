@@ -515,6 +515,104 @@ func TestASessionRunsItsFeedInItsOwnDirectory(t *testing.T) {
 	})
 }
 
+// TestTwoSessionsResolveTheirOwnSessionID covers the shared runtime: one
+// built set of feeds runs beside two sessions, and each feed's
+// `session:id` resolves to the session the feed runs beside, not the
+// build's or the first session's.
+func TestTwoSessionsResolveTheirOwnSessionID(t *testing.T) {
+	manifest := feedRunManifest(t, "sid", "sessionid", "The session's ID.", map[string]string{"WHINNY_SESSION_ID": "session:id"})
+	settings, err := config.Parse([]byte(theFeedsSettings(manifest)+"session:\n  mode: logged\n  dir: "+t.TempDir()+"\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+	defer runtime.Store.Close()
+	transport := pootest.NewTransport(pootest.Turn{Text: "the answer"}, pootest.Turn{Text: "the answer"})
+	runtime.Options.Transport = transport
+
+	for _, id := range []string{"s1", "s2"} {
+		created := &poo.SessionCreatedRecord{
+			RecordMeta: poo.NewRecordMeta("session.created"), SessionMetadata: poo.SessionMetadata{Format: poo.FormatVersion,
+				SessionID:  id,
+				Mode:       "logged",
+				CreatedAt:  "2026-11-04T12:00:00Z",
+				WorkingDir: t.TempDir(),
+
+				Profile: "code",
+				Tools:   runtime.Profile.Tools, Model: poo.SessionModel{ModelID: "test-model"},
+				ContextLimit: 32768},
+		}
+		sess, err := runtime.CreateSession(context.Background(), runtime.Store, created)
+		if err != nil {
+			t.Fatalf("creating the session %q: %v", id, err)
+		}
+		waitUntil(t, "the feed's message carrying "+id, func() bool {
+			return theModelRead(transport, `<feed name="sid">`+id+"</feed>", poo.FeedOrigin("sid"))
+		})
+		sess.Close()
+	}
+}
+
+// TestARestoredSessionResolvesTheSameSessionID covers the resume: a
+// session's ID is the one its records carry, so a feed restarted beside
+// the restored session resolves the same `session:id` the original did.
+func TestARestoredSessionResolvesTheSameSessionID(t *testing.T) {
+	manifest := feedRunManifest(t, "sid", "sessionid", "The session's ID.", map[string]string{"WHINNY_SESSION_ID": "session:id"})
+	settings, err := config.Parse([]byte(theFeedsSettings(manifest)+"session:\n  mode: logged\n  dir: "+t.TempDir()+"\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+	defer runtime.Store.Close()
+	transport := pootest.NewTransport(pootest.Turn{Text: "the answer"}, pootest.Turn{Text: "the answer"})
+	runtime.Options.Transport = transport
+
+	created := &poo.SessionCreatedRecord{
+		RecordMeta: poo.NewRecordMeta("session.created"), SessionMetadata: poo.SessionMetadata{Format: poo.FormatVersion,
+			SessionID:  "s1",
+			Mode:       "logged",
+			CreatedAt:  "2026-11-04T12:00:00Z",
+			WorkingDir: t.TempDir(),
+
+			Profile: "code",
+			Tools:   runtime.Profile.Tools, Model: poo.SessionModel{ModelID: "test-model"},
+			ContextLimit: 32768},
+	}
+	sess, err := runtime.CreateSession(context.Background(), runtime.Store, created)
+	if err != nil {
+		t.Fatalf("creating the session: %v", err)
+	}
+	waitUntil(t, "the feed's message", func() bool {
+		return theModelRead(transport, `<feed name="sid">s1</feed>`, poo.FeedOrigin("sid"))
+	})
+	if err := sess.Close(); err != nil {
+		t.Fatalf("closing the session: %v", err)
+	}
+
+	// The restore builds from the session's own records, so the ID the
+	// restored session hands its feed is the recorded one. The guard
+	// keeps the test honest: a caller-set ID on the shared options would
+	// resolve through options, not records.
+	if runtime.Options.SessionID != "" {
+		t.Fatalf("the shared options carry a session ID %q", runtime.Options.SessionID)
+	}
+	loaded, err := runtime.Store.Load(context.Background(), "s1")
+	if err != nil {
+		t.Fatalf("loading the session's records: %v", err)
+	}
+	restoredTransport := pootest.NewTransport(pootest.Turn{Text: "the answer"}, pootest.Turn{Text: "the answer"})
+	restoredOptions := runtime.Options
+	restoredOptions.Transport = restoredTransport
+	restored, _, err := poo.Restore(restoredOptions, loaded.Records)
+	if err != nil {
+		t.Fatalf("restoring the session: %v", err)
+	}
+	defer restored.Close()
+	waitUntil(t, "the restored feed's message", func() bool {
+		return theModelRead(restoredTransport, `<feed name="sid">s1</feed>`, poo.FeedOrigin("sid"))
+	})
+}
+
 // TestTheSettingsExecutorRunsTheFeedCommand covers the executor: a feed's
 // command runs through the executor the settings name, the same one the
 // session's other commands run through.

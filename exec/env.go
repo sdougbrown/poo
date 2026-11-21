@@ -1,6 +1,7 @@
 package exec
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -93,6 +94,41 @@ func Lookup(environ []string) func(string) (string, bool) {
 	return func(name string) (string, bool) {
 		value, ok := values[name]
 		return value, ok
+	}
+}
+
+// ValidSessionReference reports whether a session reference names a value
+// the session scope carries: nil when it does, and the unknown-reference
+// error when it does not. The manifest load's validation and the resolver
+// answer through it, so the accepted names live in one place — the scope
+// itself is spelled here alone.
+func ValidSessionReference(scope, name string) error {
+	if scope != "session" {
+		return fmt.Errorf("unknown reference scope %q", scope)
+	}
+	if name != "id" {
+		return fmt.Errorf("unknown session reference %q", "session:"+name)
+	}
+	return nil
+}
+
+// SessionScope returns the resolver for a command's session references.
+//
+// A manifest's `session:id` reference resolves through it at the feed's
+// launch or the CLI's call, never when the settings load. The value it
+// returns is the session's own ID, and a restored session answers with
+// the same one. The ID is the caller's, so nothing the command says or
+// does can change it. A reference to any other name fails: `id` is the
+// only value the session scope carries.
+func SessionScope(sessionID string) func(scope, name string) (string, error) {
+	return func(scope, name string) (string, error) {
+		if err := ValidSessionReference(scope, name); err != nil {
+			return "", err
+		}
+		if sessionID == "" {
+			return "", fmt.Errorf("no session id for the reference %q", "session:id")
+		}
+		return sessionID, nil
 	}
 }
 

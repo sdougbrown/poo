@@ -712,6 +712,26 @@ func (r *Runtime) resolveRegistry(opts BuildOptions, workingDir string) error {
 			Err:     err,
 		}
 	}
+	// A session reference the session scope does not carry fails the
+	// build, the way a feed's does: the error would otherwise reach the
+	// model one call at a time instead of the operator once, at the
+	// manifest.
+	for _, entry := range catalog.Entries() {
+		bindings, _ := catalog.EnvBindings(entry.Name)
+		for _, binding := range bindings {
+			if !binding.Reference || binding.Scope == "" {
+				continue
+			}
+			if err := exec.ValidSessionReference(binding.Scope, binding.From); err != nil {
+				return &Error{
+					Code:    CodeInvalid,
+					Field:   "cli_registry.paths",
+					Message: fmt.Sprintf("the CLI %q declares an unknown session reference", entry.Name),
+					Err:     err,
+				}
+			}
+		}
+	}
 	r.Registry = catalog
 	r.loaded = catalog
 	return checkRegistryConditions(catalog.AvailabilityInputs())
@@ -1470,7 +1490,8 @@ func (r *Runtime) resolveFeedRuns(opts BuildOptions) error {
 				// other, and copied here. A nil image is a text-only
 				// message — the conversion would name an image with no
 				// path — so it passes through as nil.
-				return run(ctx, io.Dir, func(from, text string, image *feed.Image) error {
+				session := exec.SessionScope(io.SessionID)
+				return run(ctx, io.Dir, session, func(from, text string, image *feed.Image) error {
 					if image == nil {
 						return emit(from, text, nil)
 					}

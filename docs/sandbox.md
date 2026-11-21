@@ -118,8 +118,9 @@ sandbox's binds and the protected paths it masks.
 - **Its environment** is the session's environment, already scrubbed: the
   benign names the CLI needs (`PATH`, `HOME`, `LANG`, `LC_ALL`, `TMPDIR`)
   come from it, then the variables the manifest declares, with an
-  `env:NAME` reference resolved against the scrubbed environment. A name
-  the scrub removed, or a `tools.env.passthrough` list left out, is a
+  `env:NAME` reference resolved against the scrubbed environment, and a
+  `session:id` reference resolved to the session's own ID at the call.
+  A name the scrub removed, or a `tools.env.passthrough` list left out, is a
   reference the call cannot honour, and it fails naming the variable.
   A manifest can explicitly pass a credential declared through
   `POO_CREDENTIAL_ENV` using an `env:NAME` binding.

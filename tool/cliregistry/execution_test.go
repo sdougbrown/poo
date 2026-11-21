@@ -173,6 +173,43 @@ func TestAScrubbedVariableIsNotResolved(t *testing.T) {
 	})
 }
 
+// TestASessionReferenceResolvesAtTheCall covers a manifest's
+// `session:id`: each call resolves it to the session ID the call's
+// environment carries, so two sessions calling the same CLI read their
+// own IDs, and a reference to a name the session scope does not carry
+// fails with the reference named.
+func TestASessionReferenceResolvesAtTheCall(t *testing.T) {
+	tool := execTool(t, []string{"/bin/sh", "-c", `printf 'sid=%s\n' "$WHINNY_SESSION_ID"`}, map[string]any{
+		"env": map[string]string{"WHINNY_SESSION_ID": "session:id"},
+	})
+	for _, sessionID := range []string{"sess-one", "sess-two"} {
+		res, err := runCall(t, tool, poo.ToolEnv{SessionID: sessionID, Env: bash.ScrubEnv(os.Environ(), bash.Scrub{Passthrough: []string{"PATH"}})})
+		if err != nil {
+			t.Fatalf("running the CLI for %q: %v", sessionID, err)
+		}
+		output, _ := observation(t, res)[bash.EnvelopeOutput].(string)
+		if want := "sid=" + sessionID + "\n"; output != want {
+			t.Errorf("the CLI printed %q, want %q", output, want)
+		}
+	}
+
+	// The model cannot move the ID: it is the call environment's, and
+	// nothing in the arguments reaches the resolution. A call whose
+	// session carries no ID fails closed, and the command does not start,
+	// which a marker the command would have touched proves.
+	marker := filepath.Join(t.TempDir(), "started.marker")
+	unknown := execTool(t, []string{"/bin/sh", "-c", "touch $0", marker}, map[string]any{
+		"env": map[string]string{"SESSION": "session:id"},
+	})
+	_, err := runCall(t, unknown, poo.ToolEnv{Env: os.Environ()})
+	if err == nil || !strings.Contains(err.Error(), "no session id") {
+		t.Errorf("the call without a session ID returned %v, want the fail-closed error", err)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Error("the command started anyway: the marker exists")
+	}
+}
+
 // TestTheCLIRunsUnderBothExecutors covers the two executors: a CLI runs
 // through whichever one the session was built with, with the session's
 // directory, and sees only the environment its manifest resolved.
