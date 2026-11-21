@@ -84,20 +84,34 @@ func (g *growthTracker) growth(observationCap int) int {
 // a baseline, and the differences measured before it stand: the turns that
 // made them cost what they cost.
 //
-// A turn that reported no input ends the reports the tracker measures
-// across. A difference must never span two turns, so the next report is a
-// baseline.
+// A report with no input starts the baseline over too, so a difference never
+// spans two turns.
 func (s *Session) noteTurnInput(meta RecordMeta, usage *UsageReport, retried bool) {
 	if !s.opts.TurnGrowth || meta.Origin == OriginCompaction {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if retried || usage == nil || usage.InputTokens <= 0 {
+	if retried || usage.InputTokens <= 0 {
 		s.growth.resetBaseline()
 		return
 	}
 	s.growth.observe(usage.InputTokens)
+}
+
+// noteNoUsage ends the reports the turn-growth tracker measures across, when
+// the session measures turn growth.
+//
+// A turn whose request ended without a usage report is no measurement of the
+// view. A difference must never span two turns, so the next report is a
+// baseline rather than growth measured across the silent turn.
+func (s *Session) noteNoUsage() {
+	if !s.opts.TurnGrowth {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.growth.resetBaseline()
 }
 
 // observationCapTokensLocked returns the observation cap in tokens: the most

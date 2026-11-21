@@ -514,6 +514,47 @@ func TestARetriedRequestDoesNotFeedTheTurnGrowth(t *testing.T) {
 	}
 }
 
+// TestATurnThatReportsNoUsageStartsTheGrowthBaselineOver covers the turn the
+// endpoint reports nothing for. The turn is charged an estimate, so it never
+// reaches the growth tracker, and a difference must not span the two turns
+// around it: the turn after it is a baseline rather than growth measured across
+// the gap.
+func TestATurnThatReportsNoUsageStartsTheGrowthBaselineOver(t *testing.T) {
+	const (
+		first = 4000
+		step  = 2000
+	)
+	// Turn three reports nothing, and turn four reports far more than turn
+	// two. A tracker that measured straight past the silent turn would carry
+	// the three steps between them as one turn's growth.
+	probe := &growthProbe{inner: pootest.NewCompactor(false, poo.Compaction{})}
+	opts := testOptions(t, scripted([]fakeResponse{
+		{calls: toolCallTurn().calls, usage: &poo.UsageReport{InputTokens: first, OutputTokens: 5}},
+		{calls: toolCallTurn().calls, usage: &poo.UsageReport{InputTokens: first + step, OutputTokens: 5}},
+		{calls: toolCallTurn().calls},
+		{calls: toolCallTurn().calls, usage: &poo.UsageReport{InputTokens: first + 4*step, OutputTokens: 5}},
+		{text: "the answer"},
+	}), &echoTool{result: "echoed"}, &recordingSink{})
+	opts.Compactor = probe
+	opts.TurnGrowth = true
+	s := newTestSession(t, opts)
+
+	if res := runSession(t, s, "do the thing"); res.Reason != poo.ReasonEndTurn {
+		t.Fatalf("the run settled %q, want end_turn", res.Reason)
+	}
+	// The fourth gate follows the silent turn's own gate, and a report landed
+	// after it: it is the gate after the fourth turn's report.
+	const after = 4
+	if len(probe.growth) <= after {
+		t.Fatalf("the compactor was given %d budgets, want the gate after the fourth turn's report at %d",
+			len(probe.growth), after)
+	}
+	if got := probe.growth[after]; got != step {
+		t.Errorf("the gate after the silent turn carries a turn growth of %d, want the measured %d: the input across it spans no difference",
+			got, step)
+	}
+}
+
 // TestARetriedReportAfterACompactionLeavesTheGuardUnarmed covers the other
 // seam the retry touches: a compaction's first report is what the native
 // strategy's guard measures. A request that was retried reports the sum of its

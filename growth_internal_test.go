@@ -111,37 +111,28 @@ func TestACompactionsOwnReportIsNotATurn(t *testing.T) {
 // TestATurnThatReportsNoInputStartsTheBaselineOver covers a turn whose usage
 // says nothing about the view. A difference must never span two turns, so the
 // report after such a turn is a baseline rather than growth measured across the
-// gap.
+// gap. A turn whose request reported no usage at all never reaches the tracker,
+// and the session starts the baseline over from the path that charges it.
 func TestATurnThatReportsNoInputStartsTheBaselineOver(t *testing.T) {
-	for _, test := range []struct {
-		name  string
-		usage *UsageReport
-	}{
-		{"no usage at all", nil},
-		{"no input tokens", &UsageReport{InputTokens: 0}},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			s := &Session{}
-			s.opts.TurnGrowth = true
-			// The first two turns measure a difference of 2000.
-			s.noteTurnInput(RecordMeta{Record: "usage"}, &UsageReport{InputTokens: 1000}, false)
-			s.noteTurnInput(RecordMeta{Record: "usage"}, &UsageReport{InputTokens: 3000}, false)
-			if got := s.growth.growth(1); got != 2000 {
-				t.Fatalf("the turn growth is %d, want 2000 before the silent turn", got)
-			}
+	s := &Session{}
+	s.opts.TurnGrowth = true
+	// The first two turns measure a difference of 2000.
+	s.noteTurnInput(RecordMeta{Record: "usage"}, &UsageReport{InputTokens: 1000}, false)
+	s.noteTurnInput(RecordMeta{Record: "usage"}, &UsageReport{InputTokens: 3000}, false)
+	if got := s.growth.growth(1); got != 2000 {
+		t.Fatalf("the turn growth is %d, want 2000 before the silent turn", got)
+	}
 
-			s.noteTurnInput(RecordMeta{Record: "usage"}, test.usage, false)
-			s.noteTurnInput(RecordMeta{Record: "usage"}, &UsageReport{InputTokens: 9000}, false)
-			if got := s.growth.growth(1); got != 2000 {
-				t.Errorf("the turn growth is %d, want the earlier 2000: the input across the silent turn is no difference", got)
-			}
-			// The report after the silent turn is the baseline, so the next turn
-			// measures against it.
-			s.noteTurnInput(RecordMeta{Record: "usage"}, &UsageReport{InputTokens: 12000}, false)
-			if got := s.growth.growth(1); got != 3000 {
-				t.Errorf("the turn growth is %d, want the 3000 the turn after the new baseline added", got)
-			}
-		})
+	s.noteTurnInput(RecordMeta{Record: "usage"}, &UsageReport{InputTokens: 0}, false)
+	s.noteTurnInput(RecordMeta{Record: "usage"}, &UsageReport{InputTokens: 9000}, false)
+	if got := s.growth.growth(1); got != 2000 {
+		t.Errorf("the turn growth is %d, want the earlier 2000: the input across the silent turn is no difference", got)
+	}
+	// The report after the silent turn is the baseline, so the next turn
+	// measures against it.
+	s.noteTurnInput(RecordMeta{Record: "usage"}, &UsageReport{InputTokens: 12000}, false)
+	if got := s.growth.growth(1); got != 3000 {
+		t.Errorf("the turn growth is %d, want the 3000 the turn after the new baseline added", got)
 	}
 }
 

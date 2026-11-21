@@ -559,6 +559,10 @@ func (s *Session) loop(run *runState) []candidate {
 			// written: every request gets a usage record.
 			if resp != nil && resp.usage != nil {
 				s.writeUsage(run, turn, resp)
+			} else if resp != nil {
+				// The failed request reported nothing, so the turn it
+				// ended is no measurement of the view.
+				s.noteNoUsage()
 			}
 			refusal := newCandidate(reason, detail)
 			// An endpoint that refused the prompt's own length is the
@@ -609,6 +613,7 @@ func (s *Session) loop(run *runState) []candidate {
 			// The endpoint reported no usage, and the run's token
 			// budget still has to count the turn.
 			s.addEstimatedUsage(run, resp, assistant)
+			s.noteNoUsage()
 		}
 
 		// A truncated response: the complete calls run, and the
@@ -2081,6 +2086,9 @@ func (s *Session) accountInterruptedRequest(run *runState, turn int, resp *respo
 		})
 	}
 	s.addEstimatedChars(run, resp.requestChars+estimateMessageChars(assistant))
+	// The request reported nothing, so the turn it ended is no measurement
+	// of the view.
+	s.noteNoUsage()
 	return true
 }
 
