@@ -14,6 +14,31 @@ var coreToolNames = map[string]struct{}{
 	CancelJobToolName: {},
 }
 
+// nestedRefusal reports why a codemode script may not call a tool by
+// name, or "" when it may.
+//
+// The run's own tools are outside a script's reach: the finish tool would
+// settle the run the script runs in, and the job tools drive it. A tool
+// that only runs in the background is out too, because a nested call runs
+// in the turn its parent runs in. The tools a script is offered and the
+// tools a nested batch may call both come from this one rule, so the two
+// cannot drift.
+func nestedRefusal(name string, spec ToolSpec) string {
+	if _, core := coreToolNames[name]; core {
+		return fmt.Sprintf("the tool %q cannot run as a nested call", name)
+	}
+	if spec.Background == BackgroundAlways {
+		return fmt.Sprintf("the tool %q cannot run as a nested call", name)
+	}
+	return ""
+}
+
+// nestedCallable reports whether a codemode script may call a tool by
+// name.
+func nestedCallable(name string, spec ToolSpec) bool {
+	return nestedRefusal(name, spec) == ""
+}
+
 // registerJobTools adds the core's own job tools and checks that every
 // linked tool may be registered.
 //
