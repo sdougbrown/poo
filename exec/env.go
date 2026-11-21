@@ -100,7 +100,7 @@ func Lookup(environ []string) func(string) (string, bool) {
 // SessionScope returns the resolver for a command's session references.
 //
 // A manifest's `session:id` reference resolves through it at the feed's
-// launch or the CLI's call, never when the settings load: the value it
+// launch or the CLI's call, never when the settings load. The value it
 // returns is the session's own ID, and a restored session answers with
 // the same one. The ID is the caller's, so nothing the command says or
 // does can change it. A reference to any other name fails: `id` is the
