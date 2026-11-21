@@ -834,14 +834,13 @@ func (s *Session) toolEnvFor(runID, handle string) ToolEnv {
 
 // toolInfos lists the session's tools, in offer order, for a tool that
 // names its siblings to the model.
+//
+// The list comes from the specs the model sees, so a tool offered here
+// is offered there with the same name, class and background mode.
 func (s *Session) toolInfos() []ToolInfo {
-	infos := make([]ToolInfo, 0, len(s.opts.ToolOrder))
-	for _, name := range s.opts.ToolOrder {
-		tool, ok := s.opts.Tools[name]
-		if !ok {
-			continue
-		}
-		spec := tool.Spec()
+	specs := s.toolSpecs()
+	infos := make([]ToolInfo, 0, len(specs))
+	for _, spec := range specs {
 		infos = append(infos, ToolInfo{Name: spec.Name, Class: spec.Class, Background: spec.Background})
 	}
 	return infos
