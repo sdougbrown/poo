@@ -124,10 +124,10 @@ func (s *Settings) checkValues() error {
 		return err
 	}
 	code := s.Tools.Codemode
-	// An unset engine is QuickJS, the codemode tool's default, so a
-	// settings file that names no engine still cannot ask for a limit
-	// the engine it gets does not honor.
-	engine := "quickjs"
+	// An unset engine is the default one, so a settings file that names
+	// no engine still cannot ask for a limit the engine it gets does not
+	// honor.
+	engine := DefaultCodemodeEngine
 	if code.Engine != nil {
 		engine = *code.Engine
 	}

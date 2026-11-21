@@ -1397,9 +1397,9 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 		Registry:       r.offeredCatalog(),
 		Search:         r.offersSearch(),
 		Inputs:         r.modelInputs(),
-		// QuickJS is the codemode engine a settings file gets when it
-		// names none. A file that names starlark keeps the first engine.
-		CodemodeEngine: "quickjs",
+		// A file that names an engine keeps it; an unset one gets the
+		// default, the same engine the settings check judges limits by.
+		CodemodeEngine: DefaultCodemodeEngine,
 	}
 	if settings.Tools.Codemode.Engine != nil {
 		toolOptions.CodemodeEngine = *settings.Tools.Codemode.Engine

@@ -393,9 +393,17 @@ type Bash struct {
 	Executor *string `json:"executor,omitempty"`
 }
 
+// DefaultCodemodeEngine is the engine a settings file gets when it names
+// none.
+//
+// The check that refuses an engine's limits and the build that selects the
+// engine both read it, so the validation path and the construction path
+// cannot disagree about which engine an unset setting means.
+const DefaultCodemodeEngine = "quickjs"
+
 // Codemode are the codemode tool's settings.
 type Codemode struct {
-	// Engine selects the script runtime. The poo command defaults to QuickJS.
+	// Engine selects the script runtime. Unset means the default engine.
 	Engine *string `json:"engine,omitempty"`
 	// TimeoutS is a script run's wall-clock limit, in seconds.
 	TimeoutS *int `json:"timeout_s,omitempty"`

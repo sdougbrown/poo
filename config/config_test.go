@@ -418,6 +418,13 @@ func TestTheDefaultCodemodeEngineRefusesExecSteps(t *testing.T) {
 	if field, ok := config.FieldOf(err); !ok || field != "tools.codemode.exec_steps" {
 		t.Fatalf("the failure names %q (%v), want tools.codemode.exec_steps", field, err)
 	}
+	// The named engine reaches the same check, and the arm that refuses
+	// must still refuse it.
+	if _, err := config.Parse([]byte("version: 1\ntools:\n  codemode:\n    engine: quickjs\n    exec_steps: 100\n"), config.FormatYAML); err == nil {
+		t.Fatal("a settings file naming quickjs decoded with an exec_steps limit")
+	} else if field, ok := config.FieldOf(err); !ok || field != "tools.codemode.exec_steps" {
+		t.Fatalf("the failure names %q (%v), want tools.codemode.exec_steps", field, err)
+	}
 	if _, err := config.Parse([]byte("version: 1\ntools:\n  codemode:\n    engine: starlark\n    exec_steps: 100\n"), config.FormatYAML); err != nil {
 		t.Fatalf("starlark refused exec_steps: %v", err)
 	}
