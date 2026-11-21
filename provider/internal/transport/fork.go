@@ -7,7 +7,8 @@ import (
 )
 
 // AppendMessagesToBody appends serialized messages to a serialized request
-// body, and replaces the output limit.
+// body, and replaces the output limit. The tool choice is the fork's own
+// to set, with SetToolChoice.
 //
 // The fork re-sends the snapshot as it was built: the body is decoded, the
 // messages go after the last one and the output limit is replaced, and the
@@ -70,5 +71,29 @@ func AppendMessagesToBody(body []byte, messages [][]byte, maxTokens int) ([]byte
 		return nil, err
 	}
 	order = WithKeys(order, payload, []string{"messages", "max_tokens"})
+	return EncodeObject(payload, order), nil
+}
+
+// SetToolChoice rewrites the body's tool choice, keeping the key order
+// the body had. A body that carries no tools is returned unchanged:
+// there is nothing to forbid, and a rewrite that adds a key would make
+// the fork differ from the snapshot for nothing.
+func SetToolChoice(body []byte, value json.RawMessage) ([]byte, error) {
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, &poo.ProviderError{
+			Kind:    poo.ProviderKindInvalidRequest,
+			Message: "the request snapshot does not hold a JSON body",
+		}
+	}
+	if _, ok := payload["tools"]; !ok {
+		return body, nil
+	}
+	payload["tool_choice"] = value
+	order, err := JSONKeyOrder(body)
+	if err != nil {
+		return nil, err
+	}
+	order = WithKeys(order, payload, []string{"tool_choice"})
 	return EncodeObject(payload, order), nil
 }

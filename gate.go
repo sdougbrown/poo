@@ -316,6 +316,7 @@ func (s *Session) compact(run *runState) (compactionOutcome, error) {
 	s.events.emit(EventCompactionEnded, map[string]any{
 		"run_id":   run.id,
 		"strategy": compaction.Strategy,
+		"side":     compaction.Side,
 	})
 	return outcome, nil
 }

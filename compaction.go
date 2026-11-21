@@ -43,7 +43,9 @@ type CompactionEnv struct {
 }
 
 // ForkFunc sends a request that is byte-identical to the last main
-// request, apart from the appended messages and the output limit.
+// request, apart from the appended messages, the output limit and the
+// tool choice, which the fork sets to none: the fork's ask cannot be
+// answered with work.
 //
 // Core binds it to the transport's Fork and to the last request's
 // snapshot, so a strategy cannot build a fork request any other way.
@@ -85,6 +87,33 @@ type Compaction struct {
 	Window *ProviderWindow `json:"window,omitempty"`
 	// End refuses to compact: the run settles with the handoff.
 	End *EndRun `json:"end,omitempty"`
+	// Side reports what a strategy's own requests did, when it made
+	// any. The compaction's record carries it, and the compaction
+	// ended event reports it, so a consumer watching compactions sees
+	// whether the strategy's asks came back as asked.
+	Side *SideRequests `json:"side,omitempty"`
+}
+
+// SideRequests reports the requests a strategy made on its own.
+type SideRequests struct {
+	// Fork reports the request a strategy made by forking the last
+	// main request, when it made one.
+	Fork *ForkSide `json:"fork,omitempty"`
+}
+
+// ForkSide reports one fork a strategy made.
+type ForkSide struct {
+	// Bytes is the size of the reply text the strategy kept. A reply
+	// the strategy did not keep reports zero.
+	Bytes int `json:"bytes,omitempty"`
+	// Truncated reports that the reply hit the fork's output limit.
+	Truncated bool `json:"truncated,omitempty"`
+	// ToolCall reports that the reply answered with tool calls: the
+	// model treated the strategy's ask as the task, and the reply was
+	// not used.
+	ToolCall bool `json:"tool_call,omitempty"`
+	// Error is why the fork failed, when it failed.
+	Error string `json:"error,omitempty"`
 }
 
 // TurnRange is a range of turns, counting from one.

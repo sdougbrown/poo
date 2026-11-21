@@ -209,6 +209,7 @@ func (c *Compactor) Compact(ctx context.Context, in poo.CompactionEnv) (poo.Comp
 	covered := messages[r.Start:r.End]
 
 	pointers := ""
+	var fork *poo.ForkSide
 	if in.Fork != nil {
 		reply, err := in.Fork(ctx, pointerRequest(), c.pointerMaxTokens)
 		// The pass is advisory, so a fork that fails mines without it.
@@ -217,6 +218,14 @@ func (c *Compactor) Compact(ctx context.Context, in poo.CompactionEnv) (poo.Comp
 		// reply would have named.
 		if err == nil && len(reply.Message.ToolCalls()) == 0 {
 			pointers = strings.TrimSpace(reply.Message.Text())
+		}
+		fork = &poo.ForkSide{}
+		if err != nil {
+			fork.Error = err.Error()
+		} else {
+			fork.Bytes = len(pointers)
+			fork.Truncated = reply.Finish == poo.FinishLength
+			fork.ToolCall = len(reply.Message.ToolCalls()) > 0
 		}
 	}
 
@@ -249,6 +258,7 @@ func (c *Compactor) Compact(ctx context.Context, in poo.CompactionEnv) (poo.Comp
 			Cut:      r.Cut,
 			Messages: []poo.Message{poo.NewTextMessage(poo.RoleUser, replacement)},
 		},
+		Side: &poo.SideRequests{Fork: fork},
 	}, nil
 }
 

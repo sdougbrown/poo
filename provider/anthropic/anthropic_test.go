@@ -570,6 +570,44 @@ func TestAForkResendsTheSnapshotAsItWas(t *testing.T) {
 	}
 }
 
+// TestAForkWithToolsForbidsTheirUse covers the fork's tool choice: the
+// tools stay in the request, so the prefix the endpoint cached is
+// intact, and the choice forbids their use.
+func TestAForkWithToolsForbidsTheirUse(t *testing.T) {
+	body := frame(`{"type":"message_start","message":{"usage":{"input_tokens":8}}}`) +
+		frame(`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hi"}}`) +
+		frame(`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}`) +
+		frame(`{"type":"message_stop"}`)
+	srv := newSSEServer(t, body)
+	tr := anthropic.New(anthropic.Options{Endpoint: srv.URL, Model: "claude-haiku-5-5", ModelInfo: thinkingModel()})
+
+	req := request("ses_one")
+	req.Tools = []poo.ToolSpec{{Name: "echo", Description: "echo", Schema: []byte(`{"type":"object"}`)}}
+	reader, rendered, err := tr.Stream(context.Background(), req)
+	if err != nil {
+		t.Fatalf("starting the request: %v", err)
+	}
+	read(t, reader)
+	_ = reader.Close()
+
+	reader, err = tr.Fork(context.Background(), rendered, []poo.Message{poo.NewTextMessage(poo.RoleUser, "more")}, 64)
+	if err != nil {
+		t.Fatalf("forking the request: %v", err)
+	}
+	read(t, reader)
+	_ = reader.Close()
+
+	sent := srv.requests[1]
+	choice, ok := sent["tool_choice"].(map[string]any)
+	if !ok || choice["type"] != "none" {
+		t.Errorf("the fork's tool choice is %v, want none", sent["tool_choice"])
+	}
+	tools, ok := sent["tools"].([]any)
+	if !ok || len(tools) != 1 {
+		t.Errorf("the fork carries the tools %v, want the one it was offered", sent["tools"])
+	}
+}
+
 func TestAForkRefusesWhatIsNotItsOwn(t *testing.T) {
 	srv := newSSEServer(t, frame(`{"type":"message_stop"}`))
 	tr := anthropic.New(anthropic.Options{Endpoint: srv.URL, Model: "claude-haiku-5-5", ModelInfo: thinkingModel()})
