@@ -21,9 +21,9 @@ return files.map(r => r.is_error ? r.text : r.text.split("\n")[0]);
 - `await tools.<name>(args)` returns an object with `handle`, `tool`,
   `outcome`, `text`, `is_error`, and `structured` (a JSON string or
   `null`). A refused or failed tool call comes back as data in `outcome`.
-- Named calls submitted together and `gather([[name, args], ...])` use
-  the same scheduling rule. Calls overlap only if every tool in the
-  batch is declared read-only. Otherwise they run in input order.
+- Named calls submitted together form a batch. Calls overlap only if
+  every tool in the batch is declared read-only. Otherwise they run in
+  input order.
 - `parallel([[name, args], ...])` explicitly requests overlap even for
   calls that write. Use it only for independent calls. Normal tool
   permissions still apply. Batches return results in input order,

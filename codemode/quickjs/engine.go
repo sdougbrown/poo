@@ -236,7 +236,6 @@ const wrapper = `((NAMES) => async (source) => {
     if (pending) flush();
     return runBatch(raw, parallel);
   };
-  const gather = (batch) => explicitBatch(batch, false);
   const parallel = (batch) => explicitBatch(batch, true);
   const named = Object.create(null);
   for (const name of NAMES) {
@@ -250,13 +249,13 @@ const wrapper = `((NAMES) => async (source) => {
       }
     });
   }
-  const call = (name, args = null) => gather([[name, args]])[0];
+  const call = (name, args = null) => explicitBatch([[name, args]], false)[0];
   const print = (value) => { if (active) log(text(value)); };
   const compile = Object.getPrototypeOf(async function () {}).constructor;
-  const program = compile("call", "gather", "parallel", "print", "tools", '"use strict";\n' + source);
+  const program = compile("call", "parallel", "print", "tools", '"use strict";\n' + source);
   active = true;
   try {
-    const value = await program(call, gather, parallel, print, named);
+    const value = await program(call, parallel, print, named);
     active = false;
     // A script that returns nothing is a clean no-value result, like a
     // Starlark script that never exits: undefined passes to the host.
