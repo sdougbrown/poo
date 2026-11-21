@@ -12,17 +12,21 @@ func TestCodemodeSettingsSelectScriptLanguage(t *testing.T) {
 	for _, test := range []struct {
 		engine, script, language, badField string
 	}{
-		{"", `exit(42)`, "Starlark", ""},
+		{"", `const xs = [20, 22]; return xs.reduce((a, b) => a + b);`, "QuickJS", ""},
 		{"starlark", `exit(42)`, "Starlark", ""},
 		{"quickjs", `const xs = [20, 22]; return xs.reduce((a, b) => a + b);`, "QuickJS", ""},
 		{"unknown", "", "", "tools.codemode.engine"},
-		{"quickjs", "", "", "tools.codemode.exec_steps"},
+		{"", "", "", "tools.codemode.exec_steps"},
 	} {
 		name := test.engine
 		if name == "" {
-			// The unset-engine case proves the Starlark default, and a
-			// failure of it must be distinguishable in the test output.
+			// The unset-engine cases prove the QuickJS default, and a
+			// failure of one must be distinguishable in the test output:
+			// two rows called "default" would collide.
 			name = "default"
+			if test.badField != "" {
+				name += "-" + strings.TrimPrefix(test.badField, "tools.codemode.")
+			}
 		}
 		t.Run(name, func(t *testing.T) {
 			args, err := json.Marshal(map[string]string{"script": test.script})
@@ -35,11 +39,14 @@ func TestCodemodeSettingsSelectScriptLanguage(t *testing.T) {
 			endpoint := newFakeEndpointSequence(t, []string{call, answer})
 			dir := t.TempDir()
 			settings := "version: 1\npermission:\n  unmatched: allow\n"
-			if test.engine != "" {
-				settings += "tools:\n  codemode:\n    engine: " + test.engine + "\n"
-			}
-			if test.badField == "tools.codemode.exec_steps" {
-				settings += "    exec_steps: 100\n"
+			if test.engine != "" || test.badField == "tools.codemode.exec_steps" {
+				settings += "tools:\n  codemode:\n"
+				if test.engine != "" {
+					settings += "    engine: " + test.engine + "\n"
+				}
+				if test.badField == "tools.codemode.exec_steps" {
+					settings += "    exec_steps: 100\n"
+				}
 			}
 			path := filepath.Join(dir, "settings.yaml")
 			if err := os.WriteFile(path, []byte(settings), 0600); err != nil {

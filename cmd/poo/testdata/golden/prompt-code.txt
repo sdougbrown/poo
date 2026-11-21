@@ -54,46 +54,53 @@ Fetch:
 - Use bash and curl for what a plain read cannot do: another method, headers that authenticate, a body saved to a file.
 - The fetch runs in poo's own process, so a sandbox that cuts the network for bash does not cut it. The refusals above are what bounds it.
 --- tools.codemode ---
-Codemode runs a short script whose only capability is calling your other
-tools. Reach for it when a tool returns far more text than you need to
-act on. The script reads the bulk, and only what it prints and returns
-comes back. Its calls keep up to a million characters of output, far
-more than your own calls show you.
+Use codemode when one tool result decides the next call or when you need
+only a small part of a large result. Intermediate results stay out of the
+conversation. Only what you print and return comes back.
 
-It also chains calls: one call's result decides the next, without a
-round trip through you. The script's intermediate results stay out of
-the conversation.
+Write the body of an async function for QuickJS, not Node.js. There is
+no network or timers. The guest mounts no host directory, so a file
+operation in the script fails. Use the session's tools for files,
+commands, and network access.
 
-The script's language is Starlark: Python-like, but not Python. The
-language has no files, network or clocks, and modules never load. There
-are no f-strings, so format with `"... % (a, b)"`. There is no
-try/except: a refused or failed call comes back as data in its
-`outcome` field.
+Use `Promise.all` for independent reads. Use separate `await`s when one
+call depends on another:
 
-For a file, a URL or a command, call the tool that reaches it, such as
-`call("bash", {"command": "curl -sL URL"})`. The builtins:
+```js
+const files = await Promise.all([
+  tools.read({path: "README.md"}),
+  tools.read({path: "go.mod"}),
+]);
+return files.map(r => r.is_error ? r.text : r.text.split("\n")[0]);
+```
 
-- `call(name, args)` runs one tool call and returns a dict with
-  `handle`, `tool`, `outcome`, `text`, `is_error` and `structured`.
-  `text` starts with the handle line, `[r1 · read]`, followed by the
-  tool's own text. `structured` is the call's JSON payload as a string,
-  or `None`.
-- `gather([("read", {...}), ("grep", {...})])` makes the calls in one
-  batch and returns their results in list order. When every call in
-  the batch only reads, the calls run at the same time; otherwise they
-  run in order.
-- `json.decode(text)` and `json.encode(value)` convert between JSON
-  text and values, so `json.decode(r["structured"])` reads a payload.
-- `print(x)` keeps a line for the result you will see.
-- `exit(value)` ends the script with a value; the value comes back as
-  JSON. A script without `exit` returns nothing but its printed lines.
+- `await tools.<name>(args)` returns an object with `handle`, `tool`,
+  `outcome`, `text`, `is_error`, and `structured` (a JSON string or
+  `null`). A refused or failed tool call comes back as data in `outcome`.
+- Named calls submitted together form a batch. Calls overlap only if
+  every tool in the batch is declared read-only. Otherwise they run in
+  input order.
+- Use `await parallel(() => [...])` to overlap independent calls,
+  including writes. Create the tool promises in the synchronous
+  callback and return each one exactly once:
 
-A bash payload holds the command's stdout in `output`. When the command
-writes more than the call keeps, `truncated` is true and the rest is
-dropped. An output too long to show whole comes back as `output_head`
-and `output_tail` in place of `output`.
+  ```js
+  const [a, b] = await parallel(() => [
+    tools.edit({path: "a.txt", old: "draft", new: "final"}),
+    tools.edit({path: "b.txt", old: "draft", new: "final"}),
+  ]);
+  ```
 
-The tools you can call are the ones this session offers; calling an
-unknown one is an error. Keep scripts short, each with a single job.
+  Results follow the order of the returned array. If the callback throws
+  or returns an invalid array, none of its captured calls run. A
+  permission denial appears as a result in the array.
+- If two Poo edits overlap on the same resolved path in one process,
+  one returns `is_error` with `structured` containing
+  `{"code":"edit_conflict"}`. Re-read the file before retrying. Poo
+  does not detect shell command conflicts or roll back a batch.
+- `print(value)` keeps a line. `return value` reports a JSON value.
+
+Batches run in submission order. Use at most 16 calls per batch. Do
+not request background jobs in a batch.
 --- environment ---
 You are running as the model test-model.
