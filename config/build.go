@@ -712,6 +712,26 @@ func (r *Runtime) resolveRegistry(opts BuildOptions, workingDir string) error {
 			Err:     err,
 		}
 	}
+	// A session reference the session scope does not carry fails the
+	// build, the way a feed's does: the error would otherwise reach the
+	// model one call at a time instead of the operator once, at the
+	// manifest.
+	for _, entry := range catalog.Entries() {
+		bindings, _ := catalog.EnvBindings(entry.Name)
+		for _, binding := range bindings {
+			if !binding.Reference || binding.Scope == "" {
+				continue
+			}
+			if err := exec.ValidSessionReference(binding.Scope, binding.From); err != nil {
+				return &Error{
+					Code:    CodeInvalid,
+					Field:   "cli_registry.paths",
+					Message: fmt.Sprintf("the CLI %q declares an unknown session reference", entry.Name),
+					Err:     err,
+				}
+			}
+		}
+	}
 	r.Registry = catalog
 	r.loaded = catalog
 	return checkRegistryConditions(catalog.AvailabilityInputs())

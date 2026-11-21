@@ -1192,3 +1192,34 @@ func TestARegistryThatDeclaresTheConditionAsAnotherTypeIsRefused(t *testing.T) {
 		t.Errorf("the message %q does not say what poo supplies", failure.Message)
 	}
 }
+
+// TestTheBuildRefusesAnUnknownSessionReference covers the CLI manifest's
+// load-time validation, the same one a feed's gets: a session reference
+// the session scope does not carry fails the build naming the CLI,
+// instead of failing every call at the model.
+func TestTheBuildRefusesAnUnknownSessionReference(t *testing.T) {
+	for _, value := range []string{"session:run_id", "session:"} {
+		entry := registryEntry("A CLI with a bad session reference.")
+		entry["env"] = map[string]string{"SESSION": value}
+		dir := writeRegistryDoc(t, map[string]any{"version": 1, "tools": map[string]any{"probe": entry}})
+		settings, err := config.Parse([]byte(registrySettings(dir)), config.FormatYAML)
+		if err != nil {
+			t.Fatalf("decoding the settings: %v", err)
+		}
+		_, err = config.Build(config.BuildOptions{
+			Settings:       settings,
+			WorkingDir:     t.TempDir(),
+			DefaultProfile: "code",
+			Tools:          theTools(),
+			Profiles:       theProfiles(),
+			Executors:      theExecutors(),
+		})
+		if err == nil {
+			t.Errorf("the build accepted the session reference %q", value)
+			continue
+		}
+		if !strings.Contains(err.Error(), `"probe"`) || !strings.Contains(err.Error(), value) {
+			t.Errorf("the failure %v does not name the CLI and the reference", err)
+		}
+	}
+}

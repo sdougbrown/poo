@@ -194,16 +194,16 @@ func TestASessionReferenceResolvesAtTheCall(t *testing.T) {
 	}
 
 	// The model cannot move the ID: it is the call environment's, and
-	// nothing in the arguments reaches the resolution. The unknown
-	// reference fails before the command starts, which a marker the
-	// command would have touched proves.
+	// nothing in the arguments reaches the resolution. A call whose
+	// session carries no ID fails closed, and the command does not start,
+	// which a marker the command would have touched proves.
 	marker := filepath.Join(t.TempDir(), "started.marker")
 	unknown := execTool(t, []string{"/bin/sh", "-c", "touch $0", marker}, map[string]any{
-		"env": map[string]string{"SESSION": "session:run_id"},
+		"env": map[string]string{"SESSION": "session:id"},
 	})
-	_, err := runCall(t, unknown, poo.ToolEnv{SessionID: "sess-one", Env: os.Environ()})
-	if err == nil || !strings.Contains(err.Error(), "session:run_id") {
-		t.Errorf("the call for an unknown session reference returned %v, want one naming session:run_id", err)
+	_, err := runCall(t, unknown, poo.ToolEnv{Env: os.Environ()})
+	if err == nil || !strings.Contains(err.Error(), "no session id") {
+		t.Errorf("the call without a session ID returned %v, want the fail-closed error", err)
 	}
 	if _, err := os.Stat(marker); err == nil {
 		t.Error("the command started anyway: the marker exists")

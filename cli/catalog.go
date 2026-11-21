@@ -137,6 +137,17 @@ func (c *Catalog) Lookup(name string) (Entry, bool) {
 	return Entry{}, false
 }
 
+// EnvBindings returns the env bindings the named CLI's manifest declares,
+// in name order, or false when no CLI answers to the name. A host that
+// validates references when the settings load asks the same question the
+// call's resolution does through them.
+func (c *Catalog) EnvBindings(name string) ([]cliregistry.EnvBinding, bool) {
+	if c == nil {
+		return nil, false
+	}
+	return c.registry.EnvBindings(name)
+}
+
 // Names returns the registered names, in order.
 func (c *Catalog) Names() []string {
 	if c == nil {
