@@ -254,6 +254,20 @@ func TestRemovingTheToolsSlotTakesTheToolSectionsAway(t *testing.T) {
 	}
 }
 
+// TestAnEmptyToolSectionLeavesNoGap covers the rule that a tool whose
+// section renders no text adds no blank line to the tools block.
+func TestAnEmptyToolSectionLeavesNoGap(t *testing.T) {
+	b := prompt.New(testEnv("bash", "read"))
+	b.Set("base", "the base")
+	b.Set(prompt.ToolSection("bash"), "the bash tool")
+	b.Set(prompt.ToolSection("read"), "")
+
+	want := "the base\n\n<tools>\nthe bash tool\n</tools>\n"
+	if got := b.Render(); got != want {
+		t.Errorf("the prompt is %q, want %q", got, want)
+	}
+}
+
 // TestReplaceTakesOverTheWholePrompt covers the replace mutation.
 func TestReplaceTakesOverTheWholePrompt(t *testing.T) {
 	b := prompt.New(testEnv())

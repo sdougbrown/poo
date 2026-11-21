@@ -391,7 +391,9 @@ func (b *Builder) SectionsError() ([]SectionText, error) {
 				if err != nil {
 					return nil, err
 				}
-				out = append(out, SectionText{Name: tool, Text: text})
+				if text != "" {
+					out = append(out, SectionText{Name: tool, Text: text})
+				}
 			}
 			continue
 		}
@@ -642,22 +644,6 @@ func (b *Builder) sectionTextError(name string) (string, error) {
 		return "", err
 	}
 	return text + b.extra[name], nil
-}
-
-// toolTextsError returns the texts of the tool sections, in the order
-// the environment offers the tools, or the error a template reported.
-func (b *Builder) toolTextsError() ([]string, error) {
-	var texts []string
-	for _, name := range b.toolNames() {
-		text, err := b.sectionTextError(name)
-		if err != nil {
-			return nil, err
-		}
-		if text != "" {
-			texts = append(texts, text)
-		}
-	}
-	return texts, nil
 }
 
 // toolNames returns the names of the tool sections that render, in the

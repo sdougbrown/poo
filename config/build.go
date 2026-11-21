@@ -2038,6 +2038,7 @@ func (r *Runtime) resolvePrompt(opts BuildOptions, workingDir string) error {
 // tool.
 func promptSources(opts BuildOptions, r *Runtime) prompt.Sources {
 	sources := prompt.Sources{
+		"persona":      nil,
 		"base":         nil,
 		"profile":      nil,
 		"environment":  nil,
