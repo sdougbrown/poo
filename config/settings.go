@@ -395,7 +395,7 @@ type Bash struct {
 
 // Codemode are the codemode tool's settings.
 type Codemode struct {
-	// Engine selects the script runtime. The poo command defaults to Starlark.
+	// Engine selects the script runtime. The poo command defaults to QuickJS.
 	Engine *string `json:"engine,omitempty"`
 	// TimeoutS is a script run's wall-clock limit, in seconds.
 	TimeoutS *int `json:"timeout_s,omitempty"`

@@ -421,6 +421,11 @@ func TestTheDefaultCodemodeEngineRefusesExecSteps(t *testing.T) {
 	if _, err := config.Parse([]byte("version: 1\ntools:\n  codemode:\n    engine: starlark\n    exec_steps: 100\n"), config.FormatYAML); err != nil {
 		t.Fatalf("starlark refused exec_steps: %v", err)
 	}
+	// Zero is how a settings file says the limit is off, so the default
+	// engine takes it.
+	if _, err := config.Parse([]byte("version: 1\ntools:\n  codemode:\n    exec_steps: 0\n"), config.FormatYAML); err != nil {
+		t.Fatalf("the default engine refused a zero exec_steps: %v", err)
+	}
 }
 
 // TestARuleNeedsOneMatcher covers the rules the settings check by
