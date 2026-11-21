@@ -1,6 +1,7 @@
 package prompt_test
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -208,6 +209,48 @@ func TestThePersonaIsEditableLikeAnySection(t *testing.T) {
 	b.Remove("persona")
 	if !strings.HasPrefix(b.Render(), "Keep going until the task is done.") {
 		t.Errorf("the persona did not go away with the remove: %q", b.Render())
+	}
+}
+
+// TestTheToolsSlotRendersInsideTheToolsBlock covers the rule that a
+// consumer's text in the "tools" slot joins the block, ahead of the
+// tool sections' own texts.
+func TestTheToolsSlotRendersInsideTheToolsBlock(t *testing.T) {
+	b := prompt.New(testEnv("bash"))
+	b.Set("base", "the base")
+	b.Set("tools", "the tools slot")
+	b.Set(prompt.ToolSection("bash"), "the bash tool")
+
+	want := "the base\n\n<tools>\nthe tools slot\n\nthe bash tool\n</tools>\n"
+	if got := b.Render(); got != want {
+		t.Errorf("the prompt is %q, want %q", got, want)
+	}
+	if !slices.Contains(b.Names(), "tools") {
+		t.Errorf("the names are %v, want 'tools' among them", b.Names())
+	}
+}
+
+// TestAToolsOnlyPromptRendersBare covers the rule that the first block
+// renders bare even when the first block is the tools block.
+func TestAToolsOnlyPromptRendersBare(t *testing.T) {
+	b := prompt.New(testEnv("bash"))
+	b.Set(prompt.ToolSection("bash"), "the bash tool")
+
+	if got := b.Render(); got != "the bash tool\n" {
+		t.Errorf("the prompt is %q, want the bare tool text", got)
+	}
+}
+
+// TestRemovingTheToolsSlotTakesTheToolSectionsAway covers the rule that
+// removing the "tools" slot removes the per-tool sections' render.
+func TestRemovingTheToolsSlotTakesTheToolSectionsAway(t *testing.T) {
+	b := prompt.New(testEnv("bash"))
+	b.Set("base", "the base")
+	b.Set(prompt.ToolSection("bash"), "the bash tool")
+
+	b.Remove("tools")
+	if got := b.Render(); got != "the base\n" {
+		t.Errorf("the prompt is %q, want the base alone", got)
 	}
 }
 
