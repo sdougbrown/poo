@@ -29,9 +29,9 @@ func TestQuickJSReportsOnlyWhatTheScriptKeeps(t *testing.T) {
 	res, err := quickjs.New().Run(t.Context(), codemode.RunOptions{
 		Script: `
 const r = await tools.read({path: "input.txt"});
-const batch = gather([["grep", {pattern: JSON.parse(r.structured).word}], ["blocked", {}]]);
+const [matches, denied] = await Promise.all([tools.grep({pattern: JSON.parse(r.structured).word}), tools.blocked({})]);
 print("日本語日本語");
-return {matches: batch[0].text.split("\n").length, denied: batch[1].is_error};
+return {matches: matches.text.split("\n").length, denied: denied.is_error};
 `,
 		Limits: codemode.Limits{OutputCapChars: 3},
 		Tools:  []poo.ToolInfo{{Name: "read"}, {Name: "grep"}, {Name: "blocked"}},
@@ -223,16 +223,16 @@ func TestQuickJSRunawayStopsAndNextScriptRuns(t *testing.T) {
 	}
 }
 
-// TestGatherRefusesAnEntryItCannotRead mirrors the Starlark test of the
-// same name: a malformed batch fails the run before any call reaches the
-// seam, and the failure names the entry it could not read.
-func TestGatherRefusesAnEntryItCannotRead(t *testing.T) {
+// TestParallelRefusesAnEntryItCannotRead: a malformed parallel batch
+// fails the run before any call reaches the seam, and the failure names
+// the entry it could not read.
+func TestParallelRefusesAnEntryItCannotRead(t *testing.T) {
 	for _, test := range []struct{ script, want string }{
-		{`gather("read");`, "tool batch expects an array"},
-		{`gather(["read"]);`, "is not a [name, args] pair"},
-		{`gather([["read"]]);`, "is not a [name, args] pair"},
-		{`gather([[1, {}]]);`, "needs a tool name"},
-		{`gather([["", {}]]);`, "needs a tool name"},
+		{`parallel("read");`, "tool batch expects an array"},
+		{`parallel(["read"]);`, "is not a [name, args] pair"},
+		{`parallel([["read"]]);`, "is not a [name, args] pair"},
+		{`parallel([[1, {}]]);`, "needs a tool name"},
+		{`parallel([["", {}]]);`, "needs a tool name"},
 	} {
 		t.Run(test.script, func(t *testing.T) {
 			handed := 0
@@ -262,7 +262,7 @@ func TestQuickJSBoundsGuestExecution(t *testing.T) {
 		{"deadline", `while (true) {}`, codemode.Limits{TimeoutS: 1}, "deadline exceeded"},
 		{"memory", `return new ArrayBuffer(128 * 1024 * 1024).byteLength;`, codemode.Limits{}, "out of memory"},
 		{"step budget", `return 1;`, codemode.Limits{ExecSteps: 100}, "does not support the exec_steps limit"},
-		{"batch width", `gather(Array.from({length: 17}, () => ["read", {}]));`, codemode.Limits{}, "tool batch takes at most"},
+		{"batch width", `parallel(Array.from({length: 17}, () => ["read", {}]));`, codemode.Limits{}, "tool batch takes at most"},
 		{"oversized return", `return "x".repeat(2097152);`, codemode.Limits{}, "print a summary instead"},
 		{"call after return", `return {toJSON() { call("read", {}); return 1; }};`, codemode.Limits{}, "after returning"},
 	} {
