@@ -525,6 +525,7 @@ func TestARetriedReportAfterACompactionLeavesTheGuardUnarmed(t *testing.T) {
 		next   = 18000
 	)
 	probe := &growthProbe{inner: roomCompactor{}}
+	sink := &recordingSink{}
 	opts := testOptions(t, wireTransport(t, []wireAnswer{
 		{call: "echo", input: 20000, output: 5},
 		{call: "echo", input: 30000, output: 5},
@@ -534,7 +535,7 @@ func TestARetriedReportAfterACompactionLeavesTheGuardUnarmed(t *testing.T) {
 		{call: "echo", input: prompt, output: 5},
 		{call: "echo", input: next, output: 5},
 		{text: "the answer"},
-	}), &echoTool{result: "echoed"}, &recordingSink{})
+	}), &echoTool{result: "echoed"}, sink)
 	opts.Model.ContextLimit = 34000
 	opts.Model.MaxOutput = 4096
 	opts.Compactor = probe
@@ -557,6 +558,28 @@ func TestARetriedReportAfterACompactionLeavesTheGuardUnarmed(t *testing.T) {
 	// The next report is the view's own, and the guard arms on it.
 	if got := probe.compacted[4]; got != next {
 		t.Errorf("the gate after the next report carries a compacted input of %d, want %d", got, next)
+	}
+
+	// A session resumed from these records arms the guard the same way. The
+	// retried report is no measurement there either, so the restore takes the
+	// next one and not the attempts' sum.
+	restoredProbe := &growthProbe{inner: roomCompactor{}}
+	restoredOpts := restoreOptions(t, wireTransport(t, []wireAnswer{{text: "the answer"}}), &recordingSink{})
+	restoredOpts.Compactor = restoredProbe
+	restored, _, err := poo.Restore(restoredOpts, append([]poo.Record{header("s1")}, sink.allRecords()...))
+	if err != nil {
+		t.Fatalf("restoring the session: %v", err)
+	}
+	t.Cleanup(func() { restored.Close() })
+	if res := runSession(t, restored, "carry on"); res.Reason != poo.ReasonEndTurn {
+		t.Fatalf("the restored run settled %q, want end_turn", res.Reason)
+	}
+	if len(restoredProbe.compacted) == 0 {
+		t.Fatal("the restored compactor was given no budget")
+	}
+	live := probe.compacted[len(probe.compacted)-1]
+	if got := restoredProbe.compacted[0]; got != live {
+		t.Errorf("the restored budget carries a compacted input of %d, want the live guard's %d", got, live)
 	}
 }
 

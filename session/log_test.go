@@ -238,6 +238,66 @@ func TestTheCacheReadCountIsAbsentWhenTheEndpointReportsNone(t *testing.T) {
 	}
 }
 
+func TestTheUsageRecordCarriesTheRetryFlag(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+
+	log, err := session.Open(path)
+	if err != nil {
+		t.Fatalf("opening the log: %v", err)
+	}
+	ctx := context.Background()
+	retried := &poo.UsageRecord{
+		RecordMeta:   poo.NewRecordMeta("usage"),
+		RunID:        "r1",
+		Turn:         1,
+		Request:      1,
+		InputTokens:  2400,
+		OutputTokens: 8,
+		Retried:      true,
+	}
+	if err := log.Append(ctx, retried); err != nil {
+		t.Fatalf("appending: %v", err)
+	}
+	if err := log.Close(); err != nil {
+		t.Fatalf("closing: %v", err)
+	}
+
+	recs := records(t, path)
+	if recs[0]["retried"] != true {
+		t.Errorf("the record's retried flag is %v, want true", recs[0]["retried"])
+	}
+
+	codec := session.NewCodec()
+	line, err := codec.Encode(retried)
+	if err != nil {
+		t.Fatalf("encoding the record: %v", err)
+	}
+	decoded, err := codec.Decode(line)
+	if err != nil {
+		t.Fatalf("decoding the record: %v", err)
+	}
+	got, ok := decoded.(*poo.UsageRecord)
+	if !ok {
+		t.Fatalf("the line decoded to a %T, want *poo.UsageRecord", decoded)
+	}
+	if !got.Retried || got.InputTokens != retried.InputTokens {
+		t.Errorf("the record round-tripped as %+v, want the retried report %+v", got, retried)
+	}
+
+	// A line written before the field existed carries no retried key, and
+	// reads as a request the transport made once.
+	old := []byte(`{"record":"usage","seq":1,"ts":"2026-01-01T00:00:00Z",` +
+		`"run_id":"r1","turn":1,"request":1,"input_tokens":120,"output_tokens":8,"ttft_ms":0}`)
+	decoded, err = codec.Decode(old)
+	if err != nil {
+		t.Fatalf("decoding an old usage line: %v", err)
+	}
+	if got, ok := decoded.(*poo.UsageRecord); !ok || got.Retried {
+		t.Errorf("an old usage line decoded to %+v, want a report that was not retried", decoded)
+	}
+}
+
 func TestTheToolCallRecordHoldsTheFullArguments(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "session.jsonl")

@@ -1999,6 +1999,7 @@ func (s *Session) recordUsage(run *runState, meta RecordMeta, turn, request int,
 		OutputTokens:    usage.OutputTokens,
 		CacheReadTokens: usage.CacheReadTokens,
 		TTFTMS:          usage.TTFTMS,
+		Retried:         retried,
 	}); err != nil {
 		s.noteStoreError(run, err)
 		return false
