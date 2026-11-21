@@ -2446,6 +2446,47 @@ context:
 	}
 }
 
+// TestTheCompactionRoleSendsTheSideRequestsToItsModel covers the
+// compaction role's wiring: the build resolves the role's model, builds
+// its transport, and the session's options carry both.
+func TestTheCompactionRoleSendsTheSideRequestsToItsModel(t *testing.T) {
+	settings, err := config.Parse([]byte(strings.Replace(theModelSettings, "  chat: test-model", "  chat: test-model\n  compaction: test-model", 1)), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+	if runtime.Options.SideTransport == nil {
+		t.Fatal("the session has no side transport, want the compaction role's")
+	}
+	if runtime.Options.SideModel.ModelID != "test-model" {
+		t.Errorf("the side model is %q, want test-model", runtime.Options.SideModel.ModelID)
+	}
+}
+
+// TestTheBuildRefusesAnUnknownCompactionModel covers the compaction
+// role's resolution: a model the catalog does not have is a build
+// failure, not a session that silently asks the chat model.
+func TestTheBuildRefusesAnUnknownCompactionModel(t *testing.T) {
+	settings, err := config.Parse([]byte(strings.Replace(theModelSettings, "  chat: test-model", "  chat: test-model\n  compaction: no-such-model", 1)), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	_, err = config.Build(config.BuildOptions{
+		Settings:       settings,
+		WorkingDir:     t.TempDir(),
+		DefaultProfile: "code",
+		Tools:          theTools(),
+		Profiles:       theProfiles(),
+		Executors:      theExecutors(),
+	})
+	if err == nil {
+		t.Fatal("the build succeeded, want a failure")
+	}
+	if !strings.Contains(err.Error(), "compaction") {
+		t.Errorf("the failure is %v, want it to name the compaction role", err)
+	}
+}
+
 // TestTheMineStrategyDefaults covers a settings document that names the
 // mine strategy and its fields: the compactor the session gets is the
 // mine one, with the fields the settings configured.

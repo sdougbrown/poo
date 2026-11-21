@@ -16,7 +16,8 @@
 // strings, the open threads — steers the mining request's reading. The
 // pass is advisory: a reply the output limit cut short still steers,
 // because pointers that stop early lose nothing the transcript does not
-// still hold.
+// still hold, and a fork that fails mines without the pass, because
+// the transcript holds what the pass would have named.
 //
 // The mining request is where the compaction is decided. The model is
 // told to construct the context instead of continuing the work, tool
@@ -163,7 +164,7 @@ func (c *Compactor) ShouldCompact(view poo.View, budget poo.ContextBudget) bool 
 // restoresOutputRoom reports that the output room is short and a
 // reconstruction would end the shortage.
 func (c *Compactor) restoresOutputRoom(view poo.View, budget poo.ContextBudget) bool {
-	if !budget.OutputRoomShort() {
+	if !budget.RoomShort(budget.OutputLimit) {
 		return false
 	}
 	messages := view.Messages()
@@ -174,7 +175,7 @@ func (c *Compactor) restoresOutputRoom(view poo.View, budget poo.ContextBudget) 
 	covered := messages[r.Start:r.End]
 	after := cut.RoomAfter(budget, cut.TurnTokens(covered, budget),
 		c.maxTokens+c.replacementCarriageTokens(r, covered, budget))
-	return !after.OutputRoomShort()
+	return !after.RoomShort(after.OutputLimit)
 }
 
 // replacementCarriageTokens estimates what the replacement carries
@@ -189,11 +190,13 @@ func (c *Compactor) replacementCarriageTokens(r cut.Range, covered []poo.Message
 // Compact reconstructs the turns the view can spare and replaces them
 // with the reconstruction.
 //
-// The pointer pass runs first, on a fork of the last main request. A
-// fork that fails is a failure of the compaction, and the run carries
-// on uncompacted: the mining request would read the transcript without
-// steering, and a strategy that mines past a failing transport mines
-// blind.
+// The pointer pass runs first, on a fork of the last main request. The
+// pass is best-effort: a fork that fails, or a model that answers with
+// a tool call, leaves the reconstruction without steering rather than
+// fails the compaction. The transcript holds what the pointers would
+// have named, and the cap on the pass's output already bounds what a
+// pointer reply can add, so mining blind loses less than not mining at
+// all.
 func (c *Compactor) Compact(ctx context.Context, in poo.CompactionEnv) (poo.Compaction, error) {
 	if in.Ask == nil {
 		return poo.Compaction{}, errors.New("mine: there is no request to make")
@@ -208,17 +211,13 @@ func (c *Compactor) Compact(ctx context.Context, in poo.CompactionEnv) (poo.Comp
 	pointers := ""
 	if in.Fork != nil {
 		reply, err := in.Fork(ctx, pointerRequest(), c.pointerMaxTokens)
-		if err != nil {
-			return poo.Compaction{}, err
+		// The pass is advisory, so a fork that fails mines without it.
+		// A tool call is not pointers either: a model that answers with
+		// one has not read the ask, and the transcript holds what its
+		// reply would have named.
+		if err == nil && len(reply.Message.ToolCalls()) == 0 {
+			pointers = strings.TrimSpace(reply.Message.Text())
 		}
-		// A pointer reply the output limit cut short still steers: it
-		// names what it named, and the transcript holds the rest. A
-		// tool call is not pointers, and a model that answers with one
-		// has not read the ask.
-		if len(reply.Message.ToolCalls()) > 0 {
-			return poo.Compaction{}, errors.New("mine: the pointer pass called a tool")
-		}
-		pointers = strings.TrimSpace(reply.Message.Text())
 	}
 
 	request := miningRequest(covered, pointers, cut.PreviousSummary(messages[:r.Start]))

@@ -1,6 +1,6 @@
 The text above, in <transcript>, is the transcript of a session to reconstruct a working context from. Anything in <pointers> names what that context must preserve. Construct the working context another instance will use to continue the work.
 
-Reconstruct the state of the work, not the story of the session: what the task is, what state the world is in, and what happens next. Two statements of where things stand are worth more than a replay of how they got that way.
+Reconstruct the state of the work, not the story of the session. Write what the task is, what state the world is in, and what happens next. Two statements of where things stand are worth more than a replay of how they got that way.
 
 Use this EXACT format:
 

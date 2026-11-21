@@ -100,7 +100,7 @@ func TailTokens(budget poo.ContextBudget, keep int) int {
 // now, less the tokens the covered messages cost, plus what the
 // replacement carries.
 //
-// A strategy compares it with OutputRoomShort to report whether the
+// A strategy compares it with RoomShort to report whether the
 // compaction ends the shortage, so the arithmetic the estimate needs is
 // one formula the strategies share rather than one per strategy.
 func RoomAfter(budget poo.ContextBudget, coveredTokens, replacementTokens int) poo.ContextBudget {
