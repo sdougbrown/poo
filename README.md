@@ -577,22 +577,23 @@ the script makes the tool calls, and only the script's output and
 return value enter the context. The calls go through the nested-call
 seam, so the permission engine and the doom loop judge every one of
 them, and the session log records each with its parent's handle. The
-first engine is Starlark (`poo/codemode/starlark`); the seam is
-`poo/codemode.Engine`, and a binary that links no engine offers no
+engine the `poo` CLI runs is QuickJS (`poo/codemode/quickjs`), and the
+first engine, Starlark (`poo/codemode/starlark`), is one setting away. The
+seam is `poo/codemode.Engine`, and a binary that links no engine offers no
 codemode tool. The settings are `tools.codemode.*`.
 
-To try the experimental JavaScript engine in the `poo` CLI, set:
+QuickJS runs as WebAssembly and does not require Node.js. A script is the
+body of an async JavaScript function: `await tools.<name>(args)` chains
+calls, and `Promise.all` overlaps independent reads. Use `timeout_s` to
+bound runtime. `exec_steps` is only supported by Starlark, so a settings
+file that sets it must also name that engine:
 
 ```yaml
 tools:
   codemode:
-    engine: quickjs  # starlark is the default
+    engine: starlark
+    exec_steps: 250000
 ```
-
-QuickJS runs as WebAssembly and does not require Node.js. Its scripts are
-synchronous JavaScript function bodies. Use `timeout_s` to bound runtime;
-`exec_steps` is only supported by Starlark and must be unset or zero for
-QuickJS.
 
 **Feeds.** When the settings name feed manifests in `feeds.paths` (a
 path that starts with `~/` resolves under the home directory), the

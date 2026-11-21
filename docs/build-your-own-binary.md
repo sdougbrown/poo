@@ -202,8 +202,9 @@ permission rule that names a tool the binary does not register is a typed
 error. So is a cli registry whose `call_cli` the binary does not link.
 
 Pass the engine the binary links to `tool/codemode`. This example pins
-Starlark and ignores `tools.codemode.engine`. The `poo` command links
-both engines and selects one using `CodemodeEngine`:
+Starlark and ignores `tools.codemode.engine`. The `poo` command links both
+engines, defaults to QuickJS, and selects one using `CodemodeEngine` (an
+unset `tools.codemode.engine` reaches it as `quickjs`):
 
 ```go
 "codemode": func(config.ToolOptions) poo.Tool {
