@@ -434,42 +434,61 @@ func (b *Builder) Render() string {
 // The sections render in the order the builder holds, and their texts
 // are joined with a blank line. A section with no text renders nothing.
 // A prompt with no sections is empty.
+//
+// Every section but the first renders wrapped in tags named after it,
+// so the model sees where one section ends and the next begins. The
+// tool sections render together in one <tools> block, in the order the
+// environment offers the tools. A replaced prompt renders as it is:
+// the text took the tags' place.
 func (b *Builder) RenderError() (string, error) {
 	if b.replaced {
 		return b.text, nil
 	}
-	var blocks []string
-	for _, name := range b.order {
-		if isToolSection(name) {
-			continue
-		}
-		if name == toolSlot {
-			text, err := b.sectionTextError(name)
-			if err != nil {
-				return "", err
-			}
-			if text != "" {
-				blocks = append(blocks, text)
-			}
-			texts, err := b.toolTextsError()
-			if err != nil {
-				return "", err
-			}
-			blocks = append(blocks, texts...)
-			continue
-		}
-		text, err := b.sectionTextError(name)
-		if err != nil {
-			return "", err
-		}
-		if text != "" {
-			blocks = append(blocks, text)
-		}
+	sections, err := b.SectionsError()
+	if err != nil {
+		return "", err
 	}
+	return renderSections(sections), nil
+}
+
+// renderSections joins the sections' texts into the prompt text.
+//
+// The tool sections render together in one <tools> block, wherever the
+// first of them sits in the order. The first block renders bare, and
+// every block after it renders wrapped in tags named after its
+// section.
+func renderSections(sections []SectionText) string {
+	type block struct {
+		name string
+		text string
+	}
+	var blocks []block
+	var tools []string
+	flushTools := func() {
+		if len(tools) == 0 {
+			return
+		}
+		blocks = append(blocks, block{name: toolSlot, text: strings.Join(tools, "\n\n")})
+		tools = nil
+	}
+	for _, section := range sections {
+		if isToolSection(section.Name) || section.Name == toolSlot {
+			tools = append(tools, section.Text)
+			continue
+		}
+		flushTools()
+		blocks = append(blocks, block{name: section.Name, text: section.Text})
+	}
+	flushTools()
 	if len(blocks) == 0 {
-		return "", nil
+		return ""
 	}
-	return strings.Join(blocks, "\n\n") + "\n", nil
+	var out []string
+	out = append(out, blocks[0].text)
+	for _, block := range blocks[1:] {
+		out = append(out, "<"+block.name+">\n"+block.text+"\n</"+block.name+">")
+	}
+	return strings.Join(out, "\n\n") + "\n"
 }
 
 // Copy returns a copy of the builder.

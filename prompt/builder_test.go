@@ -36,7 +36,7 @@ func TestTheSectionsRenderInTheDefaultOrder(t *testing.T) {
 	b.Set("first", "the first")
 	b.Set("second", "the second")
 
-	want := "the base\n\nthe catalog\n\nthe skills\n\nthe environment\n\nthe user\n\nthe project\n\nthe first\n\nthe second\n"
+	want := "the base\n\n<catalog>\nthe catalog\n</catalog>\n\n<skills>\nthe skills\n</skills>\n\n<environment>\nthe environment\n</environment>\n\n<user>\nthe user\n</user>\n\n<project>\nthe project\n</project>\n\n<first>\nthe first\n</first>\n\n<second>\nthe second\n</second>\n"
 	if got := b.Render(); got != want {
 		t.Errorf("the prompt is %q, want %q", got, want)
 	}
@@ -51,7 +51,7 @@ func TestTheToolSectionsRenderWhereTheToolsSit(t *testing.T) {
 	b.Set(prompt.ToolSection("bash"), "the bash tool")
 	b.Set("catalog", "the catalog")
 
-	want := "the base\n\nthe bash tool\n\nthe read tool\n\nthe catalog\n"
+	want := "the base\n\n<tools>\nthe bash tool\n\nthe read tool\n</tools>\n\n<catalog>\nthe catalog\n</catalog>\n"
 	if got := b.Render(); got != want {
 		t.Errorf("the prompt is %q, want %q", got, want)
 	}
@@ -104,7 +104,7 @@ func TestAppendAddsToASection(t *testing.T) {
 	b.Append("base", " and more")
 	b.Append("new", "the new section")
 
-	want := "the base and more\n\nthe new section\n"
+	want := "the base and more\n\n<new>\nthe new section\n</new>\n"
 	if got := b.Render(); got != want {
 		t.Errorf("the prompt is %q, want %q", got, want)
 	}
@@ -144,7 +144,7 @@ func TestInsertPutsASectionAfterAnother(t *testing.T) {
 	b.Set("catalog", "the catalog")
 	b.Insert("base", "extra", "the extra section")
 
-	want := "the base\n\nthe extra section\n\nthe catalog\n"
+	want := "the base\n\n<extra>\nthe extra section\n</extra>\n\n<catalog>\nthe catalog\n</catalog>\n"
 	if got := b.Render(); got != want {
 		t.Errorf("the prompt is %q, want %q", got, want)
 	}
@@ -157,7 +157,7 @@ func TestInsertWithAnUnknownAnchorPutsTheSectionFirst(t *testing.T) {
 	b.Set("base", "the base")
 	b.Insert("nothing", "extra", "the extra section")
 
-	want := "the extra section\n\nthe base\n"
+	want := "the extra section\n\n<base>\nthe base\n</base>\n"
 	if got := b.Render(); got != want {
 		t.Errorf("the prompt is %q, want %q", got, want)
 	}
@@ -171,7 +171,7 @@ func TestInsertMovesASectionThatIsAlreadyThere(t *testing.T) {
 	b.Set("catalog", "the catalog")
 	b.Insert("base", "catalog", "the catalog")
 
-	want := "the base\n\nthe catalog\n"
+	want := "the base\n\n<catalog>\nthe catalog\n</catalog>\n"
 	if got := b.Render(); got != want {
 		t.Errorf("the prompt is %q, want %q", got, want)
 	}
@@ -185,7 +185,7 @@ func TestInsertAfterAToolSectionFollowsTheTools(t *testing.T) {
 	b.Set(prompt.ToolSection("bash"), "the bash tool")
 	b.Insert(prompt.ToolSection("bash"), "extra", "the extra section")
 
-	want := "the base\n\nthe bash tool\n\nthe extra section\n"
+	want := "the base\n\n<tools>\nthe bash tool\n</tools>\n\n<extra>\nthe extra section\n</extra>\n"
 	if got := b.Render(); got != want {
 		t.Errorf("the prompt is %q, want %q", got, want)
 	}
@@ -270,7 +270,7 @@ func TestACopyIsIndependent(t *testing.T) {
 	c.Set("base", "the other base")
 	c.Remove(prompt.ToolSection("bash"))
 
-	if got := b.Render(); got != "the base\n\nthe bash tool\n" {
+	if got := b.Render(); got != "the base\n\n<tools>\nthe bash tool\n</tools>\n" {
 		t.Errorf("the builder renders %q, want the base and the bash tool", got)
 	}
 	if got := c.Render(); got != "the other base\n" {
@@ -300,7 +300,7 @@ func TestTheBuilderIsASectionsSurface(t *testing.T) {
 	sections.Insert("base", "inserted", "the inserted section")
 	sections.Remove("extra")
 
-	want := "the base and more\n\nthe inserted section\n"
+	want := "the base and more\n\n<inserted>\nthe inserted section\n</inserted>\n"
 	if got := sections.(*prompt.Builder).Render(); got != want {
 		t.Errorf("the prompt is %q, want %q", got, want)
 	}
