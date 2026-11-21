@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "feeds": {
+    "avenor-inbox": {
+      "description": "Receive Avenor messages",
+      "command": ["avenor", "feed", "broker"],
+      "env": {
+        "AVENOR_SOCKET": "/tmp/poo-avenor.sock",
+        "AVENOR_BIND_HOST": "poo",
+        "AVENOR_BIND_SESSION": "session:id"
+      },
+      "on_idle": "wake",
+      "restart": true
+    }
+  }
+}
