@@ -97,6 +97,13 @@ type Options struct {
 	// client that says nothing is named by the HTTP library alone. Empty
 	// sends none.
 	UserAgent string
+	// KeyPresent reports whether the key an endpoint's credential reads is
+	// in reach. The curated layer is poo's word, and an entry whose key the
+	// operator cannot reach is not one to offer: poo models, the model
+	// switcher and the role checks all read the catalog's answer. Nil
+	// offers every entry: a binary that links no credential store offers
+	// what it embeds.
+	KeyPresent func(name string, credential Credential) bool
 	// Cached says the catalog holds what the endpoints last reported, read from the
 	// discovery cache when it is built. It is how a model an endpoint served is a model a
 	// session can name without a probe: the build never reaches the network, and the cache
@@ -316,8 +323,36 @@ func (c *Catalog) addCuratedModels() {
 			continue
 		}
 		curated, endpoint, notes := c.curated.forModel(id)
-		if served, ok := c.endpoints[endpoint]; ok {
+		// The curated model rides the endpoint a session resolves its key
+		// from: the merged one, whichever layer had the last word on the
+		// credential. A model whose key is not in reach is not one to
+		// offer — poo's word is the curated entry, and the operator's own
+		// models ride no gate.
+		served, ok := c.endpoints[endpoint]
+		if ok {
+			if c.opts.KeyPresent != nil && !c.opts.KeyPresent(endpoint, served.Credential) {
+				// The curated model is not offered. An endpoint only poo
+				// declares goes with it: an endpoint the operator declared
+				// is theirs, and stays for the models they wrote against
+				// it.
+				if _, declared := c.opts.File.Endpoints[endpoint]; !declared {
+					if _, declared := c.opts.Settings.Endpoints[endpoint]; !declared {
+						delete(c.endpoints, endpoint)
+					}
+				}
+				continue
+			}
 			curated.Endpoint = served.Endpoint
+		} else {
+			hosted, isHosted := c.curated.endpoints[endpoint]
+			if !isHosted {
+				continue
+			}
+			if c.opts.KeyPresent != nil && !c.opts.KeyPresent(endpoint, hosted.Credential) {
+				continue
+			}
+			c.endpoints[endpoint] = hosted
+			curated.Endpoint = hosted.Endpoint
 		}
 		e := &entry{
 			name:     id,

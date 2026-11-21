@@ -879,3 +879,66 @@ func TestADeciderServesTheRoleWithEitherOperation(t *testing.T) {
 		})
 	}
 }
+
+// TestACuratedModelNeedsAKeyInTheReach covers the gate the curated hosted
+// layer takes: an entry whose key the operator cannot reach is not
+// offered, and one whose key is there is. A catalog built with no
+// presence answer offers everything the layer declares, so a binary that
+// links no credential store offers what it embeds.
+func TestACuratedModelNeedsAKeyInTheReach(t *testing.T) {
+	present := catalog.New(catalog.Options{
+		Settings:   localSettings(),
+		KeyPresent: func(name string, credential catalog.Credential) bool { return true },
+	})
+	if _, err := present.Resolve("claude-sonnet-4-5"); err != nil {
+		t.Errorf("the hosted model with its key in reach did not resolve: %v", err)
+	}
+	if _, ok := present.Endpoints()["anthropic"]; !ok {
+		t.Errorf("the hosted endpoint with its key in reach is not in the catalog")
+	}
+	gone := catalog.New(catalog.Options{
+		Settings:   localSettings(),
+		KeyPresent: func(name string, credential catalog.Credential) bool { return false },
+	})
+	if _, err := gone.Resolve("claude-sonnet-4-5"); err == nil {
+		t.Errorf("the hosted model with no key in reach resolved")
+	}
+	if _, ok := gone.Endpoints()["anthropic"]; ok {
+		t.Errorf("the hosted endpoint with no key in reach is in the catalog")
+	}
+	ungated := catalog.New(catalog.Options{Settings: localSettings()})
+	if _, err := ungated.Resolve("claude-sonnet-4-5"); err != nil {
+		t.Errorf("the hosted model without a presence answer did not resolve: %v", err)
+	}
+}
+
+// TestTheGateReadsTheCredentialTheSessionResolves covers the override
+// case: settings that re-declare a curated endpoint with their own key
+// variable change the credential the session resolves the key from, and
+// the gate follows the merged one. An entry the curated variable would
+// wake stays unoffered when the override's variable is not there, and
+// wakes when it is.
+func TestTheGateReadsTheCredentialTheSessionResolves(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "curated-key")
+	settings := catalog.Settings{
+		Endpoints: map[string]catalog.EndpointSettings{
+			"anthropic": {
+				Endpoint:  "https://api.anthropic.com/v1",
+				APIKeyEnv: "ANTHROPIC_KEY2",
+			},
+		},
+	}
+	keys := map[string]string{"ANTHROPIC_API_KEY": "curated-key"}
+	present := func(name string, credential catalog.Credential) bool {
+		return keys[credential.Env] != ""
+	}
+	gated := catalog.New(catalog.Options{Settings: settings, KeyPresent: present})
+	if _, err := gated.Resolve("claude-sonnet-4-5"); err == nil {
+		t.Errorf("the override's variable is not there, and the model resolved")
+	}
+	keys["ANTHROPIC_KEY2"] = "override-key"
+	woken := catalog.New(catalog.Options{Settings: settings, KeyPresent: present})
+	if _, err := woken.Resolve("claude-sonnet-4-5"); err != nil {
+		t.Errorf("the override's variable is there, and the model did not resolve: %v", err)
+	}
+}
