@@ -3,9 +3,10 @@ only a small part of a large result. Intermediate results stay out of the
 conversation. Only what you print and return comes back.
 
 The code is the body of an async function run by QuickJS. There is no
-Node, file system, network, or timers: use the session's tools for
-those. A slow tool call is bounded by that tool's own timeout. The
-session's tools are properties of `tools`, by name, so call one as
+Node, network, or timers: use the session's tools for those. The guest
+mounts no host directory, so a file operation in the script fails. A
+slow tool call is bounded by that tool's own timeout. The session's
+tools are properties of `tools`, by name, so call one as
 `await tools.read({...})`. For example, if `read` is available:
 
 ```js
