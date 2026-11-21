@@ -20,9 +20,13 @@ func TestCodemodeSettingsSelectScriptLanguage(t *testing.T) {
 	} {
 		name := test.engine
 		if name == "" {
-			// The unset-engine case proves the QuickJS default, and a
-			// failure of it must be distinguishable in the test output.
+			// The unset-engine cases prove the QuickJS default, and a
+			// failure of one must be distinguishable in the test output:
+			// two rows called "default" would collide.
 			name = "default"
+			if test.badField != "" {
+				name += "-" + strings.TrimPrefix(test.badField, "tools.codemode.")
+			}
 		}
 		t.Run(name, func(t *testing.T) {
 			args, err := json.Marshal(map[string]string{"script": test.script})
