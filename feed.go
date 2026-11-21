@@ -46,7 +46,8 @@ type FeedIO struct {
 	Dir string
 	// Emit queues one input, which may carry an image. It returns the
 	// session's refusal (ErrSessionClosed, ErrSessionBroken, a store
-	// error); the runner stops and returns that error.
+	// error) or the image's own failure — a model that reads no images,
+	// or an image that does not read: either one fails the attempt.
 	Emit func(from, text string, image *FeedImage) error
 	// Decider returns the session's recorded decision model, fetched
 	// for each decision because the session can switch models while the
@@ -435,22 +436,47 @@ func (s *Session) feedLogger(name string) *slog.Logger {
 // is therefore accepted before the end's claim, or refused after it,
 // never lost in between.
 //
-// An input that names an image is read here: a file that does not
-// read, an image the head does not name, or a declared media type the
-// head does not confirm is the attempt's failure, the way a refused
-// input is.
+// An input that names an image is admitted by feedImageAttachments, and
+// the image's own failures end the attempt here.
 func (s *Session) emitFeedInput(f *feedState, attempt int, from, text string, image *FeedImage) error {
-	var attachments []Attachment
-	if image != nil {
-		attachment, err := s.readFeedImage(f.name, image)
-		if err != nil {
-			return err
-		}
-		attachments = []Attachment{attachment}
+	attachments, err := s.feedImageAttachments(f.name, image)
+	if err != nil {
+		return err
 	}
 	return s.queueFeedInput(f.name, from, text, attachments, f.spec.OnIdle, func() bool {
 		return f.ended < attempt
 	})
+}
+
+// feedImageAttachments reads the image a feed's input names, with the
+// admission checks the image answers to.
+//
+// A model that reads no images would drop the whole input at the
+// request — the wake is spent on nothing — so the refusal is the feed's
+// to hear, the way a refused input is. An image that does not read, an
+// image the head does not name, or a declared media type the head does
+// not confirm is the attempt's failure too. The read happens before the
+// admission, so an emit that races its attempt's end can fail on the
+// image rather than the session's refusal: either one fails the
+// attempt.
+func (s *Session) feedImageAttachments(feed string, image *FeedImage) ([]Attachment, error) {
+	if image == nil {
+		return nil, nil
+	}
+	if image.Path == "" {
+		return nil, fmt.Errorf("poo: the feed %q names an image with no path", feed)
+	}
+	s.mu.Lock()
+	readsImages := s.opts.Model.Reads(ModalityImage)
+	s.mu.Unlock()
+	if !readsImages {
+		return nil, fmt.Errorf("poo: the feed %q emitted an image, and the model does not read images", feed)
+	}
+	attachment, err := s.readFeedImage(feed, image)
+	if err != nil {
+		return nil, err
+	}
+	return []Attachment{attachment}, nil
 }
 
 // readFeedImage reads the image a feed's input names.
@@ -479,6 +505,12 @@ func (s *Session) readFeedImage(feed string, image *FeedImage) (Attachment, erro
 	media, ok := ImageMediaType(data)
 	if !ok {
 		return Attachment{}, fmt.Errorf("poo: the feed %q names the image %q, and its bytes are not an image the session reads", feed, image.Path)
+	}
+	// The sniffed type is the one the request carries, so a type the
+	// core does not accept is a failure here rather than a picture the
+	// delivery silently drops.
+	if !IsMediaType(ModalityImage, media) {
+		return Attachment{}, fmt.Errorf("poo: the feed %q names the image %q, and its bytes are %q, which no provider takes", feed, image.Path, media)
 	}
 	if image.MediaType != "" && image.MediaType != media {
 		return Attachment{}, fmt.Errorf("poo: the feed %q names the image %q as %q, and its bytes are %q", feed, image.Path, image.MediaType, media)

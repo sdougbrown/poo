@@ -177,6 +177,9 @@ func TestTheFilterDeliversAFeedImageUnasked(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(runtime.Options.WorkingDir, "shot.png"), png, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	// The session's model reads images, so the feed's picture is one the
+	// admission takes.
+	runtime.Options.Model.Inputs = []poo.Modality{poo.ModalityText, poo.ModalityImage}
 	transport := pootest.NewTransport(pootest.Turn{Text: "ack"}, pootest.Turn{Text: "ack"})
 	sink := pootest.NewSink()
 	runtime.Options.Transport = transport

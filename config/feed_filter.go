@@ -32,8 +32,8 @@ func filterEmit(ctx context.Context, io poo.FeedIO, name string, filter feed.Fil
 			return err
 		}
 		// A message that carries an image is delivered unasked: the
-		// question is calibrated on text, and no image fits the byte
-		// budget the question is asked under.
+		// question is asked about text, and the decider never sees the
+		// picture.
 		if image != nil || io.Decider == nil || len(from)+len(text) > maxFeedFilterBytes {
 			return io.Emit(from, text, image)
 		}

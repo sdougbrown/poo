@@ -220,7 +220,7 @@ func (t *Tool) accepts(modality poo.Modality, env poo.ToolEnv) bool {
 // attachmentType reports the modality and media type a file's head names, and
 // whether it names one the tool returns.
 func attachmentType(head []byte) (poo.Modality, string, bool) {
-	if media, ok := imageMediaType(head); ok && poo.IsMediaType(poo.ModalityImage, media) {
+	if media, ok := poo.ImageMediaType(head); ok && poo.IsMediaType(poo.ModalityImage, media) {
 		return poo.ModalityImage, media, true
 	}
 	if media, ok := audioMediaType(head); ok && poo.IsMediaType(poo.ModalityAudio, media) {
@@ -264,14 +264,6 @@ func mp3Head(head []byte) bool {
 	version := (head[1] >> 3) & 0x03
 	layer := (head[1] >> 1) & 0x03
 	return version != 0x01 && layer != 0x00
-}
-
-// imageMediaType reports the media type of the image the head of a file
-// starts with. The core owns the answer: the read tool and a feed's
-// image ask it the same question, and the core's list is the one
-// providers accept.
-func imageMediaType(head []byte) (string, bool) {
-	return poo.ImageMediaType(head)
 }
 
 // reachable reports whether the resolved path is one the read tool may

@@ -78,16 +78,13 @@ func QueueFeedInput(s *Session, feed, from, text string) error {
 }
 
 // QueueFeedImageInput queues one feed's input that carries an image,
-// reading it the way a feed's emit does.
-//
-// The read is the session's own: a bad image is the caller's error
-// here, where a feed's runner would fail the attempt with it.
+// admitting the image the way a feed's emit does.
 func QueueFeedImageInput(s *Session, feed, from, text string, image *FeedImage) error {
-	attachment, err := s.readFeedImage(feed, image)
+	attachments, err := s.feedImageAttachments(feed, image)
 	if err != nil {
 		return err
 	}
-	return s.queueFeedInput(feed, from, text, []Attachment{attachment}, "", nil)
+	return s.queueFeedInput(feed, from, text, attachments, "", nil)
 }
 
 // SetFeedRestartDelay replaces how long the session's feeds wait before
