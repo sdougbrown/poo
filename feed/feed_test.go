@@ -213,7 +213,9 @@ func TestASessionReferenceStaysUnresolvedUntilTheAttempt(t *testing.T) {
 	// With one, it resolves beside the environment reference. The
 	// benign names stay out: the lookup holds only what it declares.
 	env, err := spec.ResolveEnvScoped(
-		func(name string) (string, bool) { return map[string]string{"TOKEN": "the-token"}[name], name == "TOKEN" },
+		func(name string) (string, bool) {
+			return map[string]string{"TOKEN": "the-token"}[name], name == "TOKEN"
+		},
 		exec.SessionScope("sess-01"),
 	)
 	if err != nil {
