@@ -334,13 +334,15 @@ type Context struct {
 	NoticeRatio *float64 `json:"notice_ratio,omitempty"`
 	// HardRatio is removed and ignored: it no longer has any effect.
 	HardRatio *float64 `json:"hard_ratio,omitempty"`
-	// Strategy is how the view is compacted: summary, handoff, native or
-	// none.
+	// Strategy is how the view is compacted: summary, mine, handoff,
+	// native or none.
 	Strategy *string `json:"strategy,omitempty"`
 	// Handoff are the handoff strategy's settings.
 	Handoff Handoff `json:"handoff,omitempty"`
 	// Summary are the summary strategy's settings.
 	Summary Summary `json:"summary,omitempty"`
+	// Mine are the mine strategy's settings.
+	Mine Mine `json:"mine,omitempty"`
 }
 
 // Handoff are the handoff strategy's settings.
@@ -361,6 +363,20 @@ type Summary struct {
 	KeepRecentTokens *int `json:"keep_recent_tokens,omitempty"`
 	// MaxTokens is the summary request's configured limit, in tokens.
 	MaxTokens *int `json:"max_tokens,omitempty"`
+}
+
+// Mine are the mine strategy's settings.
+type Mine struct {
+	// Ratio is the share of the prompt limit at which the view is
+	// mined.
+	Ratio *float64 `json:"ratio,omitempty"`
+	// KeepRecentTokens is how much of the newest history stays verbatim.
+	KeepRecentTokens *int `json:"keep_recent_tokens,omitempty"`
+	// MaxTokens is the mining request's configured limit, in tokens.
+	MaxTokens *int `json:"max_tokens,omitempty"`
+	// PointerMaxTokens is the pointer pass's configured limit, in
+	// tokens.
+	PointerMaxTokens *int `json:"pointer_max_tokens,omitempty"`
 }
 
 // Tools are the tools' settings.

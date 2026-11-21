@@ -14,6 +14,7 @@ import (
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/codemode"
+	"github.com/sdougbrown/poo/compact/mine"
 	"github.com/sdougbrown/poo/compact/summary"
 	"github.com/sdougbrown/poo/config"
 	"github.com/sdougbrown/poo/exec"
@@ -2441,6 +2442,43 @@ context:
 	} {
 		if field.got != field.want {
 			t.Errorf("context.summary.%s reached the strategy as %d, want %d", field.name, field.got, field.want)
+		}
+	}
+}
+
+// TestTheMineStrategyDefaults covers a settings document that names the
+// mine strategy and its fields: the compactor the session gets is the
+// mine one, with the fields the settings configured.
+func TestTheMineStrategyDefaults(t *testing.T) {
+	settings, err := config.Parse([]byte(theModelSettings+`
+context:
+  strategy: mine
+  mine:
+    ratio: 0.7
+    keep_recent_tokens: 4096
+    max_tokens: 1024
+    pointer_max_tokens: 256
+`), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+	strategy, ok := runtime.Options.Compactor.(*mine.Compactor)
+	if !ok {
+		t.Fatalf("the session's compactor is %T, want the mine strategy", runtime.Options.Compactor)
+	}
+	for _, field := range []struct {
+		name string
+		got  int
+		want int
+	}{
+		{"ratio", int(strategy.Ratio() * 100), 70},
+		{"keep_recent_tokens", strategy.KeepRecentTokens(), 4096},
+		{"max_tokens", strategy.MaxTokens(), 1024},
+		{"pointer_max_tokens", strategy.PointerMaxTokens(), 256},
+	} {
+		if field.got != field.want {
+			t.Errorf("context.mine.%s reached the strategy as %d, want %d", field.name, field.got, field.want)
 		}
 	}
 }

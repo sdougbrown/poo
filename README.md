@@ -357,6 +357,30 @@ checked when a compaction happens: a session that moved to a model without the
 `compact` operation refuses to compact natively rather than asking a provider
 that cannot serve it.
 
+**Mined compaction.** `context.strategy: mine` replaces the oldest turns with a
+context two fresh requests construct: a fork of the last main request asks the
+model what its history must preserve, and a request of the strategy's own reads
+the covered transcript and writes the working context a fresh start continues
+from. The default `summary` carries the conversation forward as one checkpoint;
+`mine` reconstructs the work, so what replaces the cut is shaped by the task
+rather than by the order it happened in. The replacement ends with a pointer at
+what the store retains — the cut's turns are recoverable from the session's
+records, and the pointer names the session and the turns to recover them from.
+Its own keys sit under `context.mine`:
+
+```yaml
+context:
+  strategy: mine
+  mine:
+    ratio: 0.85
+    keep_recent_tokens: 12000
+    max_tokens: 4096
+    pointer_max_tokens: 1024
+```
+
+The strategy's own requests run inside the run that is compaction, so a model
+that cannot answer two side requests cannot mine; the default stays `summary`.
+
 **The repl.** `poo repl [flags]` takes the serve flags, starts a `poo
 serve` with them, and renders the session in the terminal: replies as
 markdown with highlighted code blocks, tool calls and results as

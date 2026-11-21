@@ -18,6 +18,7 @@ import (
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/cli"
 	"github.com/sdougbrown/poo/compact/handoff"
+	"github.com/sdougbrown/poo/compact/mine"
 	"github.com/sdougbrown/poo/compact/native"
 	"github.com/sdougbrown/poo/compact/summary"
 	"github.com/sdougbrown/poo/decide"
@@ -2169,6 +2170,21 @@ func (r *Runtime) resolveSession(opts BuildOptions, workingDir string) error {
 			summaryOptions.MaxTokens = *settings.Context.Summary.MaxTokens
 		}
 		r.Options.Compactor = summary.New(summaryOptions)
+	case "mine":
+		mineOptions := mine.Options{}
+		if settings.Context.Mine.Ratio != nil {
+			mineOptions.Ratio = *settings.Context.Mine.Ratio
+		}
+		if settings.Context.Mine.KeepRecentTokens != nil {
+			mineOptions.KeepRecentTokens = *settings.Context.Mine.KeepRecentTokens
+		}
+		if settings.Context.Mine.MaxTokens != nil {
+			mineOptions.MaxTokens = *settings.Context.Mine.MaxTokens
+		}
+		if settings.Context.Mine.PointerMaxTokens != nil {
+			mineOptions.PointerMaxTokens = *settings.Context.Mine.PointerMaxTokens
+		}
+		r.Options.Compactor = mine.New(mineOptions)
 	}
 	if strategy == native.Strategy {
 		return r.checkNativeCompaction()
