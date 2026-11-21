@@ -1470,7 +1470,8 @@ func (r *Runtime) resolveFeedRuns(opts BuildOptions) error {
 				// other, and copied here. A nil image is a text-only
 				// message — the conversion would name an image with no
 				// path — so it passes through as nil.
-				return run(ctx, io.Dir, io.SessionID, func(from, text string, image *feed.Image) error {
+				session := exec.SessionScope(io.SessionID)
+				return run(ctx, io.Dir, session, func(from, text string, image *feed.Image) error {
 					if image == nil {
 						return emit(from, text, nil)
 					}

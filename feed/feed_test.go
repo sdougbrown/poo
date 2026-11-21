@@ -135,7 +135,7 @@ func TestResolveEnvCoversLiteralsReferencesAndBenignNames(t *testing.T) {
 		}
 		return "", false
 	}
-	env, err := set.Specs()[0].ResolveEnv(lookup)
+	env, err := set.Specs()[0].ResolveEnvScoped(lookup, nil)
 	if err != nil {
 		t.Fatalf("resolving the env: %v", err)
 	}
@@ -149,7 +149,7 @@ func TestResolveEnvCoversLiteralsReferencesAndBenignNames(t *testing.T) {
 	}
 
 	// A feed with no env entries still gets the benign names.
-	env, err = set.Specs()[1].ResolveEnv(lookup)
+	env, err = set.Specs()[1].ResolveEnvScoped(lookup, nil)
 	if err != nil {
 		t.Fatalf("resolving the env of a feed with none: %v", err)
 	}
@@ -166,7 +166,7 @@ func TestAMissingReferenceNamesTheVariable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loading the manifests: %v", err)
 	}
-	_, err = set.Specs()[0].ResolveEnv(func(string) (string, bool) { return "", false })
+	_, err = set.Specs()[0].ResolveEnvScoped(func(string) (string, bool) { return "", false }, nil)
 	if err == nil {
 		t.Fatal("a missing reference resolved")
 	}
@@ -184,7 +184,7 @@ func TestABareEnvReferenceIsMissing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loading the manifests: %v", err)
 	}
-	if _, err := set.Specs()[0].ResolveEnv(func(string) (string, bool) { return "set", true }); err == nil {
+	if _, err := set.Specs()[0].ResolveEnvScoped(func(string) (string, bool) { return "set", true }, nil); err == nil {
 		t.Fatal("a bare env: reference resolved")
 	}
 }
@@ -206,7 +206,7 @@ func TestASessionReferenceStaysUnresolvedUntilTheAttempt(t *testing.T) {
 	}
 
 	// Without a session resolver, the session reference does not resolve.
-	if _, err := spec.ResolveEnv(func(string) (string, bool) { return "set", true }); err == nil {
+	if _, err := spec.ResolveEnvScoped(func(string) (string, bool) { return "set", true }, nil); err == nil {
 		t.Fatal("a session reference resolved without the session")
 	}
 
@@ -224,19 +224,14 @@ func TestASessionReferenceStaysUnresolvedUntilTheAttempt(t *testing.T) {
 		t.Errorf("the env is %v, want %v", env, want)
 	}
 
-	// A name the session scope does not carry fails with the reference named.
-	set, err = feed.Load(writeManifest(t, map[string]any{
+	// A name the session scope does not carry fails the load: the feed
+	// would never resolve it, and a feed that starts and then fails
+	// every attempt is worse than a manifest that does not load.
+	_, err = feed.Load(writeManifest(t, map[string]any{
 		"broker": map[string]any{"command": []string{"true"}, "env": map[string]string{"SESSION": "session:run_id"}},
 	}))
-	if err != nil {
-		t.Fatalf("loading the manifests: %v", err)
-	}
-	_, err = set.Specs()[0].ResolveEnvScoped(
-		func(string) (string, bool) { return "", false },
-		exec.SessionScope("sess-01"),
-	)
 	if err == nil || !strings.Contains(err.Error(), "session:run_id") {
-		t.Errorf("the failure %v does not name the reference", err)
+		t.Errorf("the load accepted an unknown session reference: %v", err)
 	}
 }
 

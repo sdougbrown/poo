@@ -590,7 +590,12 @@ func TestARestoredSessionResolvesTheSameSessionID(t *testing.T) {
 	}
 
 	// The restore builds from the session's own records, so the ID the
-	// restored session hands its feed is the recorded one.
+	// restored session hands its feed is the recorded one. The guard
+	// keeps the test honest: a caller-set ID on the shared options would
+	// resolve through options, not records.
+	if runtime.Options.SessionID != "" {
+		t.Fatalf("the shared options carry a session ID %q", runtime.Options.SessionID)
+	}
 	loaded, err := runtime.Store.Load(context.Background(), "s1")
 	if err != nil {
 		t.Fatalf("loading the session's records: %v", err)

@@ -45,9 +45,9 @@ type FeedIO struct {
 	// was created in, or, for a restored session, the recorded one.
 	Dir string
 	// SessionID is the session's own ID, which a manifest's session
-	// references resolve to. It is the same ID after a restore, so a
-	// feed restarted beside a resumed session resolves to what it
-	// resolved to before.
+	// references resolve to. It is the recorded one, unless the restore
+	// options name another, so a feed restarted beside a resumed session
+	// resolves to what it resolved to before.
 	SessionID string
 	// Emit queues one input, which may carry an image. It returns the
 	// session's refusal (ErrSessionClosed, ErrSessionBroken, a store

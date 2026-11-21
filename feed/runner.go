@@ -29,12 +29,13 @@ var silentLogger = slog.New(slog.DiscardHandler)
 
 // Run is one attempt of a feed's process.
 //
-// dir is the directory the command runs in, and sessionID is the ID of
-// the session the feed runs beside, both the session's to hand over: a
+// dir is the directory the command runs in, and session resolves the
+// manifest's session references — exec.SessionScope over the ID of the
+// session the feed runs beside. Both are the session's to hand over: a
 // feed follows the session it runs beside rather than the directory the
-// binary was built in, and its manifest's session references resolve to
-// that session's ID.
-type Run func(ctx context.Context, dir string, sessionID string, emit func(from, text string, image *Image) error, log *slog.Logger) error
+// binary was built in, and its session references resolve to that
+// session's ID.
+type Run func(ctx context.Context, dir string, session func(scope, name string) (string, error), emit func(from, text string, image *Image) error, log *slog.Logger) error
 
 // Image is the image a feed's message names, by its path.
 //
@@ -87,13 +88,14 @@ type Image struct {
 // attempt's log, never to the model, and never into an input.
 //
 // The environment follows a registered CLI's rules: the benign names,
-// then the manifest's own entries, resolved through env. A `env:NAME`
+// then the manifest's own entries, resolved through env. An `env:NAME`
 // reference resolves against the session's scrubbed environment, and a
-// `session:id` reference resolves to the session's ID. A reference that
-// does not resolve fails the attempt, and the command does not start.
+// `session:id` reference resolves through the session the caller hands
+// over. A reference that does not resolve fails the attempt, and the
+// command does not start.
 func Runner(spec Spec, ex exec.Executor, env func(string) (string, bool)) Run {
-	return func(ctx context.Context, dir string, sessionID string, emit func(from, text string, image *Image) error, log *slog.Logger) error {
-		resolved, err := spec.ResolveEnvScoped(env, exec.SessionScope(sessionID))
+	return func(ctx context.Context, dir string, session func(scope, name string) (string, error), emit func(from, text string, image *Image) error, log *slog.Logger) error {
+		resolved, err := spec.ResolveEnvScoped(env, session)
 		if err != nil {
 			return fmt.Errorf("feed %q: %w", spec.Name, err)
 		}
