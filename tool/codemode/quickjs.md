@@ -3,8 +3,8 @@ only a small part of a large result. Intermediate results stay out of the
 conversation. Only what you print and return comes back.
 
 Write the body of an async function for QuickJS, not Node.js. There is
-no network or timers, and the guest mounts no host directory, so a file
-operation in the script fails: use the session's tools for files,
+no network or timers. The guest mounts no host directory, so a file
+operation in the script fails. Use the session's tools for files,
 commands, and network access.
 
 Use `Promise.all` for independent reads. Use separate `await`s when one
