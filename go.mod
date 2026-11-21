@@ -9,6 +9,7 @@ require (
 	github.com/charmbracelet/glamour v1.0.0
 	github.com/charmbracelet/x/ansi v0.11.9
 	github.com/chubin/vt10x v0.0.0-20231112153020-ef4f56837bf1
+	github.com/fastschema/qjs v0.0.6
 	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/reeflective/readline v1.3.0
 	github.com/sdougbrown/cli-contract v0.10.0
@@ -43,6 +44,7 @@ require (
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/spf13/cobra v1.10.2 // indirect
 	github.com/spf13/pflag v1.0.9 // indirect
+	github.com/tetratelabs/wazero v1.9.0 // indirect
 	github.com/umpire-tools/umpire-go v0.1.0 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	github.com/yuin/goldmark-emoji v1.0.6 // indirect

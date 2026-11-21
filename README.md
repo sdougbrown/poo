@@ -581,6 +581,19 @@ first engine is Starlark (`poo/codemode/starlark`); the seam is
 `poo/codemode.Engine`, and a binary that links no engine offers no
 codemode tool. The settings are `tools.codemode.*`.
 
+To try the experimental JavaScript engine in the `poo` CLI, set:
+
+```yaml
+tools:
+  codemode:
+    engine: quickjs  # starlark is the default
+```
+
+QuickJS runs as WebAssembly and does not require Node.js. Its scripts are
+synchronous JavaScript function bodies. Use `timeout_s` to bound runtime;
+`exec_steps` is only supported by Starlark and must be unset or zero for
+QuickJS.
+
 **Feeds.** When the settings name feed manifests in `feeds.paths` (a
 path that starts with `~/` resolves under the home directory), the
 session runs a long-lived command beside itself and delivers the messages

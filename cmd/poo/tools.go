@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/codemode/quickjs"
 	codemodestarlark "github.com/sdougbrown/poo/codemode/starlark"
 	"github.com/sdougbrown/poo/config"
 	"github.com/sdougbrown/poo/profile"
@@ -80,7 +81,10 @@ func linkedTools() map[string]config.ToolFactory {
 		"read": func(opts config.ToolOptions) poo.Tool { return read.New(read.WithInputs(opts.Inputs...)) },
 		"grep": func(config.ToolOptions) poo.Tool { return grep.New() },
 		"edit": func(config.ToolOptions) poo.Tool { return edit.New() },
-		"codemode": func(config.ToolOptions) poo.Tool {
+		"codemode": func(opts config.ToolOptions) poo.Tool {
+			if opts.CodemodeEngine == "quickjs" {
+				return codemode.New(quickjs.New())
+			}
 			return codemode.New(codemodestarlark.New())
 		},
 		"fetch": func(config.ToolOptions) poo.Tool {

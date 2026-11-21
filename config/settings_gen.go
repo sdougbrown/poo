@@ -65,6 +65,7 @@ type SettingsFields struct {
 	ToolsBwrapNetwork               *bool    "json:\"tools.bwrap.network,omitempty\""
 	ToolsBwrapRoBinds               []string "json:\"tools.bwrap.ro_binds,omitempty\""
 	ToolsBwrapRwBinds               []string "json:\"tools.bwrap.rw_binds,omitempty\""
+	ToolsCodemodeEngine             *string  "json:\"tools.codemode.engine,omitempty\""
 	ToolsCodemodeExecSteps          *float64 "json:\"tools.codemode.exec_steps,omitempty\""
 	ToolsCodemodeOutputCapChars     *float64 "json:\"tools.codemode.output_cap_chars,omitempty\""
 	ToolsCodemodeScriptMaxBytes     *float64 "json:\"tools.codemode.script_max_bytes,omitempty\""
@@ -151,6 +152,7 @@ type SettingsAvailability struct {
 	ToolsBwrapNetwork               FieldStatus
 	ToolsBwrapRoBinds               FieldStatus
 	ToolsBwrapRwBinds               FieldStatus
+	ToolsCodemodeEngine             FieldStatus
 	ToolsCodemodeExecSteps          FieldStatus
 	ToolsCodemodeOutputCapChars     FieldStatus
 	ToolsCodemodeScriptMaxBytes     FieldStatus
@@ -325,6 +327,8 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 	ToolsBwrapRoBindsSatisfied := len(f.ToolsBwrapRoBinds) > 0
 	ToolsBwrapRwBindsEnabled := true
 	ToolsBwrapRwBindsSatisfied := len(f.ToolsBwrapRwBinds) > 0
+	ToolsCodemodeEngineEnabled := true
+	ToolsCodemodeEngineSatisfied := func() bool { v := f.ToolsCodemodeEngine; return v != nil && *v != "" }()
 	ToolsCodemodeExecStepsEnabled := true
 	ToolsCodemodeExecStepsSatisfied := f.ToolsCodemodeExecSteps != nil
 	ToolsCodemodeOutputCapCharsEnabled := true
@@ -1805,6 +1809,34 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 			Valid: nil,
 			Error: "",
 		},
+		ToolsCodemodeEngine: FieldStatus{
+			Required:  ToolsCodemodeEngineEnabled && false,
+			Enabled:   ToolsCodemodeEngineEnabled,
+			Satisfied: ToolsCodemodeEngineSatisfied,
+			Fair:      f.ToolsCodemodeEngine != nil && isValidRegexMatch(*f.ToolsCodemodeEngine, "^(starlark|quickjs)$"),
+			Reason: func() *string {
+				var reasons []string
+				if !(f.ToolsCodemodeEngine != nil && isValidRegexMatch(*f.ToolsCodemodeEngine, "^(starlark|quickjs)$")) && "tools.codemode.engine must be starlark or quickjs" != "" {
+					reasons = append(reasons, "tools.codemode.engine must be starlark or quickjs")
+				}
+				if len(reasons) == 0 {
+					return nil
+				}
+				return &reasons[0]
+			}(),
+			Reasons: func() []string {
+				var reasons []string
+				if !(f.ToolsCodemodeEngine != nil && isValidRegexMatch(*f.ToolsCodemodeEngine, "^(starlark|quickjs)$")) && "tools.codemode.engine must be starlark or quickjs" != "" {
+					reasons = append(reasons, "tools.codemode.engine must be starlark or quickjs")
+				}
+				if reasons == nil {
+					reasons = []string{}
+				}
+				return reasons
+			}(),
+			Valid: nil,
+			Error: "",
+		},
 		ToolsCodemodeExecSteps: FieldStatus{
 			Required:  ToolsCodemodeExecStepsEnabled && false,
 			Enabled:   ToolsCodemodeExecStepsEnabled,
@@ -2388,6 +2420,9 @@ func depSatisfied(f SettingsFields, name string) bool {
 		return len(f.ToolsBwrapRoBinds) > 0
 	case "ToolsBwrapRwBinds":
 		return len(f.ToolsBwrapRwBinds) > 0
+	case "ToolsCodemodeEngine":
+		v := f.ToolsCodemodeEngine
+		return v != nil && *v != ""
 	case "ToolsCodemodeExecSteps":
 		return f.ToolsCodemodeExecSteps != nil
 	case "ToolsCodemodeOutputCapChars":
@@ -2581,6 +2616,7 @@ var ruleMeta = []RuleMetaEntry{
 	{Field: "SystemPromptBaseFile", RuleType: "disables", Expr: "f.SystemPromptReplace != nil", Reason: "system_prompt.base_file and system_prompt.replace are mutually exclusive"},
 	{Field: "SystemPromptReplace", RuleType: "disables", Expr: "f.SystemPromptBaseFile != nil", Reason: "system_prompt.base_file and system_prompt.replace are mutually exclusive"},
 	{Field: "ToolsBashExecutor", RuleType: "check", Expr: "f.ToolsBashExecutor != nil && isValidRegexMatch(*f.ToolsBashExecutor, \"^[a-z][a-z0-9_-]*$\")", Reason: "tools.bash.executor must be the name of a linked executor"},
+	{Field: "ToolsCodemodeEngine", RuleType: "check", Expr: "f.ToolsCodemodeEngine != nil && isValidRegexMatch(*f.ToolsCodemodeEngine, \"^(starlark|quickjs)$\")", Reason: "tools.codemode.engine must be starlark or quickjs"},
 	{Field: "Version", RuleType: "check", Expr: "f.Version != nil && *f.Version >= 1 && *f.Version <= 1", Reason: "the settings version must be 1"},
 }
 
@@ -2965,6 +3001,13 @@ func Challenge(fieldName string, f SettingsFields, c SettingsConditions, prev Se
 		if status.Reason != nil {
 			explanations = append(explanations, "* "+*status.Reason)
 		}
+	case "ToolsCodemodeEngine", "tools.codemode.engine":
+		found = true
+		status = avail.ToolsCodemodeEngine
+		if status.Reason != nil {
+			explanations = append(explanations, "* "+*status.Reason)
+		}
+		explanations = append(explanations, "* check: tools.codemode.engine must be starlark or quickjs")
 	case "ToolsCodemodeExecSteps", "tools.codemode.exec_steps":
 		found = true
 		status = avail.ToolsCodemodeExecSteps

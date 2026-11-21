@@ -27,9 +27,16 @@ var sectionText string
 // section is the guidance the tool brings to the system prompt.
 var section = prompt.MustCompile("codemode", sectionText, nil)
 
+//go:embed quickjs.md
+var quickJSSectionText string
+
+var quickJSSection = prompt.MustCompile("codemode.quickjs", quickJSSectionText, nil)
+
 // Tool is the codemode tool.
 type Tool struct {
-	// Engine runs the scripts.
+	// Engine runs the scripts. The engine names its script language, and
+	// the guidance the tool renders follows it. A mismatched pairing
+	// then cannot hand the model the wrong language's syntax.
 	Engine codemode.Engine
 	// Limits override the session's, for a binary that pins them.
 	// Zero fields take the session's, or the engine's defaults.
@@ -41,8 +48,27 @@ func New(engine codemode.Engine) *Tool {
 	return &Tool{Engine: engine}
 }
 
+// languageEngine is an engine that names the script language it runs.
+// An engine without the method gets the Starlark guidance, the language
+// the seam's first engine runs.
+type languageEngine interface {
+	ScriptLanguage() string
+}
+
+// language is the script language of the tool's engine.
+func (t *Tool) language() string {
+	if lang, ok := t.Engine.(languageEngine); ok {
+		return lang.ScriptLanguage()
+	}
+	return "starlark"
+}
+
 // Spec describes the tool.
 func (t *Tool) Spec() poo.ToolSpec {
+	script := `"A Starlark script. It can call(name, args), gather([(name, args), ...]), print(x) and exit(value)."`
+	if t.language() == "quickjs" {
+		script = `"A JavaScript function body for QuickJS. Use call(name, args), gather([[name, args], ...]), print(x), and return a JSON value."`
+	}
 	return poo.ToolSpec{
 		Name: "codemode",
 		Description: "Run a short script whose only capability is calling your other tools. " +
@@ -50,7 +76,7 @@ func (t *Tool) Spec() poo.ToolSpec {
 		Schema: json.RawMessage(`{
   "type": "object",
   "properties": {
-    "script": {"type": "string", "description": "The script. It can call(name, args), gather([(name, args), ...]), print(x) and exit(value)."}
+    "script": {"type": "string", "description": ` + script + `}
   },
   "required": ["script"]
 ,"additionalProperties":false}`),
@@ -164,5 +190,8 @@ func resultText(result codemode.RunResult, err error) string {
 
 // PromptSection renders the tool's own section of the system prompt.
 func (t *Tool) PromptSection(env prompt.Env) string {
+	if t.language() == "quickjs" {
+		return quickJSSection.Render(env)
+	}
 	return section.Render(env)
 }
