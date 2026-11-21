@@ -5,7 +5,6 @@
       "description": "Start an Avenor child whose messages return to this conversation. Use the returned runtime_id with avenor_status or avenor_result.",
       "command": ["avenor", "spawn"],
       "env": {
-        "AVENOR_SOCKET": "/tmp/poo-avenor.sock",
         "AVENOR_BIND_HOST": "poo",
         "AVENOR_BIND_SESSION": "session:id"
       },
@@ -32,7 +31,6 @@
       "description": "Read an Avenor child's status or wait for it to complete a turn. If the child is waiting for your answer, handle the inbox message before waiting again.",
       "command": ["avenor", "status", "--timeout-ms=30000"],
       "env": {
-        "AVENOR_SOCKET": "/tmp/poo-avenor.sock",
         "AVENOR_BIND_HOST": "poo",
         "AVENOR_BIND_SESSION": "session:id"
       },
@@ -56,7 +54,6 @@
       "description": "Read an Avenor child's final output after its turn completes.",
       "command": ["avenor", "result"],
       "env": {
-        "AVENOR_SOCKET": "/tmp/poo-avenor.sock",
         "AVENOR_BIND_HOST": "poo",
         "AVENOR_BIND_SESSION": "session:id"
       },
@@ -77,7 +74,6 @@
       "description": "Reply to an Avenor message received in this conversation's inbox.",
       "command": ["avenor", "message"],
       "env": {
-        "AVENOR_SOCKET": "/tmp/poo-avenor.sock",
         "AVENOR_BIND_HOST": "poo",
         "AVENOR_BIND_SESSION": "session:id"
       },
