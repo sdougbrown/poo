@@ -1,0 +1,6 @@
+#!/bin/sh
+# A fixture feed: it emits a message that names an image and one that
+# does not, then waits to be stopped.
+printf '{"text": "the look", "from": "alice", "image": {"path": "shot.png", "media": "image/png"}}\n'
+printf '{"image": {"path": "bare.png"}}\n'
+sleep 60

@@ -3,7 +3,10 @@ package poo
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"regexp"
 	"time"
 
@@ -20,16 +23,31 @@ import (
 // A feed's input joins the session's job queue, so the idle policy, the
 // wake limit and the close treat it as they treat a job's result.
 
+// FeedImage is the image a feed's input names, by its path.
+//
+// The feed's runner hands the reference over without reading it: the
+// session reads the bytes when the input is accepted, so an image that
+// does not read, or is not an image, fails the attempt the way a
+// refused input does.
+type FeedImage struct {
+	// Path is the image's file. A relative path answers to the
+	// directory the feed's command runs in.
+	Path string
+	// MediaType is the media type the feed declared, empty when the
+	// feed named none. The session's own read must agree with it.
+	MediaType string
+}
+
 // FeedIO is what a feed's runner may use.
 type FeedIO struct {
 	// Dir is the session's working directory, where the feed's process
 	// runs. The session hands over its own: the directory a new session
 	// was created in, or, for a restored session, the recorded one.
 	Dir string
-	// Emit queues one input. It returns the session's refusal
-	// (ErrSessionClosed, ErrSessionBroken, a store error); the runner
-	// stops and returns that error.
-	Emit func(from, text string) error
+	// Emit queues one input, which may carry an image. It returns the
+	// session's refusal (ErrSessionClosed, ErrSessionBroken, a store
+	// error); the runner stops and returns that error.
+	Emit func(from, text string, image *FeedImage) error
 	// Decider returns the session's recorded decision model, fetched
 	// for each decision because the session can switch models while the
 	// feed runs. The field is nil when the runner's builder passed no
@@ -394,8 +412,8 @@ func (s *Session) runFeedAttempt(f *feedState, attempt int) (err error) {
 	}()
 	return f.spec.Run(f.ctx, FeedIO{
 		Dir: s.opts.WorkingDir,
-		Emit: func(from, text string) error {
-			return s.emitFeedInput(f, attempt, from, text)
+		Emit: func(from, text string, image *FeedImage) error {
+			return s.emitFeedInput(f, attempt, from, text, image)
 		},
 		Decider: s.Decider,
 		Log:     s.feedLogger(f.name),
@@ -416,10 +434,56 @@ func (s *Session) feedLogger(name string) *slog.Logger {
 // is refused with ErrSessionClosed. An emit that races its attempt's end
 // is therefore accepted before the end's claim, or refused after it,
 // never lost in between.
-func (s *Session) emitFeedInput(f *feedState, attempt int, from, text string) error {
-	return s.queueFeedInput(f.name, from, text, f.spec.OnIdle, func() bool {
+//
+// An input that names an image is read here: a file that does not
+// read, an image the head does not name, or a declared media type the
+// head does not confirm is the attempt's failure, the way a refused
+// input is.
+func (s *Session) emitFeedInput(f *feedState, attempt int, from, text string, image *FeedImage) error {
+	var attachments []Attachment
+	if image != nil {
+		attachment, err := s.readFeedImage(f.name, image)
+		if err != nil {
+			return err
+		}
+		attachments = []Attachment{attachment}
+	}
+	return s.queueFeedInput(f.name, from, text, attachments, f.spec.OnIdle, func() bool {
 		return f.ended < attempt
 	})
+}
+
+// readFeedImage reads the image a feed's input names.
+//
+// A path relative to the feed's working directory is resolved against
+// it, the bytes are capped at MaxImageBytes, and the head names the
+// media type: a declared type the head does not confirm is a failure
+// that names both, so a feed that mislabels its images is heard from.
+func (s *Session) readFeedImage(feed string, image *FeedImage) (Attachment, error) {
+	path := image.Path
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(s.opts.WorkingDir, path)
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return Attachment{}, fmt.Errorf("poo: the feed %q names the image %q, and it does not read: %w", feed, image.Path, err)
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, MaxImageBytes+1))
+	if err != nil {
+		return Attachment{}, fmt.Errorf("poo: the feed %q names the image %q, and it does not read: %w", feed, image.Path, err)
+	}
+	if len(data) > MaxImageBytes {
+		return Attachment{}, fmt.Errorf("poo: the feed %q names the image %q, and it is larger than the %d bytes a model takes", feed, image.Path, MaxImageBytes)
+	}
+	media, ok := ImageMediaType(data)
+	if !ok {
+		return Attachment{}, fmt.Errorf("poo: the feed %q names the image %q, and its bytes are not an image the session reads", feed, image.Path)
+	}
+	if image.MediaType != "" && image.MediaType != media {
+		return Attachment{}, fmt.Errorf("poo: the feed %q names the image %q as %q, and its bytes are %q", feed, image.Path, image.MediaType, media)
+	}
+	return Attachment{Modality: ModalityImage, MediaType: media, Data: data}, nil
 }
 
 // feedOutcome says how an attempt ended.

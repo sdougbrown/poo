@@ -20,19 +20,22 @@ const maxFeedFilterBytes = 8 << 10
 const filterDecisionTimeout = 1500 * time.Millisecond
 
 // filterEmit wraps delivery for a feed with a validated manifest filter.
-func filterEmit(ctx context.Context, io poo.FeedIO, name string, filter feed.Filter) func(string, string) error {
+func filterEmit(ctx context.Context, io poo.FeedIO, name string, filter feed.Filter) func(string, string, *poo.FeedImage) error {
 	questions := []decide.Question{{
 		ID:           "feed:" + name,
 		Instructions: filter.Question,
 		Kind:         decide.Bool{True: "deliver the message", False: "do not deliver the message"},
 	}}
 	warned := false
-	return func(from, text string) error {
+	return func(from, text string, image *poo.FeedImage) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if io.Decider == nil || len(from)+len(text) > maxFeedFilterBytes {
-			return io.Emit(from, text)
+		// A message that carries an image is delivered unasked: the
+		// question is calibrated on text, and no image fits the byte
+		// budget the question is asked under.
+		if image != nil || io.Decider == nil || len(from)+len(text) > maxFeedFilterBytes {
+			return io.Emit(from, text, image)
 		}
 		model := io.Decider()
 		if model == nil {
@@ -43,7 +46,7 @@ func filterEmit(ctx context.Context, io poo.FeedIO, name string, filter feed.Fil
 				warned = true
 				io.Log.Warn("the feed has a filter, but the session has no decision model; messages are delivered unfiltered")
 			}
-			return io.Emit(from, text)
+			return io.Emit(from, text, image)
 		}
 		state := map[string]string{"feed": name, "from": from, "text": text}
 		decideCtx, cancel := context.WithTimeout(ctx, filterDecisionTimeout)
@@ -57,7 +60,7 @@ func filterEmit(ctx context.Context, io poo.FeedIO, name string, filter feed.Fil
 			p := answer.Probabilities["no"]
 			if mass := answer.LabelMass; mass != nil {
 				if !(*mass >= 0 && *mass <= 1) {
-					return io.Emit(from, text)
+					return io.Emit(from, text, image)
 				}
 				p *= *mass
 			}
@@ -65,6 +68,6 @@ func filterEmit(ctx context.Context, io poo.FeedIO, name string, filter feed.Fil
 				return nil
 			}
 		}
-		return io.Emit(from, text)
+		return io.Emit(from, text, image)
 	}
 }

@@ -29,20 +29,23 @@ type emitted struct {
 	refuse error
 }
 
-// input is one emitted input: who sent it, and what it says.
+// input is one emitted input: who sent it, what it says, and the
+// image it names.
 type input struct {
 	from string
 	text string
+	// image is the image the message named, nil for a text-only one.
+	image *feed.Image
 }
 
 // emit accepts one input, or refuses it as the test asked.
-func (e *emitted) emit(from, text string) error {
+func (e *emitted) emit(from, text string, image *feed.Image) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.refuse != nil {
 		return e.refuse
 	}
-	e.inputs = append(e.inputs, input{from: from, text: text})
+	e.inputs = append(e.inputs, input{from: from, text: text, image: image})
 	return nil
 }
 
@@ -339,7 +342,7 @@ func TestTheManifestEnvironmentReachesTheCommand(t *testing.T) {
 			run := feed.Runner(spec, c.executor, envLookup("FIXTURE_HOST=the reference"))
 			var mu sync.Mutex
 			var texts []string
-			err := run(context.Background(), t.TempDir(), func(from, text string) error {
+			err := run(context.Background(), t.TempDir(), func(from, text string, _ *feed.Image) error {
 				mu.Lock()
 				defer mu.Unlock()
 				texts = append(texts, text)
@@ -416,12 +419,64 @@ func (finished) Stopped() bool { return false }
 func TestAFeedWithNoEnvironmentIsGivenAnEmptyOne(t *testing.T) {
 	recorder := &recordingExecutor{}
 	run := feed.Runner(feed.Spec{Name: "quiet", Command: []string{"/bin/true"}}, recorder, envLookup())
-	if err := run(context.Background(), t.TempDir(), func(string, string) error { return nil }, silent()); err != nil {
+	if err := run(context.Background(), t.TempDir(), func(string, string, *feed.Image) error { return nil }, silent()); err != nil {
 		t.Fatalf("the attempt failed: %v", err)
 	}
 	recorder.mu.Lock()
 	defer recorder.mu.Unlock()
 	if recorder.command.Env == nil {
 		t.Error("the command was handed a nil environment, which inherits the executor's own")
+	}
+}
+
+// TestAMessageMayCarryAnImage covers the envelope: a message that names
+// an image carries its path and media to the session, and a message
+// that names one may leave its text empty — the image is the message.
+func TestAMessageMayCarryAnImage(t *testing.T) {
+	for _, c := range executorCases(t) {
+		t.Run(c.name, func(t *testing.T) {
+			got, cancel, done := start(t, c, feed.Spec{Name: "image", Command: []string{script(t, "image")}}, silent())
+			waitFor(t, "the two messages", func() bool { return got.len() == 2 })
+			cancel()
+			if err := result(t, done); !errors.Is(err, context.Canceled) {
+				t.Errorf("the cancelled attempt returned %v, want context.Canceled", err)
+			}
+			inputs := got.all()
+			if len(inputs) != 2 {
+				t.Fatalf("the attempt emitted %v, want two inputs", inputs)
+			}
+			first, second := inputs[0], inputs[1]
+			if first.from != "alice" || first.text != "the look" || first.image == nil ||
+				first.image.Path != "shot.png" || first.image.MediaType != "image/png" {
+				t.Errorf("the first input is %+v, want the look from alice with shot.png", first)
+			}
+			if second.text != "" || second.image == nil || second.image.Path != "bare.png" || second.image.MediaType != "" {
+				t.Errorf("the second input is %+v, want an image-only message with no media named", second)
+			}
+		})
+	}
+}
+
+// TestAMessageThatNamesAnImageWithNoPathFailsTheAttempt covers the
+// protocol: the image's path is required, and a line that names no path
+// is the attempt's failure. The messages before it stand.
+func TestAMessageThatNamesAnImageWithNoPathFailsTheAttempt(t *testing.T) {
+	for _, c := range executorCases(t) {
+		t.Run(c.name, func(t *testing.T) {
+			got, cancel, done := start(t, c, feed.Spec{Name: "badimage", Command: []string{script(t, "badimage")}}, silent())
+			defer cancel()
+			err := result(t, done)
+			if err == nil {
+				t.Fatal("the attempt accepted a message whose image names no path")
+			}
+			if !strings.Contains(err.Error(), "names an image with no path") {
+				t.Errorf("the attempt failed with %q, want it to name the image's path", err)
+			}
+			inputs := got.all()
+			want := input{text: "the message before the failure"}
+			if len(inputs) != 1 || inputs[0] != want {
+				t.Errorf("the attempt emitted %+v, want only %+v", inputs, want)
+			}
+		})
 	}
 }

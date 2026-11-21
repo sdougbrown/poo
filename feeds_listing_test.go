@@ -24,7 +24,7 @@ func TestARunningFeedIsListedOnceWithItsHeldInput(t *testing.T) {
 	s := newTestSession(t, opts, poo.WithFeeds(poo.FeedSpec{
 		Name: "inbox",
 		Run: func(ctx context.Context, io poo.FeedIO) error {
-			if err := io.Emit("", "the message"); err != nil {
+			if err := io.Emit("", "the message", nil); err != nil {
 				return err
 			}
 			<-ctx.Done()
@@ -55,7 +55,7 @@ func TestTheJobsToolListsARunningFeedOnce(t *testing.T) {
 	})
 	tr := &openRunHoldTransport{inner: inner, at2: make(chan struct{}), release: make(chan struct{})}
 	sink := &recordingSink{}
-	emits := make(chan func(from, text string) error, 1)
+	emits := make(chan func(from, text string, image *poo.FeedImage) error, 1)
 	s := newTestSession(t, testOptions(t, tr, &echoTool{}, sink), poo.WithFeeds(poo.FeedSpec{
 		Name: "inbox",
 		Run: func(ctx context.Context, io poo.FeedIO) error {
@@ -71,7 +71,7 @@ func TestTheJobsToolListsARunningFeedOnce(t *testing.T) {
 	<-tr.at2
 	// The run is open, so the input stays on the queue while the model's
 	// next turn lists the jobs.
-	if err := emit("", "the message"); err != nil {
+	if err := emit("", "the message", nil); err != nil {
 		t.Fatalf("emitting the feed's input: %v", err)
 	}
 	waitFor(t, "the input to be queued", func() bool {

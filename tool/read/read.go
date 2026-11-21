@@ -6,7 +6,6 @@ package read
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -41,10 +40,8 @@ const (
 	// BinarySniffBytes is how much of a file is read to decide whether it
 	// is binary.
 	BinarySniffBytes = 8 << 10
-	// MaxImageBytes is the largest image the tool returns. Providers cap an
-	// image request themselves, the smallest of them at 5 MB, so a larger
-	// file is refused here rather than sent to fail there.
-	MaxImageBytes = 5 << 20
+	// MaxImageBytes is the largest image the tool returns.
+	MaxImageBytes = poo.MaxImageBytes
 	// MaxAudioBytes is the largest recording the tool returns. The audio part's
 	// own limit is 25 MB, so a larger file is refused here rather than sent to
 	// fail there.
@@ -270,20 +267,11 @@ func mp3Head(head []byte) bool {
 }
 
 // imageMediaType reports the media type of the image the head of a file
-// starts with, and whether it is one. The four types are the ones providers
-// accept.
+// starts with. The core owns the answer: the read tool and a feed's
+// image ask it the same question, and the core's list is the one
+// providers accept.
 func imageMediaType(head []byte) (string, bool) {
-	switch {
-	case bytes.HasPrefix(head, []byte("\x89PNG\r\n\x1a\n")):
-		return "image/png", true
-	case bytes.HasPrefix(head, []byte("\xff\xd8\xff")):
-		return "image/jpeg", true
-	case bytes.HasPrefix(head, []byte("GIF87a")), bytes.HasPrefix(head, []byte("GIF89a")):
-		return "image/gif", true
-	case len(head) > 12 && bytes.HasPrefix(head, []byte("RIFF")) && bytes.Equal(head[8:12], []byte("WEBP")):
-		return "image/webp", true
-	}
-	return "", false
+	return poo.ImageMediaType(head)
 }
 
 // reachable reports whether the resolved path is one the read tool may

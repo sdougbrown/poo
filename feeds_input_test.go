@@ -618,7 +618,7 @@ func TestAMixedIdleWakeTakesTheHeldResult(t *testing.T) {
 		OnIdle: poo.OnIdleWake,
 		Run: func(ctx context.Context, io poo.FeedIO) error {
 			<-emit
-			if err := io.Emit("", "the message"); err != nil {
+			if err := io.Emit("", "the message", nil); err != nil {
 				return err
 			}
 			<-ctx.Done()

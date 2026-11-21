@@ -32,7 +32,23 @@ var silentLogger = slog.New(slog.DiscardHandler)
 // dir is the directory the command runs in. The session passes its own
 // working directory at the call, so a feed follows the session it runs
 // beside rather than the directory the binary was built in.
-type Run func(ctx context.Context, dir string, emit func(from, text string) error, log *slog.Logger) error
+type Run func(ctx context.Context, dir string, emit func(from, text string, image *Image) error, log *slog.Logger) error
+
+// Image is the image a feed's message names, by its path.
+//
+// The runner does not read the file: it enforces the envelope's shape
+// alone, and the session reads the bytes when the input is accepted, so
+// an image that does not read fails the attempt the way a refused
+// input does.
+type Image struct {
+	// Path is the image's file. A relative path answers to the
+	// directory the feed's command runs in.
+	Path string `json:"path"`
+	// MediaType is the image's media type, as the feed declares it.
+	// It is empty when the feed names none, and the session's own
+	// read must agree with it when it is not.
+	MediaType string `json:"media,omitempty"`
+}
 
 // Runner returns the run that runs one attempt of a feed's command.
 //
@@ -46,11 +62,17 @@ type Run func(ctx context.Context, dir string, emit func(from, text string) erro
 //
 //	{"text": "the message", "from": "alice"}
 //
-// `text` is required and is not empty; `from` names the sender and may
-// be left out. A blank line is skipped, and a field the message does
-// not name is ignored, so a feed may carry its own bookkeeping in a
-// line. A line the object does not describe is a protocol failure:
-// silence about a message is better than a guess at what it meant.
+// A message may name an image beside its text:
+//
+//	{"text": "the look", "image": {"path": "shot.png", "media": "image/png"}}
+//
+// `text` is required and is not empty, and `from` names the sender and
+// may be left out. A message that names an image may leave its text
+// empty: the image is the message, and the image's path is required.
+// A blank line is skipped, and a field the message does not name is
+// ignored, so a feed may carry its own bookkeeping in a line. A line
+// the object does not describe is a protocol failure: silence about a
+// message is better than a guess at what it meant.
 //
 // The first protocol failure — a line that is not such an object, a
 // line longer than the line limit, or an input the session refuses — is
@@ -65,7 +87,7 @@ type Run func(ctx context.Context, dir string, emit func(from, text string) erro
 // that does not resolve fails the attempt, and the command does not
 // start.
 func Runner(spec Spec, ex exec.Executor, env func(string) (string, bool)) Run {
-	return func(ctx context.Context, dir string, emit func(from, text string) error, log *slog.Logger) error {
+	return func(ctx context.Context, dir string, emit func(from, text string, image *Image) error, log *slog.Logger) error {
 		resolved, err := spec.ResolveEnv(env)
 		if err != nil {
 			return fmt.Errorf("feed %q: %w", spec.Name, err)
@@ -117,10 +139,14 @@ func Runner(spec Spec, ex exec.Executor, env func(string) (string, bool)) Run {
 
 // message is one line of a feed's stdout: the input the feed emits.
 type message struct {
-	// Text is the message's text. It is required.
+	// Text is the message's text. It is required, unless the message
+	// names an image.
 	Text string `json:"text"`
 	// From names the sender, and is empty when the feed names none.
 	From string `json:"from"`
+	// Image is the image the message names, and nil when it names
+	// none.
+	Image *Image `json:"image,omitempty"`
 }
 
 // lineReader turns a command's stdout into the inputs the feed emits.
@@ -134,7 +160,7 @@ type message struct {
 type lineReader struct {
 	// emit queues one input. It is the session's, and its refusal ends
 	// the attempt.
-	emit func(from, text string) error
+	emit func(from, text string, image *Image) error
 	// cancel stops the command.
 	cancel context.CancelFunc
 	// pending holds the bytes of the line that has not ended yet.
@@ -213,10 +239,13 @@ func (r *lineReader) accept(line string) error {
 	if err := json.Unmarshal([]byte(line), &msg); err != nil {
 		return r.fail(fmt.Errorf("a line is not a feed message: %w", err))
 	}
-	if msg.Text == "" {
+	if msg.Text == "" && msg.Image == nil {
 		return r.fail(fmt.Errorf("a feed message has no text"))
 	}
-	if err := r.emit(msg.From, msg.Text); err != nil {
+	if msg.Image != nil && msg.Image.Path == "" {
+		return r.fail(fmt.Errorf("a feed message names an image with no path"))
+	}
+	if err := r.emit(msg.From, msg.Text, msg.Image); err != nil {
 		return r.fail(err)
 	}
 	return nil

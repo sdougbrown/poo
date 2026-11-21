@@ -1,6 +1,7 @@
 package poo
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
 )
@@ -336,6 +337,32 @@ var attachmentKinds = map[Modality]attachmentKind{
 // so a type that is not accepted cannot be produced and quietly dropped.
 func IsMediaType(modality Modality, mediaType string) bool {
 	return attachmentKinds[modality].mediaTypes[mediaType]
+}
+
+// MaxImageBytes is the largest image a request carries. Providers cap
+// an image request themselves, the smallest of them at 5 MB, so a
+// larger image is refused before it is asked for.
+const MaxImageBytes = 5 << 20
+
+// ImageMediaType reports the media type of the image the head of a file
+// starts with, and whether it is one.
+//
+// The four types are the ones providers accept, and the head is what
+// the reader of a file already holds: the reader of a feed's image and
+// the read tool ask the same question here, so one answer names the
+// type everywhere.
+func ImageMediaType(head []byte) (string, bool) {
+	switch {
+	case bytes.HasPrefix(head, []byte("\x89PNG\r\n\x1a\n")):
+		return "image/png", true
+	case bytes.HasPrefix(head, []byte("\xff\xd8\xff")):
+		return "image/jpeg", true
+	case bytes.HasPrefix(head, []byte("GIF87a")), bytes.HasPrefix(head, []byte("GIF89a")):
+		return "image/gif", true
+	case len(head) > 12 && bytes.HasPrefix(head, []byte("RIFF")) && bytes.Equal(head[8:12], []byte("WEBP")):
+		return "image/webp", true
+	}
+	return "", false
 }
 
 // modalityOf returns the input modality a block's kind carries, and whether the

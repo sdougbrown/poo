@@ -141,6 +141,91 @@ func TestFeedFilterDropsOnlyAConfidentNo(t *testing.T) {
 	}
 }
 
+// TestTheFilterDeliversAFeedImageUnasked covers the bypass: a message
+// that carries an image is delivered without the decider's question,
+// because the question is calibrated on text and no image fits the
+// byte budget it is asked under.
+func TestTheFilterDeliversAFeedImageUnasked(t *testing.T) {
+	const question = "Does this message need attention?"
+	dir := t.TempDir()
+	png := append([]byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}, 1, 2, 3, 4)
+	if err := os.WriteFile(filepath.Join(dir, "shot.png"), png, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "feed.json")
+	manifest := `{
+  "version": 1,
+  "feeds": {
+    "inbox": {
+      "command": ["sh", "-c", "printf '%s\\n' \"$@\"", "feed",
+        "{\"text\":\"the look\",\"image\":{\"path\":\"shot.png\",\"media\":\"image/png\"}}",
+        "{\"text\":\"routine\"}"],
+      "on_idle": "wake",
+      "filter": {"question": "` + question + `", "min_no_probability": 0.9}
+    }
+  }
+}`
+	if err := os.WriteFile(path, []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	settings, err := config.Parse([]byte(theFeedsSettings(path)), config.FormatYAML)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+	// The feed's image answers to the session's own working directory.
+	if err := os.WriteFile(filepath.Join(runtime.Options.WorkingDir, "shot.png"), png, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	transport := pootest.NewTransport(pootest.Turn{Text: "ack"}, pootest.Turn{Text: "ack"})
+	sink := pootest.NewSink()
+	runtime.Options.Transport = transport
+	runtime.Options.Sink = sink
+	model := decide.DeciderFunc(func(ctx context.Context, state any, _ string, qs []decide.Question) ([]decide.Answer, error) {
+		fields, ok := state.(map[string]string)
+		if !ok || qs[0].Instructions != question {
+			t.Errorf("unexpected filter request: %#v", state)
+			return nil, decide.ErrDeferred
+		}
+		if fields["text"] != "routine" {
+			t.Errorf("the decider was asked about %q, want only the routine text", fields["text"])
+		}
+		answer := decide.Answer{ID: qs[0].ID, Probabilities: map[string]float64{"no": 0.99, "yes": 0.01}}
+		return []decide.Answer{answer}, nil
+	})
+	sess, err := poo.New(runtime.Options, poo.WithDecider(poo.ModelInfo{}, model))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sess.Close() })
+	waitUntil(t, "the image message to reach the chat model", func() bool {
+		return theModelRead(transport, `<feed name="inbox">the look</feed>`, poo.FeedOrigin("inbox"))
+	})
+	var queued []string
+	decisions := 0
+	for _, rec := range sink.Records() {
+		switch rec := rec.(type) {
+		case *poo.InputQueuedRecord:
+			if rec.Mode == poo.InputModeFeed {
+				queued = append(queued, rec.Text)
+			}
+			if len(rec.Attachments) != 1 || rec.Attachments[0].MediaType != "image/png" {
+				t.Errorf("the input %q holds %+v, want the png beside its text", rec.Text, rec.Attachments)
+			}
+		case *poo.DecisionRecord:
+			decisions++
+		}
+	}
+	// The image was never asked about, so the one decision is the
+	// routine text's, and its confident no dropped it.
+	if len(queued) != 1 || decisions != 1 {
+		t.Fatalf("queued %d inputs and recorded %d decisions; want the image queued unasked and one decision", len(queued), decisions)
+	}
+	if queued[0] != `<feed name="inbox">the look</feed>` {
+		t.Errorf("the queued input is %q, want the image's text", queued[0])
+	}
+}
+
 // warnCapture records the warn records a session's log dispatches.
 type warnCapture struct {
 	mu      sync.Mutex
@@ -420,7 +505,7 @@ func TestTheSettingsExecutorRunsTheFeedCommand(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	err = runtime.Options.Feeds[0].Run(ctx, poo.FeedIO{
-		Emit: func(string, string) error {
+		Emit: func(string, string, *poo.FeedImage) error {
 			cancel()
 			return nil
 		},
@@ -512,7 +597,7 @@ func TestAFeedCannotReachAScrubbedVariable(t *testing.T) {
 
 	emitted := 0
 	err = runtime.Options.Feeds[0].Run(context.Background(), poo.FeedIO{
-		Emit: func(string, string) error {
+		Emit: func(string, string, *poo.FeedImage) error {
 			emitted++
 			return nil
 		},
@@ -580,7 +665,7 @@ func TestAFeedReachesADeclaredCredential(t *testing.T) {
 	// The fixture prints once and exits, so the runner's own supervision of a
 	// finished command is not what this test is about.
 	err = runtime.Options.Feeds[0].Run(ctx, poo.FeedIO{
-		Emit: func(_, text string) error {
+		Emit: func(_, text string, _ *poo.FeedImage) error {
 			emitted = append(emitted, text)
 			return nil
 		},
