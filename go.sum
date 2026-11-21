@@ -77,8 +77,8 @@ github.com/santhosh-tekuri/jsonschema/v6 v6.0.3 h1:1EYB5IzjZawrrnELUi78f9fPu57Hu
 github.com/santhosh-tekuri/jsonschema/v6 v6.0.3/go.mod h1:JXeL+ps8p7/KNMjDQk3TCwPpBy0wYklyWTfbkIzdIFU=
 github.com/sdougbrown/cli-contract v0.10.0 h1:W6+jFVclqH6fB+D5gJWW80avdUzQTDYlL5XeTn2XqQQ=
 github.com/sdougbrown/cli-contract v0.10.0/go.mod h1:gUVC+vCw8jx+czT9PMdPsMQPq4pJMWBh0tsOoOKdEMo=
-github.com/sdougbrown/cli-registry v0.6.2-0.20261121144438-26f23e318a1c h1:edcgJU6Vl6/UaVqxeOFGIl6OmCxN+3tH353BXeVLsxQ=
-github.com/sdougbrown/cli-registry v0.6.2-0.20261121144438-26f23e318a1c/go.mod h1:940fkUMIzh1pgY3nzKfWiyM2RChY9IlU4qhTIjrAiK8=
+github.com/sdougbrown/cli-registry v0.6.2 h1:Eg6f+j+9x6iiXvzFhu6auUaifMhHHBlWpwoy4PzC5/Q=
+github.com/sdougbrown/cli-registry v0.6.2/go.mod h1:940fkUMIzh1pgY3nzKfWiyM2RChY9IlU4qhTIjrAiK8=
 github.com/sdougbrown/readline v1.3.0-poo.6 h1:3LK/mDdDv0RcW53gey8oQXqGVLnTrvZKon9Tf+ZHkig=
 github.com/sdougbrown/readline v1.3.0-poo.6/go.mod h1:bOpqx2/VqGlIoobyWR1Vgt/p5FiMfIHj4OicPuw6RfU=
 github.com/sebdah/goldie/v2 v2.8.0 h1:dZb9wR8q5++oplmEiJT+U/5KyotVD+HNGCAc5gNr8rc=
