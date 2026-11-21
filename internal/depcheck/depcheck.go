@@ -142,6 +142,8 @@ func (c Checker) rules() []rule {
 				m,
 				m + "/cli",
 				m + "/compact/handoff",
+				m + "/compact/internal/cut",
+				m + "/compact/mine",
 				m + "/compact/native",
 				m + "/compact/summary",
 				m + "/config",

@@ -139,7 +139,8 @@ func (t *Transport) Stream(ctx context.Context, req poo.ChatRequest) (poo.Stream
 }
 
 // Fork sends a body that is byte-identical to the snapshot, apart from the
-// appended messages and the output limit.
+// appended messages, the output limit and the tool choice, which the fork
+// sets to none.
 //
 // The snapshot holds the serialized body, so the fork re-sends it with the
 // appended messages added after the last one. The session is the snapshot's,
@@ -163,6 +164,10 @@ func (t *Transport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.
 		return nil, err
 	}
 	body, err := anthropic.AppendMessages(prev.Body, messages, maxTokens)
+	if err != nil {
+		return nil, err
+	}
+	body, err = anthropic.WithoutTools(body)
 	if err != nil {
 		return nil, err
 	}

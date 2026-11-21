@@ -153,7 +153,8 @@ func (t *Transport) Stream(ctx context.Context, req poo.ChatRequest) (poo.Stream
 }
 
 // Fork sends a body that is byte-identical to the snapshot, apart from
-// the appended messages and the output limit.
+// the appended messages, the output limit and the tool choice, which
+// the fork sets to none.
 //
 // The snapshot holds the serialized body, so the fork re-sends it with
 // the appended messages added after the last one. The key order and
@@ -186,6 +187,10 @@ func (t *Transport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.
 		return nil, err
 	}
 	body, err := chat.AppendMessages(prev.Body, shapeAppended(quirksFor(prev.Quirks, t.logger), converted), maxTokens)
+	if err != nil {
+		return nil, err
+	}
+	body, err = chat.WithoutTools(body)
 	if err != nil {
 		return nil, err
 	}

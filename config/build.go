@@ -18,6 +18,7 @@ import (
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/cli"
 	"github.com/sdougbrown/poo/compact/handoff"
+	"github.com/sdougbrown/poo/compact/mine"
 	"github.com/sdougbrown/poo/compact/native"
 	"github.com/sdougbrown/poo/compact/summary"
 	"github.com/sdougbrown/poo/decide"
@@ -1777,6 +1778,22 @@ func (r *Runtime) resolveSession(opts BuildOptions, workingDir string) error {
 		}
 		r.Options.Transport = transport
 	}
+	// The compaction role gives the strategies' own requests a model of
+	// their own. A fork stays on the chat model, because it re-sends
+	// the last main request and only the chat model's transport can
+	// stand in for that; the ask is what moves.
+	if _, ok := settings.Roles["compaction"]; ok {
+		model, err := r.Catalog.Role(catalog.RoleCompaction)
+		if err != nil {
+			return err
+		}
+		transport, err := r.Transport(model)
+		if err != nil {
+			return err
+		}
+		r.Options.SideTransport = transport
+		r.Options.SideModel = model
+	}
 	// The decider is the session's as well as the policy's: the tools over
 	// a cli registry ask it which entries fit, and a session without one
 	// lists the whole catalog instead.
@@ -1871,6 +1888,21 @@ func (r *Runtime) resolveSession(opts BuildOptions, workingDir string) error {
 			summaryOptions.MaxTokens = *settings.Context.Summary.MaxTokens
 		}
 		r.Options.Compactor = summary.New(summaryOptions)
+	case "mine":
+		mineOptions := mine.Options{}
+		if settings.Context.Mine.Ratio != nil {
+			mineOptions.Ratio = *settings.Context.Mine.Ratio
+		}
+		if settings.Context.Mine.KeepRecentTokens != nil {
+			mineOptions.KeepRecentTokens = *settings.Context.Mine.KeepRecentTokens
+		}
+		if settings.Context.Mine.MaxTokens != nil {
+			mineOptions.MaxTokens = *settings.Context.Mine.MaxTokens
+		}
+		if settings.Context.Mine.PointerMaxTokens != nil {
+			mineOptions.PointerMaxTokens = *settings.Context.Mine.PointerMaxTokens
+		}
+		r.Options.Compactor = mine.New(mineOptions)
 	}
 	if strategy == native.Strategy {
 		return r.checkNativeCompaction()

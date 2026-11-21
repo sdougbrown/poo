@@ -25,12 +25,17 @@
     "system_prompt.replace": { "isEmpty": "string" },
     "system_prompt.append": { "isEmpty": "string" },
     "system_prompt.remove": { "isEmpty": "array" },
+    "roles.compaction": { "isEmpty": "string" },
     "context.strategy": { "isEmpty": "string" },
     "context.handoff.ratio": { "isEmpty": "number" },
     "context.handoff.max_tokens": { "isEmpty": "number" },
     "context.summary.ratio": { "isEmpty": "number" },
     "context.summary.keep_recent_tokens": { "isEmpty": "number" },
     "context.summary.max_tokens": { "isEmpty": "number" },
+    "context.mine.ratio": { "isEmpty": "number" },
+    "context.mine.keep_recent_tokens": { "isEmpty": "number" },
+    "context.mine.max_tokens": { "isEmpty": "number" },
+    "context.mine.pointer_max_tokens": { "isEmpty": "number" },
     "tools.read.restrict_to_working_dir": { "isEmpty": "boolean" },
     "tools.grep.restrict_to_working_dir": { "isEmpty": "boolean" },
     "tools.edit.restrict_to_working_dir": { "isEmpty": "boolean" },
@@ -182,8 +187,8 @@
       "type": "check",
       "field": "context.strategy",
       "op": "matches",
-      "pattern": "^(summary|handoff|native|none)$",
-      "reason": "context.strategy must be summary, handoff, native or none"
+      "pattern": "^(summary|mine|handoff|native|none)$",
+      "reason": "context.strategy must be summary, mine, handoff, native or none"
     },
     {
       "type": "check",
@@ -349,6 +354,35 @@
       "op": "min",
       "value": 0,
       "reason": "context.summary.max_tokens must not be negative"
+    },
+    {
+      "type": "check",
+      "field": "context.mine.ratio",
+      "op": "range",
+      "min": 0,
+      "max": 1,
+      "reason": "context.mine.ratio must be between 0 and 1"
+    },
+    {
+      "type": "check",
+      "field": "context.mine.keep_recent_tokens",
+      "op": "min",
+      "value": 0,
+      "reason": "context.mine.keep_recent_tokens must not be negative"
+    },
+    {
+      "type": "check",
+      "field": "context.mine.max_tokens",
+      "op": "min",
+      "value": 0,
+      "reason": "context.mine.max_tokens must not be negative"
+    },
+    {
+      "type": "check",
+      "field": "context.mine.pointer_max_tokens",
+      "op": "min",
+      "value": 0,
+      "reason": "context.mine.pointer_max_tokens must not be negative"
     },
     {
       "type": "check",

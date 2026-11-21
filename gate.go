@@ -177,10 +177,11 @@ func (s *Session) compact(run *runState) (compactionOutcome, error) {
 
 	tokensBefore := s.estimatedInput()
 	env := CompactionEnv{
-		View:   s.view(),
-		Budget: s.budget(),
-		Fork:   s.forkFunc(run),
-		Ask:    s.askFunc(run),
+		View:      s.view(),
+		Budget:    s.budget(),
+		SessionID: s.ID(),
+		Fork:      s.forkFunc(run),
+		Ask:       s.askFunc(run),
 	}
 
 	// The compaction runs under the run's activity context, so an
@@ -315,6 +316,7 @@ func (s *Session) compact(run *runState) (compactionOutcome, error) {
 	s.events.emit(EventCompactionEnded, map[string]any{
 		"run_id":   run.id,
 		"strategy": compaction.Strategy,
+		"side":     compaction.Side,
 	})
 	return outcome, nil
 }
@@ -373,9 +375,12 @@ func (s *Session) forkFunc(run *runState) ForkFunc {
 func (s *Session) askFunc(run *runState) AskFunc {
 	return func(ctx context.Context, messages []Message, maxTokens int) (Reply, error) {
 		s.mu.Lock()
-		model := s.opts.Model
+		transport, model := s.opts.Transport, s.opts.Model
+		if s.opts.SideTransport != nil {
+			transport, model = s.opts.SideTransport, s.opts.SideModel
+		}
 		s.mu.Unlock()
-		reader, _, err := s.opts.Transport.Stream(ctx, ChatRequest{
+		reader, _, err := transport.Stream(ctx, ChatRequest{
 			Model:     model.ModelID,
 			ModelInfo: model,
 			Messages:  CloneMessages(messages),

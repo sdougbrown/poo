@@ -14,6 +14,9 @@ const (
 	RoleChat Role = "chat"
 	// RoleDecider is the model that answers the decision questions.
 	RoleDecider Role = "decider"
+	// RoleCompaction is the model that answers a compaction strategy's
+	// own requests: the summary or reconstruction it writes.
+	RoleCompaction Role = "compaction"
 )
 
 // CredentialSource names where an endpoint's key comes from.
@@ -189,6 +192,8 @@ func opsForRole(role Role) []poo.Op {
 		return []poo.Op{poo.OpChat}
 	case RoleDecider:
 		return []poo.Op{poo.OpSystemOne, poo.OpDecisions}
+	case RoleCompaction:
+		return []poo.Op{poo.OpChat}
 	}
 	return nil
 }

@@ -225,7 +225,8 @@ func (t *Transport) Stream(ctx context.Context, req poo.ChatRequest) (poo.Stream
 }
 
 // Fork sends a body that is byte-identical to the snapshot, apart from
-// the input items appended after the last one.
+// the input items appended after the last one and the tool choice, which
+// the fork sets to none.
 //
 // The appended messages are shaped by the attachments the snapshot carries.
 // The model info a request was shaped for is not part of the body. The
@@ -247,6 +248,10 @@ func (t *Transport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.
 		}
 	}
 	body, err := responses.AppendInput(prev.Body, appended, responses.ModalitiesFrom(prev.Inputs))
+	if err != nil {
+		return nil, err
+	}
+	body, err = responses.WithoutTools(body)
 	if err != nil {
 		return nil, err
 	}

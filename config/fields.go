@@ -22,6 +22,7 @@ func fieldsOf(s *Settings) SettingsFields {
 
 	f.RolesChat = text(s.Roles["chat"])
 	f.RolesDecider = text(s.Roles["decider"])
+	f.RolesCompaction = text(s.Roles["compaction"])
 
 	f.DeciderTimeoutMs = count(s.Decider.TimeoutMS)
 
@@ -47,6 +48,10 @@ func fieldsOf(s *Settings) SettingsFields {
 	f.ContextSummaryRatio = share(s.Context.Summary.Ratio)
 	f.ContextSummaryKeepRecentTokens = count(s.Context.Summary.KeepRecentTokens)
 	f.ContextSummaryMaxTokens = count(s.Context.Summary.MaxTokens)
+	f.ContextMineRatio = share(s.Context.Mine.Ratio)
+	f.ContextMineKeepRecentTokens = count(s.Context.Mine.KeepRecentTokens)
+	f.ContextMineMaxTokens = count(s.Context.Mine.MaxTokens)
+	f.ContextMinePointerMaxTokens = count(s.Context.Mine.PointerMaxTokens)
 
 	f.ToolsReadRestrictToWorkingDir = flag(s.Tools.Read.RestrictToWorkingDir)
 	f.ToolsGrepRestrictToWorkingDir = flag(s.Tools.Grep.RestrictToWorkingDir)

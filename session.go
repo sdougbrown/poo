@@ -488,6 +488,22 @@ type Options struct {
 	// (ErrSessionInit), so no run starts without a window to measure
 	// against.
 	Model ModelInfo
+	// SideTransport sends a strategy's own requests, when one is set.
+	//
+	// It is how a strategy asks a model other than the session's own:
+	// the summary that condenses a window, or the reconstruction a mine
+	// writes, do not have to be the chat model's work. A side transport
+	// without a side model is a construction error, and so is a side
+	// model without a side transport.
+	//
+	// The fork never uses it: a fork re-sends the last main request,
+	// and only the session's own transport can stand in for that.
+	SideTransport ChatTransport
+	// SideModel describes the model the side transport talks to.
+	//
+	// It names the identifier the endpoint knows the model by. The
+	// window the session measures against stays the chat model's own.
+	SideModel ModelInfo
 	// Profile is the name of the profile the session was built with.
 	//
 	// A profile is a named tool set with its own defaults. The name
@@ -708,6 +724,9 @@ func New(opts Options, fns ...Option) (*Session, error) {
 	}
 	if opts.Model.ContextLimit <= 0 {
 		return nil, &ErrSessionInit{Cause: errors.New("poo: the session has no context limit")}
+	}
+	if (opts.SideTransport == nil) != (opts.SideModel.ModelID == "") {
+		return nil, &ErrSessionInit{Cause: errors.New("poo: the side transport and the side model stand together: one without the other has no model to ask or no transport to ask it")}
 	}
 	if err := checkFinishTool(&opts); err != nil {
 		return nil, &ErrSessionInit{Cause: err}
