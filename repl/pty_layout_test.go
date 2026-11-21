@@ -347,6 +347,9 @@ func TestTheDraftSurvivesTheStreamingAndSettlesInTheFooter(t *testing.T) {
 	if prompts := server.waitPrompts(t, 2); prompts[1] != "draft more" {
 		t.Fatalf("the next prompt was %q, want the draft intact", prompts[1])
 	}
+	// The second run settles on its own, and the quit waits for it, the
+	// way a command typed while a run works waits for the next prompt.
+	waitTimes(t, term, "✓ end_turn", 2)
 	term.press("/quit\r")
 	select {
 	case got := <-code:
@@ -676,7 +679,10 @@ func TestAMultilineDraftStaysInTheFooter(t *testing.T) {
 		t.Fatalf("the submitted line is %q, want the draft whole", prompts[0])
 	}
 	// The echo of a two-row draft scrolls fast on a twelve-row terminal,
-	// so the send is what the wait asserts.
+	// so the settle is what the wait asserts. It is also what the quit
+	// waits on: a command typed while a run works waits for the next
+	// prompt.
+	waitScreen(t, term, "✓ end_turn")
 	waitBottom(t, term)
 	term.press("/quit\r")
 	select {
