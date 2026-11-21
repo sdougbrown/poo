@@ -67,7 +67,7 @@ func (t *Tool) language() string {
 func (t *Tool) Spec() poo.ToolSpec {
 	script := `"A Starlark script. It can call(name, args), gather([(name, args), ...]), print(x) and exit(value)."`
 	if t.language() == "quickjs" {
-		script = `"A JavaScript function body for QuickJS. Use call(name, args), gather([[name, args], ...]), print(x), and return a JSON value."`
+		script = `"The body of an async JavaScript function for QuickJS. Call your tools as await tools.<name>(args); use gather([[name, args], ...]) to batch, print(value) to output, and return a JSON value."`
 	}
 	return poo.ToolSpec{
 		Name: "codemode",
@@ -139,6 +139,7 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 	result, err := t.Engine.Run(ctx, codemode.RunOptions{
 		Script: p.script,
 		Nested: env.Nested,
+		Tools:  env.Tools,
 		Limits: limits,
 	})
 	text := resultText(result, err)

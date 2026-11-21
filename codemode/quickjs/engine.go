@@ -105,17 +105,28 @@ func (*Engine) Run(ctx context.Context, opts codemode.RunOptions) (result codemo
 		output.Print(line, limits.OutputCapChars)
 		return js.NewUndefined(), nil
 	})
+	// The wrapper serves both dispatch styles from this one bridge: a
+	// single call is a batch of one, so a named call and a gather entry
+	// are validated the same way.
 
-	// qjs.Eval pumps QuickJS's event loop. Use it for trusted setup only;
-	// InvokeJS never runs pending jobs, including dynamic imports.
-	entry, err := js.Eval("codemode.js", qjs.Code(wrapper))
+	// The script runs through one Eval with the async flag. QuickJS's
+	// own loop pump drives the awaited calls, and the deadline closes
+	// the guest when a script never settles.
+	// json.Marshal cannot fail for a string or a list of strings, so
+	// these two encodings carry no error path.
+	names, _ := json.Marshal(toolNames(opts.Tools))
+	source, _ := json.Marshal(opts.Script)
+	value, err := js.Eval("codemode.js", qjs.Code(wrapper+"("+string(names)+")("+string(source)+")"), qjs.FlagAsync())
 	if err != nil {
-		return result, fmt.Errorf("could not prepare the QuickJS runtime: %w", err)
+		return result, fmt.Errorf("the script failed: %w", err)
 	}
-	defer entry.Free()
-	source := js.NewString(opts.Script)
-	defer source.Free()
-	value, err := entry.InvokeJS("run", source)
+	// The async eval hands back the script's pending promise. Awaiting
+	// it runs QuickJS's own loop on this goroutine, so every host
+	// crossing stays single-threaded. A promise that never settles is
+	// stopped by the deadline closing the guest. The promise itself is
+	// left for the runtime's close: freeing it after the await traps
+	// the guest.
+	value, err = value.Await()
 	if err != nil {
 		return result, fmt.Errorf("the script failed: %w", err)
 	}
@@ -132,6 +143,16 @@ func (*Engine) Run(ctx context.Context, opts codemode.RunOptions) (result codemo
 	return result, nil
 }
 
+// toolNames lists the session's tools in offer order, for the wrapper's
+// `tools` object.
+func toolNames(infos []poo.ToolInfo) []string {
+	names := make([]string, len(infos))
+	for i, info := range infos {
+		names[i] = info.Name
+	}
+	return names
+}
+
 // newVM builds a guest whose filesystem mount is inert.
 func newVM(runCtx context.Context) (*qjs.Runtime, error) {
 	return qjs.New(qjs.Option{
@@ -140,8 +161,10 @@ func newVM(runCtx context.Context) (*qjs.Runtime, error) {
 		// qjs always mounts CWD at the guest's root. It offers no way to
 		// mount nothing, so the path points below the null device, where
 		// no host directory exists. Any file operation traps the runtime
-		// instead of opening a host file. The wrapper's globals deletion
-		// is the boundary the model sees; this mount backs it.
+		// instead of opening a host file. The wrapper deletes the globals
+		// a script would reach, and an async script can still import the
+		// compiled-in modules: the inert mount is what holds, and the
+		// deletion is not a barrier in its place.
 		CWD:          filepath.Join(os.DevNull, "poo-codemode"),
 		MemoryLimit:  64 << 20,
 		MaxStackSize: 256 << 10,
@@ -162,7 +185,12 @@ func nestedCall(ctx context.Context, nested poo.NestedCaller, calls []poo.Nested
 	return nested.Call(ctx, calls)
 }
 
-const wrapper = `(() => {
+// The wrapper deletes the host's surface, then runs the script as the
+// body of an async function whose only powers are the tool bridges. The
+// session's tool names are injected as the NAMES argument, so the model
+// calls `await tools.<name>(args)` instead of guessing names into a
+// string dispatch.
+const wrapper = `((NAMES) => async (source) => {
   const tools = globalThis.__pooTools, log = globalThis.__pooPrint;
   for (const name of ["__pooTools", "__pooPrint", "std", "os", "bjson",
     "print", "console", "scriptArgs", "setTimeout", "setInterval", "clearTimeout",
@@ -176,28 +204,37 @@ const wrapper = `(() => {
     if (!active) throw new Error("codemode scripts cannot call tools after returning");
     return decode(tools(encode(batch)));
   };
+  const named = {};
+  for (const name of NAMES) {
+    // One host crossing, as for a gather entry; the promise keeps the
+    // awaiting surface while the call itself is already done.
+    named[name] = (args) => new Promise((resolve, reject) => {
+      try {
+        resolve(gather([[name, args]])[0]);
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
   const call = (name, args = null) => gather([[name, args]])[0];
   const print = (value) => { if (active) log(text(value)); };
-  const compile = Function, promise = Promise;
-  return {run(source) {
-    const program = compile("call", "gather", "print", '"use strict";\n' + source);
-    active = true;
-    try {
-      const value = program(call, gather, print);
-      active = false;
-      if (value instanceof promise) throw new Error("codemode scripts must be synchronous");
-      // A script that returns nothing is a clean no-value result, like a
-      // Starlark script that never exits: undefined passes to the host.
-      const encoded = value === undefined ? undefined : encode(value);
-      // The guest measures its own return value, so an oversized one never
-      // crosses into host memory: the host would copy it several times.
-      if (typeof encoded === "string" && encoded.length > 1048576) throw new Error("codemode: the return value is over 1048576 characters; print a summary instead");
-      return encoded;
-    } finally {
-      active = false;
-    }
-  }};
-})()`
+  const compile = Object.getPrototypeOf(async function () {}).constructor;
+  const program = compile("call", "gather", "print", "tools", '"use strict";\n' + source);
+  active = true;
+  try {
+    const value = await program(call, gather, print, named);
+    active = false;
+    // A script that returns nothing is a clean no-value result, like a
+    // Starlark script that never exits: undefined passes to the host.
+    const encoded = value === undefined ? undefined : encode(value);
+    // The guest measures its own return value, so an oversized one never
+    // crosses into host memory: the host would copy it several times.
+    if (typeof encoded === "string" && encoded.length > 1048576) throw new Error("codemode: the return value is over 1048576 characters; print a summary instead");
+    return encoded;
+  } finally {
+    active = false;
+  }
+})`
 
 func stringArg(this *qjs.This) (string, error) {
 	args := this.Args()

@@ -379,6 +379,9 @@ func TestANestedBatchIsValidatedBeforeItStarts(t *testing.T) {
 		{name: "background request", entry: `worker {"text":"x","background":true}`,
 			want:  `"worker" cannot run in the background as a nested call`,
 			tools: map[string]poo.Tool{"worker": &namedTool{echoTool: echoTool{background: poo.BackgroundAllowed}, name: "worker"}}},
+		{name: "background-only tool", entry: `worker {"text":"x"}`,
+			want:  `"worker" cannot run as a nested call`,
+			tools: map[string]poo.Tool{"worker": &namedTool{echoTool: echoTool{background: poo.BackgroundAlways}, name: "worker"}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			nest := &nestedTool{script: []string{`reader {"text":"one"}`, tc.entry}}
