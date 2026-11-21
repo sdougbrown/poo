@@ -574,6 +574,34 @@ func TestASessionWithoutATransportIsAConstructionError(t *testing.T) {
 	}
 }
 
+// TestASideTransportWithoutItsModelIsAConstructionError covers the
+// side model's pairing: a transport with no model to ask, or a model
+// with no transport to ask, is a construction error, not a session
+// that half-configures its side requests.
+func TestASideTransportWithoutItsModelIsAConstructionError(t *testing.T) {
+	for _, opts := range []poo.Options{
+		{
+			Transport:     pootest.NewTransport(),
+			Model:         poo.ModelInfo{ModelID: "m", ContextLimit: 1024},
+			SideTransport: pootest.NewTransport(),
+		},
+		{
+			Transport: pootest.NewTransport(),
+			Model:     poo.ModelInfo{ModelID: "m", ContextLimit: 1024},
+			SideModel: poo.ModelInfo{ModelID: "side", ContextLimit: 1024},
+		},
+	} {
+		_, err := poo.New(opts)
+		if err == nil {
+			t.Fatal("a half-configured side model was built")
+		}
+		var init *poo.ErrSessionInit
+		if !asSessionInit(err, &init) {
+			t.Fatalf("the error is %T, want an ErrSessionInit", err)
+		}
+	}
+}
+
 // asSessionInit reports that the error is an ErrSessionInit.
 func asSessionInit(err error, target **poo.ErrSessionInit) bool {
 	for err != nil {

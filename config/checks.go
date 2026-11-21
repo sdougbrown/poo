@@ -130,7 +130,7 @@ func (s *Settings) checkValues() error {
 func (s *Settings) checkRoles() error {
 	for name := range s.Roles {
 		switch name {
-		case "chat", "decider":
+		case "chat", "decider", "compaction":
 		default:
 			return &Error{
 				Code:    CodeInvalid,

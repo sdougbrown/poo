@@ -295,6 +295,30 @@ func TestARoleNeedsTheOperation(t *testing.T) {
 	}
 }
 
+// TestTheCompactionRoleNeedsTheChatOperation covers the compaction role's
+// operation: it answers a strategy's own requests, so it needs chat.
+func TestTheCompactionRoleNeedsTheChatOperation(t *testing.T) {
+	settings := localSettings()
+	settings.Models["gemma4"] = catalog.ModelSettings{
+		Endpoint: "grace",
+		ModelID:  "gemma4",
+		Ops:      []poo.Op{poo.OpSystemOne},
+	}
+	settings.Roles = map[string]string{"compaction": "gemma4"}
+	c := catalog.New(catalog.Options{Settings: settings})
+	_, err := c.Role(catalog.RoleCompaction)
+	var op *catalog.OpError
+	if !errors.As(err, &op) {
+		t.Fatalf("the role is %v, want an OpError", err)
+	}
+	if op.Role != catalog.RoleCompaction {
+		t.Errorf("the error names the %q role, want compaction", op.Role)
+	}
+	if len(op.Ops) != 1 || op.Ops[0] != poo.OpChat {
+		t.Errorf("the error names the operations %v, want chat", op.Ops)
+	}
+}
+
 func TestTheChatRoleNeedsTheChatOperation(t *testing.T) {
 	settings := localSettings()
 	settings.Models["gemma4"] = catalog.ModelSettings{

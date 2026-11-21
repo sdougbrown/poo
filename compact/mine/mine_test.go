@@ -333,6 +333,97 @@ func TestTheCarryForwardUpdatesThePriorContext(t *testing.T) {
 	}
 }
 
+// TestAMinedReconstructionRunsWhenTheForkFails covers the fallback: a
+// pointer pass that fails mines without pointers instead of failing the
+// compaction, because the transcript holds what the pass would have
+// named.
+func TestAMinedReconstructionRunsWhenTheForkFails(t *testing.T) {
+	tr := pootest.NewTransport(
+		pootest.Turn{Text: long("TURN-ONE"), Calls: []pootest.Call{{Name: "echo", Arguments: json.RawMessage(`{"text":"one"}`)}}},
+		pootest.Turn{Text: long("TURN-TWO"), Calls: []pootest.Call{{Name: "echo", Arguments: json.RawMessage(`{"text":"two"}`)}}},
+		pootest.Turn{Text: "## Goal\nfinish the task\n\n## Next Steps\n1. answer"},
+		pootest.Turn{Text: "the final answer"},
+	)
+	// No fork turns: the pointer pass fails with an exhausted script.
+	s, sink := session(t, tr, mine.Options{Ratio: 0.05, KeepRecentTokens: 1},
+		map[string]poo.Tool{"echo": &echoTool{}}, []string{"echo"})
+
+	run(t, s)
+
+	text := replacementText(t, sink)
+	if !strings.Contains(text, "finish the task") {
+		t.Errorf("the replacement is %q, want the reconstruction in it", text)
+	}
+	asks := askRequests(tr.Requests())
+	if len(asks) != 1 {
+		t.Fatalf("the transport holds %d strategy requests, want 1", len(asks))
+	}
+	if ask := asks[0].Messages[1].Text(); strings.Contains(ask, "</pointers>") {
+		t.Errorf("the mining request is %q, want it to carry no pointers", ask)
+	}
+}
+
+// TestTheMiningRequestUsesTheSideModel covers the compaction role: a
+// session with a side transport asks the mining request there, while
+// the fork stays on the session's own transport, because a fork
+// re-sends the last main request and only that transport can stand in
+// for it.
+func TestTheMiningRequestUsesTheSideModel(t *testing.T) {
+	tr := pootest.NewTransport(
+		pootest.Turn{Text: long("TURN-ONE"), Calls: []pootest.Call{{Name: "echo", Arguments: json.RawMessage(`{"text":"one"}`)}}},
+		pootest.Turn{Text: long("TURN-TWO"), Calls: []pootest.Call{{Name: "echo", Arguments: json.RawMessage(`{"text":"two"}`)}}},
+		pootest.Turn{Text: "the final answer"},
+	)
+	tr.SetForkTurns(pootest.Turn{Text: "- the pointers"})
+	side := pootest.NewTransport(
+		pootest.Turn{Text: "## Goal\nfinish the task\n\n## Next Steps\n1. answer"},
+	)
+	sink := pootest.NewSink()
+	s, err := poo.New(poo.Options{
+		Transport:     tr,
+		SideTransport: side,
+		SideModel:     poo.ModelInfo{ModelID: "side-model", ContextLimit: 20000},
+		Tools:         map[string]poo.Tool{"echo": &echoTool{}},
+		ToolOrder:     []string{"echo"},
+		Sink:          sink,
+		SessionID:     "s1",
+		Model:         poo.ModelInfo{ModelID: "test-model", ContextLimit: 20000},
+		SystemPrompt:  "the system prompt",
+		Compactor:     mine.New(mine.Options{Ratio: 0.05, KeepRecentTokens: 1}),
+	})
+	if err != nil {
+		t.Fatalf("building the session: %v", err)
+	}
+	t.Cleanup(func() { s.Close() })
+
+	run(t, s)
+
+	// The mining request went to the side model.
+	sideReqs := side.Requests()
+	if len(sideReqs) != 1 {
+		t.Fatalf("the side transport holds %d requests, want 1", len(sideReqs))
+	}
+	if sideReqs[0].Model != "side-model" {
+		t.Errorf("the side request names the model %q, want side-model", sideReqs[0].Model)
+	}
+	if ask := sideReqs[0].Messages[1].Text(); !strings.Contains(ask, "<pointers>") {
+		t.Errorf("the mining request is %q, want it to carry the pointers", ask)
+	}
+
+	// The fork stayed on the session's own transport.
+	if forks := tr.Forks(); len(forks) != 1 {
+		t.Fatalf("the main transport holds %d forks, want 1", len(forks))
+	}
+	if side.Forks() != nil && len(side.Forks()) != 0 {
+		t.Errorf("the side transport holds %d forks, want none", len(side.Forks()))
+	}
+
+	// The reconstruction the side model wrote reached the run's view.
+	if text := replacementText(t, sink); !strings.Contains(text, "finish the task") {
+		t.Errorf("the replacement is %q, want the reconstruction in it", text)
+	}
+}
+
 // TestAMinedReconstructionTheLimitCutShortIsRefused covers the guard:
 // a reconstruction the output limit cut short is not a context, so the
 // compaction is refused and the run carries on uncompacted.

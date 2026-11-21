@@ -22,6 +22,7 @@ func fieldsOf(s *Settings) SettingsFields {
 
 	f.RolesChat = text(s.Roles["chat"])
 	f.RolesDecider = text(s.Roles["decider"])
+	f.RolesCompaction = text(s.Roles["compaction"])
 
 	f.DeciderTimeoutMs = count(s.Decider.TimeoutMS)
 

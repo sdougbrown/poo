@@ -25,6 +25,7 @@
     "system_prompt.replace": { "isEmpty": "string" },
     "system_prompt.append": { "isEmpty": "string" },
     "system_prompt.remove": { "isEmpty": "array" },
+    "roles.compaction": { "isEmpty": "string" },
     "context.strategy": { "isEmpty": "string" },
     "context.handoff.ratio": { "isEmpty": "number" },
     "context.handoff.max_tokens": { "isEmpty": "number" },

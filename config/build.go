@@ -1757,6 +1757,22 @@ func (r *Runtime) resolveSession(opts BuildOptions, workingDir string) error {
 		}
 		r.Options.Transport = transport
 	}
+	// The compaction role gives the strategies' own requests a model of
+	// their own. A fork stays on the chat model, because it re-sends
+	// the last main request and only the chat model's transport can
+	// stand in for that; the ask is what moves.
+	if _, ok := settings.Roles["compaction"]; ok {
+		model, err := r.Catalog.Role(catalog.RoleCompaction)
+		if err != nil {
+			return err
+		}
+		transport, err := r.Transport(model)
+		if err != nil {
+			return err
+		}
+		r.Options.SideTransport = transport
+		r.Options.SideModel = model
+	}
 	// The decider is the session's as well as the policy's: the tools over
 	// a cli registry ask it which entries fit, and a session without one
 	// lists the whole catalog instead.
