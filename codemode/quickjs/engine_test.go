@@ -120,7 +120,11 @@ const first = tools.read(args);
 args.path = "second";
 const second = tools.read(args);
 args.path = "write";
-const batch = parallel([["write", args], ["write", {path: "other"}]]);
+const batch = parallel(() => {
+  const write = tools.write(args);
+  const other = tools.write({path: "other"});
+  return [other, write];
+});
 if (!(batch instanceof Promise)) throw new Error("parallel did not return a promise");
 args.path = "last";
 const last = tools.read(args);
@@ -128,13 +132,13 @@ const legacy = call("read", {path: "legacy"});
 const [a, b, writes, c] = await Promise.all([first, second, batch, last]);
 return [a.text, b.text, writes.map(r => r.text), c.text, legacy.text];
 `,
-		Tools:  []poo.ToolInfo{{Name: "read"}},
+		Tools:  []poo.ToolInfo{{Name: "read"}, {Name: "write"}},
 		Nested: parallelNested{nested: record("default"), parallel: record("parallel")},
 	})
-	if err != nil || res.Calls != 6 || string(res.Value) != `["first","second",["write","other"],"last","legacy"]` {
+	if err != nil || res.Calls != 6 || string(res.Value) != `["first","second",["other","write"],"last","legacy"]` {
 		t.Fatalf("run = %+v, %v", res, err)
 	}
-	want := [][]string{{"default", "first", "second"}, {"parallel", "write", "other"}, {"default", "last"}, {"default", "legacy"}}
+	want := [][]string{{"default", "first", "second"}, {"parallel", "other", "write"}, {"default", "last"}, {"default", "legacy"}}
 	if !slices.EqualFunc(batches, want, slices.Equal[[]string]) {
 		t.Fatalf("batches = %v, want %v", batches, want)
 	}
@@ -157,7 +161,8 @@ return results.every(r => r.status === "rejected" && String(r.reason).includes("
 
 func TestExplicitParallelDoesNotFallBackToOrdinaryScheduling(t *testing.T) {
 	_, err := quickjs.New().Run(t.Context(), codemode.RunOptions{
-		Script: `await parallel([["write", {}]]);`,
+		Script: `await parallel(() => [tools.write({})]);`,
+		Tools:  []poo.ToolInfo{{Name: "write"}},
 		Nested: nested(noCalls),
 	})
 	if err == nil || !strings.Contains(err.Error(), "does not support explicit parallel batches") {
@@ -241,31 +246,39 @@ func TestQuickJSRunawayStopsAndNextScriptRuns(t *testing.T) {
 	}
 }
 
-// TestParallelRefusesAnEntryItCannotRead: a malformed parallel batch
-// fails the run before any call reaches the seam, and the failure names
-// the entry it could not read.
-func TestParallelRefusesAnEntryItCannotRead(t *testing.T) {
-	for _, test := range []struct{ script, want string }{
-		{`await parallel("read");`, "tool batch expects an array"},
-		{`await parallel(["read"]);`, "is not a [name, args] pair"},
-		{`await parallel([["read"]]);`, "is not a [name, args] pair"},
-		{`await parallel([[1, {}]]);`, "needs a tool name"},
-		{`await parallel([["", {}]]);`, "needs a tool name"},
+func TestInvalidParallelCallbacksDoNotDispatch(t *testing.T) {
+	for _, test := range []struct{ name, callback, want string }{
+		{"async", `async () => { await 0; return [tools.write({})]; }`, "synchronous callback"},
+		{"throws", `() => { tools.write({}); throw new Error("discard batch"); }`, "discard batch"},
+		{"omits call", `() => { tools.write({}); return []; }`, "exactly once"},
+		{"duplicates call", `() => { const a = tools.write({}); tools.write({}); return [a, a]; }`, "exactly once"},
+		{"foreign promise", `() => { tools.write({}); return [Promise.resolve()]; }`, "exactly once"},
+		{"returns promise", `() => Promise.all([tools.write({})])`, "return an array"},
+		{"synchronous call", `() => [call("write", {})]`, "use named tools"},
+		{"nested batch", `() => [parallel(() => [tools.write({})])]`, "cannot be nested"},
 	} {
-		t.Run(test.script, func(t *testing.T) {
-			handed := 0
-			_, err := quickjs.New().Run(t.Context(), codemode.RunOptions{
-				Script: test.script,
-				Nested: nested(func(context.Context, []poo.NestedCall) ([]poo.NestedResult, error) {
-					handed++
-					return nil, nil
-				}),
+		t.Run(test.name, func(t *testing.T) {
+			var handed []string
+			record := nested(func(_ context.Context, calls []poo.NestedCall) ([]poo.NestedResult, error) {
+				for _, call := range calls {
+					handed = append(handed, call.Tool)
+				}
+				return make([]poo.NestedResult, len(calls)), nil
 			})
-			if err == nil || !strings.Contains(err.Error(), test.want) {
-				t.Fatalf("run error = %v; want %q", err, test.want)
+			res, err := quickjs.New().Run(t.Context(), codemode.RunOptions{
+				Script: `try { await parallel(` + test.callback + `); } catch (error) {
+  await tools.read({});
+  return String(error);
+}
+return "batch unexpectedly succeeded";`,
+				Tools:  []poo.ToolInfo{{Name: "read"}, {Name: "write"}},
+				Nested: parallelNested{nested: record, parallel: record},
+			})
+			if err != nil || !strings.Contains(string(res.Value), test.want) {
+				t.Fatalf("run = %+v, %v; want %q", res, err, test.want)
 			}
-			if handed != 0 {
-				t.Fatalf("the seam received %d batches", handed)
+			if !slices.Equal(handed, []string{"read"}) {
+				t.Fatalf("tools dispatched = %v, want only the read after recovery", handed)
 			}
 		})
 	}
@@ -280,14 +293,14 @@ func TestQuickJSBoundsGuestExecution(t *testing.T) {
 		{"deadline", `while (true) {}`, codemode.Limits{TimeoutS: 1}, "deadline exceeded"},
 		{"memory", `return new ArrayBuffer(128 * 1024 * 1024).byteLength;`, codemode.Limits{}, "out of memory"},
 		{"step budget", `return 1;`, codemode.Limits{ExecSteps: 100}, "does not support the exec_steps limit"},
-		{"batch width", `await parallel(Array.from({length: 17}, () => ["read", {}]));`, codemode.Limits{}, "tool batch takes at most"},
+		{"batch width", `await parallel(() => Array.from({length: 17}, () => tools.read({})));`, codemode.Limits{}, "tool batch takes at most"},
 		{"oversized return", `return "x".repeat(2097152);`, codemode.Limits{}, "print a summary instead"},
 		{"call after return", `return {toJSON() { call("read", {}); return 1; }};`, codemode.Limits{}, "after returning"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
-			_, err := quickjs.New().Run(ctx, codemode.RunOptions{Script: test.script, Nested: nested(noCalls), Limits: test.limits})
+			_, err := quickjs.New().Run(ctx, codemode.RunOptions{Script: test.script, Tools: []poo.ToolInfo{{Name: "read"}}, Nested: nested(noCalls), Limits: test.limits})
 			if err == nil || !strings.Contains(err.Error(), test.want) || ctx.Err() != nil {
 				t.Fatalf("run error = %v; want %q before parent timeout", err, test.want)
 			}

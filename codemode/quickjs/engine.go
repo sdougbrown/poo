@@ -206,7 +206,11 @@ const wrapper = `((NAMES) => async (source) => {
     if (!delete globalThis[name]) throw new Error("could not remove " + name);
   }
   const encode = JSON.stringify, decode = JSON.parse, text = String, ToolPromise = Promise;
-  let active = false, pending;
+  const all = ToolPromise.all.bind(ToolPromise), rejected = ToolPromise.reject.bind(ToolPromise);
+  const observe = Function.prototype.call.bind(ToolPromise.prototype.then);
+  const isArray = Array.isArray, prototypeOf = Object.getPrototypeOf;
+  const asyncPrototype = prototypeOf(async function () {});
+  let active = false, pending, collecting;
   const requireActive = () => {
     if (!active) throw new Error("codemode scripts cannot call tools after returning");
   };
@@ -214,11 +218,11 @@ const wrapper = `((NAMES) => async (source) => {
     requireActive();
     return decode(batchCall(raw, parallel));
   };
-  const runNamed = (calls) => {
+  const dispatch = ({calls, parallel: overlap}) => {
     try {
       let raw = "[";
       for (let i = 0; i < calls.length; i++) raw += (i ? "," : "") + calls[i].raw;
-      const results = runBatch(raw + "]", false);
+      const results = runBatch(raw + "]", overlap);
       for (let i = 0; i < calls.length; i++) calls[i].resolve(results[i]);
     } catch (error) {
       for (let i = 0; i < calls.length; i++) calls[i].reject(error);
@@ -227,7 +231,7 @@ const wrapper = `((NAMES) => async (source) => {
   const flush = () => {
     const batches = pending;
     pending = undefined;
-    for (let i = 0; i < batches.length; i++) batches[i].run();
+    for (let i = 0; i < batches.length; i++) dispatch(batches[i]);
   };
   const schedule = async (batches) => {
     await 0;
@@ -237,42 +241,82 @@ const wrapper = `((NAMES) => async (source) => {
     if (!pending) schedule(pending = []);
     pending[pending.length] = batch;
   };
-  const parallel = (batch) => new ToolPromise((resolve, reject) => {
+  const collectParallel = async (build) => {
     requireActive();
-    const raw = encode(batch);
-    enqueue({calls: null, run: () => {
-      try {
-        resolve(runBatch(raw, true));
-      } catch (error) {
-        reject(error);
+    if (typeof build !== "function" || prototypeOf(build) === asyncPrototype) {
+      throw new Error("parallel expects a synchronous callback");
+    }
+    const captured = collecting = new Map();
+    const calls = [], promises = [], seen = new Set();
+    try {
+      const returned = build();
+      if (!isArray(returned)) {
+        if (returned instanceof ToolPromise) observe(returned, undefined, () => {});
+        throw new Error("the parallel callback must return an array of tool promises");
       }
-    }});
-  });
+      for (let i = 0; i < returned.length; i++) {
+        const promise = returned[i];
+        const call = captured.get(promise);
+        if (!call || seen.has(promise)) {
+          throw new Error("the parallel callback must return each tool promise it creates exactly once");
+        }
+        seen.add(promise);
+        calls[i] = call;
+        promises[i] = promise;
+      }
+      if (calls.length !== captured.size) {
+        throw new Error("the parallel callback must return each tool promise it creates exactly once");
+      }
+    } catch (error) {
+      for (const [promise, call] of captured) {
+        observe(promise, undefined, () => {});
+        call.reject(error);
+      }
+      throw error;
+    } finally {
+      collecting = undefined;
+    }
+    if (calls.length) enqueue({calls, parallel: true});
+    return all(promises);
+  };
+  const parallel = (build) => {
+    if (collecting) throw new Error("parallel callbacks cannot be nested");
+    return collectParallel(build);
+  };
   const named = Object.create(null);
   for (const name of NAMES) {
-    named[name] = (args) => new ToolPromise((resolve, reject) => {
-      requireActive();
-      // Snapshot arguments at submission, not at dispatch.
-      const raw = encode([name, args]);
-      // Coalesce only adjacent named submissions. An explicit batch
-      // between them keeps its place in the queue.
-      let calls = pending?.[pending.length - 1]?.calls;
-      if (!calls) {
-        calls = [];
-        enqueue({calls, run: () => runNamed(calls)});
+    named[name] = (args) => {
+      let raw;
+      try {
+        requireActive();
+        // Snapshot arguments at submission, not at dispatch.
+        raw = encode([name, args]);
+      } catch (error) {
+        if (collecting) throw error;
+        return rejected(error);
       }
-      calls[calls.length] = {raw, resolve, reject};
-    });
+      let call;
+      const promise = new ToolPromise((resolve, reject) => { call = {raw, resolve, reject}; });
+      if (collecting) {
+        collecting.set(promise, call);
+      } else {
+        const last = pending?.[pending.length - 1];
+        if (last && !last.parallel) last.calls[last.calls.length] = call;
+        else enqueue({calls: [call], parallel: false});
+      }
+      return promise;
+    };
   }
   const call = (name, args = null) => {
     requireActive();
+    if (collecting) throw new Error("use named tools inside the parallel callback");
     const raw = encode([[name, args]]);
     // The synchronous helper cannot overtake queued batches.
     if (pending) flush();
     return runBatch(raw, false)[0];
   };
   const print = (value) => { if (active) log(text(value)); };
-  const compile = Object.getPrototypeOf(async function () {}).constructor;
+  const compile = asyncPrototype.constructor;
   const program = compile("call", "parallel", "print", "tools", '"use strict";\n' + source);
   active = true;
   try {

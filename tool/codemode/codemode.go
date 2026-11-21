@@ -67,7 +67,7 @@ func (t *Tool) language() string {
 func (t *Tool) Spec() poo.ToolSpec {
 	script := `"A Starlark script. It can call(name, args), gather([(name, args), ...]), print(x) and exit(value)."`
 	if t.language() == "quickjs" {
-		script = `"The body of an async JavaScript function for QuickJS. Call tools with await tools.<name>(args). Use Promise.all for parallel reads or await parallel([[name, args], ...]) to overlap independent writes. Use print(value) to output, and return a JSON value."`
+		script = `"The body of an async JavaScript function for QuickJS. Call tools with await tools.<name>(args). Use Promise.all for parallel reads. Use await parallel(() => [tools.x(args), ...]) to overlap independent writes. The callback must be synchronous and return each tool promise exactly once. Use print(value) to output, and return a JSON value."`
 	}
 	return poo.ToolSpec{
 		Name: "codemode",
