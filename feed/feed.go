@@ -32,6 +32,7 @@ import (
 
 	"github.com/sdougbrown/cli-registry"
 	"github.com/sdougbrown/cli-registry/manifest"
+	"github.com/sdougbrown/poo/exec"
 )
 
 // The idle policies a feed's manifest may name. An entry without one
@@ -288,8 +289,11 @@ func readFeed(path, name string, raw json.RawMessage) (Spec, error) {
 		envs = append(envs, cliregistry.EnvBinding{Name: entry, Value: value})
 	}
 	for _, binding := range envs {
-		if binding.Reference && binding.Scope == cliregistry.SessionScope && binding.From != "id" {
-			return Spec{}, fmt.Errorf("feed manifest %s: feed %q has an unknown session reference %q, want \"session:id\"", path, name, binding.Scope+":"+binding.From)
+		if !binding.Reference || binding.Scope == "" {
+			continue
+		}
+		if err := exec.ValidSessionReference(binding.Scope, binding.From); err != nil {
+			return Spec{}, fmt.Errorf("feed manifest %s: feed %q: %w", path, name, err)
 		}
 	}
 	return Spec{
