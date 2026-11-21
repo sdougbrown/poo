@@ -37,6 +37,10 @@ type RunOptions struct {
 	// script makes, in batches, and every call it makes is judged and
 	// recorded by the session.
 	Nested poo.NestedCaller
+	// Tools are the session's tools, in offer order. An engine that
+	// surfaces the tools to the script by name uses the list; one that
+	// takes names as strings ignores it.
+	Tools []poo.ToolInfo
 	// Limits bound the run.
 	Limits Limits
 }

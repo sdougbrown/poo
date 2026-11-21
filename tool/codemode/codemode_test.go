@@ -38,12 +38,14 @@ func (noopNested) Call(ctx context.Context, calls []poo.NestedCall) ([]poo.Neste
 	return make([]poo.NestedResult, len(calls)), nil
 }
 
-// env builds the environment a call runs in, with the nested seam.
-func env(nested poo.NestedCaller, settings poo.ToolSettings) poo.ToolEnv {
+// env builds the environment a call runs in, with the nested seam and
+// the tools the session offers.
+func env(nested poo.NestedCaller, settings poo.ToolSettings, tools ...poo.ToolInfo) poo.ToolEnv {
 	return poo.ToolEnv{
 		PrepareEnv: poo.PrepareEnv{WorkingDir: "/tmp"},
 		Handle:     "r7",
 		Nested:     nested,
+		Tools:      tools,
 		Settings:   settings,
 	}
 }
@@ -72,7 +74,7 @@ func TestTheToolRunsTheScriptOnItsEngine(t *testing.T) {
 		Calls:  3,
 	}}
 	tool := toolcodemode.New(engine)
-	res, err := tool.Call(context.Background(), prepare(t, "print('hi')"), env(noopNested{}, poo.ToolSettings{}))
+	res, err := tool.Call(context.Background(), prepare(t, "print('hi')"), env(noopNested{}, poo.ToolSettings{}, poo.ToolInfo{Name: "read", Class: poo.ClassReadOnly}))
 	if err != nil {
 		t.Fatalf("calling: %v", err)
 	}
@@ -89,6 +91,9 @@ func TestTheToolRunsTheScriptOnItsEngine(t *testing.T) {
 	}
 	if engine.opts.Nested == nil {
 		t.Error("the engine got no nested caller")
+	}
+	if len(engine.opts.Tools) != 1 || engine.opts.Tools[0].Name != "read" {
+		t.Errorf("the engine got the tools %+v, want the session's read tool", engine.opts.Tools)
 	}
 }
 
@@ -272,7 +277,7 @@ func TestTheGuidanceFollowsTheEngine(t *testing.T) {
 		schema, guide string
 	}{
 		{"starlark", starlark.New(), "A Starlark script", "Starlark"},
-		{"quickjs", quickjs.New(), "A JavaScript function body", "QuickJS"},
+		{"quickjs", quickjs.New(), "The body of an async JavaScript function", "QuickJS"},
 		{"unnamed engine", &fakeEngine{}, "A Starlark script", "Starlark"},
 	} {
 		t.Run(test.name, func(t *testing.T) {

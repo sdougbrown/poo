@@ -28,13 +28,13 @@ func TestQuickJSReportsOnlyWhatTheScriptKeeps(t *testing.T) {
 	var batches [][]poo.NestedCall
 	res, err := quickjs.New().Run(t.Context(), codemode.RunOptions{
 		Script: `
-const r = call("read", {path: "input.txt"});
+const r = await tools.read({path: "input.txt"});
 const batch = gather([["grep", {pattern: JSON.parse(r.structured).word}], ["blocked", {}]]);
-Promise.resolve().then(() => call("late", {}));
 print("日本語日本語");
 return {matches: batch[0].text.split("\n").length, denied: batch[1].is_error};
 `,
 		Limits: codemode.Limits{OutputCapChars: 3},
+		Tools:  []poo.ToolInfo{{Name: "read"}, {Name: "grep"}, {Name: "blocked"}},
 		Nested: nested(func(_ context.Context, calls []poo.NestedCall) ([]poo.NestedResult, error) {
 			batches = append(batches, calls)
 			if len(batches) == 1 && len(calls) == 1 {
@@ -53,6 +53,74 @@ return {matches: batch[0].text.split("\n").length, denied: batch[1].is_error};
 		batches[0][0].Tool != "read" || string(batches[0][0].Arguments) != `{"path":"input.txt"}` ||
 		batches[1][0].Tool != "grep" || string(batches[1][0].Arguments) != `{"pattern":"needle"}` || batches[1][1].Tool != "blocked" {
 		t.Fatalf("nested batches = %+v", batches)
+	}
+}
+
+// TestTheAwaitedCallsNameTheTools covers the surface the spike exists
+// for: the session's tools arrive as named properties, a chain of
+// awaited calls reads one call's result to decide the next, and each
+// awaited call reaches the seam as its own batch.
+func TestTheAwaitedCallsNameTheTools(t *testing.T) {
+	var batches [][]poo.NestedCall
+	res, err := quickjs.New().Run(t.Context(), codemode.RunOptions{
+		Script: `
+const first = await tools.read({});
+const second = await tools[first.is_error ? "blocked" : "grep"]({word: JSON.parse(first.structured).k});
+return [first.tool, second.tool, second.text];
+`,
+		Tools: []poo.ToolInfo{{Name: "read"}, {Name: "grep"}, {Name: "blocked"}},
+		Nested: nested(func(_ context.Context, calls []poo.NestedCall) ([]poo.NestedResult, error) {
+			batches = append(batches, calls)
+			if calls[0].Tool == "read" {
+				return []poo.NestedResult{{Tool: "read", Structured: json.RawMessage(`{"k":1}`)}}, nil
+			}
+			return []poo.NestedResult{{Tool: calls[0].Tool, Text: "the grep text"}}, nil
+		}),
+	})
+	if err != nil || string(res.Value) != `["read","grep","the grep text"]` {
+		t.Fatalf("run = %+v, %v", res, err)
+	}
+	if len(batches) != 2 || batches[0][0].Tool != "read" || batches[1][0].Tool != "grep" ||
+		string(batches[1][0].Arguments) != `{"word":1}` {
+		t.Fatalf("nested batches = %+v", batches)
+	}
+}
+
+// TestAnAwaitThatNeverSettlesStopsAtTheDeadline covers the async bound:
+// the run blocks inside the guest's own loop, and the deadline closing
+// the guest is what stops it.
+func TestAnAwaitThatNeverSettlesStopsAtTheDeadline(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	_, err := quickjs.New().Run(ctx, codemode.RunOptions{
+		Script: `await new Promise(() => {});`,
+		Limits: codemode.Limits{TimeoutS: 1},
+		Nested: nested(noCalls),
+	})
+	if err == nil || !strings.Contains(err.Error(), "deadline exceeded") || ctx.Err() != nil {
+		t.Fatalf("run error = %v; want the deadline before parent timeout", err)
+	}
+}
+
+// TestTheDynamicImportDoorIsOpenButContained pins what the eval's own
+// loop pump reopens: an async script can import the compiled-in
+// modules. Their file operations still meet the inert mount, so the
+// boundary is the mount, and the globals deletion is not a barrier in
+// its place. Closing the door needs a loader hook qjs does not offer.
+func TestTheDynamicImportDoorIsOpenButContained(t *testing.T) {
+	res, err := quickjs.New().Run(t.Context(), codemode.RunOptions{
+		Script: `const std = await import("qjs:std"); return typeof std.open;`,
+		Nested: nested(noCalls),
+	})
+	if err != nil || string(res.Value) != `"function"` {
+		t.Fatalf("the import probe: run = %+v, %v", res, err)
+	}
+	_, err = quickjs.New().Run(t.Context(), codemode.RunOptions{
+		Script: `const std = await import("qjs:std"); std.open("input.txt", "r"); return "read";`,
+		Nested: nested(noCalls),
+	})
+	if err == nil || !strings.Contains(err.Error(), "the QuickJS runtime stopped unexpectedly") {
+		t.Fatalf("the file probe: run error = %v; want the inert mount to stop it", err)
 	}
 }
 
@@ -134,7 +202,6 @@ func TestQuickJSBoundsGuestExecution(t *testing.T) {
 		{"memory", `return new ArrayBuffer(128 * 1024 * 1024).byteLength;`, codemode.Limits{}, "out of memory"},
 		{"step budget", `return 1;`, codemode.Limits{ExecSteps: 100}, "does not support the exec_steps limit"},
 		{"batch width", `gather(Array.from({length: 17}, () => ["read", {}]));`, codemode.Limits{}, "gather takes at most"},
-		{"async result", `return Promise.resolve(42);`, codemode.Limits{}, "scripts must be synchronous"},
 		{"oversized return", `return "x".repeat(2097152);`, codemode.Limits{}, "print a summary instead"},
 		{"call after return", `return {toJSON() { call("read", {}); return 1; }};`, codemode.Limits{}, "after returning"},
 	} {
@@ -168,7 +235,7 @@ func TestQuickJSLeavesNoHostGlobalsInTheScript(t *testing.T) {
 		"std", "os", "bjson", "print", "console", "scriptArgs",
 		"setTimeout", "setInterval", "clearTimeout", "clearInterval",
 		"QJS_PROXY_VALUE", "performance", "Date", "navigator", "gc", "eval",
-		"fetch", "process", "require", "module", "__pooTools", "__pooPrint",
+		"fetch", "process", "require", "module", "__pooTools", "__pooCall", "__pooPrint",
 	} {
 		if slices.Contains(names, danger) {
 			t.Errorf("the script can see the global %q", danger)
@@ -192,6 +259,22 @@ func TestAScriptThatReturnsNothingIsASuccess(t *testing.T) {
 	}
 	if len(res.Output) != 2 || res.Output[0] != "kept line" || res.Output[1] != "dropped" {
 		t.Fatalf("the run's output is %q", res.Output)
+	}
+}
+
+// TestAnAwaitedCallThatFailsFailsTheRun covers the awaited call's error
+// branch: a refused batch is data, but a nested caller that returns an
+// error ends the script with that error instead of leaving it to hang.
+func TestAnAwaitedCallThatFailsFailsTheRun(t *testing.T) {
+	_, err := quickjs.New().Run(t.Context(), codemode.RunOptions{
+		Script: `const r = await tools.read({path: "input.txt"}); return r.text;`,
+		Tools:  []poo.ToolInfo{{Name: "read"}},
+		Nested: nested(func(context.Context, []poo.NestedCall) ([]poo.NestedResult, error) {
+			return nil, errors.New("the seam refused the batch")
+		}),
+	})
+	if err == nil || !strings.Contains(err.Error(), "the seam refused the batch") {
+		t.Fatalf("run error = %v; want the seam's error surfaced", err)
 	}
 }
 
