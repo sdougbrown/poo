@@ -82,10 +82,17 @@ func linkedTools() map[string]config.ToolFactory {
 		"grep": func(config.ToolOptions) poo.Tool { return grep.New() },
 		"edit": func(config.ToolOptions) poo.Tool { return edit.New() },
 		"codemode": func(opts config.ToolOptions) poo.Tool {
-			if opts.CodemodeEngine == "quickjs" {
-				return codemode.New(quickjs.New())
+			// An unset engine is the settings' default one, the same
+			// value the settings check judges limits by. Starlark is the
+			// engine a settings file has to name.
+			engine := opts.CodemodeEngine
+			if engine == "" {
+				engine = config.DefaultCodemodeEngine
 			}
-			return codemode.New(codemodestarlark.New())
+			if engine == "starlark" {
+				return codemode.New(codemodestarlark.New())
+			}
+			return codemode.New(quickjs.New())
 		},
 		"fetch": func(config.ToolOptions) poo.Tool {
 			return fetch.New()
