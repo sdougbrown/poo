@@ -108,7 +108,7 @@ func (s *Session) executeBatch(run *runState, turn int, calls []ToolCall, trunca
 	s.startActivity(run)
 	defer s.endActivity(run)
 
-	s.runBatch(run, turn, plans)
+	s.runBatch(run, turn, plans, false)
 	return processed
 }
 
@@ -117,17 +117,17 @@ func (s *Session) executeBatch(run *runState, turn int, calls []ToolCall, trunca
 //
 // A batch runs to completion: no stop condition skips the remaining
 // calls. Only a cancellation or a fatal error (through the
-// finalization) and an interrupt end it early. The calls run in parallel
-// only when every one of them belongs to a tool declared ReadOnly;
-// otherwise they run sequentially in model order.
+// finalization) and an interrupt end it early. A batch runs in parallel
+// when all calls are read-only or the nested caller explicitly requests
+// parallel execution.
 //
 // The caller has registered the batch and given it its activity:
 // executeBatch opens the turn's activity for a turn's batch, and a
 // nested batch arrives here from the tool that made it, inside the
 // parent call's activity. A nested call is a call of the turn, so the
 // turn's summary stays the model's.
-func (s *Session) runBatch(run *runState, turn int, plans []callPlan) {
-	if s.batchIsParallel(plans) {
+func (s *Session) runBatch(run *runState, turn int, plans []callPlan, parallel bool) {
+	if parallel || s.batchIsParallel(plans) {
 		for i := range plans {
 			if s.runWindingDown(run) || s.interruptPending(run) {
 				break
@@ -346,7 +346,7 @@ func isCompleteJSONObject(raw json.RawMessage) bool {
 // batchIsParallel reports that every call in the batch belongs to a
 // read-only tool.
 //
-// Parallel execution happens only when every call is read-only,
+// By default a batch only runs in parallel when every call is read-only,
 // because a side-effecting call may depend on what ran before it.
 func (s *Session) batchIsParallel(plans []callPlan) bool {
 	if len(plans) < 2 {
@@ -364,7 +364,7 @@ func (s *Session) batchIsParallel(plans []callPlan) bool {
 	return true
 }
 
-// executeParallel runs a read-only batch at the same time.
+// executeParallel runs the calls of a batch concurrently.
 //
 // Permission decisions are complete before the tools run concurrently.
 func (s *Session) executeParallel(run *runState, turn int, plans []callPlan) {
