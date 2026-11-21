@@ -17,11 +17,17 @@ var baseText string
 //go:embed environment.md
 var environmentText string
 
+//go:embed persona.md
+var personaText string
+
 // baseTemplate is the base section's default prose.
 var baseTemplate = MustCompile("base", baseText, nil)
 
 // environmentTemplate is the environment section's default prose.
 var environmentTemplate = MustCompileTrimmed("environment", environmentText, nil)
+
+// personaTemplate is the persona section's default prose.
+var personaTemplate = MustCompileTrimmed("persona", personaText, nil)
 
 // Base returns the base section's default prose.
 //
@@ -35,6 +41,13 @@ func Base() *Template { return baseTemplate }
 // system, the date and the model. Its template renders with the
 // environment.
 func Environment() *Template { return environmentTemplate }
+
+// Persona returns the persona section's default prose.
+//
+// The section is the prompt's first line: it says what the model is. Its
+// template renders with the environment, whose profile names the agent
+// the line describes.
+func Persona() *Template { return personaTemplate }
 
 // Template is a section's prose, compiled.
 //

@@ -30,6 +30,9 @@ type Env struct {
 	Date string
 	// Model is the name of the model the session talks to.
 	Model string
+	// Profile is the name of the profile the session was built with.
+	// The empty name means the session built with no profile.
+	Profile string
 	// Tools are the names of the tools linked into the session, in
 	// offer order.
 	Tools []string
@@ -159,6 +162,14 @@ func (c Content) text(env Env) (string, error) {
 // beside the operating contract every profile shares.
 const ProfileSection = "profile"
 
+// PersonaSection is the name of the prompt's persona section.
+//
+// The section is the prompt's first: it says what the model is, in one
+// line, and renders bare, before the first tags open. A consumer edits
+// it like any other section; the default names the profile the session
+// was built with.
+const PersonaSection = "persona"
+
 // DefaultOrder is the order the sections render in.
 //
 // "tools" stands for the per-tool sections, which are named
@@ -170,7 +181,7 @@ const ProfileSection = "profile"
 //
 // The slice is read-only: a consumer that changes it changes the prompt
 // for everybody.
-var DefaultOrder = []string{"base", "profile", "tools", "catalog", "skills", "environment", "user", "project"}
+var DefaultOrder = []string{"persona", "base", "profile", "tools", "catalog", "skills", "environment", "user", "project"}
 
 // Order returns the order the sections render in.
 //

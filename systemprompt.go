@@ -48,7 +48,9 @@ func systemPromptEnv(opts *Options) prompt.Env {
 		OS:      runtime.GOOS,
 		Date:    time.Now().UTC().Format("2006-01-02"),
 		Model:   opts.Model.ModelID,
-		Tools:   tools,
+		// Profile is the name of the profile the session was built with.
+	Profile: opts.Profile,
+	Tools:   tools,
 		Feeds:   feeds,
 		Variant: opts.PromptVariant,
 	}
@@ -69,6 +71,13 @@ var baseSection = prompt.Base()
 // the operating system, the date and the model it talks to.
 var environmentSection = prompt.Environment()
 
+// personaSection renders the persona section.
+//
+// The section is the prompt's first line: it says what the model is. A
+// raw system prompt takes its place, so a consumer who supplies the
+// base supplies the identity too.
+var personaSection = prompt.Persona()
+
 // buildPrompt assembles the session's prompt builder.
 //
 // The builder holds the core's own section and the sections the linked
@@ -88,6 +97,7 @@ func buildPrompt(opts *Options) *prompt.Builder {
 	if opts.SystemPrompt != "" {
 		b.Set("base", opts.SystemPrompt)
 	} else {
+		b.SetTemplateDefault("persona", personaSection)
 		b.SetTemplateDefault("environment", environmentSection)
 		for _, name := range opts.ToolOrder {
 			tool, ok := opts.Tools[name]

@@ -191,6 +191,26 @@ func TestInsertAfterAToolSectionFollowsTheTools(t *testing.T) {
 	}
 }
 
+// TestThePersonaIsEditableLikeAnySection covers the rule that the
+// persona is a section the consumer owns: a Set replaces the default
+// line, and a Remove takes it away.
+func TestThePersonaIsEditableLikeAnySection(t *testing.T) {
+	b := prompt.New(testEnv())
+	b.SetTemplateDefault("persona", prompt.Persona())
+	b.SetTemplateDefault("base", prompt.Base())
+
+	b.Set("persona", "the custom persona")
+	want := "the custom persona\n\n<base>\nKeep going until the task is done."
+	if !strings.HasPrefix(b.Render(), want) {
+		t.Errorf("the persona did not take the custom text: %q", b.Render())
+	}
+
+	b.Remove("persona")
+	if !strings.HasPrefix(b.Render(), "Keep going until the task is done.") {
+		t.Errorf("the persona did not go away with the remove: %q", b.Render())
+	}
+}
+
 // TestReplaceTakesOverTheWholePrompt covers the replace mutation.
 func TestReplaceTakesOverTheWholePrompt(t *testing.T) {
 	b := prompt.New(testEnv())
