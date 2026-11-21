@@ -28,3 +28,10 @@ func AppendMessages(body []byte, messages []Message, maxTokens int) ([]byte, err
 	}
 	return transport.AppendMessagesToBody(body, encoded, maxTokens)
 }
+
+// WithoutTools rewrites the body's tool choice to none, so the fork's
+// ask cannot be answered with work. A body that carries no tools is
+// returned unchanged.
+func WithoutTools(body []byte) ([]byte, error) {
+	return transport.SetToolChoice(body, json.RawMessage(`{"type":"none"}`))
+}
