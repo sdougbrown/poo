@@ -112,14 +112,10 @@ func (*Engine) Run(ctx context.Context, opts codemode.RunOptions) (result codemo
 	// The script runs through one Eval with the async flag. QuickJS's
 	// own loop pump drives the awaited calls, and the deadline closes
 	// the guest when a script never settles.
-	names, err := json.Marshal(toolNames(opts.Tools))
-	if err != nil {
-		return result, fmt.Errorf("the session's tool names: %w", err)
-	}
-	source, err := json.Marshal(opts.Script)
-	if err != nil {
-		return result, fmt.Errorf("the script: %w", err)
-	}
+	// json.Marshal cannot fail for a string or a list of strings, so
+	// these two encodings carry no error path.
+	names, _ := json.Marshal(toolNames(opts.Tools))
+	source, _ := json.Marshal(opts.Script)
 	value, err := js.Eval("codemode.js", qjs.Code(wrapper+"("+string(names)+")("+string(source)+")"), qjs.FlagAsync())
 	if err != nil {
 		return result, fmt.Errorf("the script failed: %w", err)
