@@ -217,6 +217,7 @@ func TestTheCodemodeSettingsReachTheSession(t *testing.T) {
 	settings, err := config.Parse([]byte(theModelSettings+`
 tools:
   codemode:
+    engine: starlark
     timeout_s: 17
     script_max_bytes: 2048
     output_cap_chars: 4096

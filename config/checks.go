@@ -124,11 +124,18 @@ func (s *Settings) checkValues() error {
 		return err
 	}
 	code := s.Tools.Codemode
-	if code.Engine != nil && *code.Engine == "quickjs" && code.ExecSteps != nil && *code.ExecSteps != 0 {
+	// An unset engine is QuickJS, the codemode tool's default, so a
+	// settings file that names no engine still cannot ask for a limit
+	// the engine it gets does not honor.
+	engine := "quickjs"
+	if code.Engine != nil {
+		engine = *code.Engine
+	}
+	if engine == "quickjs" && code.ExecSteps != nil && *code.ExecSteps != 0 {
 		return &Error{
 			Code:    CodeInvalid,
 			Field:   "tools.codemode.exec_steps",
-			Message: "quickjs does not support the exec_steps limit; use timeout_s",
+			Message: "quickjs does not support the exec_steps limit; use timeout_s, or set tools.codemode.engine to starlark",
 		}
 	}
 	return s.checkFiles()

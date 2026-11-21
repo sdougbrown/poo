@@ -406,6 +406,23 @@ func TestTheDecideAskerNeedsADecider(t *testing.T) {
 	}
 }
 
+// TestTheDefaultCodemodeEngineRefusesExecSteps covers the limit the
+// default engine cannot honor: a settings file that names no engine gets
+// QuickJS, so exec_steps is refused there too, and starlark is the engine
+// that takes it.
+func TestTheDefaultCodemodeEngineRefusesExecSteps(t *testing.T) {
+	_, err := config.Parse([]byte("version: 1\ntools:\n  codemode:\n    exec_steps: 100\n"), config.FormatYAML)
+	if err == nil {
+		t.Fatal("the settings decoded, want the default engine's refusal")
+	}
+	if field, ok := config.FieldOf(err); !ok || field != "tools.codemode.exec_steps" {
+		t.Fatalf("the failure names %q (%v), want tools.codemode.exec_steps", field, err)
+	}
+	if _, err := config.Parse([]byte("version: 1\ntools:\n  codemode:\n    engine: starlark\n    exec_steps: 100\n"), config.FormatYAML); err != nil {
+		t.Fatalf("starlark refused exec_steps: %v", err)
+	}
+}
+
 // TestARuleNeedsOneMatcher covers the rules the settings check by
 // hand: a rule matches on a tool or on a class, never on both.
 func TestARuleNeedsOneMatcher(t *testing.T) {
