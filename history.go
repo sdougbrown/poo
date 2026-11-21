@@ -1,7 +1,10 @@
 package poo
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -10,6 +13,17 @@ import (
 //
 // It is not the model's view and not the raw records: a projection says
 // what happened, in the order it happened, in the shape a client shows.
+
+// RecordReader reads a session's records back, oldest first.
+//
+// It is the read side of RecordSink, and it is optional: a sink that
+// implements it lets the session serve its own history to the tools,
+// which is how the history tool reads what a compaction retained. A
+// reader sees the records the store has written; a sink that buffers
+// makes no promise about the tail.
+type RecordReader interface {
+	Records(ctx context.Context) ([]Record, error)
+}
 
 // The kinds of item a projection holds.
 const (
@@ -239,4 +253,217 @@ func messageText(content []ContentBlock) string {
 		}
 	}
 	return b.String()
+}
+
+// History is the retained read side of the history projection.
+//
+// A compaction changes the model's view, not the store: the turns a
+// strategy replaced are still in the records, and the history is how a
+// tool reads them back. The turn numbers are the session's own,
+// counting from one, so a replacement's marker and the history agree
+// about what "turn 3" means.
+type History interface {
+	// Turns returns the session's turn numbers, oldest first, including
+	// the turns a compaction removed.
+	Turns() ([]int, error)
+	// Turn returns one turn's text, as it was said. A turn the session
+	// never had, or one that holds no message, returns empty text.
+	Turn(turn int) (string, error)
+	// Search returns the retained lines that match the regular
+	// expression, oldest first. A line that matches names the turn it
+	// belongs to.
+	Search(pattern string) ([]HistoryMatch, error)
+}
+
+// HistoryMatch is one line a history search matched.
+type HistoryMatch struct {
+	// Turn is the turn the line belongs to.
+	Turn int
+	// Text is the line, as it was said.
+	Text string
+}
+
+// NewHistory rebuilds the retained history a record chain holds.
+//
+// The chain is read as the restore reads it: the runs in order, and
+// each run's turns in order, numbered continuously across the runs, so
+// the turn numbers are the session's own. A compaction record is left
+// out rather than applied, so the turns the compaction removed are
+// still in what comes back.
+func NewHistory(records []Record) History {
+	// The runs in order, and each run's turn count.
+	var order []string
+	seen := map[string]bool{}
+	turns := map[string]int{}
+	note := func(id string) {
+		if id == "" || seen[id] {
+			return
+		}
+		seen[id] = true
+		order = append(order, id)
+	}
+	for _, rec := range records {
+		switch r := rec.(type) {
+		case *RunStartedRecord:
+			note(r.RunID)
+		case *RunSettledRecord:
+			note(r.RunID)
+			if r.Turns > turns[r.RunID] {
+				turns[r.RunID] = r.Turns
+			}
+		case *MessageRecord:
+			note(r.RunID)
+			if r.Turn > turns[r.RunID] {
+				turns[r.RunID] = r.Turn
+			}
+		case *ToolCallRecord:
+			note(r.RunID)
+			if r.Turn > turns[r.RunID] {
+				turns[r.RunID] = r.Turn
+			}
+		case *ToolResultRecord:
+			note(r.RunID)
+			if r.Turn > turns[r.RunID] {
+				turns[r.RunID] = r.Turn
+			}
+		case *UsageRecord:
+			note(r.RunID)
+		}
+	}
+	offset := 0
+	sessionTurn := map[string]int{}
+	for _, id := range order {
+		for t := 1; t <= turns[id]; t++ {
+			sessionTurn[fmt.Sprintf("%s/%d", id, t)] = offset + t
+		}
+		offset += turns[id]
+	}
+	// The items are the projection's, with the turns renamed to the
+	// session's numbering.
+	items := historyItems(records)
+	for i, item := range items {
+		if turn, ok := sessionTurn[fmt.Sprintf("%s/%d", item.RunID, item.Turn)]; ok {
+			items[i].Turn = turn
+		}
+	}
+	return retainedHistory{items: items}
+}
+
+// retainedHistory is the retained history one record chain holds.
+type retainedHistory struct {
+	items []HistoryItem
+}
+
+// retainedLine renders one history item as the line the retained
+// history holds. The kinds that name what was said are the ones a
+// recovery reads; the run and job boundaries are the client
+// projection's business and are left out.
+func retainedLine(item HistoryItem) (string, bool) {
+	switch item.Type {
+	case HistoryMessage:
+		if item.Role == RoleTool {
+			return "", false
+		}
+		if strings.TrimSpace(item.Text) == "" {
+			return "", false
+		}
+		return "[" + string(item.Role) + "] " + item.Text, true
+	case HistoryToolCall:
+		return fmt.Sprintf("[call %s %s] %s", item.Handle, item.Tool, item.Summary), true
+	case HistoryToolResult:
+		if strings.TrimSpace(item.Text) == "" {
+			return "", false
+		}
+		return fmt.Sprintf("[result %s] %s", item.Handle, item.Text), true
+	}
+	return "", false
+}
+
+// turns collects the turn numbers that hold lines, oldest first.
+func (h retainedHistory) turns() []int {
+	var out []int
+	seen := map[int]bool{}
+	for _, item := range h.items {
+		if item.Turn < 1 || seen[item.Turn] {
+			continue
+		}
+		if _, ok := retainedLine(item); ok {
+			seen[item.Turn] = true
+			out = append(out, item.Turn)
+		}
+	}
+	return out
+}
+
+// Turns returns the turn numbers that hold lines, oldest first.
+func (h retainedHistory) Turns() ([]int, error) {
+	return h.turns(), nil
+}
+
+// Turn returns one turn's lines, as they were said.
+func (h retainedHistory) Turn(turn int) (string, error) {
+	var lines []string
+	for _, item := range h.items {
+		if item.Turn != turn {
+			continue
+		}
+		if l, ok := retainedLine(item); ok {
+			lines = append(lines, l)
+		}
+	}
+	return strings.Join(lines, "\n"), nil
+}
+
+// Search returns the retained lines that match the regular expression.
+func (h retainedHistory) Search(pattern string) ([]HistoryMatch, error) {
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return nil, err
+	}
+	var out []HistoryMatch
+	for _, item := range h.items {
+		l, ok := retainedLine(item)
+		if !ok || !re.MatchString(l) {
+			continue
+		}
+		out = append(out, HistoryMatch{Turn: item.Turn, Text: l})
+	}
+	return out, nil
+}
+
+// lazyHistory is the history a sink reads back per call.
+//
+// The records are read when the tool asks, so a long session does not
+// pay for a rebuild it never reads, and a read that fails is the tool
+// call's failure rather than the session's.
+type lazyHistory struct {
+	reader RecordReader
+}
+
+// Turns returns the turn numbers the reader's records retain.
+func (l lazyHistory) Turns() ([]int, error) {
+	records, err := l.reader.Records(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	return NewHistory(records).Turns()
+}
+
+// Turn returns one turn's text from the reader's records.
+func (l lazyHistory) Turn(turn int) (string, error) {
+	records, err := l.reader.Records(context.Background())
+	if err != nil {
+		return "", err
+	}
+	return NewHistory(records).Turn(turn)
+}
+
+// Search returns the retained lines that match, from the reader's
+// records.
+func (l lazyHistory) Search(pattern string) ([]HistoryMatch, error) {
+	records, err := l.reader.Records(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	return NewHistory(records).Search(pattern)
 }
