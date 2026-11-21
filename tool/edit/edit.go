@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/protect"
@@ -135,6 +136,10 @@ func (t *Tool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, e
 	}, nil
 }
 
+// activeEdits reserves each path from read through rename. It covers
+// all edits in this process, not writes by other programs.
+var activeEdits sync.Map
+
 // Call makes the change.
 //
 // The context is honoured: a cancelled run stops paying for the edit.
@@ -146,6 +151,15 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 	if !ok {
 		return poo.ToolResult{}, errors.New("edit: prepared value is not an edit call")
 	}
+
+	if _, busy := activeEdits.LoadOrStore(p.abs, struct{}{}); busy {
+		return poo.ToolResult{
+			Text:       fmt.Sprintf("edit: another edit is in progress for %s; re-read the file before retrying", p.path),
+			Structured: json.RawMessage(`{"code":"edit_conflict"}`),
+			IsError:    true,
+		}, nil
+	}
+	defer activeEdits.Delete(p.abs)
 
 	content, mode, exists, err := read(p.abs)
 	if err != nil {

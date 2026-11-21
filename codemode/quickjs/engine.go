@@ -72,18 +72,18 @@ func (*Engine) Run(ctx context.Context, opts codemode.RunOptions) (result codemo
 		if err := runCtx.Err(); err != nil {
 			return nil, err
 		}
-		arg, err := stringArg(this)
-		if err != nil {
-			return nil, err
+		args := this.Args()
+		if len(args) != 2 || !args[0].IsString() || !args[1].IsBool() {
+			return nil, fmt.Errorf("a tool batch needs its calls and a parallel flag")
 		}
-		calls, err := decodeBatch(arg)
+		calls, err := decodeBatch(args[0].String())
 		if err != nil {
 			return nil, err
 		}
 		if len(calls) == 0 {
 			return js.NewString("[]"), nil
 		}
-		results, err := nestedCall(runCtx, opts.Nested, calls)
+		results, err := nestedCall(runCtx, opts.Nested, calls, args[1].Bool())
 		if err != nil {
 			return nil, err
 		}
@@ -176,12 +176,19 @@ func newVM(runCtx context.Context) (*qjs.Runtime, error) {
 // nestedCall runs one batch of tool calls. A panicking tool must not
 // surface as a script error carrying the host's Go stack. qjs stringifies
 // a panic it catches, and that message reaches the model.
-func nestedCall(ctx context.Context, nested poo.NestedCaller, calls []poo.NestedCall) (results []poo.NestedResult, err error) {
+func nestedCall(ctx context.Context, nested poo.NestedCaller, calls []poo.NestedCall, parallel bool) (results []poo.NestedResult, err error) {
 	defer func() {
 		if recover() != nil {
 			err = fmt.Errorf("the tool bridge failed")
 		}
 	}()
+	if parallel {
+		caller, ok := nested.(poo.ParallelNestedCaller)
+		if !ok {
+			return nil, fmt.Errorf("this session does not support explicit parallel batches")
+		}
+		return caller.CallParallel(ctx, calls)
+	}
 	return nested.Call(ctx, calls)
 }
 
@@ -191,24 +198,51 @@ func nestedCall(ctx context.Context, nested poo.NestedCaller, calls []poo.Nested
 // calls `await tools.<name>(args)` instead of guessing names into a
 // string dispatch.
 const wrapper = `((NAMES) => async (source) => {
-  const tools = globalThis.__pooTools, log = globalThis.__pooPrint;
+  const batchCall = globalThis.__pooTools, log = globalThis.__pooPrint;
   for (const name of ["__pooTools", "__pooPrint", "std", "os", "bjson",
     "print", "console", "scriptArgs", "setTimeout", "setInterval", "clearTimeout",
     "clearInterval", "QJS_PROXY_VALUE", "performance", "Date", "navigator",
     "gc", "eval"]) {
     if (!delete globalThis[name]) throw new Error("could not remove " + name);
   }
-  const encode = JSON.stringify, decode = JSON.parse, text = String;
-  let active = false;
-  const gather = (batch) => {
+  const encode = JSON.stringify, decode = JSON.parse, text = String, ToolPromise = Promise;
+  let active = false, pending;
+  const requireActive = () => {
     if (!active) throw new Error("codemode scripts cannot call tools after returning");
-    return decode(tools(encode(batch)));
   };
-  const named = {};
+  const runBatch = (raw, parallel) => decode(batchCall(raw, parallel));
+  const flush = () => {
+    const calls = pending;
+    pending = undefined;
+    try {
+      requireActive();
+      let raw = "[";
+      for (let i = 0; i < calls.length; i++) raw += (i ? "," : "") + calls[i].raw;
+      const results = runBatch(raw + "]", false);
+      for (let i = 0; i < calls.length; i++) calls[i].resolve(results[i]);
+    } catch (error) {
+      for (let i = 0; i < calls.length; i++) calls[i].reject(error);
+    }
+  };
+  // Named calls submitted before this job runs share one host batch.
+  const schedule = async (batch) => {
+    await 0;
+    if (pending === batch) flush();
+  };
+  const explicitBatch = (batch, parallel) => {
+    requireActive();
+    const raw = encode(batch);
+    // Synchronous calls may not overtake submitted named calls.
+    if (pending) flush();
+    return runBatch(raw, parallel);
+  };
+  const gather = (batch) => explicitBatch(batch, false);
+  const parallel = (batch) => explicitBatch(batch, true);
+  const named = Object.create(null);
   for (const name of NAMES) {
     // One host crossing, as for a gather entry; the promise keeps the
     // awaiting surface while the call itself is already done.
-    named[name] = (args) => new Promise((resolve, reject) => {
+    named[name] = (args) => new ToolPromise((resolve, reject) => {
       try {
         resolve(gather([[name, args]])[0]);
       } catch (error) {
@@ -219,10 +253,10 @@ const wrapper = `((NAMES) => async (source) => {
   const call = (name, args = null) => gather([[name, args]])[0];
   const print = (value) => { if (active) log(text(value)); };
   const compile = Object.getPrototypeOf(async function () {}).constructor;
-  const program = compile("call", "gather", "print", "tools", '"use strict";\n' + source);
+  const program = compile("call", "gather", "parallel", "print", "tools", '"use strict";\n' + source);
   active = true;
   try {
-    const value = await program(call, gather, print, named);
+    const value = await program(call, gather, parallel, print, named);
     active = false;
     // A script that returns nothing is a clean no-value result, like a
     // Starlark script that never exits: undefined passes to the host.
@@ -246,24 +280,24 @@ func stringArg(this *qjs.This) (string, error) {
 
 func decodeBatch(raw string) ([]poo.NestedCall, error) {
 	if !json.Valid([]byte(raw)) {
-		return nil, fmt.Errorf("gather expects a JSON array of [name, args] pairs")
+		return nil, fmt.Errorf("a tool batch expects a JSON array of [name, args] pairs")
 	}
 	dec := json.NewDecoder(strings.NewReader(raw))
 	if tok, err := dec.Token(); err != nil || tok != json.Delim('[') {
-		return nil, fmt.Errorf("gather expects an array of [name, args] pairs")
+		return nil, fmt.Errorf("a tool batch expects an array of [name, args] pairs")
 	}
 	var calls []poo.NestedCall
 	for dec.More() {
 		if len(calls) == script.MaxGatherWidth {
-			return nil, fmt.Errorf("gather takes at most %d calls", script.MaxGatherWidth)
+			return nil, fmt.Errorf("a tool batch takes at most %d calls", script.MaxGatherWidth)
 		}
 		var pair []json.RawMessage
 		if err := dec.Decode(&pair); err != nil || len(pair) != 2 {
-			return nil, fmt.Errorf("gather entry %d is not a [name, args] pair", len(calls))
+			return nil, fmt.Errorf("tool batch entry %d is not a [name, args] pair", len(calls))
 		}
 		var name string
 		if err := json.Unmarshal(pair[0], &name); err != nil || name == "" {
-			return nil, fmt.Errorf("gather entry %d needs a tool name", len(calls))
+			return nil, fmt.Errorf("tool batch entry %d needs a tool name", len(calls))
 		}
 		calls = append(calls, poo.NestedCall{Tool: name, Arguments: pair[1]})
 	}

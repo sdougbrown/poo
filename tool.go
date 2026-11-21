@@ -180,8 +180,8 @@ type NestedResult struct {
 // A nested call is a tool call a running tool makes. It goes through the
 // same path as a call the model makes: the same validation, the
 // permission engine, the before-tool hooks, the doom loop and the
-// after-tool chain, and a batch is run in parallel only when every call
-// in it is read-only. Its call and result are recorded with the mode
+// after-tool chain. Call runs a batch in parallel only when every call
+// in it is read-only. Each call and result is recorded with the mode
 // "nested" and its parent's handle — but its result never enters the
 // model's history, and its tool's own environment carries no nested
 // caller of its own, so the nesting is one call deep.
@@ -200,6 +200,14 @@ type NestedCaller interface {
 	// never started at all — an unknown tool, a run that is winding
 	// down, a run that was interrupted.
 	Call(ctx context.Context, calls []NestedCall) ([]NestedResult, error)
+}
+
+// ParallelNestedCaller can also run a batch whose calls the caller has
+// chosen to overlap, including side-effecting tools. Validation, permissions,
+// recording, cancellation, and result order are the same as for Call.
+type ParallelNestedCaller interface {
+	NestedCaller
+	CallParallel(ctx context.Context, calls []NestedCall) ([]NestedResult, error)
 }
 
 // Prepared is a validated tool call, ready to run.

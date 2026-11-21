@@ -86,6 +86,67 @@ return [first.tool, second.tool, second.text];
 	}
 }
 
+func TestNamedCallsBatchWithoutOvertaking(t *testing.T) {
+	var batches [][]string
+	res, err := quickjs.New().Run(t.Context(), codemode.RunOptions{
+		Script: `
+const args = {path: "first"};
+const first = tools.read(args);
+args.path = "second";
+const second = tools.read(args);
+const legacy = call("read", {path: "third"});
+const results = await Promise.all([first, second]);
+const fourth = await tools.read({path: results[1].text});
+return [...results.map(r => r.text), legacy.text, fourth.text];
+`,
+		Tools: []poo.ToolInfo{{Name: "read"}},
+		Nested: nested(func(_ context.Context, calls []poo.NestedCall) ([]poo.NestedResult, error) {
+			paths := make([]string, len(calls))
+			results := make([]poo.NestedResult, len(calls))
+			for i, call := range calls {
+				var args struct{ Path string }
+				if err := json.Unmarshal(call.Arguments, &args); err != nil {
+					return nil, err
+				}
+				paths[i], results[i].Text = args.Path, args.Path
+			}
+			batches = append(batches, paths)
+			return results, nil
+		}),
+	})
+	if err != nil || res.Calls != 4 || string(res.Value) != `["first","second","third","second"]` {
+		t.Fatalf("run = %+v, %v", res, err)
+	}
+	if want := [][]string{{"first", "second"}, {"third"}, {"second"}}; !slices.EqualFunc(batches, want, slices.Equal[[]string]) {
+		t.Fatalf("batches = %v, want %v", batches, want)
+	}
+}
+
+func TestOversizedNamedBatchRejectsEveryCall(t *testing.T) {
+	res, err := quickjs.New().Run(t.Context(), codemode.RunOptions{
+		Script: `
+const calls = Array.from({length: 17}, () => tools.read({}));
+const results = await Promise.allSettled(calls);
+return results.every(r => r.status === "rejected" && String(r.reason).includes("takes at most"));
+`,
+		Tools:  []poo.ToolInfo{{Name: "read"}},
+		Nested: nested(noCalls),
+	})
+	if err != nil || res.Calls != 0 || string(res.Value) != "true" {
+		t.Fatalf("run = %+v, %v", res, err)
+	}
+}
+
+func TestExplicitParallelDoesNotFallBackToOrdinaryScheduling(t *testing.T) {
+	_, err := quickjs.New().Run(t.Context(), codemode.RunOptions{
+		Script: `parallel([["write", {}]]);`,
+		Nested: nested(noCalls),
+	})
+	if err == nil || !strings.Contains(err.Error(), "does not support explicit parallel batches") {
+		t.Fatalf("run error = %v", err)
+	}
+}
+
 // TestAnAwaitThatNeverSettlesStopsAtTheDeadline covers the async bound:
 // the run blocks inside the guest's own loop, and the deadline closing
 // the guest is what stops it.
@@ -167,7 +228,7 @@ func TestQuickJSRunawayStopsAndNextScriptRuns(t *testing.T) {
 // seam, and the failure names the entry it could not read.
 func TestGatherRefusesAnEntryItCannotRead(t *testing.T) {
 	for _, test := range []struct{ script, want string }{
-		{`gather("read");`, "gather expects an array"},
+		{`gather("read");`, "tool batch expects an array"},
 		{`gather(["read"]);`, "is not a [name, args] pair"},
 		{`gather([["read"]]);`, "is not a [name, args] pair"},
 		{`gather([[1, {}]]);`, "needs a tool name"},
@@ -201,7 +262,7 @@ func TestQuickJSBoundsGuestExecution(t *testing.T) {
 		{"deadline", `while (true) {}`, codemode.Limits{TimeoutS: 1}, "deadline exceeded"},
 		{"memory", `return new ArrayBuffer(128 * 1024 * 1024).byteLength;`, codemode.Limits{}, "out of memory"},
 		{"step budget", `return 1;`, codemode.Limits{ExecSteps: 100}, "does not support the exec_steps limit"},
-		{"batch width", `gather(Array.from({length: 17}, () => ["read", {}]));`, codemode.Limits{}, "gather takes at most"},
+		{"batch width", `gather(Array.from({length: 17}, () => ["read", {}]));`, codemode.Limits{}, "tool batch takes at most"},
 		{"oversized return", `return "x".repeat(2097152);`, codemode.Limits{}, "print a summary instead"},
 		{"call after return", `return {toJSON() { call("read", {}); return 1; }};`, codemode.Limits{}, "after returning"},
 	} {
@@ -235,7 +296,7 @@ func TestQuickJSLeavesNoHostGlobalsInTheScript(t *testing.T) {
 		"std", "os", "bjson", "print", "console", "scriptArgs",
 		"setTimeout", "setInterval", "clearTimeout", "clearInterval",
 		"QJS_PROXY_VALUE", "performance", "Date", "navigator", "gc", "eval",
-		"fetch", "process", "require", "module", "__pooTools", "__pooCall", "__pooPrint",
+		"fetch", "process", "require", "module", "__pooTools", "__pooPrint",
 	} {
 		if slices.Contains(names, danger) {
 			t.Errorf("the script can see the global %q", danger)
