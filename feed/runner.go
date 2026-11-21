@@ -67,10 +67,11 @@ type Image struct {
 //	{"text": "the look", "image": {"path": "shot.png", "media": "image/png"}}
 //
 // `text` is required and is not empty, unless the message names an
-// image. `from` names the sender and
-// may be left out. A message that names an image may leave its text
-// empty: the image is the message, and the image's path is required.
-// A blank line is skipped, and a field the message does not name is
+// image. `from` names the sender and may be left out.
+//
+// A message that names an image may leave its text empty. The image is
+// the message, and the image's path is required. A blank line is
+// skipped, and a field the message does not name is
 // ignored, so a feed may carry its own bookkeeping in a line. A line
 // the object does not describe is a protocol failure: silence about a
 // message is better than a guess at what it meant.

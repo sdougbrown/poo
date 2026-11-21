@@ -25,7 +25,7 @@ import (
 
 // FeedImage is the image a feed's input names, by its path.
 //
-// The feed's runner hands the reference over without reading it: the
+// The feed's runner hands the reference over without reading it. The
 // session reads the bytes when the input is accepted, so an image that
 // does not read, or is not an image, fails the attempt the way a
 // refused input does.
@@ -46,8 +46,8 @@ type FeedIO struct {
 	Dir string
 	// Emit queues one input, which may carry an image. It returns the
 	// session's refusal (ErrSessionClosed, ErrSessionBroken, a store
-	// error) or the image's own failure — a model that reads no images,
-	// or an image that does not read: either one fails the attempt.
+	// error) or the image's own failure. A model that reads no images
+	// or an image that does not read fails the attempt either way.
 	Emit func(from, text string, image *FeedImage) error
 	// Decider returns the session's recorded decision model, fetched
 	// for each decision because the session can switch models while the
@@ -482,8 +482,8 @@ func (s *Session) feedImageAttachments(feed string, image *FeedImage) ([]Attachm
 // readFeedImage reads the image a feed's input names.
 //
 // A path relative to the feed's working directory is resolved against
-// it, the bytes are capped at MaxImageBytes, and the head names the
-// media type: a declared type the head does not confirm is a failure
+// it. The bytes are capped at MaxImageBytes, and the head names the
+// media type. A declared type the head does not confirm is a failure
 // that names both, so a feed that mislabels its images is heard from.
 func (s *Session) readFeedImage(feed string, image *FeedImage) (Attachment, error) {
 	path := image.Path
