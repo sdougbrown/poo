@@ -101,7 +101,7 @@ func (s *Session) SetModel(info ModelInfo, transport ...ChatTransport) (ModelSwi
 			name, limit))
 	}
 	prompt := PromptLimitOf(limit, info.InputLimit)
-	if exhausted, reason := s.contextExhaustedLocked(limit, info.InputLimit); exhausted {
+	if exhausted, reason := s.contextExhaustedLocked(info, limit); exhausted {
 		warnings = append(warnings, fmt.Sprintf(
 			"the current view does not fit the %d-token prompt limit of %q: %s; the next run settles context_exhausted",
 			prompt, name, reason))
@@ -135,6 +135,13 @@ func (s *Session) SetModel(info ModelInfo, transport ...ChatTransport) (ModelSwi
 	info.ModelID = modelID
 	info.API = api
 	info.ContextLimit = limit
+	// A native compaction's guard compares the input the last compaction left
+	// against the window that measured it. A change to the window or to the
+	// endpoint's input cap therefore starts the guard over.
+	if info.ContextLimit != s.opts.Model.ContextLimit || info.InputLimit != s.opts.Model.InputLimit {
+		s.compactedInput = 0
+		s.compactedReportPending = false
+	}
 	s.opts.Model = info
 	// The level the session runs at is the new model's to take: a level
 	// it refuses would be a configuration error on every request.
@@ -199,23 +206,21 @@ func (s *Session) SetDecider(info ModelInfo, decider decide.Decider) error {
 }
 
 // contextExhaustedLocked reports that the next request could not be
-// made: the view does not fit the prompt limit the window and the input cap
-// make, or the window leaves no room to answer.
+// made: the window leaves fewer than MinOutputTokens of room, or the prompt
+// is over the endpoint's input cap.
 //
 // The gate settles the run as context_exhausted in both cases, so a
 // switch warns exactly when the gate would settle.
 //
 // The caller holds the session's lock.
-func (s *Session) contextExhaustedLocked(limit, inputLimit int) (bool, string) {
-	estimated := s.est.estimate(s.modelMessagesLocked())
-	prompt := PromptLimitOf(limit, inputLimit)
-	if float64(estimated) >= s.opts.HardRatio*float64(prompt) {
-		return true, fmt.Sprintf("the estimated input of %d tokens is at or above %d%% of the %d-token prompt limit",
-			estimated, int(s.opts.HardRatio*100), prompt)
-	}
-	room := limit - estimated - OutputReserve
-	if room < MinOutputTokens {
-		return true, fmt.Sprintf("the computed max_tokens %d is under the %d-token minimum", room, MinOutputTokens)
+func (s *Session) contextExhaustedLocked(info ModelInfo, limit int) (bool, string) {
+	// The budget the next request reads is the one the model with its final
+	// window gives. A switch that brings the window with it is judged on that
+	// budget.
+	info.ContextLimit = limit
+	budget := budgetFor(info, s.est.estimate(s.modelMessagesLocked()))
+	if blocked, _, reason := budget.RequestBlocked(); blocked {
+		return true, reason
 	}
 	return false, ""
 }

@@ -783,13 +783,13 @@ func TestTheMaxDurationBudgetFiringMidToolSettlesTheRun(t *testing.T) {
 	}
 }
 
-// TestTheGateChecksTheBudgetOnEveryPath covers the gate: the
-// budget check fires on every path that goes to a new request.
+// TestTheGateJudgesAFailedCompactionByItsPredicateOnEveryPath covers the
+// gate: a failed compaction settles context_exhausted with the
+// compaction_failed source whenever the next request cannot go out.
 //
-// The test uses a scripted compactor and a context window the run
-// cannot fit into, so the gate's budget check is what stops the run on
-// each path.
-func TestTheGateChecksTheBudgetOnEveryPath(t *testing.T) {
+// The test uses a scripted compactor that fails and a context window the
+// run cannot fit into, so the predicate is what stops the run on each path.
+func TestTheGateJudgesAFailedCompactionByItsPredicateOnEveryPath(t *testing.T) {
 	// The compactor says yes, so the gate enters the compacting state
 	// and then comes back to the budget check.
 	compactor := pootest.NewCompactor(true, poo.Compaction{Strategy: "test"})
@@ -807,8 +807,8 @@ func TestTheGateChecksTheBudgetOnEveryPath(t *testing.T) {
 	if res.Reason != poo.ReasonContextExhausted {
 		t.Errorf("the run settled %q, want context_exhausted", res.Reason)
 	}
-	if res.Detail.Source != "no_output_room" {
-		t.Errorf("the settle source is %q, want no_output_room", res.Detail.Source)
+	if res.Detail.Source != "compaction_failed" {
+		t.Errorf("the settle source is %q, want compaction_failed", res.Detail.Source)
 	}
 	// The compactor was asked, which is the gate's step 1.
 	if compactor.Calls() == 0 {
@@ -1100,7 +1100,6 @@ func TestTheTypedOptionsConfigureTheSession(t *testing.T) {
 		poo.WithAfterTurn(hook),
 		poo.WithObserver(observer),
 		poo.WithBudgets(5, 1000, time.Minute),
-		poo.WithContextRatios(0.7, 0.9),
 	)
 	res := runSession(t, s, "do the thing")
 

@@ -195,9 +195,12 @@ type Session struct {
 
 	// est is the context-budget estimator.
 	est estimator
-	// noticeArmed reports that the context notice may fire. The notice
-	// re-arms when the estimate drops back below the notice ratio.
-	noticeArmed bool
+	// compactedInput is the input the first usage report after the
+	// latest compaction reported. It is zero until such a report lands.
+	compactedInput int
+	// compactedReportPending reports that a compaction was applied and no
+	// usage report has landed since.
+	compactedReportPending bool
 	// decider is the session's decision model, or nil when it has none.
 	//
 	// The handle is the recording wrapper: every call writes a record
@@ -295,14 +298,22 @@ type runState struct {
 	// tool calls it never sent. It resets with unusableTurns and under the
 	// same rule, and its bound, maxEmptyTurns, is the stricter one.
 	emptyTurns int
-	// noticeFired reports that the context notice already fired in
-	// this run.
-	noticeFired bool
 	// lastRendered is the snapshot of the last main request, so a
 	// compactor can fork it.
 	lastRendered Rendered
 	// hasRendered reports that lastRendered holds a snapshot.
 	hasRendered bool
+	// forceCompaction asks the next-request gate to compact once even when
+	// the strategy declines. The endpoint refused the request's length, so
+	// the gate compacts and the run sends the request again.
+	forceCompaction bool
+	// refusal is the settle candidate of the refusal that asked for the forced
+	// compaction. The run settles with that detail when the compaction cannot
+	// help.
+	refusal *candidate
+	// refusalForced reports that the refusal the run is compacting for has
+	// already had its one forced compaction.
+	refusalForced bool
 
 	// activityCtx is the current activity's context. The activity is
 	// the request, the tool batch, the compaction or the turn-end
@@ -584,12 +595,6 @@ type Options struct {
 	// StopConditions are the conditions that end a run. Each one that
 	// matches adds a candidate stop_requested.
 	StopConditions []StopCondition
-	// NoticeRatio is the share of the prompt limit at which the model
-	// is told that the context is filling up. It defaults to 0.80.
-	NoticeRatio float64
-	// HardRatio is the share of the prompt limit at which the run
-	// stops. It defaults to 0.97.
-	HardRatio float64
 	// Compactor is the strategy that compacts the view. A session
 	// without one never enters the compacting state.
 	Compactor Compactor
@@ -718,12 +723,6 @@ func New(opts Options, fns ...Option) (*Session, error) {
 	if opts.MaxContinuations <= 0 {
 		opts.MaxContinuations = DefaultMaxContinuations
 	}
-	if opts.NoticeRatio <= 0 {
-		opts.NoticeRatio = DefaultNoticeRatio
-	}
-	if opts.HardRatio <= 0 {
-		opts.HardRatio = DefaultHardRatio
-	}
 	if opts.HookTimeout <= 0 {
 		opts.HookTimeout = DefaultHookTimeout
 	}
@@ -741,7 +740,6 @@ func New(opts Options, fns ...Option) (*Session, error) {
 		resultMeta:         map[string]resultMeta{},
 		recorded:           map[string]Message{},
 		messageIDs:         ids,
-		noticeArmed:        true,
 		jobs:               map[string]*jobState{},
 		feeds:              map[string]*feedState{},
 		feedDelay:          feedRestartDelay,
@@ -844,12 +842,6 @@ const (
 	// DefaultMaxContinuations is how many BeforeSettle continuations a
 	// run may take.
 	DefaultMaxContinuations = 3
-	// DefaultNoticeRatio is the share of the prompt limit at which the
-	// model is told that the context is filling up.
-	DefaultNoticeRatio = 0.80
-	// DefaultHardRatio is the share of the prompt limit at which the
-	// run stops.
-	DefaultHardRatio = 0.97
 	// DefaultHookTimeout bounds one hook call.
 	DefaultHookTimeout = 30 * time.Second
 	// MinOutputTokens is the smallest output room a request may ask
@@ -866,9 +858,6 @@ const (
 	// MinCharsPerToken and MaxCharsPerToken bound the calibration.
 	MinCharsPerToken = 2.0
 	MaxCharsPerToken = 5.0
-	// ContextNoticeText is the notice the model reads when the
-	// context's prompt limit is filling up.
-	ContextNoticeText = "[Context notice: ~80% of the context limit used. Prefer narrow reads; finish or report soon.]"
 )
 
 // State returns where the session is in the FSM.
@@ -1213,19 +1202,25 @@ func (s *Session) budget() ContextBudget {
 //
 // The caller holds the session's lock.
 func (s *Session) budgetLocked() ContextBudget {
-	turns := 0
+	budget := budgetFor(s.opts.Model, s.estimatedInputLocked())
+	budget.CharsPerToken = s.est.charsPerToken
+	budget.CompactedInput = s.compactedInput
 	if s.run != nil {
-		turns = s.run.turn
+		budget.Turns = s.run.turn
 	}
+	return budget
+}
+
+// budgetFor returns the context budget of a model and an estimated input.
+//
+// Both places that size a request against a model read the budget from here.
+// A model switch therefore warns on the budget its next request reads.
+func budgetFor(model ModelInfo, estimated int) ContextBudget {
 	return ContextBudget{
-		ContextLimit:   s.opts.Model.ContextLimit,
-		InputLimit:     s.opts.Model.InputLimit,
-		EstimatedInput: s.estimatedInputLocked(),
-		NoticeRatio:    s.opts.NoticeRatio,
-		HardRatio:      s.opts.HardRatio,
-		CharsPerToken:  s.est.charsPerToken,
-		OutputLimit:    min(s.opts.Model.OutputCeiling(), DefaultMaxOutputFor(s.opts.Model.ContextLimit)),
-		Turns:          turns,
+		ContextLimit:   model.ContextLimit,
+		InputLimit:     model.InputLimit,
+		EstimatedInput: estimated,
+		OutputLimit:    min(model.OutputCeiling(), DefaultMaxOutputFor(model.ContextLimit)),
 	}
 }
 

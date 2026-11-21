@@ -331,7 +331,7 @@ func TestAToolResultCannotCloseTheConversation(t *testing.T) {
 
 // TestABadReplyIsRefused covers the replies the strategy never records:
 // one the output limit cut short, one that called a tool, and an empty
-// one. Below the hard limit the run carries on without them.
+// one. With room for the next request the run carries on without them.
 func TestABadReplyIsRefused(t *testing.T) {
 	for _, tc := range []struct {
 		// name is the failure the case covers.
@@ -361,7 +361,7 @@ func TestABadReplyIsRefused(t *testing.T) {
 				t.Fatalf("waiting for the run: %v", err)
 			}
 			if res.Reason != poo.ReasonEndTurn {
-				t.Fatalf("the run settled %q (%s), want end_turn: the run continues below the hard limit", res.Reason, res.Detail.Text)
+				t.Fatalf("the run settled %q (%s), want end_turn: the run continues with room for the next request", res.Reason, res.Detail.Text)
 			}
 			for _, rec := range sink.Records() {
 				if _, ok := rec.(*poo.CompactionRecord); ok {

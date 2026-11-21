@@ -462,9 +462,9 @@ func (m ModelInfo) reasoningError(setting, why string) *ConfigError {
 // smaller of the window and the endpoint's input cap, ignoring the one that
 // is unknown. Zero means neither is known.
 //
-// The prompt checks read it: the hard stop, the context notice, the
-// compaction triggers and the check a model switch makes. The output room
-// of MaxTokens reads the window, which the prompt and the answer share.
+// The prompt-side checks read it: the compaction rule and the check a
+// model switch makes. The output room of MaxTokens reads the window, which
+// the prompt and the answer share.
 func (m ModelInfo) PromptLimit() int {
 	return PromptLimitOf(m.ContextLimit, m.InputLimit)
 }

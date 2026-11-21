@@ -25,8 +25,6 @@
     "system_prompt.replace": { "isEmpty": "string" },
     "system_prompt.append": { "isEmpty": "string" },
     "system_prompt.remove": { "isEmpty": "array" },
-    "context.notice_ratio": { "isEmpty": "number" },
-    "context.hard_ratio": { "isEmpty": "number" },
     "context.strategy": { "isEmpty": "string" },
     "context.handoff.ratio": { "isEmpty": "number" },
     "context.handoff.max_tokens": { "isEmpty": "number" },
@@ -186,22 +184,6 @@
       "op": "matches",
       "pattern": "^(summary|handoff|native|none)$",
       "reason": "context.strategy must be summary, handoff, native or none"
-    },
-    {
-      "type": "check",
-      "field": "context.notice_ratio",
-      "op": "range",
-      "min": 0,
-      "max": 1,
-      "reason": "context.notice_ratio must be between 0 and 1"
-    },
-    {
-      "type": "check",
-      "field": "context.hard_ratio",
-      "op": "range",
-      "min": 0,
-      "max": 1,
-      "reason": "context.hard_ratio must be between 0 and 1"
     },
     {
       "type": "check",

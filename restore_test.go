@@ -1043,7 +1043,7 @@ func TestTheRestoredModelIgnoresAnotherModelsOutputLimit(t *testing.T) {
 // describes the same model id. A role the settings now point at another
 // model keeps the limits it ran with.
 func TestARestoredInputCapComesFromTheSameModel(t *testing.T) {
-	// The recorded view is far over the hard ratio of the 2000-token cap
+	// The recorded view is far over the 2000-token input cap
 	// and well under it for the 32768-token window, so a restore that
 	// picks the cap up settles context_exhausted before its first
 	// request.
@@ -1084,6 +1084,196 @@ func TestARestoredInputCapComesFromTheSameModel(t *testing.T) {
 
 			if got := runSession(t, session, "hello"); got.Reason != tc.want {
 				t.Errorf("the run settled %q, want %q", got.Reason, tc.want)
+			}
+		})
+	}
+}
+
+// TestTheRestoredSessionKeepsTheCompactedInput covers the guard a resumed
+// session needs: the input the first report after the last compaction gave is
+// the input the strategy compares the new model's window against, and a restore
+// that forgets it would let a compactor that helped nothing run again.
+func TestTheRestoredSessionKeepsTheCompactedInput(t *testing.T) {
+	const after = 1234
+	compactor := pootest.NewCompactor(true, summaryCompaction())
+	compactor.SetShouldAfter(1)
+	sink := &recordingSink{}
+	opts := testOptions(t, scripted([]fakeResponse{
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{text: "the answer", usage: &poo.UsageReport{InputTokens: after, OutputTokens: 5}},
+	}), &echoTool{result: "echoed"}, sink)
+	opts.Compactor = compactor
+	s := newTestSession(t, opts)
+	if res := runSession(t, s, "do the thing"); res.Reason != poo.ReasonEndTurn {
+		t.Fatalf("the run settled %q (%s), want end_turn", res.Reason, res.Detail.Text)
+	}
+	if got := sink.count("compaction"); got != 1 {
+		t.Fatalf("the log holds %d compactions, want 1", got)
+	}
+
+	probe := &budgetProbe{}
+	restoredOpts := restoreOptions(t, scripted([]fakeResponse{{text: "ok"}}), &recordingSink{})
+	restoredOpts.Compactor = probe
+	restored, _, err := poo.Restore(restoredOpts, append([]poo.Record{header("s1")}, sink.allRecords()...))
+	if err != nil {
+		t.Fatalf("restoring the session: %v", err)
+	}
+	t.Cleanup(func() { restored.Close() })
+	runSession(t, restored, "carry on")
+	if probe.last.CompactedInput != after {
+		t.Errorf("the restored budget carries a compacted input of %d, want the report's %d",
+			probe.last.CompactedInput, after)
+	}
+}
+
+// compactedFixture returns records of a run that compacts once and reports the
+// input the compaction left, with the positions of the compaction record and
+// of that report in the slice.
+func compactedFixture(t *testing.T) (records []poo.Record, compaction, report int) {
+	t.Helper()
+	compactor := pootest.NewCompactor(true, summaryCompaction())
+	compactor.SetShouldAfter(1)
+	sink := &recordingSink{}
+	opts := testOptions(t, scripted([]fakeResponse{
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{text: "the answer", usage: &poo.UsageReport{InputTokens: 1234, OutputTokens: 5}},
+	}), &echoTool{result: "echoed"}, sink)
+	opts.Compactor = compactor
+	s := newTestSession(t, opts)
+	if res := runSession(t, s, "do the thing"); res.Reason != poo.ReasonEndTurn {
+		t.Fatalf("the run settled %q (%s), want end_turn", res.Reason, res.Detail.Text)
+	}
+	records = append([]poo.Record{header("s1")}, sink.allRecords()...)
+	compaction, report = -1, -1
+	for i, rec := range records {
+		switch rec.(type) {
+		case *poo.CompactionRecord:
+			compaction = i
+		case *poo.UsageRecord:
+			if compaction >= 0 && report < 0 {
+				report = i
+			}
+		}
+	}
+	if compaction < 0 || report < 0 {
+		t.Fatalf("the fixture holds no compaction at %d and no report at %d", compaction, report)
+	}
+	return records, compaction, report
+}
+
+// insertRecords returns the records with recs inserted at index.
+func insertRecords(records []poo.Record, at int, recs ...poo.Record) []poo.Record {
+	out := make([]poo.Record, 0, len(records)+len(recs))
+	out = append(out, records[:at]...)
+	out = append(out, recs...)
+	return append(out, records[at:]...)
+}
+
+// plainFixture returns the records of a run that compacts nothing.
+func plainFixture(t *testing.T) []poo.Record {
+	t.Helper()
+	sink := &recordingSink{}
+	opts := testOptions(t, scripted([]fakeResponse{
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{text: "the answer", usage: &poo.UsageReport{InputTokens: 1234, OutputTokens: 5}},
+	}), &echoTool{result: "echoed"}, sink)
+	s := newTestSession(t, opts)
+	if res := runSession(t, s, "do the thing"); res.Reason != poo.ReasonEndTurn {
+		t.Fatalf("the run settled %q (%s), want end_turn", res.Reason, res.Detail.Text)
+	}
+	return append([]poo.Record{header("s1")}, sink.allRecords()...)
+}
+
+// usageLike returns a usage record shaped like another one, with its own input
+// count and origin.
+func usageLike(usage *poo.UsageRecord, input int, origin poo.Origin) *poo.UsageRecord {
+	return &poo.UsageRecord{
+		RecordMeta:   poo.NewRecordMetaFrom("usage", origin),
+		RunID:        usage.RunID,
+		Turn:         usage.Turn,
+		Request:      usage.Request,
+		InputTokens:  input,
+		OutputTokens: usage.OutputTokens,
+	}
+}
+
+// TestTheRestoredCompactedInputFollowsTheRecords covers the guard a restore
+// rebuilds. The report a compaction made is not the view's input, a compaction
+// that left no report keeps the guard waiting, a compaction the endpoint ended
+// the run with armed nothing, and a model switch cleared what it measured.
+func TestTheRestoredCompactedInputFollowsTheRecords(t *testing.T) {
+	base, _, report := compactedFixture(t)
+	plain := plainFixture(t)
+	baseReport := base[report].(*poo.UsageRecord)
+	handoff := &poo.CompactionRecord{
+		RecordMeta: poo.NewRecordMeta("compaction"),
+		RunID:      baseReport.RunID,
+		Strategy:   "handoff",
+		Form:       "end",
+		Compaction: poo.Compaction{Strategy: "handoff", End: &poo.EndRun{Handoff: "the note"}},
+	}
+	switched := &poo.ModelsChangedRecord{
+		RecordMeta: poo.NewRecordMeta("session.models_changed"),
+		From:       "fast",
+		To:         "fast",
+	}
+
+	cases := []struct {
+		name    string
+		records []poo.Record
+		want    int
+	}{
+		{
+			name:    "the report after the compaction",
+			records: base,
+			want:    1234,
+		},
+		{
+			name: "the compaction's own report is not the view's input",
+			records: insertRecords(base, report,
+				usageLike(baseReport, 50, poo.OriginCompaction)),
+			want: 1234,
+		},
+		{
+			name:    "a compaction with no report after it stays pending",
+			records: append(append([]poo.Record(nil), base[:report]...), base[report+1:]...),
+			want:    999,
+		},
+		{
+			name:    "a model switch after the compaction arms nothing",
+			records: insertRecords(base, len(base), switched),
+			want:    0,
+		},
+		{
+			name:    "a handoff after an armed compaction keeps its report",
+			records: insertRecords(base, len(base), handoff, usageLike(baseReport, 777, "")),
+			want:    1234,
+		},
+		{
+			name:    "a handoff with no armed compaction before it arms nothing",
+			records: insertRecords(plain, len(plain), handoff, usageLike(baseReport, 777, "")),
+			want:    0,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			probe := &budgetProbe{}
+			opts := restoreOptions(t, scripted([]fakeResponse{
+				{calls: []poo.ToolCall{{CallID: "c9", Name: "echo", Arguments: []byte(`{"text":"again"}`)}}, usage: &poo.UsageReport{InputTokens: 999, OutputTokens: 5}},
+				{text: "the answer"},
+			}), &recordingSink{})
+			opts.Compactor = probe
+			restored, _, err := poo.Restore(opts, c.records)
+			if err != nil {
+				t.Fatalf("restoring the session: %v", err)
+			}
+			t.Cleanup(func() { restored.Close() })
+			if res := runSession(t, restored, "carry on"); res.Reason != poo.ReasonEndTurn {
+				t.Fatalf("the run settled %q (%s), want end_turn", res.Reason, res.Detail.Text)
+			}
+			if probe.last.CompactedInput != c.want {
+				t.Errorf("the restored budget carries a compacted input of %d, want %d",
+					probe.last.CompactedInput, c.want)
 			}
 		})
 	}

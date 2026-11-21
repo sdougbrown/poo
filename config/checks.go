@@ -26,9 +26,6 @@ import (
 // because the settings' leaves are not the shapes the spec's fields
 // have:
 //
-//   - the hard ratio is above the notice ratio. The spec's expressions
-//     compare a field with a constant, never with another field. The
-//     rule is checked by hand.
 //   - a permission rule matches exactly one of a tool and a class, and
 //     a command prefix names the tool it matches. A rule is an object in
 //     a list, not a leaf, so the rules are checked by hand.
@@ -126,9 +123,6 @@ func (s *Settings) checkValues() error {
 	if err := s.checkAskers(); err != nil {
 		return err
 	}
-	if err := s.checkContext(); err != nil {
-		return err
-	}
 	return s.checkFiles()
 }
 
@@ -217,25 +211,6 @@ func (s *Settings) checkAskers() error {
 			Code:    CodeInvalid,
 			Field:   fmt.Sprintf("permission.askers[%d]", i),
 			Message: fmt.Sprintf("the asker %q is not one the settings know", name),
-		}
-	}
-	return nil
-}
-
-// checkContext checks the context window's ratios.
-//
-// The notice ratio is when the model is told that the context is
-// filling up, and the hard ratio is when the run stops. The notice
-// comes first: a hard ratio at or below the notice ratio would stop
-// the run before the model was ever told.
-func (s *Settings) checkContext() error {
-	notice, hard := s.Context.NoticeRatio, s.Context.HardRatio
-	if notice != nil && hard != nil && *hard <= *notice {
-		return &Error{
-			Code:  CodeInvalid,
-			Field: "context.hard_ratio",
-			Message: fmt.Sprintf("the hard ratio %g is not above the notice ratio %g",
-				*hard, *notice),
 		}
 	}
 	return nil

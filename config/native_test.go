@@ -60,8 +60,8 @@ context:
 	if !ok {
 		t.Fatalf("the session's compactor is %T, want the native strategy", runtime.Options.Compactor)
 	}
-	if got := strategy.Ratio(); got != native.DefaultRatio {
-		t.Errorf("the native strategy's ratio is %v, want %v", got, native.DefaultRatio)
+	if got := strategy.Ratio(); got != 0 {
+		t.Errorf("the native strategy's ratio is %v, want zero for no ratio trigger", got)
 	}
 	if _, ok := runtime.Options.Transport.(poo.NativeCompactor); !ok {
 		t.Errorf("the runtime's transport is %T, want one that can compact natively", runtime.Options.Transport)

@@ -76,18 +76,17 @@ func (s *suite) summary() {
 		return
 	}
 	// Two turns run before the gate can compact, and the third answer
-	// is what the run finally says.
+	// is what the run finally says. Each turn's answer is large, so a
+	// summary of the oldest turn gives the next answer its room back. A
+	// compaction cuts turns, never the prompt.
+	filler := strings.Repeat(handoffFiller, 40000/len(handoffFiller))
 	turns := []ScriptedAnswer{
-		{ToolCalls: []ToolCall{{Name: "bash", Arguments: map[string]any{"command": "echo hello"}}}},
-		{ToolCalls: []ToolCall{{Name: "bash", Arguments: map[string]any{"command": "echo again"}}}},
+		{Text: filler, ToolCalls: []ToolCall{{Name: "bash", Arguments: map[string]any{"command": "echo hello"}}}},
+		{Text: filler, ToolCalls: []ToolCall{{Name: "bash", Arguments: map[string]any{"command": "echo again"}}}},
 		{Text: "## Goal\nfinish the task"},
 		{Text: "done"},
 	}
 	endpoint := newEndpoint(s.t, turns)
-	// The prompt fills the window, so the estimate crosses the ratio the
-	// strategy acts at. The tail is one turn, so the turns themselves
-	// need not be large: the flow proves the default path compacts, not
-	// how much it summarizes.
 	settings := s.settings(endpoint, summaryWindow, map[string]any{
 		"context": map[string]any{"summary": map[string]any{"keep_recent_tokens": 1}},
 	})
@@ -95,13 +94,7 @@ func (s *suite) summary() {
 	s.handshake(c)
 	sessionID := s.create(c)
 
-	prompt := s.promptText(c, sessionID)
-	window := float64(summaryWindow)
-	fill := int(window*summaryFill*3.5) - len(prompt) - 70
-	if fill < 1 {
-		fill = 1
-	}
-	runID := s.prompt(c, sessionID, strings.Repeat(handoffFiller, fill/len(handoffFiller)))
+	runID := s.prompt(c, sessionID, "do the thing")
 	settled := s.settled(c, sessionID, runID)
 	if settled.Reason != "end_turn" {
 		s.t.Errorf("the run settled %q, want end_turn: the default strategy carries on", settled.Reason)
@@ -125,15 +118,9 @@ func (s *suite) summary() {
 	}
 }
 
-// summaryFill is the share of the summary flow's window the prompt fills.
-//
-// It is above the strategy's own ratio and under the hard limit, so the
-// run compacts instead of settling.
-const summaryFill = 0.88
-
 // summaryWindow is the window the summary flow runs under.
 //
-// The window is small enough that a prompt fills it, and large enough
+// The window is small enough that two large turns fill it, and large enough
 // that the first request has room for an answer and the view after a
 // compaction has room for the next one.
 const summaryWindow = 32768

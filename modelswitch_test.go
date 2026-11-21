@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/compact/native"
 	"github.com/sdougbrown/poo/pootest"
 	"github.com/sdougbrown/poo/provider/openai"
 )
@@ -588,5 +589,116 @@ func TestTheSessionWarnsWhenTheViewDoesNotFitTheNewModelsInputCap(t *testing.T) 
 	result := runSession(t, s, "hello")
 	if result.Reason != poo.ReasonContextExhausted {
 		t.Errorf("the run settled %q, want context_exhausted", result.Reason)
+	}
+}
+
+// TestAModelSwitchLetsTheNativeCompactionCompactAgain covers the guard a
+// native compaction keeps: the input the last compaction left belongs to the
+// window that measured it, so a switch that changes the window starts the
+// guard over.
+func TestAModelSwitchLetsTheNativeCompactionCompactAgain(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		// The first run fills the small window and is compacted natively.
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}, usage: &poo.UsageReport{InputTokens: 3600, OutputTokens: 5}},
+		// The report after the compaction is still short, so the guard
+		// suppresses the second compaction and the run settles.
+		{calls: []poo.ToolCall{{CallID: "c2", Name: "echo", Arguments: []byte(`{"text":"two"}`)}}, usage: &poo.UsageReport{InputTokens: 3900, OutputTokens: 5}},
+		// The second run, on the model the session switched to.
+		{calls: []poo.ToolCall{{CallID: "c3", Name: "echo", Arguments: []byte(`{"text":"three"}`)}}, usage: &poo.UsageReport{InputTokens: 4000, OutputTokens: 5}},
+		{text: "the answer"},
+	})
+	tr.SetWindow(nativeWindowOf(`{"encrypted_content":"abc"}`))
+	s := newTestSession(t, nativeOptions(t, tr, "echoed", &recordingSink{}))
+
+	if res := runSession(t, s, "do the thing"); res.Reason != poo.ReasonContextExhausted {
+		t.Fatalf("the first run settled %q (%s), want context_exhausted", res.Reason, res.Detail.Text)
+	}
+	if got := tr.Compactions(); got != 1 {
+		t.Fatalf("the transport served %d native compactions, want 1", got)
+	}
+
+	// The new window is wider than the input the compaction left, so the
+	// guard would read that input as short and never compact again.
+	if _, err := s.SetModel(poo.ModelInfo{
+		Name: "wider", ModelID: "test-model", ContextLimit: 4800, MaxOutput: 1024,
+		Ops: []poo.Op{poo.OpChat, poo.OpCompact},
+	}); err != nil {
+		t.Fatalf("switching to the wider model: %v", err)
+	}
+	res := runSession(t, s, "carry on")
+	if res.Reason != poo.ReasonEndTurn {
+		t.Fatalf("the second run settled %q (%s), want end_turn", res.Reason, res.Detail.Text)
+	}
+	if got := tr.Compactions(); got != 2 {
+		t.Errorf("the transport served %d native compactions, want the switch to let it compact again", got)
+	}
+}
+
+// budgetRecordingCompactor records the budget it was asked about and lets the
+// strategy it wraps decide.
+type budgetRecordingCompactor struct {
+	inner poo.Compactor
+	last  poo.ContextBudget
+}
+
+// ShouldCompact records the budget and asks the strategy.
+func (c *budgetRecordingCompactor) ShouldCompact(view poo.View, budget poo.ContextBudget) bool {
+	c.last = budget
+	return c.inner.ShouldCompact(view, budget)
+}
+
+// Compact asks the strategy.
+func (c *budgetRecordingCompactor) Compact(ctx context.Context, in poo.CompactionEnv) (poo.Compaction, error) {
+	return c.inner.Compact(ctx, in)
+}
+
+// TestAModelSwitchKeepsTheCompactedInputItStillMeasures covers the value the
+// native guard reads across a switch: the input a compaction left belongs to
+// the window that measured it, so a switch that keeps the window keeps the
+// value, and one that changes the endpoint's input cap starts the guard over.
+func TestAModelSwitchKeepsTheCompactedInputItStillMeasures(t *testing.T) {
+	ops := []poo.Op{poo.OpChat, poo.OpCompact}
+	cases := []struct {
+		name  string
+		model poo.ModelInfo
+		want  int
+	}{
+		{
+			name:  "the same window and no cap",
+			model: poo.ModelInfo{Name: "same", ModelID: "test-model", ContextLimit: 4000, MaxOutput: 512, Ops: ops},
+			want:  3900,
+		},
+		{
+			name:  "only the input cap changes",
+			model: poo.ModelInfo{Name: "capped", ModelID: "test-model", ContextLimit: 4000, MaxOutput: 512, InputLimit: 4000, Ops: ops},
+			want:  0,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			tr := scripted([]fakeResponse{
+				{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}, usage: &poo.UsageReport{InputTokens: 3600, OutputTokens: 5}},
+				{calls: []poo.ToolCall{{CallID: "c2", Name: "echo", Arguments: []byte(`{"text":"two"}`)}}, usage: &poo.UsageReport{InputTokens: 3900, OutputTokens: 5}},
+			})
+			tr.SetWindow(nativeWindowOf(`{"encrypted_content":"abc"}`))
+			probe := &budgetRecordingCompactor{inner: native.New(native.Options{})}
+			opts := nativeOptions(t, tr, "echoed", &recordingSink{})
+			opts.Compactor = probe
+			s := newTestSession(t, opts)
+
+			if res := runSession(t, s, "do the thing"); res.Reason != poo.ReasonContextExhausted {
+				t.Fatalf("the first run settled %q (%s), want context_exhausted", res.Reason, res.Detail.Text)
+			}
+			if got := probe.last.CompactedInput; got != 3900 {
+				t.Fatalf("the first run's budget carries a compacted input of %d, want the report's 3900", got)
+			}
+			if _, err := s.SetModel(c.model); err != nil {
+				t.Fatalf("switching the model: %v", err)
+			}
+			runSession(t, s, "carry on")
+			if got := probe.last.CompactedInput; got != c.want {
+				t.Errorf("the budget after the switch carries a compacted input of %d, want %d", got, c.want)
+			}
+		})
 	}
 }

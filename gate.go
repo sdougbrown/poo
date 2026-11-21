@@ -27,9 +27,8 @@ type requestGateResult struct {
 // The request gate never opens a request while a candidate is pending.
 func (s *Session) requestGate(run *runState) requestGateResult {
 	// The compactor gets one chance in a request gate pass. An interrupt that
-	// ends the compaction restarts the request gate for the candidates, the
-	// budget and the notice, but not for a second compaction the
-	// interrupt already ended.
+	// ends the compaction restarts the request gate for the candidates and the
+	// budget, but not for a second compaction the interrupt already ended.
 	compactionTried := false
 requestGateLoop:
 	for {
@@ -47,15 +46,21 @@ requestGateLoop:
 		// rebased onto the new view, and a compaction that refuses to
 		// compact ends the run with its handoff.
 		//
+		// A request the endpoint refused for its length asks for one
+		// compaction the strategy itself may decline. The pass takes it
+		// here, so a compaction an interrupt ended can be given back.
+		//
 		// An interrupt that ends the compaction is not a compaction
 		// failure: the request gate restarts from its first step, so the pending
-		// candidates, the compactor, the budget and the notice are all
-		// checked again instead of the interrupt opening a request by
-		// itself.
+		// candidates and the budget are checked again instead of the interrupt
+		// opening a request by itself.
+		forced, refusal := s.takeForcedCompaction(run)
 		for s.opts.Compactor != nil && !compactionTried {
 			compactionTried = true
-			should := s.opts.Compactor.ShouldCompact(s.view(), s.budget())
-			if !should {
+			// A forced compaction skips the strategy's decision. The endpoint
+			// has already said the prompt is too long, and that guess is what
+			// the strategy's guard exists to make.
+			if !forced && !s.opts.Compactor.ShouldCompact(s.view(), s.budget()) {
 				break
 			}
 			s.transition(StateCompacting)
@@ -67,6 +72,13 @@ requestGateLoop:
 				return requestGateResult{held: true}
 			}
 			if errors.Is(err, errCompactionInterrupted) {
+				// An interrupt that ended the compaction does not spend the
+				// refusal's one compaction: the restarted pass takes it again
+				// and compacts.
+				if forced {
+					s.rearmForcedCompaction(run, refusal)
+					compactionTried = false
+				}
 				s.clearInterrupt(run)
 				s.drainInputs(run, false)
 				s.transition(StateRequesting)
@@ -79,10 +91,15 @@ requestGateLoop:
 				return requestGateResult{held: true}
 			}
 			if err != nil {
-				// The compactor failed. Below the hard limit the run
-				// continues uncompacted; at or above it the run settles
-				// context_exhausted.
-				if s.overHardLimit() {
+				// A compaction the refusal asked for is the request's last
+				// chance: one that failed settles the run with the refusal.
+				if forced {
+					return requestGateResult{candidates: []candidate{refusal}}
+				}
+				// The compactor failed. When the next request can still go
+				// out the run continues uncompacted; when it cannot, the run
+				// settles context_exhausted.
+				if blocked, _, _ := s.budget().RequestBlocked(); blocked {
 					return requestGateResult{candidates: []candidate{newCandidate(ReasonContextExhausted, SettleDetail{
 						Source: "compaction_failed",
 						Text:   err.Error(),
@@ -99,97 +116,15 @@ requestGateLoop:
 	}
 
 	// Step 2: the budget check.
-	maxTokens := s.maxTokens()
-	if maxTokens < MinOutputTokens {
-		// No room to answer.
+	if blocked, source, text := s.budget().RequestBlocked(); blocked {
 		return requestGateResult{candidates: []candidate{newCandidate(ReasonContextExhausted, SettleDetail{
-			Source: "no_output_room",
-			Text:   fmt.Sprintf("the computed max_tokens %d is under the %d-token minimum", maxTokens, MinOutputTokens),
-		})}}
-	}
-	if s.overHardLimit() {
-		return requestGateResult{candidates: []candidate{newCandidate(ReasonContextExhausted, SettleDetail{
-			Source: "hard_limit",
-			Text: fmt.Sprintf("the estimated input of %d tokens is at or above %d%% of the %d-token prompt limit",
-				s.estimatedInput(), int(s.opts.HardRatio*100), s.opts.Model.PromptLimit()),
+			Source: source,
+			Text:   text,
 		})}}
 	}
 
-	// Step 3: the context notice, when it is due.
-	s.maybeNotice(run)
-
-	// The notice grew the view, so the room to answer is checked again:
-	// the request would otherwise go out with a max_tokens the minimum
-	// already forbids.
-	maxTokens = s.maxTokens()
-	if maxTokens < MinOutputTokens {
-		return requestGateResult{candidates: []candidate{newCandidate(ReasonContextExhausted, SettleDetail{
-			Source: "no_output_room",
-			Text:   fmt.Sprintf("the computed max_tokens %d is under the %d-token minimum", maxTokens, MinOutputTokens),
-		})}}
-	}
-
-	// Step 4: the run requests.
+	// Step 3: the run requests.
 	return requestGateResult{}
-}
-
-// overHardLimit reports that the estimated input is at or above the hard
-// ratio of the prompt limit.
-func (s *Session) overHardLimit() bool {
-	limit := s.opts.Model.PromptLimit()
-	if limit <= 0 {
-		return false
-	}
-	estimated := s.estimatedInput()
-	return float64(estimated) >= s.opts.HardRatio*float64(limit)
-}
-
-// maybeNotice tells the model that the prompt limit is filling up.
-//
-// The notice fires at most once per run, and it fires again in a later
-// run only if the estimate has dropped back below the notice ratio.
-func (s *Session) maybeNotice(run *runState) {
-	limit := s.opts.Model.PromptLimit()
-	if limit <= 0 {
-		return
-	}
-	s.mu.Lock()
-	estimated := s.estimatedInputLocked()
-	if float64(estimated) < s.opts.NoticeRatio*float64(limit) {
-		// The usage is below the ratio, which re-arms the notice for
-		// the runs to come.
-		s.noticeArmed = true
-		s.mu.Unlock()
-		return
-	}
-	if !s.noticeArmed || run.noticeFired {
-		s.mu.Unlock()
-		return
-	}
-	run.noticeFired = true
-	s.noticeArmed = false
-	s.mu.Unlock()
-
-	// The ratio in the model's notice is the configured one: a
-	// consumer that fires the notice at 60% does not tell the model
-	// the window is ~80% used.
-	msg := NewTextMessage(RoleUser, fmt.Sprintf("[Context notice: ~%d%% of the context limit used. Prefer narrow reads; finish or report soon.]", int(s.opts.NoticeRatio*100)))
-	msg.Origin = OriginNotice
-	s.appendMessages(msg)
-	if err := s.write(run.ctx, &MessageRecord{
-		RecordMeta: NewRecordMetaFrom("message", msg.Origin),
-		RunID:      run.id,
-		Role:       msg.Role,
-		Content:    msg.Content,
-	}); err != nil {
-		s.noteStoreError(run, err)
-	}
-	s.events.emit(EventContextNotice, map[string]any{
-		"run_id": run.id,
-		"ratio":  s.opts.NoticeRatio,
-		"input":  estimated,
-		"limit":  limit,
-	})
 }
 
 // compactionOutcome is what a compaction did.
@@ -223,7 +158,7 @@ var errCompactionStore = errors.New("poo: the compaction record was refused")
 //
 // The compaction is validated before it is applied: a compaction the
 // core cannot apply is a compactor failure, and the run carries on
-// uncompacted below the hard limit.
+// uncompacted when the next request can still go out.
 //
 // The compaction's record is written after the new view is known, so the
 // record's tokens_after is the estimate of the new view at the plan's
@@ -477,16 +412,6 @@ func (s *Session) readSideReply(ctx context.Context, run *runState, reader Strea
 	}
 	s.chargeSideRequest(run, resp.usage, reply.Message, requestChars)
 	return reply, nil
-}
-
-// maxTokens computes the output room for the next request.
-//
-// The rule is the core's: min(model MaxOutput or
-// DefaultMaxOutputFor(context_limit), context_limit − estimated input −
-// 256). The value is always computed, never left to
-// the endpoint's default.
-func (s *Session) maxTokens() int {
-	return s.opts.Model.MaxTokens(s.estimatedInput())
 }
 
 // estimatedInput estimates the prompt tokens of the next request.

@@ -761,9 +761,9 @@ before the model finished, and both settle `cancelled`.
 | `empty_turns` | The model reached the bound on consecutive turns that asked for tool calls and sent none. The detail's text says how many turns. A run that mixed the two kinds of unusable turn is named for its last turn. |
 | `unparsed_calls` | The model reached the bound on consecutive turns whose tool calls did not parse. The detail's text says how many turns. A run that mixed the two kinds of unusable turn is named for its last turn. |
 | `no_output_room` | The computed `max_tokens` was under 256, so the request was never sent. |
-| `hard_limit` | The estimate crossed the hard ratio of the prompt limit: the smaller of the context window and the endpoint's input cap. |
-| `compaction_failed` | The compactor failed at or above the hard ratio. |
-| `provider:context_length` | The endpoint reported that the request was too long. It is recognised whatever status the endpoint sent it with, including a 5xx. |
+| `prompt_limit` | The estimate plus the reserve was over the endpoint's input cap, so the request was never sent. |
+| `compaction_failed` | The compactor failed when the next request could not go out. |
+| `provider:context_length` | The endpoint reported that the request was too long. It is recognised whatever status the endpoint sent it with, including a 5xx. The run compacts once and sends the request again when it has a compactor, the refused request carried no partial answer, and no interrupt is pending. A handoff strategy forks the refused request, which fails, so the run settles with the refusal. Without those conditions the run settles as before. |
 | `provider:<kind>` | The provider request failed with that kind. |
 | `finish` | The model called the `finish` tool with a valid result. |
 | `before_settle` | A `BeforeSettle` hook stopped the run, or the run asked for more continuations than it allows. |

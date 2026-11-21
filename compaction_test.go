@@ -707,7 +707,7 @@ func TestAnEmptyCompactionIsRejected(t *testing.T) {
 	res := runSession(t, s, "do the thing")
 
 	if res.Reason != poo.ReasonEndTurn {
-		t.Errorf("the run settled %q, want end_turn: a rejected compaction is not a failure below the hard limit", res.Reason)
+		t.Errorf("the run settled %q, want end_turn: a rejected compaction is not a failure with room for the next request", res.Reason)
 	}
 	if sink.count("compaction") != 0 {
 		t.Errorf("the log holds %d compaction records, want none", sink.count("compaction"))
@@ -1083,8 +1083,8 @@ func TestTheEndSettlesWithTheHandoff(t *testing.T) {
 	}
 }
 
-// TestTheBudgetIsRebasedOntoTheNewView covers the rule: a view
-// over the hard ratio that a compaction brings below it goes on to
+// TestTheBudgetIsRebasedOntoTheNewView covers the rule: a view whose next
+// request cannot go out, that a compaction brings back into fit, goes on to
 // request, and it does not settle context_exhausted.
 func TestTheBudgetIsRebasedOntoTheNewView(t *testing.T) {
 	compactor := &compactionCompactor{
@@ -1108,24 +1108,23 @@ func TestTheBudgetIsRebasedOntoTheNewView(t *testing.T) {
 	sink := &recordingSink{}
 	opts := testOptions(t, tr, &echoTool{result: "echoed"}, sink)
 	opts.Compactor = compactor
-	opts.Model.ContextLimit = 4000
-	opts.HardRatio = 0.5
+	opts.Model.ContextLimit = 2000
 	s := newTestSession(t, opts)
 
 	res := runSession(t, s, "do the thing")
 
 	if res.Reason != poo.ReasonEndTurn {
-		t.Fatalf("the run settled %q, want end_turn: the compaction brought the view below the hard ratio", res.Reason)
+		t.Fatalf("the run settled %q, want end_turn: the compaction brought the view back into fit", res.Reason)
 	}
 	if got := len(tr.Requests()); got != 2 {
 		t.Errorf("the transport got %d requests, want 2: the run went on to request", got)
 	}
 }
 
-// TestTheHardLimitSettlesWithoutACompaction covers the rule
-// beside the rebase: a view over the hard ratio that no compaction
-// brings below it settles context_exhausted.
-func TestTheHardLimitSettlesWithoutACompaction(t *testing.T) {
+// TestARunWithoutRoomSettlesContextExhausted covers the rule beside the
+// rebase: a view that no compaction brings back into fit settles
+// context_exhausted.
+func TestARunWithoutRoomSettlesContextExhausted(t *testing.T) {
 	long := strings.Repeat("x", 8000)
 	tr := scripted([]fakeResponse{
 		{text: long, calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
@@ -1133,8 +1132,7 @@ func TestTheHardLimitSettlesWithoutACompaction(t *testing.T) {
 	})
 	sink := &recordingSink{}
 	opts := testOptions(t, tr, &echoTool{result: "echoed"}, sink)
-	opts.Model.ContextLimit = 4000
-	opts.HardRatio = 0.5
+	opts.Model.ContextLimit = 2000
 	s := newTestSession(t, opts)
 
 	res := runSession(t, s, "do the thing")
@@ -1142,13 +1140,14 @@ func TestTheHardLimitSettlesWithoutACompaction(t *testing.T) {
 	if res.Reason != poo.ReasonContextExhausted {
 		t.Fatalf("the run settled %q, want context_exhausted", res.Reason)
 	}
-	if res.Detail.Source != "hard_limit" {
-		t.Errorf("the settle detail's source is %q, want hard_limit", res.Detail.Source)
+	if res.Detail.Source != "no_output_room" {
+		t.Errorf("the settle detail's source is %q, want no_output_room", res.Detail.Source)
 	}
 }
 
-// TestTheCompactorsFailureBelowTheHardLimitContinues covers the failure row: below the hard limit the run continues uncompacted.
-func TestTheCompactorsFailureBelowTheHardLimitContinues(t *testing.T) {
+// TestTheCompactorsFailureWithRoomContinues covers the failure row: with
+// room for the next request the run continues uncompacted.
+func TestTheCompactorsFailureWithRoomContinues(t *testing.T) {
 	compactor := &compactionCompactor{
 		should: afterTurns(1),
 		compaction: func(view poo.View) (poo.Compaction, error) {
@@ -1174,9 +1173,10 @@ func TestTheCompactorsFailureBelowTheHardLimitContinues(t *testing.T) {
 	}
 }
 
-// TestTheCompactorsFailureAtTheHardLimitSettles covers the failure row: at or above the hard limit a compactor that failed
-// settles the run as context_exhausted.
-func TestTheCompactorsFailureAtTheHardLimitSettles(t *testing.T) {
+// TestTheCompactorsFailureWithoutRoomSettles covers the failure row: when
+// the next request cannot go out, a compactor that failed settles the run as
+// context_exhausted.
+func TestTheCompactorsFailureWithoutRoomSettles(t *testing.T) {
 	compactor := &compactionCompactor{
 		should: afterTurns(1),
 		compaction: func(view poo.View) (poo.Compaction, error) {
@@ -1191,8 +1191,7 @@ func TestTheCompactorsFailureAtTheHardLimitSettles(t *testing.T) {
 	sink := &recordingSink{}
 	opts := testOptions(t, tr, &echoTool{result: "echoed"}, sink)
 	opts.Compactor = compactor
-	opts.Model.ContextLimit = 4000
-	opts.HardRatio = 0.5
+	opts.Model.ContextLimit = 2000
 	s := newTestSession(t, opts)
 
 	res := runSession(t, s, "do the thing")

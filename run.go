@@ -505,7 +505,7 @@ func (s *Session) loop(run *runState) []candidate {
 
 		s.events.emit(EventTurnStarted, map[string]any{"run_id": run.id, "turn": turn})
 
-		resp, rendered, err := s.request(run, turn)
+		resp, rendered, requestChars, err := s.request(run, turn)
 		// The run may have settled while the request was in flight.
 		// What the request produced then is a late completion: it
 		// never mutates the history, the records or the events. The
@@ -526,6 +526,10 @@ func (s *Session) loop(run *runState) []candidate {
 			// and turns it into an interrupted turn. The attempt
 			// does not count against the retry budget.
 			if s.interruptPending(run) {
+				// An interrupted request is not a request that went out, so
+				// the refusal the run was compacting for is over. A later
+				// refusal gets its own compaction.
+				s.clearRefusal(run)
 				// The aborted request is still charged once before the
 				// interrupted turn's budget check.
 				if !s.accountInterruptedRequest(run, turn, resp) {
@@ -555,8 +559,34 @@ func (s *Session) loop(run *runState) []candidate {
 			if resp != nil && resp.usage != nil {
 				s.writeUsage(run, turn, resp.usage, resp.requestChars)
 			}
-			return []candidate{newCandidate(reason, detail)}
+			refusal := newCandidate(reason, detail)
+			// An endpoint that refused the prompt's own length is the
+			// authority on whether the next request fits. The run compacts
+			// once and sends the request again through the gate.
+			if s.compactForRefusal(run, err, resp, requestChars, refusal) {
+				// The refused turn ends the way every turn does: its end, the
+				// queues, the hooks and the stop conditions. A turn end that
+				// stops the run stops it here, and the refusal buys no
+				// compaction.
+				_, cands, interrupted := s.turnEndSteps(run, turn, turnNote{})
+				if interrupted {
+					// The interrupt ended the turn's steps, not the refusal:
+					// the gate compacts for it, and the resend carries the
+					// interrupt's message.
+					continue
+				}
+				if len(cands) > 0 {
+					s.clearRefusal(run)
+					return cands
+				}
+				continue
+			}
+			return []candidate{refusal}
 		}
+
+		// A request that went out ends the refusal before it: a later
+		// refusal gets the one forced compaction of its own.
+		s.clearRefusal(run)
 
 		// The model's response is part of the history whether or not
 		// it asked for tool calls.
@@ -653,12 +683,15 @@ type turnOutcome struct {
 	candidates []candidate
 }
 
-// turnEnd runs the plan's turn-end algorithm.
+// turnEndSteps runs the turn-end steps every turn takes, before the turn-end
+// algorithm decides what comes next. The steps are the end event, the drained
+// queues, the AfterTurn hooks and every stop condition.
 //
-// The steps are normative: emit turn.ended, drain the queues, run the
-// AfterTurn hooks, evaluate the stop conditions, and then either settle
-// or go to the next-request gate.
-func (s *Session) turnEnd(run *runState, turn int, processed bool, resp *response, note turnNote) turnOutcome {
+// It reports what the turn appended, the candidates that settle the run, and
+// whether an interrupt ended the turn during the hooks. An interrupt at that
+// point discards the hooks' decisions and skips the remaining steps, so the
+// caller must stop there too.
+func (s *Session) turnEndSteps(run *runState, turn int, note turnNote) (appended bool, cands []candidate, interrupted bool) {
 	// Step 1: the turn is over.
 	s.events.emit(EventTurnEnded, map[string]any{"run_id": run.id, "turn": turn})
 
@@ -667,7 +700,7 @@ func (s *Session) turnEnd(run *runState, turn int, processed bool, resp *respons
 	// A follow-up is not drained here: it waits for a natural stop, and
 	// finalize step 1 delivers it. A response note that opened another
 	// turn counts like a steer: the model has something new to read.
-	appended := s.drainInputs(run, false) || note.continued
+	appended = s.drainInputs(run, false) || note.continued
 
 	// Step 3: the AfterTurn hooks run on every turn, tool-free turns
 	// included.
@@ -680,12 +713,11 @@ func (s *Session) turnEnd(run *runState, turn int, processed bool, resp *respons
 	// steps are skipped.
 	if s.interruptPending(run) {
 		s.interruptedTurnEnd(run, turn)
-		return turnOutcome{}
+		return appended, nil, true
 	}
 
 	// Step 4: every stop condition is evaluated, and a run of unusable
 	// turns adds its bound.
-	var cands []candidate
 	if stop != nil {
 		cands = append(cands, *stop)
 	}
@@ -699,10 +731,19 @@ func (s *Session) turnEnd(run *runState, turn int, processed bool, resp *respons
 	}
 	cands = append(cands, s.evaluateStopConditions(run, turn)...)
 	cands = append(cands, s.evaluateBudgets(run, turn)...)
+	return appended, cands, false
+}
 
-	// Step 5: a candidate settles the run, and the highest-precedence
-	// one wins.
-	if len(cands) > 0 {
+// turnEnd runs the plan's turn-end algorithm.
+//
+// The steps are normative: emit turn.ended, drain the queues and run the
+// AfterTurn hooks. Then evaluate the stop conditions, and either settle or go
+// to the next-request gate. The first steps are the ones every turn end runs,
+// so a turn that produced no response runs them through turnEndSteps.
+func (s *Session) turnEnd(run *runState, turn int, processed bool, resp *response, note turnNote) turnOutcome {
+	// Steps 1 to 5: the end, the queues, the hooks and every stop condition.
+	appended, cands, interrupted := s.turnEndSteps(run, turn, note)
+	if interrupted || len(cands) > 0 {
 		return turnOutcome{candidates: cands}
 	}
 
@@ -1250,7 +1291,11 @@ func originForMode(mode InputMode) Origin {
 // prompt count leaves. One request is sent twice at most. The rejected
 // attempt says another one followed, and the resend's attempts carry on the
 // same request's numbering.
-func (s *Session) request(run *runState, turn int) (*response, Rendered, error) {
+//
+// The request's own size comes back with it. A failure that carries the
+// endpoint's prompt count can then calibrate the estimate against what the
+// endpoint measured.
+func (s *Session) request(run *runState, turn int) (*response, Rendered, int, error) {
 	res := s.requestOnce(run, turn, 0, 0)
 	reportLast := func(retried bool) (Attempt, bool) {
 		attempt, ok := res.last.take()
@@ -1264,7 +1309,7 @@ func (s *Session) request(run *runState, turn int) (*response, Rendered, error) 
 	resend, ok := s.resendLimit(run, turn, res)
 	if !ok {
 		reportLast(false)
-		return res.resp, res.rendered, res.err
+		return res.resp, res.rendered, res.requestChars, res.err
 	}
 	base := 0
 	if attempt, ok := reportLast(true); ok {
@@ -1272,7 +1317,84 @@ func (s *Session) request(run *runState, turn int) (*response, Rendered, error) 
 	}
 	res = s.requestOnce(run, turn, base, resend)
 	reportLast(false)
-	return res.resp, res.rendered, res.err
+	return res.resp, res.rendered, res.requestChars, res.err
+}
+
+// compactForRefusal asks the next-request gate to compact once for a request
+// the endpoint refused for its context length, and reports whether the run
+// goes on.
+//
+// A smaller max_tokens cannot shrink a prompt, so a compaction is the only
+// thing that can make the refused request fit. The endpoint's own count of the
+// prompt is the prompt's real size, and it calibrates the estimate the gate
+// sizes the compaction with.
+//
+// A refused request gets one forced compaction. A run with no compactor, a run
+// that is winding down and a run with an interrupt pending settle the way the
+// refusal always did. They are ending, or already had their say.
+func (s *Session) compactForRefusal(run *runState, err error, resp *response, requestChars int, refusal candidate) bool {
+	var perr *ProviderError
+	if !errors.As(err, &perr) || perr.Kind != ProviderKindContextLength {
+		return false
+	}
+	// A refusal that carried part of an answer is not a request the run may
+	// send again: the model already read what it said.
+	if resp != nil && (len(resp.content) > 0 || len(resp.calls) > 0) {
+		return false
+	}
+	if s.opts.Compactor == nil || s.interruptPending(run) || s.runWindingDown(run) {
+		return false
+	}
+	s.mu.Lock()
+	forced := run.refusalForced
+	run.refusalForced = true
+	if !forced {
+		run.forceCompaction = true
+		run.refusal = &refusal
+	}
+	s.mu.Unlock()
+	if forced {
+		return false
+	}
+	if perr.PromptTokens > 0 {
+		s.observeUsage(&UsageReport{InputTokens: perr.PromptTokens}, requestChars)
+	}
+	return true
+}
+
+// clearRefusal forgets the refusal the run compacted for, so a later refusal
+// gets the one forced compaction of its own.
+func (s *Session) clearRefusal(run *runState) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	run.refusalForced = false
+	run.refusal = nil
+	run.forceCompaction = false
+}
+
+// takeForcedCompaction returns the compaction a refused request asked for,
+// with the settle candidate the refusal produced, and consumes both: one
+// refusal buys one compaction.
+func (s *Session) takeForcedCompaction(run *runState) (bool, candidate) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	refusal := run.refusal
+	forced := run.forceCompaction && refusal != nil
+	run.forceCompaction = false
+	run.refusal = nil
+	if !forced {
+		return false, candidate{}
+	}
+	return true, *refusal
+}
+
+// rearmForcedCompaction gives a refused request its forced compaction back
+// after an interrupt ended it, so the restarted gate compacts again.
+func (s *Session) rearmForcedCompaction(run *runState, refusal candidate) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	run.forceCompaction = true
+	run.refusal = &refusal
 }
 
 // resendLimit decides whether a rejected request is worth one more attempt
@@ -1852,6 +1974,7 @@ func (s *Session) chargeUsageLocked(run *runState, usage *UsageReport) {
 // the shape it had, and a request a compaction made says what it was for.
 func (s *Session) recordUsage(run *runState, meta RecordMeta, turn, request int, usage *UsageReport, requestChars int) bool {
 	s.observeUsage(usage, requestChars)
+	s.noteCompactedInput(meta, usage)
 	if err := s.write(run.ctx, &UsageRecord{
 		RecordMeta:      meta,
 		RunID:           run.id,
@@ -1878,6 +2001,22 @@ func (s *Session) recordUsage(run *runState, meta RecordMeta, turn, request int,
 	}
 	s.events.emit(EventUsage, payload)
 	return true
+}
+
+// noteCompactedInput records the input the first usage report after a
+// compaction reported. A request a compaction made is not the view's input,
+// so its report is left out.
+func (s *Session) noteCompactedInput(meta RecordMeta, usage *UsageReport) {
+	if meta.Origin == OriginCompaction || usage == nil || usage.InputTokens <= 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.compactedReportPending {
+		return
+	}
+	s.compactedInput = usage.InputTokens
+	s.compactedReportPending = false
 }
 
 // addEstimatedUsage counts a turn the endpoint reported no usage for.

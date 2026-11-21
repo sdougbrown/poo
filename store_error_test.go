@@ -63,18 +63,15 @@ func TestARefusedToolResultMessageSettlesStoreError(t *testing.T) {
 	}
 }
 
-// TestARefusedContextNoticeSettlesStoreError covers the same row for
-// the notice the model gets when the context fills up.
-func TestARefusedContextNoticeSettlesStoreError(t *testing.T) {
-	// The notice is written when the estimate reaches the notice
-	// ratio, so the window is small enough for the first request to
-	// reach it, and the prompt is long enough to fill it.
+// TestARefusedAssistantMessageSettlesStoreError covers the same row for the
+// reply the model wrote: the message the next request reads is a record like
+// any other, and a refused one is terminal.
+func TestARefusedAssistantMessageSettlesStoreError(t *testing.T) {
+	// The records of a plain run are the system message, the prompt and the
+	// reply. The third one is refused.
 	sink := &failingSink{failRecord: "message", failAfter: 2}
 	tr := scripted([]fakeResponse{{text: "done"}})
-	opts := testOptions(t, tr, &echoTool{}, sink)
-	opts.SystemPrompt = strings.Repeat("x", 10000)
-	opts.Model = poo.ModelInfo{ModelID: "test-model", ContextLimit: 3400}
-	s := newTestSession(t, opts)
+	s := newTestSession(t, testOptions(t, tr, &echoTool{}, sink))
 
 	res := runSession(t, s, "start")
 	if res.Reason != poo.ReasonStoreError {

@@ -676,8 +676,50 @@ func (s *Session) rebuild(records []Record, out *Restored) error {
 	// The turns that produced no message stand where the view stands
 	// when the records end.
 	s.placeRemainingTurns(placed)
+	// A resumed session guards the native compaction the way the live one did.
+	// The first report after the last compaction measured the view the
+	// compaction left.
+	s.compactedInput, s.compactedReportPending = compactedInputFrom(records)
 	out.Messages = len(s.history)
 	return nil
+}
+
+// compactedInputFrom returns the input the first usage report after the last
+// compaction reported, and whether the compaction still waits for one.
+//
+// A request a compaction made is the compaction's own, not the view's input,
+// so its report is left out. A live session leaves it out the same way. A
+// compaction that ended the run never armed the guard, because a handoff
+// changes no view. The guard therefore belongs to the compaction before it. A
+// model switch cleared a value the window that measured it no longer applied
+// to. Its record names only the models, so the switch is taken at its word and
+// nothing is armed.
+func compactedInputFrom(records []Record) (int, bool) {
+	last := -1
+	for i, rec := range records {
+		compaction, ok := rec.(*CompactionRecord)
+		if !ok || compaction.Compaction.End != nil {
+			continue
+		}
+		last = i
+	}
+	if last < 0 {
+		return 0, false
+	}
+	tail := records[last+1:]
+	for _, rec := range tail {
+		if _, ok := rec.(*ModelsChangedRecord); ok {
+			return 0, false
+		}
+	}
+	for _, rec := range tail {
+		usage, ok := rec.(*UsageRecord)
+		if !ok || usage.Origin == OriginCompaction || usage.InputTokens <= 0 {
+			continue
+		}
+		return usage.InputTokens, false
+	}
+	return 0, true
 }
 
 // seedCounters continues the session's counters past the ones the
