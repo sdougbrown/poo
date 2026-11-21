@@ -145,9 +145,10 @@ func (s *Settings) checkRoles() error {
 // checkRules checks the permission rules.
 //
 // A rule matches on the tool's name or on the tool's class, never on
-// both, and a command prefix names the tool it matches: a prefix on a
-// class rule would have no argument to match, and a rule that matches
-// nothing is a rule the operator thinks is doing something.
+// both, and a command matcher names the tool it matches: a prefix or a
+// substring on a class rule would have no argument to match, and a
+// rule that matches nothing is a rule the operator thinks is doing
+// something.
 func (s *Settings) checkRules() error {
 	for i, rule := range s.Permission.Rules {
 		where := fmt.Sprintf("permission.rules[%d]", i)
@@ -181,6 +182,29 @@ func (s *Settings) checkRules() error {
 				Code:    CodeInvalid,
 				Field:   where + ".command_prefix",
 				Message: "a command prefix is only valid on a rule that names a tool",
+			}
+		}
+		if len(rule.CommandContains) > 0 && rule.Tool == "" {
+			return &Error{
+				Code:    CodeInvalid,
+				Field:   where + ".command_contains",
+				Message: "a command substring is only valid on a rule that names a tool",
+			}
+		}
+		if rule.CommandPrefix != "" && len(rule.CommandContains) > 0 {
+			return &Error{
+				Code:    CodeInvalid,
+				Field:   where,
+				Message: "a rule carries a command prefix or command substrings, never both",
+			}
+		}
+		for _, substring := range rule.CommandContains {
+			if substring == "" {
+				return &Error{
+					Code:    CodeInvalid,
+					Field:   where + ".command_contains",
+					Message: "a command substring is empty, and a substring that matches everywhere matches everything",
+				}
 			}
 		}
 		switch rule.Action {

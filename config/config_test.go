@@ -419,6 +419,41 @@ func TestARuleNeedsOneMatcher(t *testing.T) {
 	}
 }
 
+// TestAContainsRuleNeedsOneMatcherAndASubstring covers the rules the
+// settings check by hand for a contains rule: it names a tool, it
+// carries no prefix beside it, and its substrings are not empty.
+func TestAContainsRuleNeedsOneMatcherAndASubstring(t *testing.T) {
+	tests := []struct {
+		name    string
+		setting string
+	}{
+		{
+			name:    "a contains substring on a class rule",
+			setting: "version: 1\npermission:\n  rules:\n    - class: side_effecting\n      command_contains: [\"rm -rf\"]\n      action: ask\n",
+		},
+		{
+			name:    "a contains substring beside a prefix",
+			setting: "version: 1\npermission:\n  rules:\n    - tool: bash\n      command_prefix: git\n      command_contains: [\"rm -rf\"]\n      action: ask\n",
+		},
+		{
+			name:    "an empty substring",
+			setting: "version: 1\npermission:\n  rules:\n    - tool: bash\n      command_contains: [\"\"]\n      action: ask\n",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := config.Parse([]byte(tt.setting), config.FormatYAML)
+			if err == nil {
+				t.Fatal("the settings decoded, want a failure")
+			}
+			code, ok := config.CodeOf(err)
+			if !ok || code != config.CodeInvalid {
+				t.Fatalf("the failure is %v, want an invalid value", err)
+			}
+		})
+	}
+}
+
 // TestTheGeneratedFileIsFresh covers the generated file: the generator
 // and the committed file are the same.
 func TestTheGeneratedFileIsFresh(t *testing.T) {

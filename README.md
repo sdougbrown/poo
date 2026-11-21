@@ -475,7 +475,8 @@ directory, not the settings file's, so a file travels with its prompts.
 that does not render. It exits 1 for a failure with no code of its own.
 
 **Permissions.** A policy checks every tool call before it runs.
-- A rule matches a tool name, a tool class or a bash command prefix.
+- A rule matches a tool name, a tool class, a bash command prefix, or substrings
+  a bash command carries.
 - `permission.unmatched` (or `--permission-unmatched`) decides what happens
   to a side-effecting call no rule covers: `allow`, `ask` or `deny`.
 - An `ask` goes through the asker chain. The `decide` asker asks a decision

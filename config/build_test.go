@@ -309,6 +309,37 @@ func TestAPrefixRuleNeedsAToolWithAPrimaryArgument(t *testing.T) {
 	}
 }
 
+// TestAContainsRuleNeedsAToolWithAPrimaryArgument covers the build
+// check the contains matching rides on: a pattern compares the tool's
+// primary argument, and a tool without one matches nothing, so the
+// build refuses the rule before it can pretend to ask.
+func TestAContainsRuleNeedsAToolWithAPrimaryArgument(t *testing.T) {
+	settings, err := config.Parse([]byte(theModelSettings+`permission:
+  rules:
+    - tool: bash
+      command_contains: ["rm -rf"]
+      action: ask
+`), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	build(t, settings, config.Overrides{})
+
+	settings, err = config.Parse([]byte(theModelSettings+`permission:
+  rules:
+    - tool: jobs
+      command_contains: ["anything"]
+      action: deny
+`), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	buildErr := buildExpectError(t, settings, config.Overrides{})
+	if !strings.Contains(buildErr.Error(), "no primary argument") {
+		t.Errorf("the failure is %v, want it to name the missing argument", buildErr)
+	}
+}
+
 // buildExpectError builds a runtime the settings refuse, and returns
 // the failure.
 func buildExpectError(t *testing.T, settings *config.Settings, overrides config.Overrides) error {
