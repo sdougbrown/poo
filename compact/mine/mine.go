@@ -171,9 +171,9 @@ func (c *Compactor) restoresOutputRoom(view poo.View, budget poo.ContextBudget) 
 	if !ok {
 		return false
 	}
-	after := budget
-	after.EstimatedInput = budget.EstimatedInput - cut.TurnTokens(messages[r.Start:r.End], budget) +
-		c.maxTokens + c.replacementCarriageTokens(r, messages[r.Start:r.End], budget)
+	covered := messages[r.Start:r.End]
+	after := cut.RoomAfter(budget, cut.TurnTokens(covered, budget),
+		c.maxTokens+c.replacementCarriageTokens(r, covered, budget))
 	return !after.OutputRoomShort()
 }
 

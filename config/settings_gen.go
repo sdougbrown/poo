@@ -14,12 +14,6 @@ type SettingsFields struct {
 	CliRegistryPaths                []string "json:\"cli_registry.paths,omitempty\""
 	ContextHandoffMaxTokens         *float64 "json:\"context.handoff.max_tokens,omitempty\""
 	ContextHandoffRatio             *float64 "json:\"context.handoff.ratio,omitempty\""
-	ContextHardRatio                *float64 "json:\"context.hard_ratio,omitempty\""
-	ContextMineKeepRecentTokens     *float64 "json:\"context.mine.keep_recent_tokens,omitempty\""
-	ContextMineMaxTokens            *float64 "json:\"context.mine.max_tokens,omitempty\""
-	ContextMinePointerMaxTokens     *float64 "json:\"context.mine.pointer_max_tokens,omitempty\""
-	ContextMineRatio                *float64 "json:\"context.mine.ratio,omitempty\""
-	ContextNoticeRatio              *float64 "json:\"context.notice_ratio,omitempty\""
 	ContextStrategy                 *string  "json:\"context.strategy,omitempty\""
 	ContextSummaryKeepRecentTokens  *float64 "json:\"context.summary.keep_recent_tokens,omitempty\""
 	ContextSummaryMaxTokens         *float64 "json:\"context.summary.max_tokens,omitempty\""
@@ -106,12 +100,6 @@ type SettingsAvailability struct {
 	CliRegistryPaths                FieldStatus
 	ContextHandoffMaxTokens         FieldStatus
 	ContextHandoffRatio             FieldStatus
-	ContextHardRatio                FieldStatus
-	ContextMineKeepRecentTokens     FieldStatus
-	ContextMineMaxTokens            FieldStatus
-	ContextMinePointerMaxTokens     FieldStatus
-	ContextMineRatio                FieldStatus
-	ContextNoticeRatio              FieldStatus
 	ContextStrategy                 FieldStatus
 	ContextSummaryKeepRecentTokens  FieldStatus
 	ContextSummaryMaxTokens         FieldStatus
@@ -235,18 +223,6 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 	ContextHandoffMaxTokensSatisfied := f.ContextHandoffMaxTokens != nil
 	ContextHandoffRatioEnabled := true
 	ContextHandoffRatioSatisfied := f.ContextHandoffRatio != nil
-	ContextHardRatioEnabled := true
-	ContextHardRatioSatisfied := f.ContextHardRatio != nil
-	ContextMineKeepRecentTokensEnabled := true
-	ContextMineKeepRecentTokensSatisfied := f.ContextMineKeepRecentTokens != nil
-	ContextMineMaxTokensEnabled := true
-	ContextMineMaxTokensSatisfied := f.ContextMineMaxTokens != nil
-	ContextMinePointerMaxTokensEnabled := true
-	ContextMinePointerMaxTokensSatisfied := f.ContextMinePointerMaxTokens != nil
-	ContextMineRatioEnabled := true
-	ContextMineRatioSatisfied := f.ContextMineRatio != nil
-	ContextNoticeRatioEnabled := true
-	ContextNoticeRatioSatisfied := f.ContextNoticeRatio != nil
 	ContextStrategyEnabled := true
 	ContextStrategySatisfied := func() bool { v := f.ContextStrategy; return v != nil && *v != "" }()
 	ContextSummaryKeepRecentTokensEnabled := true
@@ -491,183 +467,15 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 			Valid: nil,
 			Error: "",
 		},
-		ContextHardRatio: FieldStatus{
-			Required:  ContextHardRatioEnabled && false,
-			Enabled:   ContextHardRatioEnabled,
-			Satisfied: ContextHardRatioSatisfied,
-			Fair:      f.ContextHardRatio != nil && *f.ContextHardRatio >= 0 && *f.ContextHardRatio <= 1,
-			Reason: func() *string {
-				var reasons []string
-				if !(f.ContextHardRatio != nil && *f.ContextHardRatio >= 0 && *f.ContextHardRatio <= 1) && "context.hard_ratio must be between 0 and 1" != "" {
-					reasons = append(reasons, "context.hard_ratio must be between 0 and 1")
-				}
-				if len(reasons) == 0 {
-					return nil
-				}
-				return &reasons[0]
-			}(),
-			Reasons: func() []string {
-				var reasons []string
-				if !(f.ContextHardRatio != nil && *f.ContextHardRatio >= 0 && *f.ContextHardRatio <= 1) && "context.hard_ratio must be between 0 and 1" != "" {
-					reasons = append(reasons, "context.hard_ratio must be between 0 and 1")
-				}
-				if reasons == nil {
-					reasons = []string{}
-				}
-				return reasons
-			}(),
-			Valid: nil,
-			Error: "",
-		},
-		ContextMineKeepRecentTokens: FieldStatus{
-			Required:  ContextMineKeepRecentTokensEnabled && false,
-			Enabled:   ContextMineKeepRecentTokensEnabled,
-			Satisfied: ContextMineKeepRecentTokensSatisfied,
-			Fair:      f.ContextMineKeepRecentTokens != nil && *f.ContextMineKeepRecentTokens >= 0,
-			Reason: func() *string {
-				var reasons []string
-				if !(f.ContextMineKeepRecentTokens != nil && *f.ContextMineKeepRecentTokens >= 0) && "context.mine.keep_recent_tokens must not be negative" != "" {
-					reasons = append(reasons, "context.mine.keep_recent_tokens must not be negative")
-				}
-				if len(reasons) == 0 {
-					return nil
-				}
-				return &reasons[0]
-			}(),
-			Reasons: func() []string {
-				var reasons []string
-				if !(f.ContextMineKeepRecentTokens != nil && *f.ContextMineKeepRecentTokens >= 0) && "context.mine.keep_recent_tokens must not be negative" != "" {
-					reasons = append(reasons, "context.mine.keep_recent_tokens must not be negative")
-				}
-				if reasons == nil {
-					reasons = []string{}
-				}
-				return reasons
-			}(),
-			Valid: nil,
-			Error: "",
-		},
-		ContextMineMaxTokens: FieldStatus{
-			Required:  ContextMineMaxTokensEnabled && false,
-			Enabled:   ContextMineMaxTokensEnabled,
-			Satisfied: ContextMineMaxTokensSatisfied,
-			Fair:      f.ContextMineMaxTokens != nil && *f.ContextMineMaxTokens >= 0,
-			Reason: func() *string {
-				var reasons []string
-				if !(f.ContextMineMaxTokens != nil && *f.ContextMineMaxTokens >= 0) && "context.mine.max_tokens must not be negative" != "" {
-					reasons = append(reasons, "context.mine.max_tokens must not be negative")
-				}
-				if len(reasons) == 0 {
-					return nil
-				}
-				return &reasons[0]
-			}(),
-			Reasons: func() []string {
-				var reasons []string
-				if !(f.ContextMineMaxTokens != nil && *f.ContextMineMaxTokens >= 0) && "context.mine.max_tokens must not be negative" != "" {
-					reasons = append(reasons, "context.mine.max_tokens must not be negative")
-				}
-				if reasons == nil {
-					reasons = []string{}
-				}
-				return reasons
-			}(),
-			Valid: nil,
-			Error: "",
-		},
-		ContextMinePointerMaxTokens: FieldStatus{
-			Required:  ContextMinePointerMaxTokensEnabled && false,
-			Enabled:   ContextMinePointerMaxTokensEnabled,
-			Satisfied: ContextMinePointerMaxTokensSatisfied,
-			Fair:      f.ContextMinePointerMaxTokens != nil && *f.ContextMinePointerMaxTokens >= 0,
-			Reason: func() *string {
-				var reasons []string
-				if !(f.ContextMinePointerMaxTokens != nil && *f.ContextMinePointerMaxTokens >= 0) && "context.mine.pointer_max_tokens must not be negative" != "" {
-					reasons = append(reasons, "context.mine.pointer_max_tokens must not be negative")
-				}
-				if len(reasons) == 0 {
-					return nil
-				}
-				return &reasons[0]
-			}(),
-			Reasons: func() []string {
-				var reasons []string
-				if !(f.ContextMinePointerMaxTokens != nil && *f.ContextMinePointerMaxTokens >= 0) && "context.mine.pointer_max_tokens must not be negative" != "" {
-					reasons = append(reasons, "context.mine.pointer_max_tokens must not be negative")
-				}
-				if reasons == nil {
-					reasons = []string{}
-				}
-				return reasons
-			}(),
-			Valid: nil,
-			Error: "",
-		},
-		ContextMineRatio: FieldStatus{
-			Required:  ContextMineRatioEnabled && false,
-			Enabled:   ContextMineRatioEnabled,
-			Satisfied: ContextMineRatioSatisfied,
-			Fair:      f.ContextMineRatio != nil && *f.ContextMineRatio >= 0 && *f.ContextMineRatio <= 1,
-			Reason: func() *string {
-				var reasons []string
-				if !(f.ContextMineRatio != nil && *f.ContextMineRatio >= 0 && *f.ContextMineRatio <= 1) && "context.mine.ratio must be between 0 and 1" != "" {
-					reasons = append(reasons, "context.mine.ratio must be between 0 and 1")
-				}
-				if len(reasons) == 0 {
-					return nil
-				}
-				return &reasons[0]
-			}(),
-			Reasons: func() []string {
-				var reasons []string
-				if !(f.ContextMineRatio != nil && *f.ContextMineRatio >= 0 && *f.ContextMineRatio <= 1) && "context.mine.ratio must be between 0 and 1" != "" {
-					reasons = append(reasons, "context.mine.ratio must be between 0 and 1")
-				}
-				if reasons == nil {
-					reasons = []string{}
-				}
-				return reasons
-			}(),
-			Valid: nil,
-			Error: "",
-		},
-		ContextNoticeRatio: FieldStatus{
-			Required:  ContextNoticeRatioEnabled && false,
-			Enabled:   ContextNoticeRatioEnabled,
-			Satisfied: ContextNoticeRatioSatisfied,
-			Fair:      f.ContextNoticeRatio != nil && *f.ContextNoticeRatio >= 0 && *f.ContextNoticeRatio <= 1,
-			Reason: func() *string {
-				var reasons []string
-				if !(f.ContextNoticeRatio != nil && *f.ContextNoticeRatio >= 0 && *f.ContextNoticeRatio <= 1) && "context.notice_ratio must be between 0 and 1" != "" {
-					reasons = append(reasons, "context.notice_ratio must be between 0 and 1")
-				}
-				if len(reasons) == 0 {
-					return nil
-				}
-				return &reasons[0]
-			}(),
-			Reasons: func() []string {
-				var reasons []string
-				if !(f.ContextNoticeRatio != nil && *f.ContextNoticeRatio >= 0 && *f.ContextNoticeRatio <= 1) && "context.notice_ratio must be between 0 and 1" != "" {
-					reasons = append(reasons, "context.notice_ratio must be between 0 and 1")
-				}
-				if reasons == nil {
-					reasons = []string{}
-				}
-				return reasons
-			}(),
-			Valid: nil,
-			Error: "",
-		},
 		ContextStrategy: FieldStatus{
 			Required:  ContextStrategyEnabled && false,
 			Enabled:   ContextStrategyEnabled,
 			Satisfied: ContextStrategySatisfied,
-			Fair:      f.ContextStrategy != nil && isValidRegexMatch(*f.ContextStrategy, "^(summary|mine|handoff|native|none)$"),
+			Fair:      f.ContextStrategy != nil && isValidRegexMatch(*f.ContextStrategy, "^(summary|handoff|native|none)$"),
 			Reason: func() *string {
 				var reasons []string
-				if !(f.ContextStrategy != nil && isValidRegexMatch(*f.ContextStrategy, "^(summary|mine|handoff|native|none)$")) && "context.strategy must be summary, mine, handoff, native or none" != "" {
-					reasons = append(reasons, "context.strategy must be summary, mine, handoff, native or none")
+				if !(f.ContextStrategy != nil && isValidRegexMatch(*f.ContextStrategy, "^(summary|handoff|native|none)$")) && "context.strategy must be summary, handoff, native or none" != "" {
+					reasons = append(reasons, "context.strategy must be summary, handoff, native or none")
 				}
 				if len(reasons) == 0 {
 					return nil
@@ -676,8 +484,8 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 			}(),
 			Reasons: func() []string {
 				var reasons []string
-				if !(f.ContextStrategy != nil && isValidRegexMatch(*f.ContextStrategy, "^(summary|mine|handoff|native|none)$")) && "context.strategy must be summary, mine, handoff, native or none" != "" {
-					reasons = append(reasons, "context.strategy must be summary, mine, handoff, native or none")
+				if !(f.ContextStrategy != nil && isValidRegexMatch(*f.ContextStrategy, "^(summary|handoff|native|none)$")) && "context.strategy must be summary, handoff, native or none" != "" {
+					reasons = append(reasons, "context.strategy must be summary, handoff, native or none")
 				}
 				if reasons == nil {
 					reasons = []string{}
@@ -2458,18 +2266,6 @@ func depSatisfied(f SettingsFields, name string) bool {
 		return f.ContextHandoffMaxTokens != nil
 	case "ContextHandoffRatio":
 		return f.ContextHandoffRatio != nil
-	case "ContextHardRatio":
-		return f.ContextHardRatio != nil
-	case "ContextMineKeepRecentTokens":
-		return f.ContextMineKeepRecentTokens != nil
-	case "ContextMineMaxTokens":
-		return f.ContextMineMaxTokens != nil
-	case "ContextMinePointerMaxTokens":
-		return f.ContextMinePointerMaxTokens != nil
-	case "ContextMineRatio":
-		return f.ContextMineRatio != nil
-	case "ContextNoticeRatio":
-		return f.ContextNoticeRatio != nil
 	case "ContextStrategy":
 		v := f.ContextStrategy
 		return v != nil && *v != ""
@@ -2749,13 +2545,7 @@ type RuleMetaEntry struct {
 var ruleMeta = []RuleMetaEntry{
 	{Field: "ContextHandoffMaxTokens", RuleType: "check", Expr: "f.ContextHandoffMaxTokens != nil && *f.ContextHandoffMaxTokens >= 0", Reason: "context.handoff.max_tokens must not be negative"},
 	{Field: "ContextHandoffRatio", RuleType: "check", Expr: "f.ContextHandoffRatio != nil && *f.ContextHandoffRatio >= 0 && *f.ContextHandoffRatio <= 1", Reason: "context.handoff.ratio must be between 0 and 1"},
-	{Field: "ContextHardRatio", RuleType: "check", Expr: "f.ContextHardRatio != nil && *f.ContextHardRatio >= 0 && *f.ContextHardRatio <= 1", Reason: "context.hard_ratio must be between 0 and 1"},
-	{Field: "ContextMineKeepRecentTokens", RuleType: "check", Expr: "f.ContextMineKeepRecentTokens != nil && *f.ContextMineKeepRecentTokens >= 0", Reason: "context.mine.keep_recent_tokens must not be negative"},
-	{Field: "ContextMineMaxTokens", RuleType: "check", Expr: "f.ContextMineMaxTokens != nil && *f.ContextMineMaxTokens >= 0", Reason: "context.mine.max_tokens must not be negative"},
-	{Field: "ContextMinePointerMaxTokens", RuleType: "check", Expr: "f.ContextMinePointerMaxTokens != nil && *f.ContextMinePointerMaxTokens >= 0", Reason: "context.mine.pointer_max_tokens must not be negative"},
-	{Field: "ContextMineRatio", RuleType: "check", Expr: "f.ContextMineRatio != nil && *f.ContextMineRatio >= 0 && *f.ContextMineRatio <= 1", Reason: "context.mine.ratio must be between 0 and 1"},
-	{Field: "ContextNoticeRatio", RuleType: "check", Expr: "f.ContextNoticeRatio != nil && *f.ContextNoticeRatio >= 0 && *f.ContextNoticeRatio <= 1", Reason: "context.notice_ratio must be between 0 and 1"},
-	{Field: "ContextStrategy", RuleType: "check", Expr: "f.ContextStrategy != nil && isValidRegexMatch(*f.ContextStrategy, \"^(summary|mine|handoff|native|none)$\")", Reason: "context.strategy must be summary, mine, handoff, native or none"},
+	{Field: "ContextStrategy", RuleType: "check", Expr: "f.ContextStrategy != nil && isValidRegexMatch(*f.ContextStrategy, \"^(summary|handoff|native|none)$\")", Reason: "context.strategy must be summary, handoff, native or none"},
 	{Field: "ContextSummaryKeepRecentTokens", RuleType: "check", Expr: "f.ContextSummaryKeepRecentTokens != nil && *f.ContextSummaryKeepRecentTokens >= 0", Reason: "context.summary.keep_recent_tokens must not be negative"},
 	{Field: "ContextSummaryMaxTokens", RuleType: "check", Expr: "f.ContextSummaryMaxTokens != nil && *f.ContextSummaryMaxTokens >= 0", Reason: "context.summary.max_tokens must not be negative"},
 	{Field: "ContextSummaryRatio", RuleType: "check", Expr: "f.ContextSummaryRatio != nil && *f.ContextSummaryRatio >= 0 && *f.ContextSummaryRatio <= 1", Reason: "context.summary.ratio must be between 0 and 1"},
@@ -2833,55 +2623,13 @@ func Challenge(fieldName string, f SettingsFields, c SettingsConditions, prev Se
 			explanations = append(explanations, "* "+*status.Reason)
 		}
 		explanations = append(explanations, "* check: context.handoff.ratio must be between 0 and 1")
-	case "ContextHardRatio", "context.hard_ratio":
-		found = true
-		status = avail.ContextHardRatio
-		if status.Reason != nil {
-			explanations = append(explanations, "* "+*status.Reason)
-		}
-		explanations = append(explanations, "* check: context.hard_ratio must be between 0 and 1")
-	case "ContextMineKeepRecentTokens", "context.mine.keep_recent_tokens":
-		found = true
-		status = avail.ContextMineKeepRecentTokens
-		if status.Reason != nil {
-			explanations = append(explanations, "* "+*status.Reason)
-		}
-		explanations = append(explanations, "* check: context.mine.keep_recent_tokens must not be negative")
-	case "ContextMineMaxTokens", "context.mine.max_tokens":
-		found = true
-		status = avail.ContextMineMaxTokens
-		if status.Reason != nil {
-			explanations = append(explanations, "* "+*status.Reason)
-		}
-		explanations = append(explanations, "* check: context.mine.max_tokens must not be negative")
-	case "ContextMinePointerMaxTokens", "context.mine.pointer_max_tokens":
-		found = true
-		status = avail.ContextMinePointerMaxTokens
-		if status.Reason != nil {
-			explanations = append(explanations, "* "+*status.Reason)
-		}
-		explanations = append(explanations, "* check: context.mine.pointer_max_tokens must not be negative")
-	case "ContextMineRatio", "context.mine.ratio":
-		found = true
-		status = avail.ContextMineRatio
-		if status.Reason != nil {
-			explanations = append(explanations, "* "+*status.Reason)
-		}
-		explanations = append(explanations, "* check: context.mine.ratio must be between 0 and 1")
-	case "ContextNoticeRatio", "context.notice_ratio":
-		found = true
-		status = avail.ContextNoticeRatio
-		if status.Reason != nil {
-			explanations = append(explanations, "* "+*status.Reason)
-		}
-		explanations = append(explanations, "* check: context.notice_ratio must be between 0 and 1")
 	case "ContextStrategy", "context.strategy":
 		found = true
 		status = avail.ContextStrategy
 		if status.Reason != nil {
 			explanations = append(explanations, "* "+*status.Reason)
 		}
-		explanations = append(explanations, "* check: context.strategy must be summary, mine, handoff, native or none")
+		explanations = append(explanations, "* check: context.strategy must be summary, handoff, native or none")
 	case "ContextSummaryKeepRecentTokens", "context.summary.keep_recent_tokens":
 		found = true
 		status = avail.ContextSummaryKeepRecentTokens
