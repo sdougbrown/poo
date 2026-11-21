@@ -201,6 +201,9 @@ type Session struct {
 	// compactedReportPending reports that a compaction was applied and no
 	// usage report has landed since.
 	compactedReportPending bool
+	// growth measures how many tokens a turn adds to the prompt, for a
+	// session that adds it to the fit rule.
+	growth growthTracker
 	// decider is the session's decision model, or nil when it has none.
 	//
 	// The handle is the recording wrapper: every call writes a record
@@ -598,6 +601,11 @@ type Options struct {
 	// Compactor is the strategy that compacts the view. A session
 	// without one never enters the compacting state.
 	Compactor Compactor
+	// TurnGrowth adds the session's measured per-turn input growth to the
+	// fit rule. A compaction then happens one turn before the turn's tool
+	// results would push the prompt past the limit. It is off by default:
+	// the rule then compacts at the last possible moment.
+	TurnGrowth bool
 	// HookTimeout bounds one hook call. It defaults to 30 seconds.
 	HookTimeout time.Duration
 	// FinishSchema is the JSON schema a finish tool validates its
@@ -1207,6 +1215,9 @@ func (s *Session) budgetLocked() ContextBudget {
 	budget.CompactedInput = s.compactedInput
 	if s.run != nil {
 		budget.Turns = s.run.turn
+	}
+	if s.opts.TurnGrowth {
+		budget.TurnGrowth = s.growth.growth(s.observationCapTokensLocked())
 	}
 	return budget
 }

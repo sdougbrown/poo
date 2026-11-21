@@ -114,6 +114,33 @@ func (p *budgetProbe) Compact(ctx context.Context, in poo.CompactionEnv) (poo.Co
 	return poo.Compaction{}, nil
 }
 
+// TestRoomShortAfterLeavesTheTurnGrowthOut covers the check a strategy makes
+// about a compaction's own input: the budget is read with the input the caller
+// names and with no turn growth, so one more turn is never what keeps a
+// compaction from happening.
+func TestRoomShortAfterLeavesTheTurnGrowthOut(t *testing.T) {
+	const need, growth = 4096, 2000
+	// line is the largest input that fits the window with the reserve and the
+	// output need, and no turn growth.
+	line := 40000 - need - poo.OutputReserve
+	budget := poo.ContextBudget{
+		ContextLimit:   40000,
+		EstimatedInput: line - growth + 1,
+		OutputLimit:    need,
+		TurnGrowth:     growth,
+		Turns:          2,
+	}
+	if !budget.RoomShort(need) {
+		t.Fatal("the budget is not short with the turn growth on, want the test's setup to be short")
+	}
+	if budget.RoomShortAfter(line, need) {
+		t.Error("RoomShortAfter counted the turn growth, so a compaction that restores the room for the answer was refused")
+	}
+	if !budget.RoomShortAfter(line+1, need) {
+		t.Error("RoomShortAfter declined an input one token over the line")
+	}
+}
+
 // TestTheRequestIsBlockedOnlyWhenNoRoomIsLeft covers the gate's block
 // decision on both lines it draws: the window's room under the smallest
 // max_tokens, and the prompt over the endpoint's input cap.
@@ -164,6 +191,19 @@ func TestTheRequestIsBlockedOnlyWhenNoRoomIsLeft(t *testing.T) {
 			budget: poo.ContextBudget{ContextLimit: window, InputLimit: cap, EstimatedInput: cap - poo.OutputReserve + 1, OutputLimit: 4096},
 			want:   true,
 			source: "prompt_limit",
+		},
+		{
+			// The turn growth is the strategy's to plan for, not the
+			// gate's: a request with the minimum room left goes out
+			// whatever the next turn is expected to add.
+			name:   "a large turn growth with the minimum room left",
+			budget: poo.ContextBudget{ContextLimit: window, EstimatedInput: window - poo.OutputReserve - poo.MinOutputTokens, OutputLimit: 4096, TurnGrowth: 20000},
+			room:   poo.MinOutputTokens,
+		},
+		{
+			name:   "a large turn growth just under the input cap",
+			budget: poo.ContextBudget{ContextLimit: window, InputLimit: cap, EstimatedInput: cap - poo.OutputReserve, OutputLimit: 4096, TurnGrowth: 20000},
+			room:   4096,
 		},
 	}
 	for _, c := range cases {

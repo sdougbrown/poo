@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -557,7 +558,11 @@ func (s *Session) loop(run *runState) []candidate {
 			// The request failed, but the usage it produced is still
 			// written: every request gets a usage record.
 			if resp != nil && resp.usage != nil {
-				s.writeUsage(run, turn, resp.usage, resp.requestChars)
+				s.writeUsage(run, turn, resp)
+			} else if resp != nil {
+				// The failed request reported nothing, so the turn it
+				// ended is no measurement of the view.
+				s.noteNoUsage()
 			}
 			refusal := newCandidate(reason, detail)
 			// An endpoint that refused the prompt's own length is the
@@ -599,7 +604,7 @@ func (s *Session) loop(run *runState) []candidate {
 		}
 
 		if resp.usage != nil {
-			if !s.writeUsage(run, turn, resp.usage, resp.requestChars) {
+			if !s.writeUsage(run, turn, resp) {
 				// The refused record is the run's candidate; the
 				// finalization settles it.
 				return nil
@@ -608,6 +613,7 @@ func (s *Session) loop(run *runState) []candidate {
 			// The endpoint reported no usage, and the run's token
 			// budget still has to count the turn.
 			s.addEstimatedUsage(run, resp, assistant)
+			s.noteNoUsage()
 		}
 
 		// A truncated response: the complete calls run, and the
@@ -1553,6 +1559,9 @@ func (s *Session) requestOnce(run *runState, turn int, attemptBase, maxTokens in
 	defer s.endActivity(run)
 
 	last := &pendingAttempt{}
+	// The transport reports every attempt it made, so a retried one tells
+	// the request that the report it ends with is the sum of them.
+	var retried atomic.Bool
 	reader, rendered, err := s.opts.Transport.Stream(actCtx, ChatRequest{
 		Model:     model.ModelID,
 		ModelInfo: model,
@@ -1567,6 +1576,7 @@ func (s *Session) requestOnce(run *runState, turn int, attemptBase, maxTokens in
 				last.hold(a)
 				return
 			}
+			retried.Store(true)
 			s.reportAttempt(run, turn, a)
 		},
 	})
@@ -1591,6 +1601,7 @@ func (s *Session) requestOnce(run *runState, turn int, attemptBase, maxTokens in
 	})
 	if resp != nil {
 		resp.requestChars = requestChars
+		resp.retried = retried.Load()
 		resp.truncation = limit.Truncation(model, rendered.MaxTokens)
 	}
 	if err != nil && resp != nil && resp.usage == nil {
@@ -1872,11 +1883,11 @@ func (s *Session) toolSpecs() []ToolSpec {
 // A refused write follows the failure table: it is the store_error
 // candidate, and the session is broken. The call reports whether the
 // record was written.
-func (s *Session) writeUsage(run *runState, turn int, usage *UsageReport, requestChars int) bool {
+func (s *Session) writeUsage(run *runState, turn int, resp *response) bool {
 	s.mu.Lock()
-	s.chargeUsageLocked(run, usage)
+	s.chargeUsageLocked(run, resp.usage)
 	s.mu.Unlock()
-	return s.recordUsage(run, NewRecordMeta("usage"), turn, run.requests, usage, requestChars)
+	return s.recordUsage(run, NewRecordMeta("usage"), turn, run.requests, resp.usage, resp.requestChars, resp.retried)
 }
 
 // writeCompactionUsage writes the usage of a request a compaction made.
@@ -1895,13 +1906,16 @@ func (s *Session) writeUsage(run *runState, turn int, usage *UsageReport, reques
 // before it commits, so the charge stops at the seal, and the record
 // written after it is one the sink still takes: the seal refuses a record
 // a run's in-flight work claims, not the append itself.
-func (s *Session) writeCompactionUsage(run *runState, turn int, usage *UsageReport, requestChars int) bool {
+//
+// A request the transport retried reports what its attempts spent together,
+// so the record says so and the sum calibrates nothing.
+func (s *Session) writeCompactionUsage(run *runState, turn int, usage *UsageReport, requestChars int, retried bool) bool {
 	s.mu.Lock()
 	if !run.committed && !run.sealed {
 		s.chargeUsageLocked(run, usage)
 	}
 	s.mu.Unlock()
-	return s.recordUsage(run, NewRecordMetaFrom("usage", OriginCompaction), turn, 0, usage, requestChars)
+	return s.recordUsage(run, NewRecordMetaFrom("usage", OriginCompaction), turn, 0, usage, requestChars, retried)
 }
 
 // accountNativeCompaction charges the request a native compaction made.
@@ -1923,7 +1937,9 @@ func (s *Session) accountNativeCompaction(run *runState, result NativeCompaction
 	// so the estimate is the request's own size. That is what an interrupted
 	// turn is charged when the endpoint reports nothing.
 	produced := Message{Role: RoleAssistant, Content: result.Window.Items}
-	s.chargeSideRequest(run, result.Usage, produced, requestChars)
+	// A native compaction's request has no attempt seam, so its report is
+	// never a retried one.
+	s.chargeSideRequest(run, result.Usage, produced, requestChars, false)
 }
 
 // chargeSideRequest charges a request the run did not make as a turn.
@@ -1935,12 +1951,15 @@ func (s *Session) accountNativeCompaction(run *runState, result NativeCompaction
 // A request that finishes after the run settled does not add to the settled
 // run's token counter. Each path enforces that under the same lock that
 // charges, so a settle between the check and the charge cannot slip through.
-func (s *Session) chargeSideRequest(run *runState, usage *UsageReport, produced Message, requestChars int) {
+//
+// retried reports that the transport retried the request, so the report is the
+// attempts' sum and no measurement of the view.
+func (s *Session) chargeSideRequest(run *runState, usage *UsageReport, produced Message, requestChars int, retried bool) {
 	s.mu.Lock()
 	turn := run.turn
 	s.mu.Unlock()
 	if usage != nil {
-		s.writeCompactionUsage(run, turn, usage, requestChars)
+		s.writeCompactionUsage(run, turn, usage, requestChars, retried)
 		return
 	}
 	s.mu.Lock()
@@ -1972,9 +1991,16 @@ func (s *Session) chargeUsageLocked(run *runState, usage *UsageReport) {
 // The charge has already landed; this is what a reader and a subscriber
 // see. A turn's request says nothing about its origin, so the event keeps
 // the shape it had, and a request a compaction made says what it was for.
-func (s *Session) recordUsage(run *runState, meta RecordMeta, turn, request int, usage *UsageReport, requestChars int) bool {
-	s.observeUsage(usage, requestChars)
-	s.noteCompactedInput(meta, usage)
+//
+// A report the transport retried covers more than one attempt. The notes that
+// measure the view are told about it and skip it, and the calibration is left
+// alone.
+func (s *Session) recordUsage(run *runState, meta RecordMeta, turn, request int, usage *UsageReport, requestChars int, retried bool) bool {
+	if !retried {
+		s.observeUsage(usage, requestChars)
+	}
+	s.noteCompactedInput(meta, usage, retried)
+	s.noteTurnInput(meta, usage, retried)
 	if err := s.write(run.ctx, &UsageRecord{
 		RecordMeta:      meta,
 		RunID:           run.id,
@@ -1984,6 +2010,7 @@ func (s *Session) recordUsage(run *runState, meta RecordMeta, turn, request int,
 		OutputTokens:    usage.OutputTokens,
 		CacheReadTokens: usage.CacheReadTokens,
 		TTFTMS:          usage.TTFTMS,
+		Retried:         retried,
 	}); err != nil {
 		s.noteStoreError(run, err)
 		return false
@@ -2006,8 +2033,12 @@ func (s *Session) recordUsage(run *runState, meta RecordMeta, turn, request int,
 // noteCompactedInput records the input the first usage report after a
 // compaction reported. A request a compaction made is not the view's input,
 // so its report is left out.
-func (s *Session) noteCompactedInput(meta RecordMeta, usage *UsageReport) {
-	if meta.Origin == OriginCompaction || usage == nil || usage.InputTokens <= 0 {
+//
+// A request the transport retried reports what its attempts spent together,
+// which is more than the view cost. So it is no measurement either, and the
+// guard stays armed for the next request's report.
+func (s *Session) noteCompactedInput(meta RecordMeta, usage *UsageReport, retried bool) {
+	if meta.Origin == OriginCompaction || retried || usage == nil || usage.InputTokens <= 0 {
 		return
 	}
 	s.mu.Lock()
@@ -2040,7 +2071,7 @@ func (s *Session) accountInterruptedRequest(run *runState, turn int, resp *respo
 		return true
 	}
 	if resp.usage != nil {
-		return s.writeUsage(run, turn, resp.usage, resp.requestChars)
+		return s.writeUsage(run, turn, resp)
 	}
 	// The estimate is the one a completed turn would have received:
 	// the request plus the assistant message the response would have
@@ -2055,6 +2086,9 @@ func (s *Session) accountInterruptedRequest(run *runState, turn int, resp *respo
 		})
 	}
 	s.addEstimatedChars(run, resp.requestChars+estimateMessageChars(assistant))
+	// The request reported nothing, so the turn it ended is no measurement
+	// of the view.
+	s.noteNoUsage()
 	return true
 }
 
@@ -2212,6 +2246,10 @@ type response struct {
 	// requestChars is the serialized size of the view the request sent,
 	// which is what the endpoint's input token count measures.
 	requestChars int
+	// retried reports that the transport tried the request more than once.
+	// Its usage is the sum of what the attempts spent, so its input is no
+	// measurement of the view.
+	retried bool
 	// truncation is the settle detail for a response that stopped on the
 	// output limit: the limit the request's body carried, and where it
 	// came from.

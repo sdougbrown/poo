@@ -143,6 +143,10 @@ func (s *Session) SetModel(info ModelInfo, transport ...ChatTransport) (ModelSwi
 		s.compactedReportPending = false
 	}
 	s.opts.Model = info
+	// The new model counts the same view with its own tokenizer. So its first
+	// report is the baseline for the turn growth, not a difference the old
+	// model's numbers measure.
+	s.growth.resetBaseline()
 	// The level the session runs at is the new model's to take: a level
 	// it refuses would be a configuration error on every request.
 	s.resetReasoningLocked()

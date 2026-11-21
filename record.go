@@ -427,6 +427,11 @@ type UsageRecord struct {
 	CacheReadTokens *int `json:"cache_read_tokens,omitempty"`
 	// TTFTMS is the time to the first streamed token, in milliseconds.
 	TTFTMS float64 `json:"ttft_ms"`
+	// Retried reports that the transport tried the request more than
+	// once, so its token counts are the attempts' sum. It is absent
+	// when the request was made once, which is what every record
+	// written before the field existed reads as.
+	Retried bool `json:"retried,omitempty"`
 }
 
 // ProviderAttemptRecord is the record of one attempt of a request that

@@ -18,6 +18,7 @@ type SettingsFields struct {
 	ContextSummaryKeepRecentTokens  *float64 "json:\"context.summary.keep_recent_tokens,omitempty\""
 	ContextSummaryMaxTokens         *float64 "json:\"context.summary.max_tokens,omitempty\""
 	ContextSummaryRatio             *float64 "json:\"context.summary.ratio,omitempty\""
+	ContextTurnGrowth               *bool    "json:\"context.turn_growth,omitempty\""
 	DeciderTimeoutMs                *float64 "json:\"decider.timeout_ms,omitempty\""
 	FeedsPaths                      []string "json:\"feeds.paths,omitempty\""
 	FinishSchemaFile                *string  "json:\"finish.schema_file,omitempty\""
@@ -104,6 +105,7 @@ type SettingsAvailability struct {
 	ContextSummaryKeepRecentTokens  FieldStatus
 	ContextSummaryMaxTokens         FieldStatus
 	ContextSummaryRatio             FieldStatus
+	ContextTurnGrowth               FieldStatus
 	DeciderTimeoutMs                FieldStatus
 	FeedsPaths                      FieldStatus
 	FinishSchemaFile                FieldStatus
@@ -231,6 +233,8 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 	ContextSummaryMaxTokensSatisfied := f.ContextSummaryMaxTokens != nil
 	ContextSummaryRatioEnabled := true
 	ContextSummaryRatioSatisfied := f.ContextSummaryRatio != nil
+	ContextTurnGrowthEnabled := true
+	ContextTurnGrowthSatisfied := f.ContextTurnGrowth != nil
 	DeciderTimeoutMsEnabled := true
 	DeciderTimeoutMsSatisfied := f.DeciderTimeoutMs != nil
 	FeedsPathsEnabled := true
@@ -571,6 +575,28 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 				if !(f.ContextSummaryRatio != nil && *f.ContextSummaryRatio >= 0 && *f.ContextSummaryRatio <= 1) && "context.summary.ratio must be between 0 and 1" != "" {
 					reasons = append(reasons, "context.summary.ratio must be between 0 and 1")
 				}
+				if reasons == nil {
+					reasons = []string{}
+				}
+				return reasons
+			}(),
+			Valid: nil,
+			Error: "",
+		},
+		ContextTurnGrowth: FieldStatus{
+			Required:  ContextTurnGrowthEnabled && false,
+			Enabled:   ContextTurnGrowthEnabled,
+			Satisfied: ContextTurnGrowthSatisfied,
+			Fair:      true,
+			Reason: func() *string {
+				var reasons []string
+				if len(reasons) == 0 {
+					return nil
+				}
+				return &reasons[0]
+			}(),
+			Reasons: func() []string {
+				var reasons []string
 				if reasons == nil {
 					reasons = []string{}
 				}
@@ -2275,6 +2301,8 @@ func depSatisfied(f SettingsFields, name string) bool {
 		return f.ContextSummaryMaxTokens != nil
 	case "ContextSummaryRatio":
 		return f.ContextSummaryRatio != nil
+	case "ContextTurnGrowth":
+		return f.ContextTurnGrowth != nil
 	case "DeciderTimeoutMs":
 		return f.DeciderTimeoutMs != nil
 	case "FeedsPaths":
@@ -2651,6 +2679,12 @@ func Challenge(fieldName string, f SettingsFields, c SettingsConditions, prev Se
 			explanations = append(explanations, "* "+*status.Reason)
 		}
 		explanations = append(explanations, "* check: context.summary.ratio must be between 0 and 1")
+	case "ContextTurnGrowth", "context.turn_growth":
+		found = true
+		status = avail.ContextTurnGrowth
+		if status.Reason != nil {
+			explanations = append(explanations, "* "+*status.Reason)
+		}
 	case "DeciderTimeoutMs", "decider.timeout_ms":
 		found = true
 		status = avail.DeciderTimeoutMs

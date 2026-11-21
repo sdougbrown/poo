@@ -645,11 +645,14 @@ func (s *Session) rebuild(records []Record, out *Restored) error {
 //
 // A request a compaction made is the compaction's own, not the view's input,
 // so its report is left out. A live session leaves it out the same way. A
-// compaction that ended the run never armed the guard, because a handoff
-// changes no view. The guard therefore belongs to the compaction before it. A
-// model switch cleared a value the window that measured it no longer applied
-// to. Its record names only the models, so the switch is taken at its word and
-// nothing is armed.
+// request the transport retried reports the attempts' sum, which is more than
+// the view cost. Its report is left out too, and the next unretried one arms
+// the guard. A run that ends before one leaves the guard waiting. A compaction
+// that ended the run never armed the guard, because a handoff changes no view.
+// The guard therefore belongs to the compaction before it. A model switch
+// cleared a value the window that measured it no longer applied to. Its record
+// names only the models, so the switch is taken at its word and nothing is
+// armed.
 func compactedInputFrom(records []Record) (int, bool) {
 	last := -1
 	for i, rec := range records {
@@ -670,7 +673,7 @@ func compactedInputFrom(records []Record) (int, bool) {
 	}
 	for _, rec := range tail {
 		usage, ok := rec.(*UsageRecord)
-		if !ok || usage.Origin == OriginCompaction || usage.InputTokens <= 0 {
+		if !ok || usage.Origin == OriginCompaction || usage.Retried || usage.InputTokens <= 0 {
 			continue
 		}
 		return usage.InputTokens, false

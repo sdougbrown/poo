@@ -554,6 +554,7 @@ even when the endpoint reports no token counts.
 | `output_tokens` | integer | The completion tokens the endpoint reported. `0` when it reported none. |
 | `cache_read_tokens` | integer | The prompt tokens served from the provider's cache. **Absent** when the endpoint does not report it. |
 | `ttft_ms` | number | The time to the first streamed token, in milliseconds. Measured by the transport, not reported by the endpoint. |
+| `retried` | boolean | **Absent** unless the transport tried the request more than once, in which case its token counts sum the attempts. |
 | `origin` | string | Absent for the run's own turn. `compaction` when a compaction strategy made the request: a fork that wrote a handoff, or the request that wrote a summary. |
 
 The time to the first token is the time to the first *token*: a non-empty

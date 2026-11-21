@@ -1160,14 +1160,44 @@ func usageLike(usage *poo.UsageRecord, input int, origin poo.Origin) *poo.UsageR
 	}
 }
 
+// retriedUsageLike returns a usage record shaped like another one, reporting a
+// request the transport tried more than once.
+func retriedUsageLike(usage *poo.UsageRecord, input int) *poo.UsageRecord {
+	rec := usageLike(usage, input, "")
+	rec.Retried = true
+	return rec
+}
+
+// oldUsageLike returns the report as a log written before the retried field
+// holds it. The line carries no retried key, and the record reads as a request
+// made once.
+func oldUsageLike(t *testing.T, usage *poo.UsageRecord) *poo.UsageRecord {
+	t.Helper()
+	line, err := json.Marshal(usage)
+	if err != nil {
+		t.Fatalf("marshaling the usage record: %v", err)
+	}
+	if bytes.Contains(line, []byte("retried")) {
+		t.Fatalf("the marshaled record of a request made once carries a retried field: %s", line)
+	}
+	var old poo.UsageRecord
+	if err := json.Unmarshal(line, &old); err != nil {
+		t.Fatalf("decoding an old usage record: %v", err)
+	}
+	return &old
+}
+
 // TestTheRestoredCompactedInputFollowsTheRecords covers the guard a restore
-// rebuilds. The report a compaction made is not the view's input, a compaction
-// that left no report keeps the guard waiting, a compaction the endpoint ended
-// the run with armed nothing, and a model switch cleared what it measured.
+// rebuilds. The report a compaction made is not the view's input. A report of a
+// request the transport retried is the attempts' sum, and is not one either. A
+// compaction that left no report keeps the guard waiting. A compaction the
+// endpoint ended the run with armed nothing. A model switch cleared what it
+// measured.
 func TestTheRestoredCompactedInputFollowsTheRecords(t *testing.T) {
 	base, _, report := compactedFixture(t)
 	plain := plainFixture(t)
 	baseReport := base[report].(*poo.UsageRecord)
+	withoutReport := append(append([]poo.Record(nil), base[:report]...), base[report+1:]...)
 	handoff := &poo.CompactionRecord{
 		RecordMeta: poo.NewRecordMeta("compaction"),
 		RunID:      baseReport.RunID,
@@ -1187,9 +1217,24 @@ func TestTheRestoredCompactedInputFollowsTheRecords(t *testing.T) {
 		want    int
 	}{
 		{
-			name:    "the report after the compaction",
+			name:    "a report of a request made once after the compaction",
 			records: base,
 			want:    1234,
+		},
+		{
+			name:    "an old report without the retried field still arms the guard",
+			records: insertRecords(base[:report], report, oldUsageLike(t, baseReport)),
+			want:    1234,
+		},
+		{
+			name:    "a retried report before the view's own is its attempts' sum",
+			records: insertRecords(base, report, retriedUsageLike(baseReport, 2400)),
+			want:    1234,
+		},
+		{
+			name:    "only a retried report after the compaction stays pending",
+			records: insertRecords(withoutReport, len(withoutReport), retriedUsageLike(baseReport, 2400)),
+			want:    999,
 		},
 		{
 			name: "the compaction's own report is not the view's input",
@@ -1199,7 +1244,7 @@ func TestTheRestoredCompactedInputFollowsTheRecords(t *testing.T) {
 		},
 		{
 			name:    "a compaction with no report after it stays pending",
-			records: append(append([]poo.Record(nil), base[:report]...), base[report+1:]...),
+			records: withoutReport,
 			want:    999,
 		},
 		{

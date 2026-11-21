@@ -92,10 +92,19 @@ type ContextBudget struct {
 	// names, so a load cannot tell the two apart and clears what it cannot
 	// vouch for. A compaction that only ended the run changes no view, and
 	// leaves the value where the compaction before it left it. A request
-	// the transport retried reports the sum of its attempts, so the value
-	// can run high after a retry. A strategy that guards on it then
-	// declines earlier than the next request would have needed.
+	// the transport retried reports the sum of its attempts, so it is no
+	// measurement: the value waits for the next request's report.
 	CompactedInput int
+	// TurnGrowth is how many prompt tokens a turn adds to the input. It
+	// is the largest recent increase between two usage reports, or before
+	// there is one, the observation cap in tokens. It is zero unless the
+	// session measures turn growth.
+	//
+	// A request the transport retried reports the sum of its attempts, so
+	// its report is skipped: the next one is the baseline. A restored
+	// session does not rebuild the tracker: the growth falls back to the
+	// observation cap until two of the session's own reports arrive.
+	TurnGrowth int
 	// Turns is the number of provider requests the run has made.
 	//
 	// A compaction strategy needs it: the handoff strategy asks for a
@@ -127,22 +136,38 @@ func (b ContextBudget) PromptLimit() int {
 	return PromptLimitOf(b.ContextLimit, b.InputLimit)
 }
 
-// RoomShort reports that the next request does not fit. Either the prompt,
-// the output need and the reserve exceed the window, or the prompt and the
-// reserve exceed the endpoint's input cap.
+// RoomShort reports that the next request does not fit. The request is
+// short when the prompt, the turn growth the session measured, the output
+// need and the reserve exceed the window. It is short too when the prompt,
+// the growth and the reserve exceed the endpoint's input cap.
 //
-// It is the trigger for a compaction strategy. A strategy checks whether a
-// compaction would end the shortage with the same rule, on a budget that
-// carries the input the compaction would leave. A budget with no window and no cap, or
+// It is the trigger for a compaction strategy. A strategy that asks
+// whether a compaction would end the shortage reads RoomShortAfter instead.
+// That check asks about the input the compaction would leave, and one more
+// turn's growth is not part of it. A budget with no window and no cap, or
 // whose run has asked the model nothing, is never short.
 func (b ContextBudget) RoomShort(need int) bool {
 	if b.Turns < 1 {
 		return false
 	}
-	if b.ContextLimit > 0 && b.EstimatedInput+need+OutputReserve > b.ContextLimit {
+	if b.ContextLimit > 0 && b.EstimatedInput+b.TurnGrowth+need+OutputReserve > b.ContextLimit {
 		return true
 	}
-	return b.InputLimit > 0 && b.EstimatedInput+OutputReserve > b.InputLimit
+	return b.InputLimit > 0 && b.EstimatedInput+b.TurnGrowth+OutputReserve > b.InputLimit
+}
+
+// RoomShortAfter reports that a budget whose input is the given one would be
+// short, with the turn growth left out.
+//
+// It is the check a strategy makes about the input a compaction would
+// leave. The question is whether the room the compaction frees is enough
+// for the next answer. One more turn's growth is not part of that question.
+// A compaction that frees room for the answer but not for the turn after it
+// has still bought a turn.
+func (b ContextBudget) RoomShortAfter(input, need int) bool {
+	b.EstimatedInput = input
+	b.TurnGrowth = 0
+	return b.RoomShort(need)
 }
 
 // RequestBlocked reports that the next request cannot go out. Either the

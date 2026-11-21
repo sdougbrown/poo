@@ -210,6 +210,32 @@ func TestTheObservationCapsFollowTheInputCap(t *testing.T) {
 	}
 }
 
+// TestTurnGrowthIsOffUnlessTheSettingsAskForIt covers the setting: the
+// session measures turn growth only when the settings ask for it, and an
+// absent key is the default.
+func TestTurnGrowthIsOffUnlessTheSettingsAskForIt(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		doc  string
+		want bool
+	}{
+		{"unset", theModelSettings, false},
+		{"off", theModelSettings + "context:\n  turn_growth: false\n", false},
+		{"on", theModelSettings + "context:\n  turn_growth: true\n", true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			settings, err := config.Parse([]byte(test.doc), config.FormatYAML)
+			if err != nil {
+				t.Fatalf("decoding the settings: %v", err)
+			}
+			runtime := build(t, settings, config.Overrides{})
+			if got := runtime.Options.TurnGrowth; got != test.want {
+				t.Errorf("the session measures turn growth %v, want %v", got, test.want)
+			}
+		})
+	}
+}
+
 // TestTheCodemodeSettingsReachTheSession covers the mapping: every
 // tools.codemode field lands on the session's settings, which the tool
 // passes the engine as a run's limits.
