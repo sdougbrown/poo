@@ -22,9 +22,19 @@ return files.map(r => r.is_error ? r.text : r.text.split("\n")[0]);
 - Named calls submitted together form a batch. Calls overlap only if
   every tool in the batch is declared read-only. Otherwise they run in
   input order.
-- Use `await parallel([[name, args], ...])` to overlap independent
-  calls, including writes. The promise resolves to an array of tool
-  results in input order. An invalid batch rejects the promise; a
+- Use `await parallel(() => [...])` to overlap independent calls,
+  including writes. Create the tool promises in the synchronous
+  callback and return each one exactly once:
+
+  ```js
+  const [a, b] = await parallel(() => [
+    tools.edit({path: "a.txt", old: "draft", new: "final"}),
+    tools.edit({path: "b.txt", old: "draft", new: "final"}),
+  ]);
+  ```
+
+  Results follow the order of the returned array. If the callback throws
+  or returns an invalid array, none of its captured calls run. A
   permission denial appears as a result in the array.
 - If two Poo edits overlap on the same resolved path in one process,
   one returns `is_error` with `structured` containing
