@@ -105,42 +105,9 @@ func (*Engine) Run(ctx context.Context, opts codemode.RunOptions) (result codemo
 		output.Print(line, limits.OutputCapChars)
 		return js.NewUndefined(), nil
 	})
-	// The single-call bridge resolves its promise before returning, on
-	// the same goroutine. An awaiting script then continues as a job of
-	// the eval's own loop, so no host call crosses goroutines.
-	js.SetAsyncFunc("__pooCall", func(this *qjs.This) {
-		promise := this.Promise()
-		if err := runCtx.Err(); err != nil {
-			promise.Reject(js.NewString(err.Error()))
-			return
-		}
-		args := this.Args()
-		if len(args) != 2 || !args[0].IsString() || !args[1].IsString() {
-			promise.Reject(js.NewString("a tool call needs a name and its arguments"))
-			return
-		}
-		name, raw := args[0].String(), args[1].String()
-		if !json.Valid([]byte(raw)) {
-			promise.Reject(js.NewString(fmt.Sprintf("the %s call's arguments are not JSON", name)))
-			return
-		}
-		results, err := nestedCall(runCtx, opts.Nested, []poo.NestedCall{{Tool: name, Arguments: json.RawMessage(raw)}})
-		if err != nil {
-			promise.Reject(js.NewString(err.Error()))
-			return
-		}
-		if len(results) != 1 {
-			promise.Reject(js.NewString(fmt.Sprintf("the %s call came back with %d results", name, len(results))))
-			return
-		}
-		result.Calls++
-		data, err := encodeResults(results)
-		if err != nil {
-			promise.Reject(js.NewString(err.Error()))
-			return
-		}
-		promise.Resolve(js.NewString(string(data)))
-	})
+	// The wrapper serves both dispatch styles from this one bridge: a
+	// single call is a batch of one, so a named call and a gather entry
+	// are validated the same way.
 
 	// The script runs through one Eval with the async flag. QuickJS's
 	// own loop pump drives the awaited calls, and the deadline closes
@@ -198,8 +165,10 @@ func newVM(runCtx context.Context) (*qjs.Runtime, error) {
 		// qjs always mounts CWD at the guest's root. It offers no way to
 		// mount nothing, so the path points below the null device, where
 		// no host directory exists. Any file operation traps the runtime
-		// instead of opening a host file. The wrapper's globals deletion
-		// is the boundary the model sees; this mount backs it.
+		// instead of opening a host file. The wrapper deletes the globals
+		// a script would reach, and an async script can still import the
+		// compiled-in modules: the inert mount is what holds, and the
+		// deletion is not a barrier in its place.
 		CWD:          filepath.Join(os.DevNull, "poo-codemode"),
 		MemoryLimit:  64 << 20,
 		MaxStackSize: 256 << 10,
@@ -226,8 +195,8 @@ func nestedCall(ctx context.Context, nested poo.NestedCaller, calls []poo.Nested
 // calls `await tools.<name>(args)` instead of guessing names into a
 // string dispatch.
 const wrapper = `((NAMES) => async (source) => {
-  const tools = globalThis.__pooTools, callOne = globalThis.__pooCall, log = globalThis.__pooPrint;
-  for (const name of ["__pooTools", "__pooCall", "__pooPrint", "std", "os", "bjson",
+  const tools = globalThis.__pooTools, log = globalThis.__pooPrint;
+  for (const name of ["__pooTools", "__pooPrint", "std", "os", "bjson",
     "print", "console", "scriptArgs", "setTimeout", "setInterval", "clearTimeout",
     "clearInterval", "QJS_PROXY_VALUE", "performance", "Date", "navigator",
     "gc", "eval"]) {
@@ -241,10 +210,15 @@ const wrapper = `((NAMES) => async (source) => {
   };
   const named = {};
   for (const name of NAMES) {
-    named[name] = (args) => {
-      if (!active) throw new Error("codemode scripts cannot call tools after returning");
-      return callOne(name, encode(args === undefined ? null : args)).then(decode).then((r) => r[0]);
-    };
+    // One host crossing, as for a gather entry; the promise keeps the
+    // awaiting surface while the call itself is already done.
+    named[name] = (args) => new Promise((resolve, reject) => {
+      try {
+        resolve(gather([[name, args]])[0]);
+      } catch (error) {
+        reject(error);
+      }
+    });
   }
   const call = (name, args = null) => gather([[name, args]])[0];
   const print = (value) => { if (active) log(text(value)); };

@@ -105,8 +105,8 @@ func TestAnAwaitThatNeverSettlesStopsAtTheDeadline(t *testing.T) {
 // TestTheDynamicImportDoorIsOpenButContained pins what the eval's own
 // loop pump reopens: an async script can import the compiled-in
 // modules. Their file operations still meet the inert mount, so the
-// boundary is the mount, not the deletion. Whether to close this door
-// is an open decision on the PR.
+// boundary is the mount, and the globals deletion is not a barrier in
+// its place. Closing the door needs a loader hook qjs does not offer.
 func TestTheDynamicImportDoorIsOpenButContained(t *testing.T) {
 	res, err := quickjs.New().Run(t.Context(), codemode.RunOptions{
 		Script: `const std = await import("qjs:std"); return typeof std.open;`,
@@ -259,6 +259,22 @@ func TestAScriptThatReturnsNothingIsASuccess(t *testing.T) {
 	}
 	if len(res.Output) != 2 || res.Output[0] != "kept line" || res.Output[1] != "dropped" {
 		t.Fatalf("the run's output is %q", res.Output)
+	}
+}
+
+// TestAnAwaitedCallThatFailsFailsTheRun covers the awaited call's error
+// branch: a refused batch is data, but a nested caller that returns an
+// error ends the script with that error instead of leaving it to hang.
+func TestAnAwaitedCallThatFailsFailsTheRun(t *testing.T) {
+	_, err := quickjs.New().Run(t.Context(), codemode.RunOptions{
+		Script: `const r = await tools.read({path: "input.txt"}); return r.text;`,
+		Tools:  []poo.ToolInfo{{Name: "read"}},
+		Nested: nested(func(context.Context, []poo.NestedCall) ([]poo.NestedResult, error) {
+			return nil, errors.New("the seam refused the batch")
+		}),
+	})
+	if err == nil || !strings.Contains(err.Error(), "the seam refused the batch") {
+		t.Fatalf("run error = %v; want the seam's error surfaced", err)
 	}
 }
 
