@@ -316,8 +316,9 @@ way it does for a malformed line. A message that names no `media` is
 delivered with the type the head names. The image arrives beside the
 text as the model's own picture, and the acceptance record carries its
 bytes, so a held input is still one after a restart. A message that
-carries an image is delivered without the filter question: the question
-is asked about text, and the decider never sees the picture. The optional `id` field is reserved; poo ignores it today. A field
+carries an image is asked about its text, and the picture rides the
+answer; a message whose text is empty — the image alone — is delivered
+unasked, for the decider never sees a picture. The optional `id` field is reserved; poo ignores it today. A field
 the object does not name is ignored, and a blank line is
 skipped. A line is at most 1 MiB. The first line that is not such an
 object, a longer line, or an input the session refuses is the attempt's
@@ -336,10 +337,10 @@ queues it until a run is going, and a feed without `on_idle` inherits
 `jobs.on_idle`. A run that is woken or prompted takes every queued input,
 held ones included.
 
-**Filter before delivery.** An optional `filter` applies to every message
-that carries no image, including messages emitted while a run is active.
-A message that carries an image is delivered without the question. For
-example:
+**Filter before delivery.** An optional `filter` applies to the text
+of every message, including messages emitted while a run is active. A
+message whose text is empty — an image alone — is delivered without the
+question. For example:
 
 ```json
 "filter": {

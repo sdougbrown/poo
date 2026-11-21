@@ -142,10 +142,11 @@ func TestFeedFilterDropsOnlyAConfidentNo(t *testing.T) {
 }
 
 // TestTheFilterDeliversAFeedImageUnasked covers the bypass: a message
-// that carries an image is delivered without the decider's question,
-// because the question is calibrated on text and no image fits the
-// byte budget it is asked under.
-func TestTheFilterDeliversAFeedImageUnasked(t *testing.T) {
+// that carries an image is asked about its text, and the picture rides
+// the answer: the question is asked about text, and the decider never
+// sees the picture. A message whose text is empty — the image alone —
+// is delivered unasked.
+func TestTheFilterAsksAboutAnImagesText(t *testing.T) {
 	const question = "Does this message need attention?"
 	dir := t.TempDir()
 	png := append([]byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}, 1, 2, 3, 4)
@@ -159,6 +160,7 @@ func TestTheFilterDeliversAFeedImageUnasked(t *testing.T) {
     "inbox": {
       "command": ["sh", "-c", "printf '%s\\n' \"$@\"", "feed",
         "{\"text\":\"the look\",\"image\":{\"path\":\"shot.png\",\"media\":\"image/png\"}}",
+        "{\"image\":{\"path\":\"shot.png\"}}",
         "{\"text\":\"routine\"}"],
       "on_idle": "wake",
       "filter": {"question": "` + question + `", "min_no_probability": 0.9}
@@ -180,7 +182,7 @@ func TestTheFilterDeliversAFeedImageUnasked(t *testing.T) {
 	// The session's model reads images, so the feed's picture is one the
 	// admission takes.
 	runtime.Options.Model.Inputs = []poo.Modality{poo.ModalityText, poo.ModalityImage}
-	transport := pootest.NewTransport(pootest.Turn{Text: "ack"}, pootest.Turn{Text: "ack"})
+	transport := pootest.NewTransport(pootest.Turn{Text: "ack"}, pootest.Turn{Text: "ack"}, pootest.Turn{Text: "ack"})
 	sink := pootest.NewSink()
 	runtime.Options.Transport = transport
 	runtime.Options.Sink = sink
@@ -190,10 +192,19 @@ func TestTheFilterDeliversAFeedImageUnasked(t *testing.T) {
 			t.Errorf("unexpected filter request: %#v", state)
 			return nil, decide.ErrDeferred
 		}
-		if fields["text"] != "routine" {
-			t.Errorf("the decider was asked about %q, want only the routine text", fields["text"])
+		// The caption is asked about; the empty text of the image alone
+		// never reaches the decider.
+		switch fields["text"] {
+		case "the look", "routine":
+		default:
+			t.Errorf("the decider was asked about %q, want a caption or the routine text", fields["text"])
 		}
-		answer := decide.Answer{ID: qs[0].ID, Probabilities: map[string]float64{"no": 0.99, "yes": 0.01}}
+		// The caption is worth the wake; the routine text is not.
+		no := 0.01
+		if fields["text"] == "routine" {
+			no = 0.99
+		}
+		answer := decide.Answer{ID: qs[0].ID, Probabilities: map[string]float64{"no": no, "yes": 1 - no}}
 		return []decide.Answer{answer}, nil
 	})
 	sess, err := poo.New(runtime.Options, poo.WithDecider(poo.ModelInfo{}, model))
@@ -201,11 +212,16 @@ func TestTheFilterDeliversAFeedImageUnasked(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = sess.Close() })
-	waitUntil(t, "the image message to reach the chat model", func() bool {
-		return theModelRead(transport, `<feed name="inbox">the look</feed>`, poo.FeedOrigin("inbox"))
+	// The caption's delivery, the image alone's delivery and both
+	// decisions each land on their own goroutine, so the wait holds
+	// until every one of them is in the records before any snapshot is
+	// taken.
+	waitUntil(t, "the image messages to reach the chat model and both decisions to land", func() bool {
+		return theModelRead(transport, `<feed name="inbox">the look</feed>`, poo.FeedOrigin("inbox")) &&
+			theModelRead(transport, `<feed name="inbox"></feed>`, poo.FeedOrigin("inbox")) &&
+			decisionCount(sink) == 2
 	})
 	var queued []string
-	decisions := 0
 	for _, rec := range sink.Records() {
 		switch rec := rec.(type) {
 		case *poo.InputQueuedRecord:
@@ -215,18 +231,30 @@ func TestTheFilterDeliversAFeedImageUnasked(t *testing.T) {
 			if len(rec.Attachments) != 1 || rec.Attachments[0].MediaType != "image/png" {
 				t.Errorf("the input %q holds %+v, want the png beside its text", rec.Text, rec.Attachments)
 			}
-		case *poo.DecisionRecord:
-			decisions++
 		}
 	}
-	// The image was never asked about, so the one decision is the
-	// routine text's, and its confident no dropped it.
-	if len(queued) != 1 || decisions != 1 {
-		t.Fatalf("queued %d inputs and recorded %d decisions; want the image queued unasked and one decision", len(queued), decisions)
+	// The routine text's confident no dropped it, so the two queued
+	// inputs are the caption's and the image alone's.
+	if len(queued) != 2 {
+		t.Fatalf("queued %d inputs (%v); want the caption and the image alone", len(queued), queued)
 	}
 	if queued[0] != `<feed name="inbox">the look</feed>` {
-		t.Errorf("the queued input is %q, want the image's text", queued[0])
+		t.Errorf("the first queued input is %q, want the caption's", queued[0])
 	}
+	if queued[1] != `<feed name="inbox"></feed>` {
+		t.Errorf("the second queued input is %q, want the image alone's", queued[1])
+	}
+}
+
+// decisionCount returns how many decisions the sink holds.
+func decisionCount(sink *pootest.Sink) int {
+	n := 0
+	for _, rec := range sink.Records() {
+		if _, ok := rec.(*poo.DecisionRecord); ok {
+			n++
+		}
+	}
+	return n
 }
 
 // warnCapture records the warn records a session's log dispatches.

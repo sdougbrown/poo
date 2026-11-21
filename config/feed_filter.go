@@ -31,10 +31,12 @@ func filterEmit(ctx context.Context, io poo.FeedIO, name string, filter feed.Fil
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		// A message that carries an image is delivered unasked: the
-		// question is asked about text, and the decider never sees the
-		// picture.
-		if image != nil || io.Decider == nil || len(from)+len(text) > maxFeedFilterBytes {
+		// A message that carries an image is still asked about its
+		// text, and the picture rides the answer. A message whose
+		// text is empty — the image is the message — is delivered
+		// unasked: the question is asked about text, and the decider
+		// never sees the picture.
+		if (image != nil && text == "") || io.Decider == nil || len(from)+len(text) > maxFeedFilterBytes {
 			return io.Emit(from, text, image)
 		}
 		model := io.Decider()

@@ -64,15 +64,17 @@ type Spec struct {
 	// the session's.
 	OnIdle string
 	// Filter is the manifest's optional delivery screen. The config
-	// layer applies it to each emitted message that carries no image;
-	// the runner ignores it.
+	// layer applies it to the text of each emitted message; the
+	// runner ignores it.
 	Filter *Filter
 }
 
 // Filter is a feed's delivery screen. The config layer asks the
-// session's decision model the question about each message that
-// carries no image, and drops the message when the answer is no with
-// at least MinNoProbability. A consumer that wires the runner itself
+// session's decision model the question about a message's text, and
+// drops the message when the answer is no with at least
+// MinNoProbability — a picture rides the answer of its own text, and
+// a message whose text is empty is delivered unasked, for the decider
+// never sees a picture. A consumer that wires the runner itself
 // applies no filter.
 type Filter struct {
 	// Question is asked about each message the filter sees. Phrase it
