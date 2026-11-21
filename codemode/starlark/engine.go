@@ -12,9 +12,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math"
 	"time"
-	"unicode/utf8"
 
 	jsonmod "go.starlark.net/lib/json"
 	"go.starlark.net/starlark"
@@ -22,23 +20,18 @@ import (
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/codemode"
-	"github.com/sdougbrown/poo/internal/caps"
+	"github.com/sdougbrown/poo/codemode/internal/script"
 )
 
 // The engine's own defaults, for the limits a session leaves at zero.
 const (
-	DefaultTimeoutS       = 120
-	DefaultScriptMaxBytes = 64 * 1024
-	DefaultOutputCapChars = 16 * 1024
+	DefaultTimeoutS       = script.DefaultTimeoutS
+	DefaultScriptMaxBytes = script.DefaultScriptMaxBytes
+	DefaultOutputCapChars = script.DefaultOutputCapChars
 	DefaultExecSteps      = 10 * 1000 * 1000
 	// MaxGatherWidth is the most calls one gather may fan out to.
-	MaxGatherWidth = 16
+	MaxGatherWidth = script.MaxGatherWidth
 )
-
-// maxTimeoutS is the longest timeout a run accepts. A larger one wraps to
-// a negative duration when it is scaled to seconds, which switches the
-// run's wall-clock limit off rather than extending it.
-const maxTimeoutS = math.MaxInt64 / int64(time.Second)
 
 // exitReason is the thread-cancel reason the exit builtin leaves. The
 // run checks its own flag, so an exit is a result and not a failure.
@@ -50,52 +43,39 @@ type Engine struct{}
 // New returns the Starlark engine.
 func New() *Engine { return &Engine{} }
 
+// ScriptLanguage names the script language the engine runs, so the tool
+// renders the guidance the engine's scripts need.
+func (*Engine) ScriptLanguage() string { return "starlark" }
+
 // state is what the builtins and the run share.
 //
 // A run's builtins close over the run's state, so two runs share
 // nothing. Every builtin runs on the interpreter's own goroutine: the
 // seam does the fan-out, so the state needs no lock.
 type state struct {
-	nested    poo.NestedCaller
-	ctx       context.Context
-	output    []string
-	printed   int
-	calls     int
-	exited    bool
-	truncated bool
-	value     json.RawMessage
+	nested poo.NestedCaller
+	ctx    context.Context
+	output script.Output
+	calls  int
+	exited bool
+	value  json.RawMessage
 }
 
 // Run executes one script.
 func (e *Engine) Run(ctx context.Context, opts codemode.RunOptions) (codemode.RunResult, error) {
-	limits, err := resolveLimits(opts.Limits)
+	limits, err := script.CheckRun(opts)
 	if err != nil {
 		return codemode.RunResult{}, err
 	}
-	if len(opts.Script) > limits.ScriptMaxBytes {
-		return codemode.RunResult{}, fmt.Errorf("the script is %d bytes, over the %d byte limit", len(opts.Script), limits.ScriptMaxBytes)
-	}
-	if opts.Nested == nil {
-		return codemode.RunResult{}, fmt.Errorf("the script has no way to call tools")
+	if limits.ExecSteps == 0 {
+		limits.ExecSteps = DefaultExecSteps
 	}
 
 	st := &state{nested: opts.Nested}
 	thread := &starlark.Thread{
 		Name: "codemode",
 		Print: func(_ *starlark.Thread, msg string) {
-			if st.printed >= limits.OutputCapChars {
-				st.truncated = true
-				return
-			}
-			// A single print that crosses the remaining budget is cut
-			// to it, with a note: no one print can flood the result.
-			room := limits.OutputCapChars - st.printed
-			if utf8.RuneCountInString(msg) > room {
-				msg = caps.RunePrefix(msg, room) + " …"
-				st.truncated = true
-			}
-			st.output = append(st.output, msg)
-			st.printed += utf8.RuneCountInString(msg) + 1
+			st.output.Print(msg, limits.OutputCapChars)
 		},
 		Load: func(_ *starlark.Thread, _ string) (starlark.StringDict, error) {
 			return nil, fmt.Errorf("the script cannot load modules")
@@ -137,8 +117,8 @@ func (e *Engine) Run(ctx context.Context, opts codemode.RunOptions) (codemode.Ru
 	_, err = starlark.ExecFileOptions(fileOpts, thread, "script.star", opts.Script, predeclared)
 
 	result := codemode.RunResult{
-		Output:    st.output,
-		Truncated: st.truncated,
+		Output:    st.output.Lines,
+		Truncated: st.output.Truncated,
 		Value:     st.value,
 		Calls:     st.calls,
 	}
@@ -149,42 +129,6 @@ func (e *Engine) Run(ctx context.Context, opts codemode.RunOptions) (codemode.Ru
 		return result, fmt.Errorf("the script failed: %w", err)
 	}
 	return result, nil
-}
-
-// resolveLimits fills the limits the session left at zero and refuses
-// one it got wrong: a negative limit has no meaning, a negative
-// ExecSteps would wrap to a huge uint64 and switch the step budget off,
-// and a timeout over maxTimeoutS would wrap the same way.
-func resolveLimits(limits codemode.Limits) (codemode.Limits, error) {
-	for _, limit := range []struct {
-		name  string
-		value int
-	}{
-		{"timeout_s", limits.TimeoutS},
-		{"script_max_bytes", limits.ScriptMaxBytes},
-		{"output_cap_chars", limits.OutputCapChars},
-		{"exec_steps", limits.ExecSteps},
-	} {
-		if limit.value < 0 {
-			return codemode.Limits{}, fmt.Errorf("the codemode limit %s is negative", limit.name)
-		}
-	}
-	if int64(limits.TimeoutS) > maxTimeoutS {
-		return codemode.Limits{}, fmt.Errorf("the codemode limit timeout_s is over the %d second maximum", maxTimeoutS)
-	}
-	if limits.TimeoutS == 0 {
-		limits.TimeoutS = DefaultTimeoutS
-	}
-	if limits.ScriptMaxBytes == 0 {
-		limits.ScriptMaxBytes = DefaultScriptMaxBytes
-	}
-	if limits.OutputCapChars == 0 {
-		limits.OutputCapChars = DefaultOutputCapChars
-	}
-	if limits.ExecSteps == 0 {
-		limits.ExecSteps = DefaultExecSteps
-	}
-	return limits, nil
 }
 
 // callBuiltin runs one tool call: `call("read", {"path": "..."})`.
