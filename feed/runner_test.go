@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -77,7 +78,7 @@ func start(t *testing.T, c executorCase, spec feed.Spec, log *slog.Logger) (*emi
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		done <- run(ctx, dir, got.emit, log)
+		done <- run(ctx, dir, "sess-fixture", got.emit, log)
 	}()
 	return got, cancel, done
 }
@@ -342,7 +343,7 @@ func TestTheManifestEnvironmentReachesTheCommand(t *testing.T) {
 			run := feed.Runner(spec, c.executor, envLookup("FIXTURE_HOST=the reference"))
 			var mu sync.Mutex
 			var texts []string
-			err := run(context.Background(), t.TempDir(), func(from, text string, _ *feed.Image) error {
+			err := run(context.Background(), t.TempDir(), "sess-fixture", func(from, text string, _ *feed.Image) error {
 				mu.Lock()
 				defer mu.Unlock()
 				texts = append(texts, text)
@@ -359,6 +360,66 @@ func TestTheManifestEnvironmentReachesTheCommand(t *testing.T) {
 	}
 }
 
+// TestTheSessionReferenceReachesTheCommand covers a manifest's
+// `session:id`: each attempt resolves it to the session ID the attempt
+// was given, so two sessions running the same feed resolve their own
+// IDs, and a reference to a name the session scope does not carry fails
+// the attempt before the command starts.
+func TestTheSessionReferenceReachesTheCommand(t *testing.T) {
+	for _, c := range executorCases(t) {
+		t.Run(c.name, func(t *testing.T) {
+			spec := feed.Spec{
+				Name:    "sessionid",
+				Command: []string{script(t, "sessionid")},
+				Env: []cliregistry.EnvBinding{
+					{Name: "WHINNY_SESSION_ID", From: "id", Reference: true, Scope: cliregistry.SessionScope},
+				},
+			}
+			run := feed.Runner(spec, c.executor, envLookup())
+
+			// Two attempts, one per session: the same runner, two IDs.
+			var mu sync.Mutex
+			var texts []string
+			emit := func(_ string, text string, _ *feed.Image) error {
+				mu.Lock()
+				defer mu.Unlock()
+				texts = append(texts, text)
+				return nil
+			}
+			for _, sessionID := range []string{"sess-one", "sess-two"} {
+				if err := run(context.Background(), t.TempDir(), sessionID, emit, silent()); err != nil {
+					t.Fatalf("the attempt for %q failed: %v", sessionID, err)
+				}
+			}
+			want := []string{"sess-one", "sess-two"}
+			if !slices.Equal(texts, want) {
+				t.Errorf("the commands read %v, want %v", texts, want)
+			}
+		})
+	}
+
+	// A session reference to a name the scope does not carry fails the
+	// attempt, and the command does not start.
+	recorder := &recordingExecutor{}
+	spec := feed.Spec{
+		Name:    "sessionid",
+		Command: []string{script(t, "sessionid")},
+		Env: []cliregistry.EnvBinding{
+			{Name: "WHINNY_SESSION_ID", From: "run_id", Reference: true, Scope: cliregistry.SessionScope},
+		},
+	}
+	run := feed.Runner(spec, recorder, envLookup())
+	err := run(context.Background(), t.TempDir(), "sess-one", func(string, string, *feed.Image) error { return nil }, silent())
+	if err == nil || !strings.Contains(err.Error(), "session:run_id") {
+		t.Fatalf("the attempt for an unknown session reference returned %v, want an error naming session:run_id", err)
+	}
+	recorder.mu.Lock()
+	defer recorder.mu.Unlock()
+	if recorder.command.Argv != nil {
+		t.Errorf("the command started anyway: %v", recorder.command.Argv)
+	}
+}
+
 // TestAnInputTheSessionRefusesEndsTheAttempt covers the acceptance: the
 // runner stops when the session will not take its input, and the
 // session's error is the attempt's.
@@ -371,7 +432,7 @@ func TestAnInputTheSessionRefusesEndsTheAttempt(t *testing.T) {
 			defer cancel()
 			done := make(chan error, 1)
 			go func() {
-				done <- run(ctx, t.TempDir(), got.emit, silent())
+				done <- run(ctx, t.TempDir(), "sess-fixture", got.emit, silent())
 			}()
 			err := result(t, done)
 			if !errors.Is(err, errRefused) {
@@ -419,7 +480,7 @@ func (finished) Stopped() bool { return false }
 func TestAFeedWithNoEnvironmentIsGivenAnEmptyOne(t *testing.T) {
 	recorder := &recordingExecutor{}
 	run := feed.Runner(feed.Spec{Name: "quiet", Command: []string{"/bin/true"}}, recorder, envLookup())
-	if err := run(context.Background(), t.TempDir(), func(string, string, *feed.Image) error { return nil }, silent()); err != nil {
+	if err := run(context.Background(), t.TempDir(), "sess-fixture", func(string, string, *feed.Image) error { return nil }, silent()); err != nil {
 		t.Fatalf("the attempt failed: %v", err)
 	}
 	recorder.mu.Lock()

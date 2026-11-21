@@ -29,10 +29,12 @@ var silentLogger = slog.New(slog.DiscardHandler)
 
 // Run is one attempt of a feed's process.
 //
-// dir is the directory the command runs in. The session passes its own
-// working directory at the call, so a feed follows the session it runs
-// beside rather than the directory the binary was built in.
-type Run func(ctx context.Context, dir string, emit func(from, text string, image *Image) error, log *slog.Logger) error
+// dir is the directory the command runs in, and sessionID is the ID of
+// the session the feed runs beside, both the session's to hand over: a
+// feed follows the session it runs beside rather than the directory the
+// binary was built in, and its manifest's session references resolve to
+// that session's ID.
+type Run func(ctx context.Context, dir string, sessionID string, emit func(from, text string, image *Image) error, log *slog.Logger) error
 
 // Image is the image a feed's message names, by its path.
 //
@@ -85,12 +87,13 @@ type Image struct {
 // attempt's log, never to the model, and never into an input.
 //
 // The environment follows a registered CLI's rules: the benign names,
-// then the manifest's own entries, resolved through env. A reference
-// that does not resolve fails the attempt, and the command does not
-// start.
+// then the manifest's own entries, resolved through env. A `env:NAME`
+// reference resolves against the session's scrubbed environment, and a
+// `session:id` reference resolves to the session's ID. A reference that
+// does not resolve fails the attempt, and the command does not start.
 func Runner(spec Spec, ex exec.Executor, env func(string) (string, bool)) Run {
-	return func(ctx context.Context, dir string, emit func(from, text string, image *Image) error, log *slog.Logger) error {
-		resolved, err := spec.ResolveEnv(env)
+	return func(ctx context.Context, dir string, sessionID string, emit func(from, text string, image *Image) error, log *slog.Logger) error {
+		resolved, err := spec.ResolveEnvScoped(env, exec.SessionScope(sessionID))
 		if err != nil {
 			return fmt.Errorf("feed %q: %w", spec.Name, err)
 		}

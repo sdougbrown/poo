@@ -44,6 +44,11 @@ type FeedIO struct {
 	// runs. The session hands over its own: the directory a new session
 	// was created in, or, for a restored session, the recorded one.
 	Dir string
+	// SessionID is the session's own ID, which a manifest's session
+	// references resolve to. It is the same ID after a restore, so a
+	// feed restarted beside a resumed session resolves to what it
+	// resolved to before.
+	SessionID string
 	// Emit queues one input, which may carry an image. It returns the
 	// session's refusal (ErrSessionClosed, ErrSessionBroken, a store
 	// error) or the image's own failure. A model that reads no images
@@ -412,7 +417,8 @@ func (s *Session) runFeedAttempt(f *feedState, attempt int) (err error) {
 		}
 	}()
 	return f.spec.Run(f.ctx, FeedIO{
-		Dir: s.opts.WorkingDir,
+		Dir:       s.opts.WorkingDir,
+		SessionID: s.opts.SessionID,
 		Emit: func(from, text string, image *FeedImage) error {
 			return s.emitFeedInput(f, attempt, from, text, image)
 		},

@@ -1,0 +1,3 @@
+#!/bin/sh
+# A fixture feed: it emits the session ID its environment resolved.
+printf '{"text": "%s"}\n' "$WHINNY_SESSION_ID"

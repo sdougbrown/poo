@@ -173,6 +173,37 @@ func TestAScrubbedVariableIsNotResolved(t *testing.T) {
 	})
 }
 
+// TestASessionReferenceResolvesAtTheCall covers a manifest's
+// `session:id`: each call resolves it to the session ID the call's
+// environment carries, so two sessions calling the same CLI read their
+// own IDs, and a reference to a name the session scope does not carry
+// fails with the reference named.
+func TestASessionReferenceResolvesAtTheCall(t *testing.T) {
+	tool := execTool(t, []string{"/bin/sh", "-c", `printf 'sid=%s\n' "$WHINNY_SESSION_ID"`}, map[string]any{
+		"env": map[string]string{"WHINNY_SESSION_ID": "session:id"},
+	})
+	for _, sessionID := range []string{"sess-one", "sess-two"} {
+		res, err := runCall(t, tool, poo.ToolEnv{SessionID: sessionID, Env: bash.ScrubEnv(os.Environ(), bash.Scrub{Passthrough: []string{"PATH"}})})
+		if err != nil {
+			t.Fatalf("running the CLI for %q: %v", sessionID, err)
+		}
+		output, _ := observation(t, res)[bash.EnvelopeOutput].(string)
+		if want := "sid=" + sessionID + "\n"; output != want {
+			t.Errorf("the CLI printed %q, want %q", output, want)
+		}
+	}
+
+	// The model cannot move the ID: it is the call environment's, and
+	// nothing in the arguments reaches the resolution.
+	unknown := execTool(t, []string{"/bin/true"}, map[string]any{
+		"env": map[string]string{"SESSION": "session:run_id"},
+	})
+	_, err := runCall(t, unknown, poo.ToolEnv{SessionID: "sess-one", Env: os.Environ()})
+	if err == nil || !strings.Contains(err.Error(), "session:run_id") {
+		t.Errorf("the call for an unknown session reference returned %v, want one naming session:run_id", err)
+	}
+}
+
 // TestTheCLIRunsUnderBothExecutors covers the two executors: a CLI runs
 // through whichever one the session was built with, with the session's
 // directory, and sees only the environment its manifest resolved.

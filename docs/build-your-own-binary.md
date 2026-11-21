@@ -286,9 +286,12 @@ runs.
 
 **Environment.** A feed's command gets the cli registry's benign names and
 the manifest's `env` entries, and nothing else: a name the session scrubs
-with `tools.env.scrub` never reaches it. An entry is a literal, or
-`env:NAME`, which reads the session's scrubbed environment. A reference
-that does not resolve fails the attempt, and the command does not start.
+with `tools.env.scrub` never reaches it. An entry is a literal,
+`env:NAME`, which reads the session's scrubbed environment, or
+`session:id`, which resolves to the session's own ID when the feed
+starts — the same ID after a restore, and nothing the command says or
+does can change it. A reference that does not resolve fails the attempt,
+and the command does not start.
 
 **Stdout.** One JSON object per line:
 

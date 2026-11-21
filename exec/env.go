@@ -1,6 +1,7 @@
 package exec
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -93,6 +94,29 @@ func Lookup(environ []string) func(string) (string, bool) {
 	return func(name string) (string, bool) {
 		value, ok := values[name]
 		return value, ok
+	}
+}
+
+// SessionScope returns the resolver for a command's session references.
+//
+// A manifest's `session:id` reference resolves through it at the feed's
+// launch or the CLI's call, never when the settings load: the value it
+// returns is the session's own ID, and a restored session answers with
+// the same one. The ID is the caller's, so nothing the command says or
+// does can change it. A reference to any other name fails: `id` is the
+// only value the session scope carries.
+func SessionScope(sessionID string) func(scope, name string) (string, error) {
+	return func(scope, name string) (string, error) {
+		if scope != "session" {
+			return "", fmt.Errorf("unknown reference scope %q", scope)
+		}
+		if name != "id" {
+			return "", fmt.Errorf("unknown session reference %q", "session:"+name)
+		}
+		if sessionID == "" {
+			return "", fmt.Errorf("no session id for the reference %q", "session:id")
+		}
+		return sessionID, nil
 	}
 }
 

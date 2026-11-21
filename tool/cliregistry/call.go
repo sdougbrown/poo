@@ -198,7 +198,8 @@ func planError(name string, schema map[string]any, err error) error {
 // The command runs where bash runs and under the same rules: the
 // session's executor (the sandbox, when the settings name one), the
 // session's working directory unless the manifest fixes one, an
-// environment looked up in the session's scrubbed one, and the run's
+// environment looked up in the session's scrubbed one with a manifest's
+// session:id resolving to the session's own ID, and the run's
 // context, so a cancelled run stops the CLI and everything it started.
 //
 // The output is the CLI's stdout and stderr with its exit status, in the
@@ -216,8 +217,10 @@ func (t *CallTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (
 
 	// A manifest's env:NAME is resolved against the session's scrubbed
 	// environment, never the host's: a name the scrub removed or the
-	// passthrough list left out is a reference the CLI cannot have.
-	environ, err := p.plan.ResolveEnv(exec.Lookup(env.Env))
+	// passthrough list left out is a reference the CLI cannot have. A
+	// manifest's session:id resolves to this call's session, at the
+	// call, never when the settings loaded.
+	environ, err := p.plan.ResolveEnvScoped(exec.Lookup(env.Env), exec.SessionScope(env.SessionID))
 	if err != nil {
 		return poo.ToolResult{}, fmt.Errorf("%s: %s: %w", CallToolName, p.name, err)
 	}

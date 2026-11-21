@@ -12,8 +12,11 @@
 // and the config layer wires the runner to the session.
 //
 // A feed's environment follows a registered CLI's rules. An entry is a
-// literal, or an `env:NAME` reference. The host resolves a reference
-// against its own scrubbed environment.
+// literal, an `env:NAME` reference to the session's scrubbed
+// environment, or a `session:id` reference to the session's own ID,
+// resolved when the feed starts, not when the settings load. The host
+// resolves an environment reference against its own scrubbed
+// environment.
 package feed
 
 import (
@@ -91,11 +94,21 @@ type Filter struct {
 // The library's benign names are copied first, then the manifest's
 // entries. A manifest reference lookup does not resolve is an error that
 // names the variable: a feed whose environment cannot be assembled
-// whole is not started.
+// whole is not started. A manifest session reference is an error here
+// too: resolving one needs the session's ID, which ResolveEnvScoped
+// takes.
 func (s Spec) ResolveEnv(lookup func(string) (string, bool)) ([]string, error) {
+	return s.ResolveEnvScoped(lookup, nil)
+}
+
+// ResolveEnvScoped resolves the spec's env bindings the way ResolveEnv
+// does, and resolves the manifest's session references through scoped
+// besides: scope "session", name "id" resolves to the session's ID, and
+// the resolver a caller passes is exec.SessionScope over that ID.
+func (s Spec) ResolveEnvScoped(lookup func(string) (string, bool), scoped func(scope, name string) (string, error)) ([]string, error) {
 	// The library's Plan resolves exactly these bindings, over the
 	// benign names, so the resolution stays the library's.
-	return (&cliregistry.Plan{Env: s.Env}).ResolveEnv(lookup)
+	return (&cliregistry.Plan{Env: s.Env}).ResolveEnvScoped(lookup, scoped)
 }
 
 // Set is the set of feed manifests the settings name.
@@ -271,6 +284,10 @@ func readFeed(path, name string, raw json.RawMessage) (Spec, error) {
 		value := b.Env[entry]
 		if from, ok := strings.CutPrefix(value, "env:"); ok {
 			envs = append(envs, cliregistry.EnvBinding{Name: entry, From: from, Reference: true})
+			continue
+		}
+		if from, ok := strings.CutPrefix(value, cliregistry.SessionScope+":"); ok {
+			envs = append(envs, cliregistry.EnvBinding{Name: entry, From: from, Reference: true, Scope: cliregistry.SessionScope})
 			continue
 		}
 		envs = append(envs, cliregistry.EnvBinding{Name: entry, Value: value})

@@ -18,8 +18,9 @@
 // poo runs the plan through the session's executor: the sandbox the
 // settings name, with the protected paths it masks, in the session's
 // working directory, with an environment resolved against the session's
-// scrubbed one, and under the run's context, so an interrupt, a cancel or
-// a close stops the CLI and everything it started.
+// scrubbed one — a manifest's session:id resolving to the session's own
+// ID — and under the run's context, so an interrupt, a cancel or a
+// close stops the CLI and everything it started.
 //
 // The plan's own timeout is poo's to enforce, and the call shows the
 // model the same observation bash shows it: the two streams, the exit
