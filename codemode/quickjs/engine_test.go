@@ -86,38 +86,56 @@ return [first.tool, second.tool, second.text];
 	}
 }
 
-func TestNamedCallsBatchWithoutOvertaking(t *testing.T) {
+type parallelNested struct {
+	nested
+	parallel nested
+}
+
+func (n parallelNested) CallParallel(ctx context.Context, calls []poo.NestedCall) ([]poo.NestedResult, error) {
+	return n.parallel(ctx, calls)
+}
+
+func TestToolBatchesRunInSubmissionOrder(t *testing.T) {
 	var batches [][]string
-	res, err := quickjs.New().Run(t.Context(), codemode.RunOptions{
-		Script: `
-const args = {path: "first"};
-const first = tools.read(args);
-args.path = "second";
-const second = tools.read(args);
-const legacy = call("read", {path: "third"});
-const results = await Promise.all([first, second]);
-const fourth = await tools.read({path: results[1].text});
-return [...results.map(r => r.text), legacy.text, fourth.text];
-`,
-		Tools: []poo.ToolInfo{{Name: "read"}},
-		Nested: nested(func(_ context.Context, calls []poo.NestedCall) ([]poo.NestedResult, error) {
-			paths := make([]string, len(calls))
+	record := func(mode string) nested {
+		return func(_ context.Context, calls []poo.NestedCall) ([]poo.NestedResult, error) {
+			paths := []string{mode}
 			results := make([]poo.NestedResult, len(calls))
 			for i, call := range calls {
 				var args struct{ Path string }
 				if err := json.Unmarshal(call.Arguments, &args); err != nil {
 					return nil, err
 				}
-				paths[i], results[i].Text = args.Path, args.Path
+				paths = append(paths, args.Path)
+				results[i].Text = args.Path
 			}
 			batches = append(batches, paths)
 			return results, nil
-		}),
+		}
+	}
+	res, err := quickjs.New().Run(t.Context(), codemode.RunOptions{
+		Script: `
+const args = {path: "first"};
+const first = tools.read(args);
+args.path = "second";
+const second = tools.read(args);
+args.path = "write";
+const batch = parallel([["write", args], ["write", {path: "other"}]]);
+if (!(batch instanceof Promise)) throw new Error("parallel did not return a promise");
+args.path = "last";
+const last = tools.read(args);
+const legacy = call("read", {path: "legacy"});
+const [a, b, writes, c] = await Promise.all([first, second, batch, last]);
+return [a.text, b.text, writes.map(r => r.text), c.text, legacy.text];
+`,
+		Tools:  []poo.ToolInfo{{Name: "read"}},
+		Nested: parallelNested{nested: record("default"), parallel: record("parallel")},
 	})
-	if err != nil || res.Calls != 4 || string(res.Value) != `["first","second","third","second"]` {
+	if err != nil || res.Calls != 6 || string(res.Value) != `["first","second",["write","other"],"last","legacy"]` {
 		t.Fatalf("run = %+v, %v", res, err)
 	}
-	if want := [][]string{{"first", "second"}, {"third"}, {"second"}}; !slices.EqualFunc(batches, want, slices.Equal[[]string]) {
+	want := [][]string{{"default", "first", "second"}, {"parallel", "write", "other"}, {"default", "last"}, {"default", "legacy"}}
+	if !slices.EqualFunc(batches, want, slices.Equal[[]string]) {
 		t.Fatalf("batches = %v, want %v", batches, want)
 	}
 }
@@ -139,7 +157,7 @@ return results.every(r => r.status === "rejected" && String(r.reason).includes("
 
 func TestExplicitParallelDoesNotFallBackToOrdinaryScheduling(t *testing.T) {
 	_, err := quickjs.New().Run(t.Context(), codemode.RunOptions{
-		Script: `parallel([["write", {}]]);`,
+		Script: `await parallel([["write", {}]]);`,
 		Nested: nested(noCalls),
 	})
 	if err == nil || !strings.Contains(err.Error(), "does not support explicit parallel batches") {
@@ -228,11 +246,11 @@ func TestQuickJSRunawayStopsAndNextScriptRuns(t *testing.T) {
 // the entry it could not read.
 func TestParallelRefusesAnEntryItCannotRead(t *testing.T) {
 	for _, test := range []struct{ script, want string }{
-		{`parallel("read");`, "tool batch expects an array"},
-		{`parallel(["read"]);`, "is not a [name, args] pair"},
-		{`parallel([["read"]]);`, "is not a [name, args] pair"},
-		{`parallel([[1, {}]]);`, "needs a tool name"},
-		{`parallel([["", {}]]);`, "needs a tool name"},
+		{`await parallel("read");`, "tool batch expects an array"},
+		{`await parallel(["read"]);`, "is not a [name, args] pair"},
+		{`await parallel([["read"]]);`, "is not a [name, args] pair"},
+		{`await parallel([[1, {}]]);`, "needs a tool name"},
+		{`await parallel([["", {}]]);`, "needs a tool name"},
 	} {
 		t.Run(test.script, func(t *testing.T) {
 			handed := 0
@@ -262,7 +280,7 @@ func TestQuickJSBoundsGuestExecution(t *testing.T) {
 		{"deadline", `while (true) {}`, codemode.Limits{TimeoutS: 1}, "deadline exceeded"},
 		{"memory", `return new ArrayBuffer(128 * 1024 * 1024).byteLength;`, codemode.Limits{}, "out of memory"},
 		{"step budget", `return 1;`, codemode.Limits{ExecSteps: 100}, "does not support the exec_steps limit"},
-		{"batch width", `parallel(Array.from({length: 17}, () => ["read", {}]));`, codemode.Limits{}, "tool batch takes at most"},
+		{"batch width", `await parallel(Array.from({length: 17}, () => ["read", {}]));`, codemode.Limits{}, "tool batch takes at most"},
 		{"oversized return", `return "x".repeat(2097152);`, codemode.Limits{}, "print a summary instead"},
 		{"call after return", `return {toJSON() { call("read", {}); return 1; }};`, codemode.Limits{}, "after returning"},
 	} {

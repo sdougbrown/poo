@@ -100,7 +100,7 @@ return [strip(a), strip(b)];
 func TestAnExplicitParallelBatchOverlapsWritesAndStillAsks(t *testing.T) {
 	script := `
 const strip = (r) => r.text.split("\n").slice(1).join("\n");
-const rs = parallel([
+const rs = await parallel([
   ["walker", {text: "one"}],
   ["stomper", {text: "two"}],
   ["denied", {text: "three"}],
