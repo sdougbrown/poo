@@ -272,7 +272,13 @@ type Decide struct {
 
 // ProfileSettings defines a named variant of a profile linked by the binary.
 type ProfileSettings struct {
-	Base       string       `json:"base"`
+	Base string `json:"base"`
+	// Feeds are the feeds the profile declares it needs, by manifest
+	// name. They add to the base's declared feeds, kept once each.
+	// The settings' feeds.paths still control which feeds load, and
+	// a declared feed the settings do not load is skipped with a
+	// warning.
+	Feeds      []string     `json:"feeds,omitempty"`
 	PromptFile string       `json:"prompt_file,omitempty"`
 	Tools      ProfileTools `json:"tools,omitempty"`
 }

@@ -377,7 +377,8 @@ func learnedOutputLimit(records []Record, modelID string) int {
 // The profile must exist, every role must name a model the settings
 // offer, and every recorded tool must still be linked with the same
 // class and background mode. A different settings hash or build is
-// allowed, and reported as a warning.
+// allowed, and reported as a warning. A feed the profile declares,
+// that this build's feeds do not run, is a warning too.
 func checkCompatibility(opts Options, meta SessionMetadata) ([]string, error) {
 	if meta.Profile != "" && !hasProfile(opts.Profiles, meta.Profile) {
 		return nil, &IncompatibleError{
@@ -405,6 +406,9 @@ func checkCompatibility(opts Options, meta SessionMetadata) ([]string, error) {
 		}
 	}
 	var warnings []string
+	if missing := missingFeedWarnings(opts, meta.Profile); len(missing) > 0 {
+		warnings = append(warnings, missing...)
+	}
 	if meta.SettingsHash != "" && opts.SettingsHash != "" && meta.SettingsHash != opts.SettingsHash {
 		warnings = append(warnings, "the settings changed since the session was created")
 	}
@@ -413,6 +417,45 @@ func checkCompatibility(opts Options, meta SessionMetadata) ([]string, error) {
 			meta.Build.Name, meta.Build.Version, opts.Build.Name, opts.Build.Version))
 	}
 	return warnings, nil
+}
+
+// missingFeedWarnings returns the warnings for a declared feed this
+// build's feeds do not run. The declarations belong to the profile
+// this build offers under the recorded name; the records hold only
+// the name.
+//
+// A restored session runs without them: the operator's feeds.paths
+// still control which feeds load, so the loss is a warning, not a
+// failure.
+func missingFeedWarnings(opts Options, name string) []string {
+	if name == "" {
+		return nil
+	}
+	for _, p := range opts.Profiles {
+		if p.Name != name {
+			continue
+		}
+		var missing []string
+		for _, feed := range p.Feeds {
+			if !hasFeed(opts.Feeds, feed) {
+				missing = append(missing, MissingFeedWarning(name, feed))
+			}
+		}
+		return missing
+	}
+	return nil
+}
+
+// hasFeed reports whether the feeds hold one by the name. The options
+// hold the resolved feed specs, not the feed package's set, so the
+// membership check answers over them.
+func hasFeed(feeds []FeedSpec, name string) bool {
+	for _, spec := range feeds {
+		if spec.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 // hasProfile reports whether the profiles hold a name.

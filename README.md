@@ -408,6 +408,24 @@ instructions. An explicit `system_prompt` replacement, or a setting that
 sets or removes the `profile` section, takes precedence. A resumed
 session uses its recorded prompt once it has run.
 
+`feeds` names the feeds the profile needs, by manifest name:
+
+```yaml
+profiles:
+  watcher:
+    base: code
+    feeds: [apron-room, ticker]
+```
+
+A named profile's feeds add to the base's declared feeds. They are a
+presence assertion, not a switch: the settings' `feeds.paths` still
+control which feeds load, and every loaded feed still runs, whether a
+profile declares it or not. A declared feed the settings do not load is
+skipped with a warning, never a failure, so a binary that links a profile
+without its manifests runs the rest of the session unchanged. A resumed
+session runs without a declared feed the current settings no longer
+load, and says so with the same warning.
+
 **Profiles files.** `profiles_files` names the files that hold profile
 definitions, so a settings file that has grown a long `profiles` map can
 hand them to files of their own:

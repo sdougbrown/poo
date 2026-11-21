@@ -36,6 +36,22 @@ func (r *Runtime) resolveProfileDefinitions(opts BuildOptions) ([]profile.Profil
 			return nil, err
 		}
 		base.Name = name
+		// The base's feeds belong to the linked profile, so the
+		// variant's additions grow a copy: a base whose slice has
+		// spare capacity is never written through.
+		base.Feeds = slices.Clone(base.Feeds)
+		// The variant's feeds add to the base's declaration: a
+		// specialization asserts more, never less. A name the base
+		// already declares is kept once, so a restatement warns
+		// about nothing twice.
+		for _, feed := range definition.Feeds {
+			if feed == "" {
+				return nil, &Error{Code: CodeInvalid, Field: field + ".feeds", Message: "a declared feed name cannot be empty"}
+			}
+			if !slices.Contains(base.Feeds, feed) {
+				base.Feeds = append(base.Feeds, feed)
+			}
+		}
 		definitions = append(definitions, base)
 	}
 	return definitions, nil

@@ -336,6 +336,43 @@ func TestTheRestoreWarnsAboutAChangedBuild(t *testing.T) {
 	}
 }
 
+// TestTheRestoreWarnsAboutADeclaredFeedTheFeedsDoNotRun covers the
+// compatibility check's warnings: a session whose profile declares a
+// feed this build's feeds do not run restores without it, and says so.
+func TestTheRestoreWarnsAboutADeclaredFeedTheFeedsDoNotRun(t *testing.T) {
+	records := []poo.Record{header("s1")}
+	opts := restoreOptions(t, scripted(nil), &recordingSink{})
+	opts.Profiles[0].Feeds = []string{"broker"}
+	session, restored, err := poo.Restore(opts, records)
+	if err != nil {
+		t.Fatalf("restoring the session: %v", err)
+	}
+	t.Cleanup(func() { session.Close() })
+	if len(restored.Warnings) != 1 {
+		t.Fatalf("the restore reported %d warnings, want 1: %v", len(restored.Warnings), restored.Warnings)
+	}
+	if !strings.Contains(restored.Warnings[0], `"broker"`) {
+		t.Errorf("the warning does not name the missing feed: %q", restored.Warnings[0])
+	}
+}
+
+// TestTheRestoreStaysQuietWhenADeclaredFeedRuns covers the quiet side:
+// a declared feed the build's feeds do run warns about nothing.
+func TestTheRestoreStaysQuietWhenADeclaredFeedRuns(t *testing.T) {
+	records := []poo.Record{header("s1")}
+	opts := restoreOptions(t, scripted(nil), &recordingSink{})
+	opts.Profiles[0].Feeds = []string{"broker"}
+	opts.Feeds = []poo.FeedSpec{{Name: "broker", Run: func(context.Context, poo.FeedIO) error { return nil }}}
+	session, restored, err := poo.Restore(opts, records)
+	if err != nil {
+		t.Fatalf("restoring the session: %v", err)
+	}
+	t.Cleanup(func() { session.Close() })
+	if len(restored.Warnings) != 0 {
+		t.Errorf("the restore reported %v, want no warnings", restored.Warnings)
+	}
+}
+
 // TestTheRestoreRejectsAnotherFormat covers the codec: a record format
 // this build cannot read is a typed error.
 func TestTheRestoreRejectsAnotherFormat(t *testing.T) {

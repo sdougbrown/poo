@@ -1,8 +1,9 @@
 // Package profile holds the profiles poo ships.
 //
 // A profile is a pre-wired tool set plus defaults: the tools a run
-// offers, the action the profile takes with a side-effecting call no
-// rule covers, and the name the session's metadata carries.
+// offers, the feeds it needs, and the name the session's metadata
+// carries. It also names the action the profile takes with a
+// side-effecting call no rule covers.
 //
 // The profiles themselves live in the packages beside this one, so a
 // binary links the profiles it wants and no others.
@@ -48,6 +49,11 @@ type Profile struct {
 	// An empty prompt adds no section: the profile runs on the base
 	// section alone.
 	Prompt string
+	// Feeds are the names of the feeds the profile needs. The
+	// settings' feeds.paths still control which feeds load: a declared
+	// feed the settings do not load is skipped with a warning, never
+	// a failure.
+	Feeds []string
 }
 
 // HasTool reports whether the profile offers the named tool.

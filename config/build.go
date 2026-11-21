@@ -493,7 +493,16 @@ func (r *Runtime) resolveProfile(opts BuildOptions) error {
 			Err:     err,
 		}
 	}
-	r.Profile = poo.Profile{Name: chosen.Name, Unmatched: chosen.Unmatched}
+	r.Profile = poo.Profile{Name: chosen.Name, Unmatched: chosen.Unmatched, Feeds: slices.Clone(chosen.Feeds)}
+	// The declared feeds are a presence assertion, not a switch: the
+	// operator's feeds.paths still control which feeds run. A
+	// declared feed the settings do not load is skipped with a
+	// warning, never a failure.
+	for _, feedName := range chosen.Feeds {
+		if !r.Feeds.Has(feedName) {
+			r.warn(poo.MissingFeedWarning(chosen.Name, feedName))
+		}
+	}
 	// The profile's own prompt section is the profile's, so it goes in
 	// before the binary's directory and the settings: a later layer
 	// still wins over it.
@@ -1039,7 +1048,7 @@ func (r *Runtime) resolveProfiles(opts BuildOptions, definitions []profile.Profi
 	var out []poo.Profile
 	for _, definition := range definitions {
 		disabled := r.disabledTools(definition.Name)
-		resolved := poo.Profile{Name: definition.Name, Unmatched: definition.Unmatched}
+		resolved := poo.Profile{Name: definition.Name, Unmatched: definition.Unmatched, Feeds: slices.Clone(definition.Feeds)}
 		for _, tool := range definition.Tools {
 			if !linksTool(opts, tool) {
 				continue
