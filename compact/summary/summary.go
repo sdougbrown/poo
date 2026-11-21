@@ -12,8 +12,8 @@
 // window of the last main request, which can be a turn older than the
 // view.
 //
-// It also keeps the request inside the window it summarizes. The model is
-// told to write a summary instead of continuing the work, tool results are
+// It also keeps the request inside the window it summarizes. The model
+// is told to write a summary instead of continuing the work, tool results are
 // capped, and reasoning blocks are left out.
 //
 // Every replacement the strategy writes starts with a marker line naming
@@ -28,12 +28,11 @@ package summary
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/compact/internal/cut"
 )
 
 // The strategy's constants.
@@ -48,15 +47,14 @@ const (
 	// DefaultMaxTokens is the output limit of the summarization request.
 	DefaultMaxTokens = 4096
 
-	// tailShare is the share of the prompt limit a verbatim tail may
-	// fill. A prompt limit smaller than twice the configured tail keeps
-	// this share instead, so a small-prompt model still compacts.
-	tailShare = 0.5
+	// markerVerb is what the replacement's marker line says the turns
+	// were replaced with.
+	markerVerb = "summarized"
 
 	// markerPrefix starts every replacement the strategy writes. The
 	// model reads it as the sign that its history was replaced, and the
 	// strategy strips it when it carries its own summary forward.
-	markerPrefix = "[Context compacted:"
+	markerPrefix = cut.MarkerPrefix
 )
 
 // Options configure the strategy.
@@ -79,11 +77,7 @@ type Options struct {
 }
 
 // FileOp reports the file a tool call names.
-//
-// path is the file the call names, and changed reports whether the call
-// changed it. A call the function does not recognize returns an empty
-// path, and the file is not listed.
-type FileOp func(name string, arguments json.RawMessage) (path string, changed bool)
+type FileOp = cut.FileOp
 
 // Compactor is the summary strategy.
 type Compactor struct {
@@ -107,7 +101,7 @@ func New(opts Options) *Compactor {
 		c.maxTokens = DefaultMaxTokens
 	}
 	if c.files == nil {
-		c.files = defaultFileOp
+		c.files = cut.DefaultFileOp
 	}
 	return c
 }
@@ -136,7 +130,7 @@ func (c *Compactor) MaxTokens() int { return c.maxTokens }
 // a window so small that the verbatim tail and the summary alone leave less
 // room than the output limit, a summary on every turn would gain nothing.
 func (c *Compactor) ShouldCompact(view poo.View, budget poo.ContextBudget) bool {
-	if len(liveTurns(view.Turns())) < 2 {
+	if len(cut.LiveTurns(view.Turns())) < 2 {
 		return false
 	}
 	if c.ratio > 0 && budget.Reached(c.ratio) {
@@ -155,13 +149,13 @@ func (c *Compactor) restoresRoom(view poo.View, budget poo.ContextBudget) bool {
 		return false
 	}
 	messages := view.Messages()
-	cut, ok := c.cut(messages, view.Turns(), budget)
+	r, ok := cut.Select(messages, view.Turns(), budget, c.keepRecent)
 	if !ok {
 		return false
 	}
 	after := budget
-	after.EstimatedInput = budget.EstimatedInput - turnTokens(messages[cut.Start:cut.End], budget) +
-		c.maxTokens + c.replacementCarriageTokens(cut, messages[cut.Start:cut.End], budget)
+	after.EstimatedInput = budget.EstimatedInput - cut.TurnTokens(messages[r.Start:r.End], budget) +
+		c.maxTokens + c.replacementCarriageTokens(r, messages[r.Start:r.End], budget)
 	return !after.RoomShort(after.OutputLimit)
 }
 
@@ -171,12 +165,12 @@ func (c *Compactor) restoresRoom(view poo.View, budget poo.ContextBudget) bool {
 // The estimate is the one the replacement itself gets, through the same
 // builder, so a file list the summary would add is not missing from the
 // room the compaction promises to give back.
-func (c *Compactor) replacementCarriageTokens(cut cutRange, covered []poo.Message, budget poo.ContextBudget) int {
-	text := marker(cut.Cut)
-	if files := fileList(c.files, covered); files != "" {
+func (c *Compactor) replacementCarriageTokens(r cut.Range, covered []poo.Message, budget poo.ContextBudget) int {
+	text := cut.Marker(r, markerVerb)
+	if files := cut.FileList(c.files, covered); files != "" {
 		text += "\n\n" + files
 	}
-	return turnTokens([]poo.Message{poo.NewTextMessage(poo.RoleUser, text)}, budget)
+	return cut.TurnTokens([]poo.Message{poo.NewTextMessage(poo.RoleUser, text)}, budget)
 }
 
 // Compact summarizes the turns the view can spare and replaces them with
@@ -186,12 +180,12 @@ func (c *Compactor) Compact(ctx context.Context, in poo.CompactionEnv) (poo.Comp
 		return poo.Compaction{}, errors.New("summary: there is no request to make")
 	}
 	messages := in.View.Messages()
-	cut, ok := c.cut(messages, in.View.Turns(), in.Budget)
+	r, ok := cut.Select(messages, in.View.Turns(), in.Budget, c.keepRecent)
 	if !ok {
 		return poo.Compaction{}, errors.New("summary: the newest history fills the tail, so there is nothing older to summarize")
 	}
-	covered := messages[cut.Start:cut.End]
-	request := summarizationRequest(covered, previousSummary(messages[:cut.Start]))
+	covered := messages[r.Start:r.End]
+	request := summarizationRequest(covered, cut.PreviousSummary(messages[:r.Start]))
 	reply, err := in.Ask(ctx, request, c.maxTokens)
 	if err != nil {
 		return poo.Compaction{}, err
@@ -210,141 +204,15 @@ func (c *Compactor) Compact(ctx context.Context, in poo.CompactionEnv) (poo.Comp
 	if text == "" {
 		return poo.Compaction{}, errors.New("summary: the model wrote no summary")
 	}
-	replacement := marker(cut.Cut) + "\n\n" + text
-	if files := fileList(c.files, covered); files != "" {
+	replacement := cut.Marker(r, markerVerb) + "\n\n" + text
+	if files := cut.FileList(c.files, covered); files != "" {
 		replacement += "\n\n" + files
 	}
 	return poo.Compaction{
 		Strategy: Strategy,
 		Replace: &poo.RangeReplacement{
-			Cut:      cut.Cut,
+			Cut:      r.Cut,
 			Messages: []poo.Message{poo.NewTextMessage(poo.RoleUser, replacement)},
 		},
 	}, nil
-}
-
-// cutRange is the range of turns a compaction replaces.
-type cutRange struct {
-	// Cut is the range of turns, by session turn number.
-	Cut poo.TurnRange
-	// Start and End are the indexes of the messages it covers in the
-	// view: Start is the first, End the index after the last.
-	Start int
-	End   int
-}
-
-// cut returns the turns the strategy summarizes.
-//
-// The tail is the newest turns of the view, as many as the budget keeps.
-// The cut covers everything before it. It starts at the earliest turn
-// still in the view and stops before any turn a compaction removed. The
-// range the core is asked to replace is therefore one contiguous run.
-func (c *Compactor) cut(messages []poo.Message, turns []poo.TurnSummary, budget poo.ContextBudget) (cutRange, bool) {
-	live := liveTurns(turns)
-	if len(live) < 2 {
-		// A single turn is all the view holds, so there is nothing older
-		// to summarize. Replacing it would summarize the work the run is
-		// in the middle of.
-		return cutRange{}, false
-	}
-	keep := c.tailTokens(budget)
-	tail := len(live) - 1
-	tokens := 0
-	for i := len(live) - 1; i >= 0; i-- {
-		tokens += turnTokens(messages[live[i].Start:live[i].End], budget)
-		tail = i
-		if tokens >= keep {
-			break
-		}
-	}
-	if tail == 0 {
-		return cutRange{}, false
-	}
-	return cutRange{
-		Cut:   poo.TurnRange{First: live[0].TurnIndex, Last: live[tail-1].TurnIndex},
-		Start: live[0].Start,
-		End:   live[tail-1].End,
-	}, true
-}
-
-// liveTurns returns the run of turns the view still holds.
-//
-// A compaction removes a run of turns and leaves the rest where they
-// were. The turns the strategy may cut are therefore the leading removed
-// turns skipped, and the contiguous run that follows them.
-func liveTurns(turns []poo.TurnSummary) []poo.TurnSummary {
-	live := make([]poo.TurnSummary, 0, len(turns))
-	started := false
-	for _, t := range turns {
-		if t.Removed {
-			if started {
-				break
-			}
-			continue
-		}
-		started = true
-		live = append(live, t)
-	}
-	return live
-}
-
-// tailTokens returns how many tokens the verbatim tail may hold.
-func (c *Compactor) tailTokens(budget poo.ContextBudget) int {
-	keep := c.keepRecent
-	if limit := budget.PromptLimit(); limit > 0 {
-		if share := int(float64(limit) * tailShare); share < keep {
-			keep = share
-		}
-	}
-	if keep < 1 {
-		keep = 1
-	}
-	return keep
-}
-
-// turnTokens estimates what a turn's messages cost in the window.
-func turnTokens(messages []poo.Message, budget poo.ContextBudget) int {
-	ratio := budget.CharsPerToken
-	if ratio <= 0 {
-		ratio = poo.CharsPerToken
-	}
-	return int(float64(poo.EstimateHistoryChars(messages)) / ratio)
-}
-
-// marker names the turns a replacement covers.
-//
-// The model reads it as the sign that its history was replaced rather
-// than silently dropped.
-func marker(cut poo.TurnRange) string {
-	return fmt.Sprintf("%s turns %d-%d summarized below]", markerPrefix, cut.First, cut.Last)
-}
-
-// previousSummary returns the summary an earlier compaction left in the
-// view, so the request updates it instead of summarizing that work
-// again from nothing.
-//
-// Any compaction's visible text counts, not only this strategy's: a run
-// whose strategy changed keeps the checkpoint the earlier one wrote.
-// A provider window and the marker the core writes for it are not
-// summaries, and neither is an empty message.
-func previousSummary(messages []poo.Message) string {
-	for i := len(messages) - 1; i >= 0; i-- {
-		m := messages[i]
-		if m.Origin != poo.OriginCompaction {
-			continue
-		}
-		text := strings.TrimSpace(m.Text())
-		if text == "" || text == poo.CompactionMarkerText {
-			continue
-		}
-		// A replacement this strategy wrote carries its marker line
-		// first: the summary is what follows it.
-		if strings.HasPrefix(text, markerPrefix) {
-			if _, rest, ok := strings.Cut(text, "\n\n"); ok {
-				return strings.TrimSpace(rest)
-			}
-		}
-		return text
-	}
-	return ""
 }
