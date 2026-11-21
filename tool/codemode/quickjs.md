@@ -24,12 +24,15 @@ return files.map(r => r.is_error ? r.text : r.text.split("\n")[0]);
 - Named calls submitted together form a batch. Calls overlap only if
   every tool in the batch is declared read-only. Otherwise they run in
   input order.
-- `parallel([[name, args], ...])` explicitly requests overlap even for
-  calls that write. Use it only for independent calls. Normal tool
-  permissions still apply. Batches return results in input order,
-  take at most 16 calls, and do not start background jobs.
+- Use `await parallel([[name, args], ...])` to overlap independent
+  calls, including writes. The promise resolves to an array of tool
+  results in input order. An invalid batch rejects the promise; a
+  permission denial appears as a result in the array.
 - If two Poo edits overlap on the same resolved path in one process,
   one returns `is_error` with `structured` containing
   `{"code":"edit_conflict"}`. Re-read the file before retrying. Poo
   does not detect shell command conflicts or roll back a batch.
 - `print(value)` keeps a line. `return value` reports a JSON value.
+
+Batches run in submission order. Use at most 16 calls per batch. Do
+not request background jobs in a batch.
