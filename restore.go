@@ -557,12 +557,13 @@ func pendingJobResults(records []Record) []jobResult {
 				continue
 			}
 			out = append(out, jobResult{
-				id:      r.InputID,
-				job:     string(r.Origin),
-				tool:    FeedToolName,
-				outcome: OutcomeOK,
-				text:    r.Text,
-				origin:  r.Origin,
+				id:          r.InputID,
+				job:         string(r.Origin),
+				tool:        FeedToolName,
+				outcome:     OutcomeOK,
+				text:        r.Text,
+				attachments: r.Attachments,
+				origin:      r.Origin,
 			})
 		}
 	}

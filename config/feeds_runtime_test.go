@@ -141,6 +141,122 @@ func TestFeedFilterDropsOnlyAConfidentNo(t *testing.T) {
 	}
 }
 
+// TestTheFilterDeliversAFeedImageUnasked covers the bypass: a message
+// that carries an image is asked about its text, and the picture rides
+// the answer: the question is asked about text, and the decider never
+// sees the picture. A message whose text is empty — the image alone —
+// is delivered unasked.
+func TestTheFilterAsksAboutAnImagesText(t *testing.T) {
+	const question = "Does this message need attention?"
+	dir := t.TempDir()
+	png := append([]byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}, 1, 2, 3, 4)
+	if err := os.WriteFile(filepath.Join(dir, "shot.png"), png, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "feed.json")
+	manifest := `{
+  "version": 1,
+  "feeds": {
+    "inbox": {
+      "command": ["sh", "-c", "printf '%s\\n' \"$@\"", "feed",
+        "{\"text\":\"the look\",\"image\":{\"path\":\"shot.png\",\"media\":\"image/png\"}}",
+        "{\"image\":{\"path\":\"shot.png\"}}",
+        "{\"text\":\"routine\"}"],
+      "on_idle": "wake",
+      "filter": {"question": "` + question + `", "min_no_probability": 0.9}
+    }
+  }
+}`
+	if err := os.WriteFile(path, []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	settings, err := config.Parse([]byte(theFeedsSettings(path)), config.FormatYAML)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+	// The feed's image answers to the session's own working directory.
+	if err := os.WriteFile(filepath.Join(runtime.Options.WorkingDir, "shot.png"), png, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// The session's model reads images, so the feed's picture is one the
+	// admission takes.
+	runtime.Options.Model.Inputs = []poo.Modality{poo.ModalityText, poo.ModalityImage}
+	transport := pootest.NewTransport(pootest.Turn{Text: "ack"}, pootest.Turn{Text: "ack"}, pootest.Turn{Text: "ack"})
+	sink := pootest.NewSink()
+	runtime.Options.Transport = transport
+	runtime.Options.Sink = sink
+	model := decide.DeciderFunc(func(ctx context.Context, state any, _ string, qs []decide.Question) ([]decide.Answer, error) {
+		fields, ok := state.(map[string]string)
+		if !ok || qs[0].Instructions != question {
+			t.Errorf("unexpected filter request: %#v", state)
+			return nil, decide.ErrDeferred
+		}
+		// The caption is asked about; the empty text of the image alone
+		// never reaches the decider.
+		switch fields["text"] {
+		case "the look", "routine":
+		default:
+			t.Errorf("the decider was asked about %q, want a caption or the routine text", fields["text"])
+		}
+		// The caption is worth the wake; the routine text is not.
+		no := 0.01
+		if fields["text"] == "routine" {
+			no = 0.99
+		}
+		answer := decide.Answer{ID: qs[0].ID, Probabilities: map[string]float64{"no": no, "yes": 1 - no}}
+		return []decide.Answer{answer}, nil
+	})
+	sess, err := poo.New(runtime.Options, poo.WithDecider(poo.ModelInfo{}, model))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sess.Close() })
+	// The caption's delivery, the image alone's delivery and both
+	// decisions each land on their own goroutine, so the wait holds
+	// until every one of them is in the records before any snapshot is
+	// taken.
+	waitUntil(t, "the image messages to reach the chat model and both decisions to land", func() bool {
+		return theModelRead(transport, `<feed name="inbox">the look</feed>`, poo.FeedOrigin("inbox")) &&
+			theModelRead(transport, `<feed name="inbox"></feed>`, poo.FeedOrigin("inbox")) &&
+			decisionCount(sink) == 2
+	})
+	var queued []string
+	for _, rec := range sink.Records() {
+		switch rec := rec.(type) {
+		case *poo.InputQueuedRecord:
+			if rec.Mode == poo.InputModeFeed {
+				queued = append(queued, rec.Text)
+			}
+			if len(rec.Attachments) != 1 || rec.Attachments[0].MediaType != "image/png" {
+				t.Errorf("the input %q holds %+v, want the png beside its text", rec.Text, rec.Attachments)
+			}
+		}
+	}
+	// The routine text's confident no dropped it, so the two queued
+	// inputs are the caption's and the image alone's.
+	if len(queued) != 2 {
+		t.Fatalf("queued %d inputs (%v); want the caption and the image alone", len(queued), queued)
+	}
+	if queued[0] != `<feed name="inbox">the look</feed>` {
+		t.Errorf("the first queued input is %q, want the caption's", queued[0])
+	}
+	if queued[1] != `<feed name="inbox"></feed>` {
+		t.Errorf("the second queued input is %q, want the image alone's", queued[1])
+	}
+}
+
+// decisionCount returns how many decisions the sink holds.
+func decisionCount(sink *pootest.Sink) int {
+	n := 0
+	for _, rec := range sink.Records() {
+		if _, ok := rec.(*poo.DecisionRecord); ok {
+			n++
+		}
+	}
+	return n
+}
+
 // warnCapture records the warn records a session's log dispatches.
 type warnCapture struct {
 	mu      sync.Mutex
@@ -420,7 +536,7 @@ func TestTheSettingsExecutorRunsTheFeedCommand(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	err = runtime.Options.Feeds[0].Run(ctx, poo.FeedIO{
-		Emit: func(string, string) error {
+		Emit: func(string, string, *poo.FeedImage) error {
 			cancel()
 			return nil
 		},
@@ -512,7 +628,7 @@ func TestAFeedCannotReachAScrubbedVariable(t *testing.T) {
 
 	emitted := 0
 	err = runtime.Options.Feeds[0].Run(context.Background(), poo.FeedIO{
-		Emit: func(string, string) error {
+		Emit: func(string, string, *poo.FeedImage) error {
 			emitted++
 			return nil
 		},
@@ -580,7 +696,7 @@ func TestAFeedReachesADeclaredCredential(t *testing.T) {
 	// The fixture prints once and exits, so the runner's own supervision of a
 	// finished command is not what this test is about.
 	err = runtime.Options.Feeds[0].Run(ctx, poo.FeedIO{
-		Emit: func(_, text string) error {
+		Emit: func(_, text string, _ *poo.FeedImage) error {
 			emitted = append(emitted, text)
 			return nil
 		},

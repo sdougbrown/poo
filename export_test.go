@@ -74,7 +74,17 @@ func SessionChatModel(s *Session) ModelInfo { return s.opts.Model }
 // reaches the acceptance through this. The input belongs to no attempt,
 // so no attempt bounds it.
 func QueueFeedInput(s *Session, feed, from, text string) error {
-	return s.queueFeedInput(feed, from, text, "", nil)
+	return s.queueFeedInput(feed, from, text, nil, "", nil)
+}
+
+// QueueFeedImageInput queues one feed's input that carries an image,
+// admitting the image the way a feed's emit does.
+func QueueFeedImageInput(s *Session, feed, from, text string, image *FeedImage) error {
+	attachments, err := s.feedImageAttachments(feed, image)
+	if err != nil {
+		return err
+	}
+	return s.queueFeedInput(feed, from, text, attachments, "", nil)
 }
 
 // SetFeedRestartDelay replaces how long the session's feeds wait before

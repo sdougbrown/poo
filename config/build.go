@@ -1464,7 +1464,18 @@ func (r *Runtime) resolveFeedRuns(opts BuildOptions) error {
 				if spec.Filter != nil {
 					emit = filterEmit(ctx, io, spec.Name, *spec.Filter)
 				}
-				return run(ctx, io.Dir, emit, io.Log)
+				// The feed package's image is the envelope's own shape;
+				// the session's is the seam's. The two differ in the
+				// JSON tags alone: a field added to one is added to the
+				// other, and copied here. A nil image is a text-only
+				// message — the conversion would name an image with no
+				// path — so it passes through as nil.
+				return run(ctx, io.Dir, func(from, text string, image *feed.Image) error {
+					if image == nil {
+						return emit(from, text, nil)
+					}
+					return emit(from, text, &poo.FeedImage{Path: image.Path, MediaType: image.MediaType})
+				}, io.Log)
 			},
 		})
 	}

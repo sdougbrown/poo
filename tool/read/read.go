@@ -6,7 +6,6 @@ package read
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -41,10 +40,8 @@ const (
 	// BinarySniffBytes is how much of a file is read to decide whether it
 	// is binary.
 	BinarySniffBytes = 8 << 10
-	// MaxImageBytes is the largest image the tool returns. Providers cap an
-	// image request themselves, the smallest of them at 5 MB, so a larger
-	// file is refused here rather than sent to fail there.
-	MaxImageBytes = 5 << 20
+	// MaxImageBytes is the largest image the tool returns.
+	MaxImageBytes = poo.MaxImageBytes
 	// MaxAudioBytes is the largest recording the tool returns. The audio part's
 	// own limit is 25 MB, so a larger file is refused here rather than sent to
 	// fail there.
@@ -223,7 +220,7 @@ func (t *Tool) accepts(modality poo.Modality, env poo.ToolEnv) bool {
 // attachmentType reports the modality and media type a file's head names, and
 // whether it names one the tool returns.
 func attachmentType(head []byte) (poo.Modality, string, bool) {
-	if media, ok := imageMediaType(head); ok && poo.IsMediaType(poo.ModalityImage, media) {
+	if media, ok := poo.ImageMediaType(head); ok && poo.IsMediaType(poo.ModalityImage, media) {
 		return poo.ModalityImage, media, true
 	}
 	if media, ok := audioMediaType(head); ok && poo.IsMediaType(poo.ModalityAudio, media) {
@@ -267,23 +264,6 @@ func mp3Head(head []byte) bool {
 	version := (head[1] >> 3) & 0x03
 	layer := (head[1] >> 1) & 0x03
 	return version != 0x01 && layer != 0x00
-}
-
-// imageMediaType reports the media type of the image the head of a file
-// starts with, and whether it is one. The four types are the ones providers
-// accept.
-func imageMediaType(head []byte) (string, bool) {
-	switch {
-	case bytes.HasPrefix(head, []byte("\x89PNG\r\n\x1a\n")):
-		return "image/png", true
-	case bytes.HasPrefix(head, []byte("\xff\xd8\xff")):
-		return "image/jpeg", true
-	case bytes.HasPrefix(head, []byte("GIF87a")), bytes.HasPrefix(head, []byte("GIF89a")):
-		return "image/gif", true
-	case len(head) > 12 && bytes.HasPrefix(head, []byte("RIFF")) && bytes.Equal(head[8:12], []byte("WEBP")):
-		return "image/webp", true
-	}
-	return "", false
 }
 
 // reachable reports whether the resolved path is one the read tool may

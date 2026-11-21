@@ -379,6 +379,7 @@ fate is in the records.
 | `input_id` | string | The input's identifier: a ULID. |
 | `mode` | string | How the input is delivered: `"steer"`, `"interrupt"`, `"follow_up"` or `"feed"`. |
 | `text` | string | The message text. |
+| `attachments` | array of objects | The files the input carries, each holding `modality`, `media_type` and `data` (base64), so a held input survives a restart with what it carried. Absent when the input carries none. A feed's input carries its image this way. |
 | `delivery_note` | object | How much of the previous reply the user had seen. Absent when the input carries none. Its `text` is empty when the reply was still streaming at acceptance; the delivered message carries the note rendered at delivery. |
 | `queued_at` | string | RFC 3339, UTC. |
 

@@ -110,6 +110,9 @@ type InputQueuedRecord struct {
 	// DeliveryNote says how much of the previous reply the user had
 	// seen, when the input carries one.
 	DeliveryNote *DeliveryNote `json:"delivery_note,omitempty"`
+	// Attachments are the files the input carries beside its text, so
+	// a held input is still one after a restart.
+	Attachments []Attachment `json:"attachments,omitempty"`
 	// QueuedAt is the RFC 3339 time the input was accepted, in UTC.
 	QueuedAt string `json:"queued_at"`
 }

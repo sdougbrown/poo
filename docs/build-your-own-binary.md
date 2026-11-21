@@ -296,8 +296,29 @@ that does not resolve fails the attempt, and the command does not start.
 {"text": "the message", "from": "alice"}
 ```
 
-`text` is required and is not empty. `from` names the sender and may be
-left out. The optional `id` field is reserved; poo ignores it today. A field
+`text` is required unless the message names an image. `from` names the sender and may be
+left out. A message may name an image beside its text:
+
+```
+{"text": "the look", "image": {"path": "shot.png", "media": "image/png"}}
+```
+
+A message that names an image may leave its text empty — the image is
+the message. The image's `path` is required, and a relative path answers
+to the directory the feed's command runs in. `media`, when the feed
+names it, is the media type the file's own head must confirm: the
+session reads the bytes at the acceptance, caps them at the 5 MB a model
+takes, and refuses an image that does not read, is not one the head
+names, contradicts the declared type, or is past the cap — and refuses
+it too when the session's model reads no images, rather than spending
+the wake on a picture the request would drop. The attempt fails, the
+way it does for a malformed line. A message that names no `media` is
+delivered with the type the head names. The image arrives beside the
+text as the model's own picture, and the acceptance record carries its
+bytes, so a held input is still one after a restart. A message that
+carries an image is asked about its text, and the picture rides the
+answer; a message whose text is empty — the image alone — is delivered
+unasked, for the decider never sees a picture. The optional `id` field is reserved; poo ignores it today. A field
 the object does not name is ignored, and a blank line is
 skipped. A line is at most 1 MiB. The first line that is not such an
 object, a longer line, or an input the session refuses is the attempt's
@@ -316,8 +337,10 @@ queues it until a run is going, and a feed without `on_idle` inherits
 `jobs.on_idle`. A run that is woken or prompted takes every queued input,
 held ones included.
 
-**Filter before delivery.** An optional `filter` applies to every message
-from a feed, including messages emitted while a run is active. For example:
+**Filter before delivery.** An optional `filter` applies to the text
+of every message, including messages emitted while a run is active. A
+message whose text is empty — an image alone — is delivered without the
+question. For example:
 
 ```json
 "filter": {

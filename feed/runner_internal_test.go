@@ -107,7 +107,7 @@ func TestTheLineLimitIsOnCompleteLines(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			var texts []string
 			reader := &lineReader{
-				emit: func(_, text string) error {
+				emit: func(_, text string, _ *Image) error {
 					texts = append(texts, text)
 					return nil
 				},

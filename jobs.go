@@ -898,9 +898,10 @@ const FeedToolName = "feed"
 // queueFeedInput queues one feed's input for the model.
 //
 // The model-facing text is rendered here, once, and the acceptance
-// record carries it: the delivery uses the stored text, live and after a
-// restore. A feed's message never stands in for the user's turn, so the
-// model reads it as untrusted text.
+// record carries it with the input's attachments: the delivery uses
+// the stored text and the stored files, live and after a restore. A
+// feed's message never stands in for the user's turn, so the model
+// reads it as untrusted text.
 //
 // The input joins the session's job queue, so the idle policy, the wake
 // limit and the close's held record act on it exactly as they do on a
@@ -917,7 +918,7 @@ const FeedToolName = "feed"
 // acceptance's write is registered: an emit that names the attempt it
 // belongs to is admitted before that attempt's end is claimed, or refused
 // after it, and never in between.
-func (s *Session) queueFeedInput(feed, from, text string, onIdle OnIdle, admit func() bool) error {
+func (s *Session) queueFeedInput(feed, from, text string, attachments []Attachment, onIdle OnIdle, admit func() bool) error {
 	origin := FeedOrigin(feed)
 	s.mu.Lock()
 	if s.broken {
@@ -957,7 +958,10 @@ func (s *Session) queueFeedInput(feed, from, text string, onIdle OnIdle, admit f
 		InputID:    inputID,
 		Mode:       InputModeFeed,
 		Text:       rendered,
-		QueuedAt:   nowRFC3339(),
+		// The attachments are the files the input carries beside its
+		// text, so a held input is still one after a restart.
+		Attachments: cloneAttachments(attachments),
+		QueuedAt:    nowRFC3339(),
 	}, gate); err != nil {
 		// The store refused the input's acceptance. The session is broken
 		// at once: the wakes stop, and the run that is still open gets the
@@ -972,13 +976,14 @@ func (s *Session) queueFeedInput(feed, from, text string, onIdle OnIdle, admit f
 		"origin":   string(origin),
 	})
 	s.queueJobResult(jobResult{
-		id:      inputID,
-		job:     string(origin),
-		tool:    FeedToolName,
-		outcome: OutcomeOK,
-		text:    rendered,
-		origin:  origin,
-		onIdle:  onIdle,
+		id:          inputID,
+		job:         string(origin),
+		tool:        FeedToolName,
+		outcome:     OutcomeOK,
+		text:        rendered,
+		attachments: cloneAttachments(attachments),
+		origin:      origin,
+		onIdle:      onIdle,
 	})
 	return nil
 }
