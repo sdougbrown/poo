@@ -242,7 +242,8 @@ type DoomLoop struct {
 // Rule is one permission rule.
 //
 // A rule matches on the tool's name or on the tool's class, and a bash
-// rule may match on the command's prefix.
+// rule may match on the command's prefix or on substrings the command
+// carries.
 type Rule struct {
 	// Tool is the name of the tool the rule matches.
 	Tool string `json:"tool,omitempty"`
@@ -256,6 +257,13 @@ type Rule struct {
 	// holds for its http and https URLs alike. A prefix with a scheme
 	// keeps holding the scheme it names.
 	CommandPrefix string `json:"command_prefix,omitempty"`
+	// CommandContains holds substrings the call's primary argument may
+	// carry: the command of a bash call, for one. One substring matching
+	// is enough, wherever it sits in the command. The substrings are a
+	// tripwire and not a safety boundary: a command spelled around a
+	// substring — extra spaces, split flags — matches nothing. A rule
+	// carries a prefix or substrings, never both.
+	CommandContains []string `json:"command_contains,omitempty"`
 	// Action is what the rule does with a matching call.
 	Action string `json:"action"`
 }

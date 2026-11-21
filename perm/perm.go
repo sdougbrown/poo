@@ -78,7 +78,8 @@ const (
 // Rule is one policy rule.
 //
 // A rule matches on the tool's name or on its class, and a rule that
-// names a tool may match on a prefix of the call's primary argument.
+// names a tool may match on the call's primary argument: by its
+// prefix, or by the substrings the argument carries.
 type Rule struct {
 	// Tool is the name of the tool the rule matches, exactly.
 	Tool string
@@ -97,6 +98,16 @@ type Rule struct {
 	// URLs alike. The host's spellings and its subdomains are judged
 	// the way an explicit-scheme prefix is judged.
 	CommandPrefix string
+	// CommandContains holds substrings the call's primary argument may
+	// carry: the command of a bash call, for one. One substring matching
+	// is enough, wherever it sits in the value.
+	//
+	// The comparison is text, so the matcher is a tripwire and not a
+	// safety boundary: a command spelled around the substring — extra
+	// spaces, split flags — matches nothing. It exists to name the
+	// risky parts of a command, so a policy can allow what no rule
+	// covers and ask about the calls that carry one.
+	CommandContains []string
 	// Action is what the rule says to do with a matching call.
 	Action Action
 }
@@ -226,13 +237,16 @@ func New(opts Options) (*Policy, error) {
 		if err := checkRule(i, rule); err != nil {
 			return nil, err
 		}
-		if rule.CommandPrefix == "" || opts.PrimaryArgs == nil {
+		if (rule.CommandPrefix == "" && len(rule.CommandContains) == 0) || opts.PrimaryArgs == nil {
 			continue
 		}
 		if opts.PrimaryArgs[rule.Tool] == "" {
-			return nil, fmt.Errorf("perm: rule %d matches %q by prefix, and the tool has no primary argument a prefix could match", i, rule.Tool)
+			if rule.CommandPrefix != "" {
+				return nil, fmt.Errorf("perm: rule %d matches %q by prefix, and the tool has no primary argument a prefix could match", i, rule.Tool)
+			}
+			return nil, fmt.Errorf("perm: rule %d matches %q by substrings, and the tool has no primary argument a substring could match", i, rule.Tool)
 		}
-		if refusedPrefix(rule.CommandPrefix) {
+		if rule.CommandPrefix != "" && refusedPrefix(rule.CommandPrefix) {
 			warnings = append(warnings, fmt.Sprintf("the rule %d's prefix for %q spells a URL the prefix grammar refuses; it matches only values that compare as text", i, rule.Tool))
 		}
 	}
@@ -276,6 +290,17 @@ func checkRule(index int, rule Rule) error {
 	}
 	if rule.CommandPrefix != "" && rule.Tool == "" {
 		return fmt.Errorf("perm: %s has a command prefix, which needs a named tool: the prefix matches the call's primary argument", where)
+	}
+	if len(rule.CommandContains) > 0 && rule.Tool == "" {
+		return fmt.Errorf("perm: %s has command substrings, which need a named tool: the substrings match the call's primary argument", where)
+	}
+	if rule.CommandPrefix != "" && len(rule.CommandContains) > 0 {
+		return fmt.Errorf("perm: %s has a command prefix and command substrings: a rule carries one command matcher", where)
+	}
+	for _, substring := range rule.CommandContains {
+		if substring == "" {
+			return fmt.Errorf("perm: %s has an empty command substring: a substring that matches everywhere matches everything", where)
+		}
 	}
 	return checkAction(where+"'s action", rule.Action, ActionAllow, ActionAsk, ActionDeny)
 }
@@ -454,15 +479,19 @@ func doomLoopCount(counts *poo.RepeatCounts) int {
 
 // match returns the first rule that matches the call.
 //
-// The rules are tried in order, and the first match wins. A rule with a
-// command prefix matches only a call whose command starts with the
-// prefix.
+// The rules are tried in order, and the first match wins. A rule with
+// a command prefix matches only a call whose command starts with the
+// prefix, and a rule with command substrings matches only a call whose
+// command carries one of them.
 func (p *Policy) match(info poo.ToolCallInfo) (Rule, bool) {
 	for _, rule := range p.rules {
 		if !rule.matchesTool(info) {
 			continue
 		}
 		if rule.CommandPrefix != "" && !rule.matchesCommand(info) {
+			continue
+		}
+		if len(rule.CommandContains) > 0 && !rule.matchesContains(info) {
 			continue
 		}
 		return rule, true
@@ -499,21 +528,56 @@ func (r Rule) matchesTool(info poo.ToolCallInfo) bool {
 // its authority — matches nothing canonically. The lexical comparison
 // below decides instead.
 func (r Rule) matchesCommand(info poo.ToolCallInfo) bool {
-	name := info.Spec.PrimaryArg
-	if name == "" {
-		return false
-	}
-	value, ok := stringField(info.Arguments, name)
+	value, ok := commandText(info)
 	if !ok {
 		return false
 	}
-	value = strings.TrimLeftFunc(value, unicode.IsSpace)
 	if canonical, ok := urlnorm.Canonical(value); ok {
 		if prefix, ok := urlnorm.CanonicalPrefix(canonical, r.CommandPrefix); ok {
 			return urlnorm.WithinHost(canonical, prefix)
 		}
 	}
 	return strings.HasPrefix(value, r.CommandPrefix)
+}
+
+// matchesContains reports whether the call's primary argument carries
+// one of the rule's substrings.
+//
+// The comparison is a plain substring search on the value's text: one
+// substring matching, wherever it sits in the value, is enough. The
+// leading whitespace is trimmed, the way the prefix comparison trims
+// it, and the substrings compare as they are written. A tool with no
+// primary argument has nothing a substring could match, so its rule
+// matches nothing. The matcher is a tripwire and not a safety
+// boundary: a value spelled around the substring matches nothing.
+func (r Rule) matchesContains(info poo.ToolCallInfo) bool {
+	value, ok := commandText(info)
+	if !ok {
+		return false
+	}
+	for _, substring := range r.CommandContains {
+		if strings.Contains(value, substring) {
+			return true
+		}
+	}
+	return false
+}
+
+// commandText returns the call's primary argument as trimmed text.
+//
+// The command matchers read the argument the same way: the tool's
+// primary argument, as a top-level string, with the leading whitespace
+// trimmed. A tool with no primary argument has nothing to match.
+func commandText(info poo.ToolCallInfo) (string, bool) {
+	name := info.Spec.PrimaryArg
+	if name == "" {
+		return "", false
+	}
+	value, ok := stringField(info.Arguments, name)
+	if !ok {
+		return "", false
+	}
+	return strings.TrimLeftFunc(value, unicode.IsSpace), true
 }
 
 // stringField returns the raw value of a top-level string argument.

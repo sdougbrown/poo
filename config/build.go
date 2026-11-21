@@ -1546,10 +1546,11 @@ func (r *Runtime) resolvePolicy(opts BuildOptions, workingDir string) error {
 		// never fire. The policy validates that beside its matcher, from
 		// the primary arguments resolved below.
 		rules = append(rules, perm.Rule{
-			Tool:          rule.Tool,
-			Class:         poo.ToolKind(rule.Class),
-			CommandPrefix: rule.CommandPrefix,
-			Action:        perm.Action(rule.Action),
+			Tool:            rule.Tool,
+			Class:           poo.ToolKind(rule.Class),
+			CommandPrefix:   rule.CommandPrefix,
+			CommandContains: rule.CommandContains,
+			Action:          perm.Action(rule.Action),
 		})
 	}
 	unmatched := perm.Action(r.Profile.Unmatched)
@@ -1581,11 +1582,11 @@ func (r *Runtime) resolvePolicy(opts BuildOptions, workingDir string) error {
 		chainTimeout = time.Duration(*settings.Permission.ChainTimeoutS) * time.Second
 	}
 
-	// The primary arguments the prefix rules need are resolved once, so
-	// the policy validates a rule beside the matcher that reads it.
+	// The primary arguments the command rules need are resolved once,
+	// so the policy validates a rule beside the matcher that reads it.
 	primaryArgs := map[string]string{}
 	for _, rule := range settings.Permission.Rules {
-		if rule.CommandPrefix != "" && rule.Tool != "" {
+		if (rule.CommandPrefix != "" || len(rule.CommandContains) > 0) && rule.Tool != "" {
 			primaryArgs[rule.Tool] = primaryArgOf(opts, r.Options.Tools, rule.Tool)
 		}
 	}
