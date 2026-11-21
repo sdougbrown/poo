@@ -148,7 +148,7 @@ func TestARestoredFeedImageIsStillOne(t *testing.T) {
 		created.Roles.Chat.Inputs = []poo.Modality{poo.ModalityText, poo.ModalityImage}
 	}
 	queued := &poo.InputQueuedRecord{
-		RecordMeta:  poo.NewRecordMetaFrom("input.queued", poo.FeedOrigin("inbox")),
+		RecordMeta: poo.NewRecordMetaFrom("input.queued", poo.FeedOrigin("inbox")),
 		SessionID:  "s1",
 		InputID:    "i1",
 		Mode:       poo.InputModeFeed,
