@@ -1,6 +1,7 @@
 package prompt_test
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -36,7 +37,7 @@ func TestTheSectionsRenderInTheDefaultOrder(t *testing.T) {
 	b.Set("first", "the first")
 	b.Set("second", "the second")
 
-	want := "the base\n\nthe catalog\n\nthe skills\n\nthe environment\n\nthe user\n\nthe project\n\nthe first\n\nthe second\n"
+	want := "the base\n\n<catalog>\nthe catalog\n</catalog>\n\n<skills>\nthe skills\n</skills>\n\n<environment>\nthe environment\n</environment>\n\n<user>\nthe user\n</user>\n\n<project>\nthe project\n</project>\n\n<first>\nthe first\n</first>\n\n<second>\nthe second\n</second>\n"
 	if got := b.Render(); got != want {
 		t.Errorf("the prompt is %q, want %q", got, want)
 	}
@@ -51,7 +52,7 @@ func TestTheToolSectionsRenderWhereTheToolsSit(t *testing.T) {
 	b.Set(prompt.ToolSection("bash"), "the bash tool")
 	b.Set("catalog", "the catalog")
 
-	want := "the base\n\nthe bash tool\n\nthe read tool\n\nthe catalog\n"
+	want := "the base\n\n<tools>\nthe bash tool\n\nthe read tool\n</tools>\n\n<catalog>\nthe catalog\n</catalog>\n"
 	if got := b.Render(); got != want {
 		t.Errorf("the prompt is %q, want %q", got, want)
 	}
@@ -104,7 +105,7 @@ func TestAppendAddsToASection(t *testing.T) {
 	b.Append("base", " and more")
 	b.Append("new", "the new section")
 
-	want := "the base and more\n\nthe new section\n"
+	want := "the base and more\n\n<new>\nthe new section\n</new>\n"
 	if got := b.Render(); got != want {
 		t.Errorf("the prompt is %q, want %q", got, want)
 	}
@@ -144,7 +145,7 @@ func TestInsertPutsASectionAfterAnother(t *testing.T) {
 	b.Set("catalog", "the catalog")
 	b.Insert("base", "extra", "the extra section")
 
-	want := "the base\n\nthe extra section\n\nthe catalog\n"
+	want := "the base\n\n<extra>\nthe extra section\n</extra>\n\n<catalog>\nthe catalog\n</catalog>\n"
 	if got := b.Render(); got != want {
 		t.Errorf("the prompt is %q, want %q", got, want)
 	}
@@ -157,7 +158,7 @@ func TestInsertWithAnUnknownAnchorPutsTheSectionFirst(t *testing.T) {
 	b.Set("base", "the base")
 	b.Insert("nothing", "extra", "the extra section")
 
-	want := "the extra section\n\nthe base\n"
+	want := "the extra section\n\n<base>\nthe base\n</base>\n"
 	if got := b.Render(); got != want {
 		t.Errorf("the prompt is %q, want %q", got, want)
 	}
@@ -171,7 +172,7 @@ func TestInsertMovesASectionThatIsAlreadyThere(t *testing.T) {
 	b.Set("catalog", "the catalog")
 	b.Insert("base", "catalog", "the catalog")
 
-	want := "the base\n\nthe catalog\n"
+	want := "the base\n\n<catalog>\nthe catalog\n</catalog>\n"
 	if got := b.Render(); got != want {
 		t.Errorf("the prompt is %q, want %q", got, want)
 	}
@@ -185,7 +186,83 @@ func TestInsertAfterAToolSectionFollowsTheTools(t *testing.T) {
 	b.Set(prompt.ToolSection("bash"), "the bash tool")
 	b.Insert(prompt.ToolSection("bash"), "extra", "the extra section")
 
-	want := "the base\n\nthe bash tool\n\nthe extra section\n"
+	want := "the base\n\n<tools>\nthe bash tool\n</tools>\n\n<extra>\nthe extra section\n</extra>\n"
+	if got := b.Render(); got != want {
+		t.Errorf("the prompt is %q, want %q", got, want)
+	}
+}
+
+// TestThePersonaIsEditableLikeAnySection covers the rule that the
+// persona is a section the consumer owns: a Set replaces the default
+// line, and a Remove takes it away.
+func TestThePersonaIsEditableLikeAnySection(t *testing.T) {
+	b := prompt.New(testEnv())
+	b.SetTemplateDefault("persona", prompt.Persona())
+	b.SetTemplateDefault("base", prompt.Base())
+
+	b.Set("persona", "the custom persona")
+	want := "the custom persona\n\n<base>\nKeep going until the task is done."
+	if !strings.HasPrefix(b.Render(), want) {
+		t.Errorf("the persona did not take the custom text: %q", b.Render())
+	}
+
+	b.Remove("persona")
+	if !strings.HasPrefix(b.Render(), "Keep going until the task is done.") {
+		t.Errorf("the persona did not go away with the remove: %q", b.Render())
+	}
+}
+
+// TestTheToolsSlotRendersInsideTheToolsBlock covers the rule that a
+// consumer's text in the "tools" slot joins the block, ahead of the
+// tool sections' own texts.
+func TestTheToolsSlotRendersInsideTheToolsBlock(t *testing.T) {
+	b := prompt.New(testEnv("bash"))
+	b.Set("base", "the base")
+	b.Set("tools", "the tools slot")
+	b.Set(prompt.ToolSection("bash"), "the bash tool")
+
+	want := "the base\n\n<tools>\nthe tools slot\n\nthe bash tool\n</tools>\n"
+	if got := b.Render(); got != want {
+		t.Errorf("the prompt is %q, want %q", got, want)
+	}
+	if !slices.Contains(b.Names(), "tools") {
+		t.Errorf("the names are %v, want 'tools' among them", b.Names())
+	}
+}
+
+// TestAToolsOnlyPromptRendersBare covers the rule that the first block
+// renders bare even when the first block is the tools block.
+func TestAToolsOnlyPromptRendersBare(t *testing.T) {
+	b := prompt.New(testEnv("bash"))
+	b.Set(prompt.ToolSection("bash"), "the bash tool")
+
+	if got := b.Render(); got != "the bash tool\n" {
+		t.Errorf("the prompt is %q, want the bare tool text", got)
+	}
+}
+
+// TestRemovingTheToolsSlotTakesTheToolSectionsAway covers the rule that
+// removing the "tools" slot removes the per-tool sections' render.
+func TestRemovingTheToolsSlotTakesTheToolSectionsAway(t *testing.T) {
+	b := prompt.New(testEnv("bash"))
+	b.Set("base", "the base")
+	b.Set(prompt.ToolSection("bash"), "the bash tool")
+
+	b.Remove("tools")
+	if got := b.Render(); got != "the base\n" {
+		t.Errorf("the prompt is %q, want the base alone", got)
+	}
+}
+
+// TestAnEmptyToolSectionLeavesNoGap covers the rule that a tool whose
+// section renders no text adds no blank line to the tools block.
+func TestAnEmptyToolSectionLeavesNoGap(t *testing.T) {
+	b := prompt.New(testEnv("bash", "read"))
+	b.Set("base", "the base")
+	b.Set(prompt.ToolSection("bash"), "the bash tool")
+	b.Set(prompt.ToolSection("read"), "")
+
+	want := "the base\n\n<tools>\nthe bash tool\n</tools>\n"
 	if got := b.Render(); got != want {
 		t.Errorf("the prompt is %q, want %q", got, want)
 	}
@@ -270,7 +347,7 @@ func TestACopyIsIndependent(t *testing.T) {
 	c.Set("base", "the other base")
 	c.Remove(prompt.ToolSection("bash"))
 
-	if got := b.Render(); got != "the base\n\nthe bash tool\n" {
+	if got := b.Render(); got != "the base\n\n<tools>\nthe bash tool\n</tools>\n" {
 		t.Errorf("the builder renders %q, want the base and the bash tool", got)
 	}
 	if got := c.Render(); got != "the other base\n" {
@@ -300,7 +377,7 @@ func TestTheBuilderIsASectionsSurface(t *testing.T) {
 	sections.Insert("base", "inserted", "the inserted section")
 	sections.Remove("extra")
 
-	want := "the base and more\n\nthe inserted section\n"
+	want := "the base and more\n\n<inserted>\nthe inserted section\n</inserted>\n"
 	if got := sections.(*prompt.Builder).Render(); got != want {
 		t.Errorf("the prompt is %q, want %q", got, want)
 	}

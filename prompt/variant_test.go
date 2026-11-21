@@ -40,7 +40,7 @@ func TestASectionWithoutTheVariantRendersItsDefault(t *testing.T) {
 	b.Set("base", "the default base")
 	b.Set("catalog", "the catalog")
 
-	want := "the default base\n\nthe catalog\n"
+	want := "the default base\n\n<catalog>\nthe catalog\n</catalog>\n"
 	if got := b.Render(); got != want {
 		t.Errorf("the prompt is %q, want %q", got, want)
 	}
@@ -117,7 +117,7 @@ func TestInsertOverridesTheAlternatives(t *testing.T) {
 	b.Set("catalog", "the catalog")
 	b.Insert("base", "base", "the other base")
 
-	if got := b.Render(); got != "the other base\n\nthe catalog\n" {
+	if got := b.Render(); got != "the other base\n\n<catalog>\nthe catalog\n</catalog>\n" {
 		t.Errorf("the prompt in the variant is %q, want the other base and the catalog", got)
 	}
 }
@@ -227,11 +227,11 @@ func TestInsertVariantSetsAnAlternative(t *testing.T) {
 	b.Set("catalog", "the catalog")
 	b.InsertVariant("catalog", "extra", "small-local", "the extra section")
 
-	want := "the default base\n\nthe catalog\n\nthe extra section\n"
+	want := "the default base\n\n<catalog>\nthe catalog\n</catalog>\n\n<extra>\nthe extra section\n</extra>\n"
 	if got := b.Render(); got != want {
 		t.Errorf("the prompt is %q, want %q", got, want)
 	}
-	if got := b.WithVariant("").Render(); got != "the default base\n\nthe catalog\n" {
+	if got := b.WithVariant("").Render(); got != "the default base\n\n<catalog>\nthe catalog\n</catalog>\n" {
 		t.Errorf("the prompt is %q, want the base and the catalog", got)
 	}
 }
@@ -298,7 +298,7 @@ func TestTheToolSectionRendersItsVariant(t *testing.T) {
 	b.SetVariant(prompt.ToolSection("bash"), "small-local", "the small local bash tool")
 	b.Set(prompt.ToolSection("read"), "the read tool")
 
-	want := "the default base\n\nthe small local bash tool\n\nthe read tool\n"
+	want := "the default base\n\n<tools>\nthe small local bash tool\n\nthe read tool\n</tools>\n"
 	if got := b.Render(); got != want {
 		t.Errorf("the prompt is %q, want %q", got, want)
 	}
@@ -349,7 +349,7 @@ func TestAVariantThatNoSectionOffersChangesNothing(t *testing.T) {
 	b.Set("base", "the default base")
 	b.Set(prompt.ToolSection("bash"), "the bash tool")
 
-	want := "the default base\n\nthe bash tool\n"
+	want := "the default base\n\n<tools>\nthe bash tool\n</tools>\n"
 	if got := b.Render(); got != want {
 		t.Errorf("the prompt is %q, want %q", got, want)
 	}

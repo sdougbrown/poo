@@ -48,3 +48,5 @@ evals/runs/
 
 # GoReleaser output
 /dist/
+
+/poo-eval

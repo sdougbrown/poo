@@ -136,6 +136,36 @@ func TestTheConsumersPromptMutationReachesThePrompt(t *testing.T) {
 
 // TestTheRawSystemPromptIsTheWholePrompt covers the raw prompt: it is
 // the prompt, and the sections are not used.
+// TestThePromptOpensWithThePersona covers the persona section: the
+// prompt starts with the persona's one line, naming the profile, and
+// the line renders bare, before the first tags open.
+func TestThePromptOpensWithThePersona(t *testing.T) {
+	tr := scripted([]fakeResponse{{text: "the answer"}})
+	tool := &echoTool{result: "echoed"}
+
+	opts := testOptions(t, tr, tool, &recordingSink{})
+	opts.SystemPrompt = ""
+	opts.Profile = "code"
+	s := newTestSession(t, opts)
+	runSession(t, s, "do the thing")
+
+	reqs := tr.Requests()
+	if len(reqs) != 1 {
+		t.Fatalf("the transport got %d requests, want 1", len(reqs))
+	}
+	got := systemPromptOf(t, reqs[0])
+	want := "You are a superlative code agent in the poo harness.\n\n<base>\n"
+	if !strings.HasPrefix(got, want) {
+		t.Errorf("the prompt does not open with the persona: %q", got)
+	}
+	if strings.Contains(got, "<persona>") {
+		t.Errorf("the persona renders wrapped: %q", got)
+	}
+}
+
+// TestTheRawSystemPromptIsTheWholePrompt covers the rule that the raw
+// system prompt takes the persona's place, too: a consumer who supplies
+// the base supplies the identity as well.
 func TestTheRawSystemPromptIsTheWholePrompt(t *testing.T) {
 	tr := scripted([]fakeResponse{{text: "the answer"}})
 	tool := &echoTool{result: "echoed"}
