@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -487,10 +488,27 @@ type sink struct {
 	// path is where the records go, for the message the command
 	// prints.
 	path string
+	// mu guards records.
+	mu sync.Mutex
+	// records are the records this process wrote, in order, for the
+	// history tool's read side.
+	records []poo.Record
+}
+
+// recordsSnapshot returns the records this process wrote.
+func (s *sink) recordsSnapshot() []poo.Record {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]poo.Record, len(s.records))
+	copy(out, s.records)
+	return out
 }
 
 // Append writes one record.
 func (s *sink) Append(ctx context.Context, rec poo.Record) error {
+	s.mu.Lock()
+	s.records = append(s.records, rec)
+	s.mu.Unlock()
 	switch {
 	case s.log != nil:
 		return s.log.Append(ctx, rec)
@@ -510,6 +528,27 @@ func (s *sink) Flush(ctx context.Context) error {
 		return s.store.Flush(ctx)
 	default:
 		return nil
+	}
+}
+
+// Records reads the session's records back, oldest first.
+//
+// It is the read side poo.RecordReader asks for: with it, the session's
+// history tool reads what the store retained. The log path reads its
+// file; the store path loads the session by the id the header names.
+func (s *sink) Records(ctx context.Context) ([]poo.Record, error) {
+	switch {
+	case s.log != nil:
+		return s.log.Records(ctx)
+	case s.store != nil:
+		// The store's session is open under this process's authority, so
+		// the records come from memory rather than a load: a read of the
+		// file would contend with the lock the sink holds. The memory
+		// holds what this process wrote, so a session restored from an
+		// earlier one reads only what it wrote itself.
+		return s.recordsSnapshot(), nil
+	default:
+		return s.recordsSnapshot(), nil
 	}
 }
 
