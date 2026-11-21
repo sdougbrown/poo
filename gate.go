@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync/atomic"
 )
 
 // requestGateResult is what the next-request gate decided.
@@ -359,7 +360,9 @@ func (s *Session) forkFunc(run *runState) ForkFunc {
 			return Reply{}, err
 		}
 		defer reader.Close()
-		return s.readSideReply(ctx, run, reader, chars+estimateHistoryChars(appended))
+		// The fork carries no attempt reporter of its own, so a retry of it
+		// is not reported here.
+		return s.readSideReply(ctx, run, reader, chars+estimateHistoryChars(appended), nil)
 	}
 }
 
@@ -375,18 +378,26 @@ func (s *Session) askFunc(run *runState) AskFunc {
 		s.mu.Lock()
 		model := s.opts.Model
 		s.mu.Unlock()
+		// The transport reports every attempt it made, so the ask learns
+		// whether the report it ends with sums more than one of them.
+		var retried atomic.Bool
 		reader, _, err := s.opts.Transport.Stream(ctx, ChatRequest{
 			Model:     model.ModelID,
 			ModelInfo: model,
 			Messages:  CloneMessages(messages),
 			MaxTokens: maxTokens,
 			SessionID: s.ID(),
+			OnAttempt: func(a Attempt) {
+				if a.Retried {
+					retried.Store(true)
+				}
+			},
 		})
 		if err != nil {
 			return Reply{}, err
 		}
 		defer reader.Close()
-		return s.readSideReply(ctx, run, reader, estimateHistoryChars(messages))
+		return s.readSideReply(ctx, run, reader, estimateHistoryChars(messages), &retried)
 	}
 }
 
@@ -399,7 +410,10 @@ func (s *Session) askFunc(run *runState) AskFunc {
 // usage is charged the estimate a turn would get, measured the same way
 // and so in the same unit: a fork re-sends the whole conversation, so
 // counting it as free would hide the cost of compacting.
-func (s *Session) readSideReply(ctx context.Context, run *runState, reader StreamReader, requestChars int) (Reply, error) {
+//
+// retried reports whether the transport retried the request, and nil means the
+// seam it went through cannot report one.
+func (s *Session) readSideReply(ctx context.Context, run *runState, reader StreamReader, requestChars int, retried *atomic.Bool) (Reply, error) {
 	resp, err := readResponse(ctx, reader, nil, run.id, 0, run.requests, nil)
 	if err != nil {
 		return Reply{}, err
@@ -410,7 +424,7 @@ func (s *Session) readSideReply(ctx context.Context, run *runState, reader Strea
 		// request a compaction made.
 		reply.Usage = *resp.usage
 	}
-	s.chargeSideRequest(run, resp.usage, reply.Message, requestChars)
+	s.chargeSideRequest(run, resp.usage, reply.Message, requestChars, retried != nil && retried.Load())
 	return reply, nil
 }
 

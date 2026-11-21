@@ -1901,15 +1901,16 @@ func (s *Session) writeUsage(run *runState, turn int, resp *response) bool {
 // before it commits, so the charge stops at the seal, and the record
 // written after it is one the sink still takes: the seal refuses a record
 // a run's in-flight work claims, not the append itself.
-func (s *Session) writeCompactionUsage(run *runState, turn int, usage *UsageReport, requestChars int) bool {
+//
+// A request the transport retried reports what its attempts spent together,
+// so the record says so and the sum calibrates nothing.
+func (s *Session) writeCompactionUsage(run *runState, turn int, usage *UsageReport, requestChars int, retried bool) bool {
 	s.mu.Lock()
 	if !run.committed && !run.sealed {
 		s.chargeUsageLocked(run, usage)
 	}
 	s.mu.Unlock()
-	// The origin keeps a compaction's report out of both measures either way,
-	// so the retry flag changes nothing here.
-	return s.recordUsage(run, NewRecordMetaFrom("usage", OriginCompaction), turn, 0, usage, requestChars, false)
+	return s.recordUsage(run, NewRecordMetaFrom("usage", OriginCompaction), turn, 0, usage, requestChars, retried)
 }
 
 // accountNativeCompaction charges the request a native compaction made.
@@ -1931,7 +1932,9 @@ func (s *Session) accountNativeCompaction(run *runState, result NativeCompaction
 	// so the estimate is the request's own size. That is what an interrupted
 	// turn is charged when the endpoint reports nothing.
 	produced := Message{Role: RoleAssistant, Content: result.Window.Items}
-	s.chargeSideRequest(run, result.Usage, produced, requestChars)
+	// A native compaction's request has no attempt seam, so its report is
+	// never a retried one.
+	s.chargeSideRequest(run, result.Usage, produced, requestChars, false)
 }
 
 // chargeSideRequest charges a request the run did not make as a turn.
@@ -1943,12 +1946,15 @@ func (s *Session) accountNativeCompaction(run *runState, result NativeCompaction
 // A request that finishes after the run settled does not add to the settled
 // run's token counter. Each path enforces that under the same lock that
 // charges, so a settle between the check and the charge cannot slip through.
-func (s *Session) chargeSideRequest(run *runState, usage *UsageReport, produced Message, requestChars int) {
+//
+// retried reports that the transport retried the request, so the report is the
+// attempts' sum and no measurement of the view.
+func (s *Session) chargeSideRequest(run *runState, usage *UsageReport, produced Message, requestChars int, retried bool) {
 	s.mu.Lock()
 	turn := run.turn
 	s.mu.Unlock()
 	if usage != nil {
-		s.writeCompactionUsage(run, turn, usage, requestChars)
+		s.writeCompactionUsage(run, turn, usage, requestChars, retried)
 		return
 	}
 	s.mu.Lock()

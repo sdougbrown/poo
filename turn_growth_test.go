@@ -15,6 +15,7 @@ import (
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/compact/native"
+	"github.com/sdougbrown/poo/compact/summary"
 	"github.com/sdougbrown/poo/pootest"
 	"github.com/sdougbrown/poo/provider/openai"
 )
@@ -684,6 +685,124 @@ func TestARetriedReportDoesNotFeedTheTokenCalibration(t *testing.T) {
 	}
 	if got, want := retried.estimated[after], reference.estimated[after]; got != want {
 		t.Errorf("the gate after the retried report estimates %d input tokens, want the %d the last report set", got, want)
+	}
+}
+
+// summarizeAtGate asks for a compaction at one gate and lets the strategy it
+// wraps produce it.
+type summarizeAtGate struct {
+	// inner is the strategy the run compacts with.
+	inner poo.Compactor
+	// at is the gate, counting from one, the compaction happens at.
+	at int
+	// gates is how many gates the run has consulted it at.
+	gates int
+}
+
+// ShouldCompact says yes at the gate the test named.
+func (c *summarizeAtGate) ShouldCompact(view poo.View, budget poo.ContextBudget) bool {
+	c.gates++
+	return c.gates == c.at
+}
+
+// Compact asks the strategy it wraps.
+func (c *summarizeAtGate) Compact(ctx context.Context, in poo.CompactionEnv) (poo.Compaction, error) {
+	return c.inner.Compact(ctx, in)
+}
+
+// sideCompactionScript is the answers a summary compaction's side request is
+// served: two turns, the summarization's Ask, and two turns after it.
+//
+// The Ask is retried when retry is set, and its report is then the sum of two
+// attempts' input. Without the retry the Ask reports no usage, so the run is the
+// calibration a retried report must leave alone.
+func sideCompactionScript(retry bool) []wireAnswer {
+	out := []wireAnswer{
+		{call: "echo", input: 4000, output: 5},
+		{call: "echo", input: 4500, output: 5},
+	}
+	if retry {
+		out = append(out,
+			wireAnswer{input: 5000, output: 5, fail: true},
+			wireAnswer{text: "the summary note", input: 5000, output: 5},
+		)
+	} else {
+		out = append(out, wireAnswer{text: "the summary note", noUsage: true})
+	}
+	return append(out,
+		wireAnswer{call: "echo", input: 6000, output: 5},
+		wireAnswer{text: "the answer"},
+	)
+}
+
+// runSideCompactionScript runs one side-request script and returns what the
+// probe recorded.
+func runSideCompactionScript(t *testing.T, answers []wireAnswer) (*calibrationProbe, *recordingSink) {
+	t.Helper()
+	probe := &calibrationProbe{inner: &summarizeAtGate{
+		inner: summary.New(summary.Options{KeepRecentTokens: 1}),
+		at:    3,
+	}}
+	sink := &recordingSink{}
+	opts := testOptions(t, wireTransport(t, answers), &echoTool{result: strings.Repeat("x", 1000)}, sink)
+	opts.Compactor = probe
+	s := newTestSession(t, opts)
+
+	if res := runSession(t, s, "do the thing"); res.Reason != poo.ReasonEndTurn {
+		t.Fatalf("the run settled %q, want end_turn", res.Reason)
+	}
+	return probe, sink
+}
+
+// TestARetriedSideReportDoesNotFeedTheTokenCalibration covers the side request:
+// a compaction's Ask goes through the transport too, and a retried one reports
+// the sum of its attempts' input. That sum is no calibration, so the ratio and
+// the baseline stay where the last unretried report put them, and the record
+// says the report was a retried one.
+func TestARetriedSideReportDoesNotFeedTheTokenCalibration(t *testing.T) {
+	reference, _ := runSideCompactionScript(t, sideCompactionScript(false))
+	retried, sink := runSideCompactionScript(t, sideCompactionScript(true))
+
+	// The compaction happens at the third gate, the first that has two turns
+	// to summarize, so the fourth gate is the first that sees the Ask's report.
+	const after = 3
+	if len(reference.estimated) <= after || len(retried.estimated) <= after {
+		t.Fatalf("the runs were given %d and %d gates, want the gate after the side request at %d",
+			len(reference.estimated), len(retried.estimated), after)
+	}
+	// Both runs see the same reports before the Ask, so it is the only
+	// difference the gates below can carry.
+	for i := 0; i <= after; i++ {
+		if reference.charsPerToken[i] != retried.charsPerToken[i] || reference.estimated[i] != retried.estimated[i] {
+			t.Fatalf("the gates up to the side request differ at %d: %v/%d against %v/%d",
+				i, reference.charsPerToken[i], reference.estimated[i], retried.charsPerToken[i], retried.estimated[i])
+		}
+	}
+	for i := after + 1; i < len(retried.estimated); i++ {
+		if got, want := retried.charsPerToken[i], reference.charsPerToken[i]; got != want {
+			t.Errorf("the gate after the retried side request carries %v characters per token, want the %v the last report set", got, want)
+		}
+		if got, want := retried.estimated[i], reference.estimated[i]; got != want {
+			t.Errorf("the gate after the retried side request estimates %d input tokens, want the %d the last report set", got, want)
+		}
+	}
+
+	// The side request's own record says the report it carries is a retried
+	// one, so a reader of the log knows the sum is not one request's cost.
+	var sides []*poo.UsageRecord
+	for _, rec := range sink.allRecords() {
+		if usage, ok := rec.(*poo.UsageRecord); ok && usage.Origin == poo.OriginCompaction {
+			sides = append(sides, usage)
+		}
+	}
+	if len(sides) != 1 {
+		t.Fatalf("the run wrote %d usage records for the side request, want 1", len(sides))
+	}
+	if !sides[0].Retried {
+		t.Error("the side request's record does not say its report was retried")
+	}
+	if got := sides[0].InputTokens; got != 10000 {
+		t.Errorf("the side request's record carries %d input tokens, want the 10000 the two attempts summed", got)
 	}
 }
 
