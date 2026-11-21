@@ -44,13 +44,13 @@ func systemPromptEnv(opts *Options) prompt.Env {
 		feeds = append(feeds, prompt.Feed{Name: spec.Name, Description: spec.Description})
 	}
 	return prompt.Env{
-		Cwd:     opts.WorkingDir,
-		OS:      runtime.GOOS,
-		Date:    time.Now().UTC().Format("2006-01-02"),
-		Model:   opts.Model.ModelID,
+		Cwd:   opts.WorkingDir,
+		OS:    runtime.GOOS,
+		Date:  time.Now().UTC().Format("2006-01-02"),
+		Model: opts.Model.ModelID,
 		// Profile is the name of the profile the session was built with.
-	Profile: opts.Profile,
-	Tools:   tools,
+		Profile: opts.Profile,
+		Tools:   tools,
 		Feeds:   feeds,
 		Variant: opts.PromptVariant,
 	}
