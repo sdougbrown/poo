@@ -205,6 +205,13 @@ type NestedCaller interface {
 // ParallelNestedCaller can also run a batch whose calls the caller has
 // chosen to overlap, including side-effecting tools. Validation, permissions,
 // recording, cancellation, and result order are the same as for Call.
+//
+// Overlap is safe only where the calls do not share state. A caller that
+// exposes this seam promises the tools it names can run at the same
+// time. The edit tool reports a conflict for one resolved path within
+// this process. Other tools that write — bash, a registered CLI, fetch —
+// give no such guarantee. A batch that overlaps them writes wherever
+// they write, with no signal to the script.
 type ParallelNestedCaller interface {
 	NestedCaller
 	CallParallel(ctx context.Context, calls []NestedCall) ([]NestedResult, error)
