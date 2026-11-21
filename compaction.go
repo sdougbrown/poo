@@ -25,6 +25,11 @@ type CompactionEnv struct {
 	View View
 	// Budget is the run's context budget.
 	Budget ContextBudget
+	// SessionID is the id of the session being compacted, and is empty
+	// when the session has none. A replacement that points the model at
+	// what the store retains names it, so the model can say what to
+	// recover and from where.
+	SessionID string
 	// Fork re-sends the last main request with messages appended. It is
 	// the cheapest way to ask the model something, and the only way to
 	// see what the model itself saw. A strategy that asks about the

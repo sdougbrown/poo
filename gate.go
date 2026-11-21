@@ -177,10 +177,11 @@ func (s *Session) compact(run *runState) (compactionOutcome, error) {
 
 	tokensBefore := s.estimatedInput()
 	env := CompactionEnv{
-		View:   s.view(),
-		Budget: s.budget(),
-		Fork:   s.forkFunc(run),
-		Ask:    s.askFunc(run),
+		View:      s.view(),
+		Budget:    s.budget(),
+		SessionID: s.ID(),
+		Fork:      s.forkFunc(run),
+		Ask:       s.askFunc(run),
 	}
 
 	// The compaction runs under the run's activity context, so an
