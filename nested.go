@@ -13,8 +13,8 @@ import (
 // call of the turn, so it goes through the same path as a call the model
 // makes: the same validation, the permission engine, the before-tool
 // hooks, the doom loop, the after-tool chain, the same claim machinery
-// and the same scheduling — a batch runs in parallel only when every
-// call in it is read-only.
+// and the same default scheduling. CallParallel also allows a nested
+// caller to request overlap for side-effecting tools.
 //
 // The difference is where the result goes. A nested call's record is
 // written, but nothing is appended to the model's history and no message
@@ -111,6 +111,14 @@ type nestedCaller struct {
 // checked before any of the batch is claimed, so a typo in a fan-out has
 // no effect.
 func (n *nestedCaller) Call(ctx context.Context, calls []NestedCall) ([]NestedResult, error) {
+	return n.call(ctx, calls, false)
+}
+
+func (n *nestedCaller) CallParallel(ctx context.Context, calls []NestedCall) ([]NestedResult, error) {
+	return n.call(ctx, calls, true)
+}
+
+func (n *nestedCaller) call(ctx context.Context, calls []NestedCall, parallel bool) ([]NestedResult, error) {
 	s := n.session
 	run := n.run
 
@@ -170,7 +178,7 @@ func (n *nestedCaller) Call(ctx context.Context, calls []NestedCall) ([]NestedRe
 	// No beginTurn and no startActivity: the parent call already runs
 	// inside the turn's activity, and the turn's summary stays the
 	// model's.
-	s.runBatch(run, n.turn, plans)
+	s.runBatch(run, n.turn, plans, parallel)
 
 	results := make([]NestedResult, len(plans))
 	for i, p := range plans {
