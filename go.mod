@@ -12,7 +12,7 @@ require (
 	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/reeflective/readline v1.3.0
 	github.com/sdougbrown/cli-contract v0.10.0
-	github.com/sdougbrown/cli-registry v0.6.1
+	github.com/sdougbrown/cli-registry v0.6.2
 	github.com/yuin/goldmark v1.8.2
 	go.starlark.net v0.0.0-20261021141710-4f4267fb140d
 	golang.org/x/net v0.55.0

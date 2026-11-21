@@ -277,16 +277,7 @@ func readFeed(path, name string, raw json.RawMessage) (Spec, error) {
 	sort.Strings(names)
 	envs := make([]cliregistry.EnvBinding, 0, len(names))
 	for _, entry := range names {
-		value := b.Env[entry]
-		if from, ok := strings.CutPrefix(value, "env:"); ok {
-			envs = append(envs, cliregistry.EnvBinding{Name: entry, From: from, Reference: true})
-			continue
-		}
-		if from, ok := strings.CutPrefix(value, cliregistry.SessionScope+":"); ok {
-			envs = append(envs, cliregistry.EnvBinding{Name: entry, From: from, Reference: true, Scope: cliregistry.SessionScope})
-			continue
-		}
-		envs = append(envs, cliregistry.EnvBinding{Name: entry, Value: value})
+		envs = append(envs, cliregistry.ParseEnvBinding(entry, b.Env[entry]))
 	}
 	for _, binding := range envs {
 		if !binding.Reference || binding.Scope == "" {
