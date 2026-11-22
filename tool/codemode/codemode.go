@@ -81,6 +81,7 @@ func (t *Tool) Spec() poo.ToolSpec {
   "required": ["script"]
 ,"additionalProperties":false}`),
 		Class:      poo.ClassSideEffecting,
+		Background: poo.BackgroundAllowed,
 		PrimaryArg: "script",
 	}
 }

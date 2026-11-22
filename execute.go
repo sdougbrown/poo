@@ -747,7 +747,7 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 // starts. The call's own result is the "started" one, and the batch
 // carries on.
 func (s *Session) startJobCall(run *runState, turn int, handle string, call ToolCall, plan callPlan) {
-	jobID, ok, winding := s.startJob(run, handle, call.Name, plan.prepared, plan.summary, call.Arguments)
+	jobID, ok, winding := s.startJob(run, turn, handle, call.Name, plan.prepared, plan.summary, call.Arguments)
 	if winding {
 		// The run settled while the job was being accepted; nothing
 		// else starts, and the finalization owns the run.

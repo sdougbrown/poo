@@ -230,6 +230,13 @@ type jobState struct {
 	tool string
 	// runID identifies the run that started the job.
 	runID string
+	// turn is the run-relative turn the job's call came from, so the
+	// calls its tool makes of its own carry the job's numbering.
+	turn int
+	// owner holds the calls the job's tool makes, so a script keeps
+	// calling tools after the run that started the job has settled. The
+	// finalization never sees this owner, so it never seals it.
+	owner *runState
 	// summary describes the call, for the jobs tool.
 	summary string
 	// startedAt is when the job started.
@@ -409,7 +416,7 @@ func WithJobs(o JobOptions) Option {
 // so two calls that race for the last slot admit exactly one of them.
 // The job.started record is written before the goroutine starts, so a
 // log shows the job was accepted even when it never ran.
-func (s *Session) startJob(run *runState, handle, tool string, prepared Prepared, summary string, arguments json.RawMessage) (string, bool, bool) {
+func (s *Session) startJob(run *runState, turn int, handle, tool string, prepared Prepared, summary string, arguments json.RawMessage) (string, bool, bool) {
 	// The slot is reserved under the lock, and the job is registered
 	// there too, so a job that is admitted is a job the session knows
 	// about. A run that is winding down admits nothing: no new effect
@@ -430,11 +437,23 @@ func (s *Session) startJob(run *runState, handle, tool string, prepared Prepared
 	s.jobSeq++
 	jobID := fmt.Sprintf("j%d", s.jobSeq)
 	ctx, cancel := context.WithCancelCause(s.jobCtx)
+	// The owner carries the run's id, because its records belong to that
+	// run, and the job's own context, because a settle of the run must
+	// not stop the calls the job's tool makes.
+	owner := &runState{
+		id:         run.id,
+		ctx:        ctx,
+		cancel:     cancel,
+		turn:       turn,
+		globalTurn: run.globalTurn,
+	}
 	job := &jobState{
 		id:        jobID,
 		handle:    handle,
 		tool:      tool,
 		runID:     run.id,
+		turn:      turn,
+		owner:     owner,
 		summary:   summary,
 		startedAt: time.Now(),
 		ctx:       ctx,
@@ -714,6 +733,10 @@ func stoppedText(partial string, err error, reason string) string {
 func (s *Session) jobToolEnv(job *jobState) ToolEnv {
 	env := s.toolEnvFor(job.runID, job.handle)
 	env.JobID = job.id
+	// A tool that orchestrates others gets a seam of its own, owned by
+	// the job: the calls it makes are recorded against the job's handle,
+	// and they keep running after the run that started the job settled.
+	env.Nested = &nestedCaller{session: s, run: job.owner, turn: job.turn, parent: job.handle}
 	return env
 }
 

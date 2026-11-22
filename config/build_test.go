@@ -1980,18 +1980,19 @@ func TestTheSettingsDisableAProfileTool(t *testing.T) {
 }
 
 // TestADisablingABackgroundToolTakesTheJobToolsWithIt covers the tools the
-// core adds for another tool: with bash disabled nothing the session offers
-// may run in the background, so the job tools are not offered either.
+// core adds for another tool: with every tool that may run in the
+// background disabled, the job tools are not offered either. bash and
+// codemode are the two the code profile can run in the background.
 func TestADisablingABackgroundToolTakesTheJobToolsWithIt(t *testing.T) {
 	settings, err := config.Parse([]byte(theModelSettings+`tools:
-  disabled: [bash]
+  disabled: [bash, codemode]
 `), config.FormatYAML)
 	if err != nil {
 		t.Fatalf("decoding the settings: %v", err)
 	}
 	runtime := build(t, settings, config.Overrides{})
 
-	want := []string{"read", "grep", "edit", "fetch", "codemode"}
+	want := []string{"read", "grep", "edit", "fetch"}
 	if !slices.Equal(runtime.Options.ToolOrder, want) {
 		t.Errorf("the tools are %v, want %v", runtime.Options.ToolOrder, want)
 	}
