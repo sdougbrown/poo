@@ -105,10 +105,6 @@ func (*Engine) Run(ctx context.Context, opts codemode.RunOptions) (result codemo
 		output.Print(line, limits.OutputCapChars)
 		return js.NewUndefined(), nil
 	})
-	// The wrapper serves both dispatch styles from this one bridge: a
-	// single call is a batch of one, so a named call and a gather entry
-	// are validated the same way.
-
 	// The script runs through one Eval with the async flag. QuickJS's
 	// own loop pump drives the awaited calls, and the deadline closes
 	// the guest when a script never settles.
