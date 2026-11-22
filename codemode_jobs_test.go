@@ -3,6 +3,7 @@ package poo_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -152,6 +153,9 @@ return [r.tool, r.is_error, r.text.includes("the reader's text")];
 	if nested.Parent == "" || nested.Mode != poo.CallModeNested {
 		t.Errorf("the script's call is parent %q mode %q, want a nested call under the job", nested.Parent, nested.Mode)
 	}
+	if nested.Turn != 1 {
+		t.Errorf("the script's call is recorded under turn %d, want the turn that started the job", nested.Turn)
+	}
 }
 
 // TestADeniedNestedCallInABackgroundScriptIsData covers a refusal inside
@@ -237,4 +241,78 @@ return [r.outcome, r.is_error];
 	if !strings.Contains(ended.Text, `["denied",true]`) {
 		t.Errorf("the job's result is %s, want the refusal as data", ended.Text)
 	}
+}
+
+// TestABackgroundScriptReportsAFatalNestedCall covers what happens when a
+// call inside a background script is fatal: the job's result carries the
+// fatal flag, so the run that receives it settles tool_fatal instead of
+// reading a script that merely mentioned an error.
+func TestABackgroundScriptReportsAFatalNestedCall(t *testing.T) {
+	sink := &recordingSink{}
+	s := codemodeJobSession(t, `
+const r = await tools.echo({text: "one"});
+return r.is_error;
+`, map[string]poo.Tool{"echo": &fatalTool{}}, sink)
+	runSession(t, s, "start")
+
+	waitUntil(t, 10*time.Second, "the job to end", func() bool {
+		for _, rec := range sink.allRecords() {
+			if _, ok := rec.(*poo.JobEndedRecord); ok {
+				return true
+			}
+		}
+		return false
+	})
+	if ended := jobEnded(t, sink); !ended.Fatal {
+		t.Errorf("the job ended without the fatal flag: outcome %q, text %s", ended.Outcome, ended.Text)
+	}
+}
+
+// TestAHookFailureDoesNotStopABackgroundScript covers the other half: a
+// settle candidate from a call the script made belongs to the job, which
+// is never finalized, so it must not disable the script's remaining
+// calls. The failure is still recorded on the call that hit it.
+func TestAHookFailureDoesNotStopABackgroundScript(t *testing.T) {
+	first := &namedTool{echoTool: echoTool{result: "one"}, name: "first"}
+	second := &namedTool{echoTool: echoTool{result: "two"}, name: "second"}
+	sink := &recordingSink{}
+	s := codemodeJobSession(t, `
+const a = await tools.first({text: "one"});
+const b = await tools.second({text: "two"});
+return [a.is_error, b.is_error];
+`, map[string]poo.Tool{"first": first, "second": second}, sink, poo.WithBeforeTool(&failingScriptHook{}))
+	runSession(t, s, "start")
+
+	waitUntil(t, 10*time.Second, "the job to end", func() bool {
+		for _, rec := range sink.allRecords() {
+			if _, ok := rec.(*poo.JobEndedRecord); ok {
+				return true
+			}
+		}
+		return false
+	})
+	var calls int
+	for _, rec := range sink.allRecords() {
+		if call, ok := rec.(*poo.ToolCallRecord); ok && (call.Tool == "first" || call.Tool == "second") {
+			calls++
+		}
+	}
+	if calls != 2 {
+		t.Errorf("the log holds %d of the script's 2 calls after a hook failure, want both", calls)
+	}
+	if got := len(first.Calls()) + len(second.Calls()); got != 0 {
+		t.Errorf("the hook failed, so %d calls ran, want 0", got)
+	}
+}
+
+// failingScriptHook fails the calls a script makes, and lets the model's
+// own calls through so the script starts at all.
+type failingScriptHook struct{}
+
+func (*failingScriptHook) BeforeTool(ctx poo.HookContext, info poo.ToolCallInfo) (poo.ToolDecision, error) {
+	switch info.Spec.Name {
+	case "first", "second":
+		return poo.ToolDecision{}, errors.New("the hook could not decide")
+	}
+	return poo.Allow(), nil
 }

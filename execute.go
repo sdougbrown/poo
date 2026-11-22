@@ -174,6 +174,12 @@ func (s *Session) runBatch(run *runState, turn int, plans []callPlan, parallel b
 func (s *Session) batchStopped(run *runState) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if run.jobOwned {
+		// A job's script keeps its remaining calls: its owner is never
+		// finalized, so a candidate here would stop the batch without
+		// settling anything. The job's end record reports the failure.
+		return false
+	}
 	for _, c := range run.candidates {
 		if c.reason != ReasonFinished {
 			return true

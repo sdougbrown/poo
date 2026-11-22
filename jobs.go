@@ -441,12 +441,12 @@ func (s *Session) startJob(run *runState, turn int, handle, tool string, prepare
 	// run, and the job's own context, because a settle of the run must
 	// not stop the calls the job's tool makes.
 	owner := &runState{
-		id:          run.id,
-		ctx:         ctx,
-		cancel:      cancel,
-		turn:        turn,
-		globalTurn:  run.globalTurn,
-		asksRefused: true,
+		id:         run.id,
+		ctx:        ctx,
+		cancel:     cancel,
+		turn:       turn,
+		globalTurn: run.globalTurn,
+		jobOwned:   true,
 	}
 	job := &jobState{
 		id:        jobID,
@@ -616,8 +616,14 @@ func (s *Session) runJob(job *jobState, prepared Prepared) {
 	s.mu.Unlock()
 	timedOut := errors.Is(ctx.Err(), context.DeadlineExceeded)
 	// A fatal error means the environment is unusable. The failure
-	// belongs to the job, and the receiving run settles tool_fatal.
+	// belongs to the job, and the receiving run settles tool_fatal. A
+	// fatal error a nested call reported is the job's too: the tool
+	// itself returns no error, so the owner's candidates are the only
+	// place that failure is visible.
 	fatal := err != nil && errors.Is(err, ErrFatal)
+	if job.owner != nil && s.ownerFatal(job.owner) {
+		fatal = true
+	}
 
 	// The job's context decides a timeout or a cancellation before a
 	// nil error can call the job successful: a cooperative tool returns
@@ -731,6 +737,24 @@ func stoppedText(partial string, err error, reason string) string {
 //
 // The environment names the job, so a tool can tell a job from a call in
 // the turn.
+// ownerFatal reports whether a call the job's tool made was fatal.
+//
+// The tool's own error says nothing about the calls it made on the
+// session's behalf, so the owner's settle candidates are read at the
+// job's end. A tool_fatal candidate is the environment unusable: the job's
+// result carries the fatal flag, and the run that receives it settles
+// tool_fatal the way a synchronous call does.
+func (s *Session) ownerFatal(owner *runState) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, c := range owner.candidates {
+		if c.reason == ReasonToolFatal {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Session) jobToolEnv(job *jobState) ToolEnv {
 	env := s.toolEnvFor(job.runID, job.handle)
 	env.JobID = job.id

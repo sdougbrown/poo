@@ -128,7 +128,7 @@ func (s *Session) beginPermission(run *runState, ask PermissionAsk, opts Permiss
 		s.logWarn("stale permission input dropped", slog.String("run_id", run.id), slog.String("ask_id", ask.AskID), slog.Uint64("attempt", in.Attempt))
 	}
 	s.mu.Lock()
-	if run.sealed || run.committed || run.finalizing || run.asksRefused {
+	if run.sealed || run.committed || run.finalizing || run.jobOwned {
 		p.Send(PermissionTransition{Kind: PermissionSeal})
 		s.mu.Unlock()
 		return p
@@ -161,9 +161,13 @@ func (s *Session) reportPermissionAnswered(run *runState, answer PermissionAnswe
 		return
 	}
 	s.mu.Lock()
-	if run.sealed || run.committed {
+	// A job's owner writes no permission record at all: its ask was
+	// already sealed, and its run may be long settled.
+	if run.sealed || run.committed || run.jobOwned {
 		s.mu.Unlock()
-		s.logWarn("permission answer after seal", slog.String("run_id", run.id), slog.String("ask_id", answer.AskID))
+		if !run.jobOwned {
+			s.logWarn("permission answer after seal", slog.String("run_id", run.id), slog.String("ask_id", answer.AskID))
+		}
 		return
 	}
 	p := run.asks[answer.AskID]

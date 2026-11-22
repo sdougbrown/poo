@@ -375,11 +375,14 @@ type runState struct {
 	// repeats and the current permission call belong to this run.
 	repeats          *repeatCounter
 	permissionHandle string
-	// asksRefused reports that this owner may not raise a permission
-	// ask. A background job's owner sets it: the turn that started the
-	// job may already be over, so an ask would be written after the
-	// run's settle and answered by nobody.
-	asksRefused    bool
+	// jobOwned reports that this state belongs to a background job's tool
+	// calls, not to a turn.
+	//
+	// An owner raises no permission ask, writes no permission record and
+	// does not stop a batch on a settle candidate: the turn that started
+	// the job may already be over, and the job's own end record reports
+	// its outcome.
+	jobOwned       bool
 	permissionTool string
 
 	// accepting are the inputs whose acceptance record is still being
