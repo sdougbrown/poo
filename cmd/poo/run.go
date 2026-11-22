@@ -38,6 +38,9 @@ type runOptions struct {
 	// contextStrategy is the compaction strategy the run pins, when
 	// the flag names one.
 	contextStrategy string
+	// contextKeepRecent is the verbatim tail the compaction keeps,
+	// when the flag names one.
+	contextKeepRecent int
 	// logPath is the session log path.
 	logPath string
 	// workingDir is the directory the tools work in.
@@ -64,6 +67,7 @@ func runFlagSpecs() []clicontract.Flag {
 		clicontract.Flag{Name: "max-turns", Kind: clicontract.Int, Usage: "The turn limit"},
 		clicontract.Flag{Name: "max-output", Kind: clicontract.Int, Usage: "The model's output-token limit"},
 		clicontract.Flag{Name: "context-strategy", Kind: clicontract.String, Usage: "The compaction strategy: summary, mine, pointer, native or handoff"},
+		clicontract.Flag{Name: "context-keep-recent", Kind: clicontract.Int, Usage: "The verbatim tail the compaction keeps, in tokens"},
 		clicontract.Flag{Name: "log", Kind: clicontract.String, Usage: "The session log path"},
 	)
 	specs = append(specs, toolFlagSpecs()...)
@@ -83,6 +87,7 @@ func (o *runOptions) bind(inv clicontract.Invocation) {
 	o.maxTurns = inv.Ints["max-turns"]
 	o.maxOutput = inv.Ints["max-output"]
 	o.contextStrategy = inv.Flags["context-strategy"]
+	o.contextKeepRecent = inv.Ints["context-keep-recent"]
 	o.logPath = inv.Flags["log"]
 	o.workingDir = inv.Flags["working-dir"]
 	o.executor = inv.Flags["executor"]
@@ -396,6 +401,9 @@ func (o *runOptions) validate(rest []string) error {
 	default:
 		return errors.New("--context-strategy must be summary, mine, pointer, native or handoff")
 	}
+	if o.contextKeepRecent < 0 {
+		return errors.New("--context-keep-recent must not be negative")
+	}
 	if len(rest) == 0 {
 		return errors.New("a prompt is required")
 	}
@@ -414,6 +422,16 @@ func (o *runOptions) apply(settings *config.Settings) error {
 	if o.contextStrategy != "" {
 		strategy := o.contextStrategy
 		settings.Context.Strategy = &strategy
+	}
+	if o.contextKeepRecent > 0 {
+		// The tail is a per-strategy setting, and the flag names one
+		// tail for whichever strategy runs: the three block
+		// strategies all take it, and the ones without a tail ignore
+		// it.
+		keep := o.contextKeepRecent
+		settings.Context.Summary.KeepRecentTokens = &keep
+		settings.Context.Mine.KeepRecentTokens = &keep
+		settings.Context.Pointer.KeepRecentTokens = &keep
 	}
 	// The timeout is the run's deadline, not its budget: the deadline
 	// ends the run, and the settings' limits.max_duration_s is the

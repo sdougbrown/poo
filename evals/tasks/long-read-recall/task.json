@@ -1,7 +1,7 @@
 {
   "repo": "fixture:long-read-recall",
-  "prompt": "The file config/services.yaml is the deployment config for every service this team runs. Read the whole file with the read tool — do not use grep and do not script over it, read it — and then answer: which service carries a retry_budget_ms of 41200, and which incident id does that service's comment name? Answer in one line as `<service> <incident id>`. Do not change any file: this is a question, not a task to fix.",
-  "timeout_s": 900,
+  "prompt": "The file config/services.yaml is the deployment config for every service this team runs. Exactly one service in it has a retry_budget_ms that is not a whole multiple of 500. Read the file with the read tool \u2014 do not use grep and do not script over it, read it \u2014 and answer: which service is it, and which incident id does that service's comment name? Answer in one line as `<service> <incident id>`. Do not change any file: this is a question, not a task to fix.",
+  "timeout_s": 2400,
   "tags": [
     "readonly",
     "explain",

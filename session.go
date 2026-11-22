@@ -1531,6 +1531,44 @@ type runWriteClaim struct {
 	timeout context.CancelFunc
 }
 
+// beginCompactionWrite claims the compaction's record write against
+// the run's seal.
+//
+// It is beginRunWrite without the record-write budget: the claim is
+// held across the compactor's own asks, which a slow endpoint takes
+// minutes over, so a claim bounded by one write budget would be
+// expired before the record it protects is written. The finalization's
+// wait bounds the write, the way it bounds a call record's.
+func (s *Session) beginCompactionWrite(run *runState) (context.Context, func(), bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if run.sealed {
+		return nil, nil, false
+	}
+	base := run.ctx
+	if base == nil {
+		base = context.Background()
+	}
+	ctx, cancel := context.WithCancelCause(context.WithoutCancel(base))
+	claim := &runWriteClaim{cancel: cancel}
+	run.writeClaims = append(run.writeClaims, claim)
+	run.runWrites++
+	release := func() {
+		cancel(nil)
+		s.mu.Lock()
+		for i, held := range run.writeClaims {
+			if held == claim {
+				run.writeClaims = append(run.writeClaims[:i], run.writeClaims[i+1:]...)
+				break
+			}
+		}
+		run.runWrites--
+		s.signalWorkLocked(run)
+		s.mu.Unlock()
+	}
+	return ctx, release, true
+}
+
 // beginRunWrite claims a record's write against the run's seal.
 //
 // The claim is made under the session's lock, so a write that arrives

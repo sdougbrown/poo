@@ -175,7 +175,7 @@ func (s *Session) offersHistoryTool() bool {
 // record's tokens_after is the estimate of the new view at the plan's
 // rebased ratio.
 func (s *Session) compact(run *runState) (compactionOutcome, error) {
-	claimCtx, release, ok := s.beginRunWrite(run)
+	claimCtx, release, ok := s.beginCompactionWrite(run)
 	if !ok {
 		return compactionOutcome{}, errRunWindingDown
 	}

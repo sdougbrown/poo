@@ -71,6 +71,9 @@ type RunOptions struct {
 	// Strategy pins the compaction strategy the runs use, when it
 	// names one. Empty takes poo's own default.
 	Strategy string
+	// KeepRecent pins the verbatim tail the compaction keeps, in
+	// tokens, when it is positive.
+	KeepRecent int
 	// Out is the directory the report and the logs go to.
 	Out string
 	// RunsDir is the root the per-invocation scratch working dirs are
@@ -750,6 +753,9 @@ func (r *Runner) runPoo(ctx context.Context, j cell, workdir, logPath string) (i
 	}
 	if r.opts.Strategy != "" {
 		args = append(args, "--context-strategy", r.opts.Strategy)
+	}
+	if r.opts.KeepRecent > 0 {
+		args = append(args, "--context-keep-recent", strconv.Itoa(r.opts.KeepRecent))
 	}
 	args = append(args, j.task.Prompt)
 

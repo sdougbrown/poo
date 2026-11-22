@@ -152,18 +152,21 @@ def derive(workdir, task):
     fact whose values are empty cannot be derived, which is an error.
     """
     if task == "long-read-recall":
-        # The service whose retry budget the prompt names, and the
-        # incident id of the comment above it. The budget comes from
-        # the prompt, so the derivation is the same look-up the task
-        # asks the model to do over the whole file.
+        # The one service whose retry budget is not a whole multiple
+        # of 500, and the incident id its comment names. The
+        # derivation is the same scan the task asks the model to do
+        # over the whole file.
         config = read(os.path.join(workdir, "config", "services.yaml"))
-        match = re.search(r"retry_budget_ms:\s*41200\b", config)
+        budgets = re.findall(r"- name:\s*(\S+)[\s\S]*?retry_budget_ms:\s*(\d+)", config)
+        odd = [(n, b) for n, b in budgets if int(b) % 500 != 0]
+        if len(odd) != 1:
+            return []
+        service, budget = odd[0]
+        match = re.search(r"retry_budget_ms:\s*" + budget + r"\b", config)
         if not match:
             return []
         head = config[:match.start()]
-        name = re.findall(r"^\s*- name:\s*(\S+)", head, re.M)
-        if not name:
-            return []
+        name = [service]
         # The service's own comment sits between its name and the next
         # entry, so the incident id is the first one after the name.
         tail = config[config.index("- name: " + name[-1], match.start() - 4000):]

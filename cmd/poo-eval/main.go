@@ -128,6 +128,7 @@ type runOptions struct {
 	parallel    int
 	maxTurns    int
 	strategy    string
+	keepRecent  int
 	out         string
 	modelsFile  string
 	tasksDir    string
@@ -153,6 +154,7 @@ func runRun(args []string) int {
 	fs.IntVar(&o.parallel, "parallel", 0, "How many runs may be in flight at once")
 	fs.IntVar(&o.maxTurns, "max-turns", 0, "The turn limit passed to poo")
 	fs.StringVar(&o.strategy, "strategy", "", "The compaction strategy to pin: summary, mine, pointer, native or handoff")
+	fs.IntVar(&o.keepRecent, "keep-recent", 0, "The verbatim tail the compaction keeps, in tokens")
 	fs.StringVar(&o.out, "out", "", "Where the report goes")
 	fs.StringVar(&o.modelsFile, "models-file", "", "The model catalog")
 	fs.StringVar(&o.tasksDir, "tasks-dir", "", "The task set")
@@ -245,6 +247,7 @@ func runRun(args []string) int {
 		Parallel:     o.parallel,
 		MaxTurns:     o.maxTurns,
 		Strategy:     o.strategy,
+		KeepRecent:   o.keepRecent,
 		Out:          o.out,
 		RunsDir:      runsDir,
 		PooBinary:    o.pooBinary,

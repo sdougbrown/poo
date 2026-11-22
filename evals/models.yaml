@@ -72,3 +72,13 @@
     The home router's deepseek alias, capped to 131072: the middle
     window where the long tasks strain but a compaction is still
     possible. Native tool calls.
+
+- name: gemma4-16k
+  endpoint: http://localhost:4000/v1
+  model_id: gemma4
+  context_limit: 16384
+  tools_mode: auto
+  notes: >-
+    gemma4 capped to 16384: the window where the long-read task's
+    compaction fires mid-run, whatever the model does. The keep-recent
+    tail the runs pin keeps the cut meaningful at this size.
