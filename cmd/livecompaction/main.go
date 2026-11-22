@@ -30,6 +30,8 @@ import (
 	"github.com/sdougbrown/poo/codemode/quickjs"
 	codemodestarlark "github.com/sdougbrown/poo/codemode/starlark"
 	"github.com/sdougbrown/poo/compact/mine"
+	"github.com/sdougbrown/poo/compact/pointer"
+	"github.com/sdougbrown/poo/compact/summary"
 	"github.com/sdougbrown/poo/config"
 	"github.com/sdougbrown/poo/pootest"
 	"github.com/sdougbrown/poo/profile/code"
@@ -44,6 +46,22 @@ import (
 	"github.com/sdougbrown/poo/tool/history"
 	"github.com/sdougbrown/poo/tool/read"
 )
+
+// compactor builds the strategy the caller named.
+func compactor(name string, ratio float64, maxTokens, keepRecent int) poo.Compactor {
+	switch name {
+	case "mine":
+		return mine.New(mine.Options{Ratio: ratio, MaxTokens: maxTokens, KeepRecentTokens: keepRecent})
+	case "summary":
+		return summary.New(summary.Options{Ratio: ratio, MaxTokens: maxTokens, KeepRecentTokens: keepRecent})
+	case "pointer":
+		return pointer.New(pointer.Options{Ratio: ratio, MaxTokens: maxTokens, KeepRecentTokens: keepRecent})
+	default:
+		fmt.Println("unknown strategy:", name)
+		os.Exit(2)
+		return nil
+	}
+}
 
 // codemodeEngine builds the codemode tool under the named engine: the
 // shipped binary's selection, so a replay offers the schema the
@@ -80,7 +98,8 @@ func main() {
 	prompt := flag.String("prompt", "Continue with the work.", "the prompt that wakes the restored session")
 	ratio := flag.Float64("ratio", 0.85, "the fill share the mine strategy acts at")
 	keepRecent := flag.Int("keeprecent", 0, "the verbatim tail the strategy keeps; 0 takes the strategy's own default")
-	maxTokens := flag.Int("maxtokens", 0, "the mining request's output limit; 0 takes the strategy's own default")
+	maxTokens := flag.Int("maxtokens", 0, "the strategy's compose output limit; 0 takes the strategy's own default")
+	strategy := flag.String("strategy", "pointer", "the compaction strategy: pointer, mine, or summary")
 	engine := flag.String("engine", config.DefaultCodemodeEngine, "the codemode engine the replay offers; match the recorded session")
 	flag.Parse()
 	if *logPath == "" {
