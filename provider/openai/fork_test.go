@@ -215,68 +215,8 @@ func newFix1BodyServer(t *testing.T) *openaiBodyServer {
 	return s
 }
 
-// stripField removes one top-level field's value from a body, leaving
-// the rest of the bytes alone.
-func stripField(t *testing.T, body, field string) string {
-	t.Helper()
-	key := `"` + field + `":`
-	i := strings.Index(body, key)
-	if i < 0 {
-		t.Fatalf("the body has no %s: %s", field, body)
-	}
-	rest := body[i+len(key):]
-	depth := 0
-	inString := false
-	escaped := false
-	end := -1
-	if rest[0] == '[' || rest[0] == '{' {
-		for j := 0; j < len(rest); j++ {
-			c := rest[j]
-			if inString {
-				if escaped {
-					escaped = false
-					continue
-				}
-				if c == '\\' {
-					escaped = true
-					continue
-				}
-				if c == '"' {
-					inString = false
-				}
-				continue
-			}
-			switch c {
-			case '"':
-				inString = true
-			case '[', '{':
-				depth++
-			case ']', '}':
-				depth--
-				if depth == 0 {
-					end = j + 1
-				}
-			}
-			if end >= 0 {
-				break
-			}
-		}
-	} else {
-		for j := 0; j < len(rest); j++ {
-			if rest[j] == ',' || rest[j] == '}' {
-				end = j
-				break
-			}
-		}
-	}
-	if end < 0 {
-		t.Fatalf("the field %s does not end: %s", field, body)
-	}
-	return body[:i] + rest[end:]
-}
-
-// TestTheForkDiffersOnlyInTheMessagesAndTheCeiling covers the fork item exactly: "The bodies are byte-identical except for
-// the appended messages and max_tokens."
+// TestTheForkDiffersOnlyInTheMessagesAndTheCeiling covers the fork item exactly: the bodies are identical apart from the
+// appended messages, the output limit and the tool choice.
 //
 // The shipped test compares the prefix up to the messages array, which
 // says nothing about the rest of the body. This one removes the two
