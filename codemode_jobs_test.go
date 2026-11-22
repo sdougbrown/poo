@@ -9,6 +9,7 @@ import (
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/codemode/quickjs"
+	"github.com/sdougbrown/poo/perm"
 	toolcodemode "github.com/sdougbrown/poo/tool/codemode"
 )
 
@@ -179,6 +180,61 @@ return [r.outcome, r.is_error, strip(r)];
 	}
 	ended := jobEnded(t, sink)
 	if !strings.Contains(ended.Text, `["denied",true,"the reader call was refused by the test policy"]`) {
+		t.Errorf("the job's result is %s, want the refusal as data", ended.Text)
+	}
+}
+
+// denyingAsker answers every ask with a refusal, so a policy whose
+// unmatched action is ask refuses the call once the ask resolves.
+type denyingAsker struct{}
+
+func (denyingAsker) Available() bool       { return true }
+func (denyingAsker) Budget() time.Duration { return time.Minute }
+func (denyingAsker) Ask(context.Context, perm.Ask) (perm.Decision, error) {
+	return perm.DecisionDeny, nil
+}
+
+// TestABackgroundScriptCannotRaiseAnAsk covers the rule that keeps a
+// job's ask out of the log: the turn that started the job may already be
+// over, so the job's owner refuses to ask. The script reads a refusal,
+// and no permission ask is written.
+func TestABackgroundScriptCannotRaiseAnAsk(t *testing.T) {
+	// The model's codemode call is allowed; the script's own call is what
+	// the policy asks about.
+	policy, err := perm.New(perm.Options{
+		Rules:     []perm.Rule{{Tool: "codemode", Action: perm.ActionAllow}},
+		Unmatched: perm.ActionAsk,
+		Askers:    []perm.Asker{denyingAsker{}},
+	})
+	if err != nil {
+		t.Fatalf("building the policy: %v", err)
+	}
+	// A side-effecting call is the one the unmatched action judges; a
+	// read-only call is allowed without an ask.
+	reader := &namedTool{echoTool: echoTool{result: "the reader's text", class: poo.ClassSideEffecting}, name: "reader"}
+	sink := &recordingSink{}
+	s := codemodeJobSession(t, `
+const r = await tools.reader({text: "one"});
+return [r.outcome, r.is_error];
+`, map[string]poo.Tool{"reader": reader}, sink, poo.WithPolicy(policy))
+	runSession(t, s, "start")
+
+	waitUntil(t, 10*time.Second, "the job to end", func() bool {
+		for _, rec := range sink.allRecords() {
+			if _, ok := rec.(*poo.JobEndedRecord); ok {
+				return true
+			}
+		}
+		return false
+	})
+	if got := len(reader.Calls()); got != 0 {
+		t.Errorf("the tool ran %d times under an ask it could not get", got)
+	}
+	if got := sink.count("permission.asked"); got != 0 {
+		t.Errorf("the log holds %d permission.asked records for a background script, want 0", got)
+	}
+	ended := jobEnded(t, sink)
+	if !strings.Contains(ended.Text, `["denied",true]`) {
 		t.Errorf("the job's result is %s, want the refusal as data", ended.Text)
 	}
 }

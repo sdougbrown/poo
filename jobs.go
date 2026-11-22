@@ -441,11 +441,12 @@ func (s *Session) startJob(run *runState, turn int, handle, tool string, prepare
 	// run, and the job's own context, because a settle of the run must
 	// not stop the calls the job's tool makes.
 	owner := &runState{
-		id:         run.id,
-		ctx:        ctx,
-		cancel:     cancel,
-		turn:       turn,
-		globalTurn: run.globalTurn,
+		id:          run.id,
+		ctx:         ctx,
+		cancel:      cancel,
+		turn:        turn,
+		globalTurn:  run.globalTurn,
+		asksRefused: true,
 	}
 	job := &jobState{
 		id:        jobID,

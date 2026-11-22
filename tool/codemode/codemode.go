@@ -157,10 +157,10 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 // noSeamText is what the model is told when the tool runs without a
 // nested caller.
 //
-// A call the model makes always has one. The seam is missing for a
-// script that calls codemode itself, and for a background job: the
-// nesting is one call deep, and a job runs outside the turn's tools.
-const noSeamText = "codemode runs only as a call the model makes: a nested call or a background job has no tools to call"
+// A call the model makes has one, and so does a background job's call:
+// the job owns its script's calls. The seam is missing only for a script
+// that calls codemode itself, because the nesting is one call deep.
+const noSeamText = "codemode runs only as a call the model makes: a script cannot run codemode itself"
 
 // resultText renders what the model sees of a script run: what the
 // script did, then why it stopped, if it failed.

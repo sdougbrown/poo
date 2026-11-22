@@ -375,7 +375,12 @@ type runState struct {
 	// repeats and the current permission call belong to this run.
 	repeats          *repeatCounter
 	permissionHandle string
-	permissionTool   string
+	// asksRefused reports that this owner may not raise a permission
+	// ask. A background job's owner sets it: the turn that started the
+	// job may already be over, so an ask would be written after the
+	// run's settle and answered by nobody.
+	asksRefused    bool
+	permissionTool string
 
 	// accepting are the inputs whose acceptance record is still being
 	// written. The finalization waits for them, and reports the ones it

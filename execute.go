@@ -810,9 +810,10 @@ func (s *Session) toolEnv(run *runState, turn int, handle string, plan callPlan)
 //
 // A job runs under the session, so the run it names may be gone by the
 // time the job runs. The environment still names the run that started
-// it, so a tool can tie its work back to the call. A job gets no nested
-// caller: the seam belongs to a call in the turn, and a job's nested
-// calls would outlive the result they belong to.
+// it, so a tool can tie its work back to the call. This builds no nested
+// caller: toolEnv gives a turn's call the run's seam, and jobToolEnv
+// gives a job's call one owned by the job, where the calls a script makes
+// are recorded against the job and keep running after the run ends.
 func (s *Session) toolEnvFor(runID, handle string) ToolEnv {
 	// The model is swapped under the session's lock while a background job
 	// may be starting a call, so the snapshot is taken under it too.
