@@ -1,8 +1,10 @@
 package repl
 
 import (
+	"bytes"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"sync"
 
@@ -18,6 +20,7 @@ const (
 	seqSaveCursor    = "\x1b7"   // DECSC
 	seqRestoreCursor = "\x1b8"   // DECRC
 	seqEraseLine     = "\x1b[2K" // EL
+	seqEraseTail     = "\x1b[K"  // EL 0
 	seqEraseBelow    = "\x1b[J"  // ED 0
 	seqResetRegion   = "\x1b[r"  // DECSTBM full screen
 )
@@ -54,10 +57,6 @@ type layout struct {
 	preview int
 	// previewRows holds the latest rendering, including a clipped head.
 	previewRows []string
-	// resizing marks a resize response in flight: the region is stale
-	// and the preview cache is cleared for a rebuild, so a frame that
-	// lands before the rebuild only anchors.
-	resizing bool
 	// status is the statusline text the footer's bottom row carries.
 	// It is empty until the session names its first parts.
 	status string
@@ -77,22 +76,18 @@ func newLayout(out io.Writer) *layout {
 		return nil
 	}
 	l := &layout{out: out, fd: int(f.Fd()), footer: 1 + footerChrome}
-	if !l.readSize() || l.height < 4 || l.width < 2 {
+	w, h, ok := l.size()
+	if !ok {
 		return nil
 	}
+	l.width, l.height = w, h
 	l.last = l.regionBottom() - 1
 	return l
 }
 
-// readSize takes the terminal's current size. A terminal that will not
-// say keeps the size it had.
-func (l *layout) readSize() bool {
+func (l *layout) size() (int, int, bool) {
 	w, h, err := term.GetSize(l.fd)
-	if err != nil || w < 2 || h < 4 {
-		return false
-	}
-	l.width, l.height = w, h
-	return true
+	return w, h, err == nil && w >= 2 && h >= 4
 }
 
 // regionBottom is the region's last row, one above the footer.
@@ -256,20 +251,25 @@ func (l *layout) scrollSeq(n int) string {
 	return fmt.Sprintf("\x1b[%dS", n)
 }
 
-// paintPreview paints the rows a live stream has not committed and
-// returns the rows it shows. They stand under the last committed row and
-// are repainted as the stream grows.
-//
-// The region scrolls only over committed rows, and a taller preview
-// shows its visible tail until the commit.
-// paintPreview takes the standing preview down and paints rows in its
-// place as one composed write: between the erases and the paint the
-// terminal shows nothing gone, so a fast stream does not flash.
+// paintStream replaces the preview in the same write that commits any
+// completed paragraphs. Pending rows must be erased before they can scroll.
+func (l *layout) paintStream(committed string, preview []string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	var b strings.Builder
+	if rows := textRows(committed, l.width); len(rows) > 0 {
+		l.clearPreviewLocked(&b)
+		b.WriteString(seqSaveCursor + l.rowsSeq(rows) + seqRestoreCursor)
+	}
+	l.paintPreviewLocked(&b, preview)
+	l.emit(b.String())
+}
+
+// paintPreview replaces the pending rows below the committed transcript.
 func (l *layout) paintPreview(rows []string) int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	var b strings.Builder
-	l.clearPreviewLocked(&b)
 	n := l.paintPreviewLocked(&b, rows)
 	l.emit(b.String())
 	return n
@@ -279,42 +279,44 @@ func (l *layout) paintPreview(rows []string) int {
 // the standing preview, returning the rows it stands on. The caller
 // emits the builder, so a clear and a paint can share one write.
 func (l *layout) paintPreviewLocked(b *strings.Builder, rows []string) int {
-	l.previewRows = rows
-	if !l.active || len(rows) == 0 {
+	if !l.active {
+		l.previewRows = rows
 		return 0
 	}
+	// Remove the old preview before a scroll so pending lines never
+	// enter history. A repaint in place instead overwrites them.
+	scroll := min(l.last, max(0, len(rows)-(l.regionBottom()-l.last)))
+	if scroll > 0 {
+		l.clearPreviewLocked(b)
+	}
+	n := min(len(rows), l.regionBottom()-l.last+scroll)
+	visible := rows[len(rows)-n:]
+	old := l.previewRows[len(l.previewRows)-l.preview:]
+	l.previewRows, l.preview = rows, n
+	if scroll == 0 && slices.Equal(visible, old) {
+		return n
+	}
 	b.WriteString(seqSaveCursor)
-	if extra := len(rows) - (l.regionBottom() - l.last); extra > 0 {
-		// Room comes from what is above the preview: the committed rows
-		// scroll into history, and nothing else.
-		committed := l.last - (l.regionTop() - 1)
-		if committed > 0 {
-			k := extra
-			if k > committed {
-				k = committed
-			}
-			b.WriteString(l.scrollSeq(k))
+	b.WriteString(l.scrollSeq(scroll))
+	// Skip the unchanged plain prefix. Styled rows can set attributes
+	// that later rows inherit, so play them from the first styled row.
+	start := 0
+	for start < min(len(old), n) && visible[start] == old[start] && !strings.ContainsRune(visible[start], '\x1b') {
+		start++
+	}
+	for i, text := range visible[start:] {
+		b.WriteString(fmt.Sprintf("\x1b[%d;1H\r", l.last+1+start+i))
+		b.WriteString(text)
+		if ansi.StringWidth(text) < l.width {
+			b.WriteString(seqEraseTail)
 		}
 	}
-	// The tail the region can show, oldest rows first.
-	room := l.regionBottom() - l.last
-	start := len(rows) - room
-	if start < 0 {
-		start = 0
-	}
-	row := l.last + 1
-	for _, text := range rows[start:] {
-		b.WriteString(fmt.Sprintf("\x1b[%d;1H", row))
-		b.WriteString("\r" + seqEraseLine)
-		b.WriteString(text)
-		row++
-	}
-	l.preview = row - 1 - l.last
-	if l.preview < 0 {
-		l.preview = 0
+	for i := n; i < len(old); i++ {
+		b.WriteString(fmt.Sprintf("\x1b[%d;1H\r", l.last+1+i))
+		b.WriteString(seqEraseLine)
 	}
 	b.WriteString(seqRestoreCursor)
-	return l.preview
+	return n
 }
 
 // hint paints the writing hint on the row the stream's text will take.
@@ -444,13 +446,6 @@ func (l *layout) paintChromeLocked(b *strings.Builder) {
 	b.WriteString(seqEraseLine + l.statusRow())
 }
 
-// endResize lifts the mark once the caller repainted the region.
-func (l *layout) endResize() {
-	l.mu.Lock()
-	l.resizing = false
-	l.mu.Unlock()
-}
-
 // ensure makes the footer the given number of rows, without touching the
 // cursor: a redraw the editor computes from where it stands sizes the
 // footer this way. The caller keeps one spare row while a draft is
@@ -518,10 +513,8 @@ func (l *layout) ensureLocked(footer int) bool {
 	l.active = true
 	l.paintChromeLocked(&b)
 	l.chromeStale = false
+	l.paintPreviewLocked(&b, rows)
 	l.emit(b.String())
-	var pb strings.Builder
-	l.paintPreviewLocked(&pb, rows)
-	l.emit(pb.String())
 	return true
 }
 
@@ -546,13 +539,6 @@ func (l *layout) anchor() {
 // this write and the frame that refills it. The erase rides the footer's
 // size change instead, where the vacated rows actually exist.
 func (l *layout) anchorLocked() {
-	// A frame that lands mid-resize-response only anchors: the resize
-	// path owns the region this round, and repainting the preview cache
-	// here would read it while it is cleared for the rebuild.
-	if l.resizing {
-		l.emit(fmt.Sprintf("\x1b[%d;1H", l.footerTop()))
-		return
-	}
 	var b strings.Builder
 	b.WriteString(seqSaveCursor)
 	pending := l.previewRows
@@ -577,48 +563,59 @@ func (l *layout) cols() int {
 // regionTop is the region's first row.
 func (l *layout) regionTop() int { return 1 }
 
-// resize takes the terminal's new size. A transcript row the terminal
-// held keeps the row it was on, as far as the new region reaches. The
-// caller redraws the prompt at the new bottom.
-func (l *layout) resize() bool {
+// resize rebuilds the visible tail: the terminal can move or reflow its
+// old rows before notifying us. Paint in place rather than scrolling the
+// replay into native history. The editor redraws at the new footer.
+func (l *layout) resize(width, height, footer int, transcript []byte, preview []string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	w, h := l.width, l.height
-	if !l.readSize() || (w == l.width && h == l.height) {
-		l.width, l.height = w, h
-		return false
+	l.width, l.height = width, height
+	if footer == 0 {
+		footer = l.footer - footerChrome
 	}
-	l.resizing = true
-	l.chromeStale = true
-	// l.footer counts the chrome: the total stays within one region row
-	// of the screen's height, and never falls under its own minimum of
-	// one editor row plus the chrome.
-	if l.footer > l.height-1 {
-		l.footer = l.height - 1
+	l.footer = min(height-1, max(1, footer)+footerChrome)
+	l.preview, l.previewRows = 0, nil
+	bottom := l.regionBottom()
+	committed := transcriptTail(transcript, width, bottom-len(preview))
+	l.last = bottom - min(len(preview), bottom) - len(committed)
+	if !l.active {
+		return
 	}
-	if l.footer < 1+footerChrome {
-		l.footer = 1 + footerChrome
+	var b strings.Builder
+	b.WriteString(l.regionSeq())
+	b.WriteString("\x1b[H" + seqEraseBelow)
+	b.WriteString(l.rowsSeq(committed))
+	l.paintPreviewLocked(&b, preview)
+	l.paintChromeLocked(&b)
+	l.chromeStale = false
+	b.WriteString(fmt.Sprintf("\x1b[%d;1H", l.footerTop()))
+	l.emit(b.String())
+}
+
+// Walk back only as far as needed to fill the viewport, not all the way
+// to the start of a long session. A single logical line can fill it.
+func transcriptTail(transcript []byte, width, room int) []string {
+	if room <= 0 || len(transcript) == 0 {
+		return nil
 	}
-	if l.last > l.regionBottom() {
-		l.last = l.regionBottom()
-	}
-	l.preview = 0
-	l.previewRows = nil
-	if l.active {
-		var b strings.Builder
-		b.WriteString(l.regionSeq())
-		b.WriteString(l.footerSeq())
-		// The rows under the committed boundary held a preview laid out
-		// for the old width. They are stale now.
-		if l.last < l.regionBottom() {
-			for row := l.last + 1; row <= l.regionBottom(); row++ {
-				b.WriteString(fmt.Sprintf("\x1b[%d;1H\r", row))
-				b.WriteString(seqEraseLine)
-			}
+	var groups [][]string
+	end := len(bytes.TrimSuffix(transcript, []byte{'\n'}))
+	count := 0
+	for {
+		start := bytes.LastIndexByte(transcript[:end], '\n') + 1
+		group := wrapRows(string(transcript[start:end]), width)
+		groups = append(groups, group[max(0, len(group)-(room-count)):])
+		count += len(groups[len(groups)-1])
+		if start == 0 || count == room {
+			break
 		}
-		l.emit(b.String())
+		end = start - 1
 	}
-	return true
+	rows := make([]string, 0, count)
+	for i := len(groups) - 1; i >= 0; i-- {
+		rows = append(rows, groups[i]...)
+	}
+	return rows
 }
 
 // suspend gives the whole terminal to a program that wants it, the

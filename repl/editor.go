@@ -211,6 +211,13 @@ func (i *editorInput) refresh() {
 	l.prepare(i.rowsFor(promptText, line))
 }
 
+// resizeRows measures the last editor snapshot at the new width.
+func (i *editorInput) resizeRows(width int) int {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	return promptRows(i.promptText, i.line, width) + 1
+}
+
 // rowsFor is the rows the footer reserves for a prompt and a draft.
 // It covers the rows they fill and one spare: the editor erases the rows
 // below its line on every repaint, and the spare is what that erase

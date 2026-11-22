@@ -306,7 +306,7 @@ func (r *renderer) hint() {
 	if !r.streams() || r.block.hint || r.block.started {
 		return
 	}
-	r.layout.hint(ansiDim + string(brailleFrames[r.block.hintFrame]) + " writing" + ansiReset)
+	r.layout.hint(r.writingHint())
 	r.block.hint = true
 }
 
@@ -317,7 +317,11 @@ func (r *renderer) paintHintFrame() {
 		return
 	}
 	r.block.hintFrame = (r.block.hintFrame + 1) % len(brailleFrames)
-	r.layout.hint(ansiDim + string(brailleFrames[r.block.hintFrame]) + " writing" + ansiReset)
+	r.layout.hint(r.writingHint())
+}
+
+func (r *renderer) writingHint() string {
+	return ansiDim + string(brailleFrames[r.block.hintFrame]) + " writing" + ansiReset
 }
 
 // takeHint takes the writing hint back off the terminal.
@@ -424,39 +428,27 @@ func (r *renderer) contentWidth() int {
 	return r.width
 }
 
-// repaintPreview lays the open stream out again after a resize. Its rows
-// wrapped at the old width, and the resize cleared them. The preview
-// paints from the new wrap, and the next delta carries on.
-func (r *renderer) repaintPreview() {
-	if !r.streams() {
-		return
+// resize lays out the open stream before rebuilding the screen so that
+// replayed rows never have to scroll to make room for the preview.
+func (r *renderer) resize(width, height, footer int) {
+	r.rewrap(width)
+	for _, seg := range r.live.parked {
+		r.transcript.WriteString(r.chunkBody(seg.kind, seg.source))
 	}
-	// A hint that stands before the first delta is a preview row of its
-	// own: the resize cleared it, and this is where it comes back.
-	if r.live.kind == "" && !r.block.hint {
-		return
-	}
-	// The closed segments the stall parked are final: seal them into
-	// the transcript in the order they arrived. Their standing rows
-	// wrap at the old width, so they are written again at the new one
-	// rather than sealed as they stand.
-	if len(r.live.parked) > 0 {
-		r.layout.clearPreview()
-		for _, seg := range r.live.parked {
-			if body := r.chunkBody(seg.kind, seg.source); body != "" {
-				r.transcript.WriteString(body)
-				r.layout.commitPreview(body)
-			}
-		}
-		r.live.parked = nil
-	}
+	r.live.parked = nil
 	r.block.stalled = false
-	if r.block.hint {
-		r.block.hint = false
-		r.hint()
-	}
-	r.paintStream()
 	r.live.dirty = false
+
+	var rows []string
+	switch {
+	case r.block.hint:
+		rows = []string{ansi.Truncate(r.writingHint(), width, "")}
+	case r.live.kind != "":
+		committed, preview := r.streamBodies()
+		r.transcript.WriteString(committed)
+		rows = textRows(preview, width)
+	}
+	r.layout.resize(width, height, footer, r.transcript.Bytes(), rows)
 }
 
 // stalledNow reports that the terminal's width has changed under a
@@ -512,28 +504,21 @@ func (r *renderer) switchKind(kind string) {
 	}
 }
 
-// paintStream commits the paragraphs the open source has finished with
-// and repaints the tail that is still being written. The committed
-// rows are written once and never touched again; only the preview is
-// erased and painted on the next delta.
+// paintStream commits completed paragraphs and replaces the preview
+// with the tail that is still being written.
 func (r *renderer) paintStream() {
-	done, rest := splitStream(r.live.source)
-	// Nothing is open and nothing is pending: the only rows standing
-	// are a hint's, which the repaint has just laid back down.
-	if r.live.kind == "" && rest == "" {
+	if r.live.kind == "" {
 		return
 	}
-	r.layout.clearPreview()
-	if done != "" {
-		if body := r.chunkBody(r.live.kind, done); body != "" {
-			r.transcript.WriteString(body)
-			r.layout.write(body)
-		}
-		r.live.source = rest
-	}
-	if body := r.chunkBody(r.live.kind, rest); body != "" {
-		r.paintPreviewBody(body)
-	}
+	committed, preview := r.streamBodies()
+	r.transcript.WriteString(committed)
+	r.layout.paintStream(committed, textRows(preview, r.width))
+}
+
+func (r *renderer) streamBodies() (committed, preview string) {
+	done, rest := splitStream(r.live.source)
+	r.live.source = rest
+	return r.chunkBody(r.live.kind, done), r.chunkBody(r.live.kind, rest)
 }
 
 // bufferDelta adds a delta to the open segment without painting it. A

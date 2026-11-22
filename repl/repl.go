@@ -299,15 +299,12 @@ func (m *machine) run() int {
 			m.r.paintHintFrame()
 			m.r.paintSpinner()
 		case <-resizes:
-			// The terminal changed size: reserve the footer again at
-			// the new geometry and redraw the prompt where it now
-			// belongs. The response brackets the frames: a frame that
-			// lands mid-response anchors only, since the region is
-			// cleared for its rebuild and the preview cache is empty.
-			if m.r.layout.resize() {
-				m.r.rewrap(m.r.layout.cols())
-				m.r.repaintPreview()
-				m.r.layout.endResize()
+			if width, height, ok := m.r.layout.size(); ok {
+				footer := 0
+				if editor, ok := input.(*editorInput); ok {
+					footer = editor.resizeRows(width)
+				}
+				m.r.resize(width, height, footer)
 				input.prompt(m.prompt())
 			}
 		case runID := <-m.esc:

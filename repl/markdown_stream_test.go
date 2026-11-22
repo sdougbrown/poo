@@ -66,13 +66,10 @@ func TestAResizeKeepsTheHintBeforeTheFirstDelta(t *testing.T) {
 		t.Fatalf("the hint never showed:\n%s", scr.text())
 	}
 
-	// The resize erases the rows the preview stood on before the
-	// recovery repaints them; the emulator's size cannot change under
-	// the test, so the erase stands in for it.
 	width = 20
-	r.layout.clearPreview()
-	r.rewrap(width)
-	r.repaintPreview()
+	scr.vt.Resize(width, 18)
+	r.resize(width, 18, 1)
+	scr.paint()
 
 	if rowOf(t, scr, "⠋ writing") < 0 {
 		t.Errorf("the hint was lost to the resize:\n%s", scr.text())
@@ -114,7 +111,9 @@ func TestARecoveredStallDrainsTheSegmentsItParked(t *testing.T) {
 	r.streamDelta("m1", "thinking", "second thought")
 	r.streamDelta("m1", "thinking", " that grows")
 	// The resize event recovers the block at the new width.
-	r.repaintPreview()
+	scr.vt.Resize(width, 24)
+	r.resize(width, 24, 1)
+	scr.paint()
 	r.streamDelta("m1", "thinking", " and settles.")
 	r.finish()
 
@@ -143,7 +142,7 @@ func TestARecoveredStallDrainsTheSegmentsItParked(t *testing.T) {
 // and the markdown renderer move together, so the render after the
 // recovery wraps where the rows do.
 func TestAStallMovesTheMarkdownWrapWithTheWidth(t *testing.T) {
-	_, r := aScreen(t, 40)
+	scr, r := aScreen(t, 40)
 	width := 40
 	r.liveWidth = func() int { return width }
 	r.userPrompt("go")
@@ -153,8 +152,8 @@ func TestAStallMovesTheMarkdownWrapWithTheWidth(t *testing.T) {
 	// already the new one when the resize event arrives.
 	width = 20
 	r.streamDelta("m1", "text", " more words")
-	r.rewrap(20)
-	r.repaintPreview()
+	scr.vt.Resize(width, 24)
+	r.resize(width, 24, 1)
 
 	rows := strings.Split(strings.TrimRight(r.markdown("abcdefghij abcdefghij abcdefghij"), "\n"), "\n")
 	if len(rows) < 2 {

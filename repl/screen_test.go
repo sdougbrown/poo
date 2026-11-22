@@ -309,6 +309,42 @@ func TestTheFlushKeepsTheScreenWhenTheBlockOutgrowsIt(t *testing.T) {
 	}
 }
 
+func TestStreamingKeepsThePreviewVisibleBetweenWrites(t *testing.T) {
+	vt := vt10x.New(vt10x.WithSize(40, 24))
+	var frames []string
+	out := previewObserver{vt, func(screen string) { frames = append(frames, screen) }}
+	l := aLayout(t, out, 40, 24)
+	r := aStreamingRenderer(t, out, 40, l)
+	r.streamDelta("m1", "text", "visible preview")
+	frames = nil
+
+	// First extend the open paragraph, then commit it when a second
+	// paragraph arrives. Neither transition should write a blank frame.
+	r.streamDelta("m1", "text", " keeps growing")
+	r.paintPending()
+	r.streamDelta("m1", "text", "\n\nanother paragraph")
+	r.paintPending()
+	for _, screen := range frames {
+		if !strings.Contains(screen, "visible preview") {
+			t.Fatalf("the preview disappeared between frames:\n%s", screen)
+		}
+	}
+	if screen := trimScreen(vt.String()); !strings.Contains(screen, "visible preview keeps growing") || !strings.Contains(screen, "another paragraph") {
+		t.Fatalf("the new text did not paint:\n%s", screen)
+	}
+}
+
+type previewObserver struct {
+	vt      vt10x.Terminal
+	observe func(string)
+}
+
+func (w previewObserver) Write(p []byte) (int, error) {
+	n, err := w.vt.Write(p)
+	w.observe(trimScreen(w.vt.String()))
+	return n, err
+}
+
 func TestAResizeMidBlockStopsThePainting(t *testing.T) {
 	scr, r := aScreen(t, 40)
 	width := 40
