@@ -675,6 +675,7 @@ func TestEveryCommandWithItsOwnFlagsHasABindingTest(t *testing.T) {
 		"prompt":         "TestEveryOtherCommandBindsItsFlags/prompt",
 		"models":         "TestEveryOtherCommandBindsItsFlags/models",
 		"auth status":    "TestEveryOtherCommandBindsItsFlags/auth_status",
+		"auth refresh":   "TestAuthRefresh",
 		"auth import pi": "TestEveryOtherCommandBindsItsFlags/auth_import_pi",
 		"login":          "TestEveryOtherCommandBindsItsFlags/login",
 		"sessions list":  "TestEveryOtherCommandBindsItsFlags/sessions_list",
