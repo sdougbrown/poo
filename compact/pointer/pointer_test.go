@@ -58,8 +58,8 @@ type readSink struct {
 	*pootest.Sink
 }
 
-// Records returns the sink's records.
-func (r readSink) Records(context.Context) ([]poo.Record, error) {
+// ReadRecords returns the sink's records.
+func (r readSink) ReadRecords(context.Context) ([]poo.Record, error) {
 	return r.Sink.Records(), nil
 }
 
@@ -204,17 +204,66 @@ func TestTheRunReconstructsFromTheQueries(t *testing.T) {
 	}
 }
 
-// TestAReplyThatDoesNotParseIsTheNotes covers the lenient parse: a fork
-// reply that is not JSON steers the compose ask as notes, and no
-// matches are collected.
-func TestAReplyThatDoesNotParseIsTheNotes(t *testing.T) {
+// TestAMalformedPointerReplyIsReformed covers the recovery layer: a
+// fork reply that does not parse goes back to the compaction role for
+// one cheap reformat, and the queries the reform returns drive the
+// extraction.
+func TestAMalformedPointerReplyIsReformed(t *testing.T) {
 	tr := pootest.NewTransport(
 		pootest.Turn{Text: long("TURN-ONE"), Calls: []pootest.Call{{Name: "echo", Arguments: json.RawMessage(`{"text":"one"}`)}}},
 		pootest.Turn{Text: long("TURN-TWO"), Calls: []pootest.Call{{Name: "echo", Arguments: json.RawMessage(`{"text":"two"}`)}}},
+		pootest.Turn{Text: `{"queries": ["TURN-ONE"], "notes": ""}`},
 		pootest.Turn{Text: "## Goal\nfinish the task"},
 		pootest.Turn{Text: "the final answer"},
 	)
-	tr.SetForkTurns(pootest.Turn{Text: "- the deploy is pending\n- main.go is edited"})
+	tr.SetForkTurns(pootest.Turn{Text: "- I was working on TURN-ONE; next: the deploy"})
+	s, sink := session(t, tr, pointer.Options{Ratio: 0.05, KeepRecentTokens: 1})
+
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	if _, err := s.Wait(context.Background()); err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+
+	// The reform ask carries the malformed reply, small and alone.
+	asks := askRequests(tr.Requests())
+	if len(asks) != 2 {
+		t.Fatalf("the transport holds %d strategy requests, want the reform and the compose", len(asks))
+	}
+	reform := asks[0].Messages[len(asks[0].Messages)-1].Text()
+	if !strings.Contains(reform, "TURN-ONE") || !strings.Contains(reform, "the deploy") {
+		t.Errorf("the reform request is %q, want the malformed reply in it", reform)
+	}
+
+	// The queries the reform returned drove the extraction.
+	ask := asks[1].Messages[1].Text()
+	if !strings.Contains(ask, "TURN-ONE") {
+		t.Errorf("the compose request is %q, want the matched line in it", ask)
+	}
+
+	// The record says the reply was reformed.
+	for _, rec := range sink.Records() {
+		if cr, ok := rec.(*poo.CompactionRecord); ok {
+			if cr.Compaction.Side == nil || cr.Compaction.Side.Fork == nil || !cr.Compaction.Side.Fork.Reformed {
+				t.Errorf("the compaction's side is %+v, want the reform on it", cr.Compaction.Side)
+			}
+		}
+	}
+}
+
+// TestAReformThatDoesNotParseKeepsTheNotes covers the reform's own
+// lenient parse: a reformat that does not come back as JSON leaves the
+// original reply as the notes.
+func TestAReformThatDoesNotParseKeepsTheNotes(t *testing.T) {
+	tr := pootest.NewTransport(
+		pootest.Turn{Text: long("TURN-ONE"), Calls: []pootest.Call{{Name: "echo", Arguments: json.RawMessage(`{"text":"one"}`)}}},
+		pootest.Turn{Text: long("TURN-TWO"), Calls: []pootest.Call{{Name: "echo", Arguments: json.RawMessage(`{"text":"two"}`)}}},
+		pootest.Turn{Text: "still not json"},
+		pootest.Turn{Text: "## Goal\nfinish the task"},
+		pootest.Turn{Text: "the final answer"},
+	)
+	tr.SetForkTurns(pootest.Turn{Text: "- the deploy is pending"})
 	s, _ := session(t, tr, pointer.Options{Ratio: 0.05, KeepRecentTokens: 1})
 
 	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
@@ -225,17 +274,17 @@ func TestAReplyThatDoesNotParseIsTheNotes(t *testing.T) {
 	}
 
 	asks := askRequests(tr.Requests())
-	if len(asks) != 1 {
-		t.Fatalf("the transport holds %d strategy requests, want 1", len(asks))
+	if len(asks) != 2 {
+		t.Fatalf("the transport holds %d strategy requests, want 2", len(asks))
 	}
-	ask := asks[0].Messages[1].Text()
-	for _, want := range []string{"<notes>", "the deploy is pending", "<task>"} {
+	ask := asks[1].Messages[1].Text()
+	for _, want := range []string{"<notes>", "the deploy is pending"} {
 		if !strings.Contains(ask, want) {
 			t.Errorf("the compose request is %q, want it to carry %q", ask, want)
 		}
 	}
 	if strings.Contains(ask, "TURN-ONE") {
-		t.Errorf("the compose request is %q, want no extracted content from an unparseable reply", ask)
+		t.Errorf("the compose request is %q, want no extracted content from an unreformable reply", ask)
 	}
 }
 

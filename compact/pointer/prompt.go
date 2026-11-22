@@ -40,6 +40,11 @@ var (
 	//
 	//go:embed prompts/system.md
 	systemPrompt string
+	// reformPrompt asks the compaction role to re-form a malformed
+	// pointer reply into the machine-readable shape.
+	//
+	//go:embed prompts/reform.md
+	reformPrompt string
 )
 
 // pointerRequest builds the message the fork appends.
@@ -113,4 +118,13 @@ func matchText(matches []poo.HistoryMatch) string {
 func itoa(n int) string {
 	b, _ := json.Marshal(n)
 	return string(b)
+}
+
+// reformRequest builds the messages the reformat ask carries: the
+// instruction and the malformed reply, and nothing else.
+func reformRequest(malformed string) []poo.Message {
+	return []poo.Message{
+		poo.NewTextMessage(poo.RoleSystem, systemPrompt),
+		poo.NewTextMessage(poo.RoleUser, reformPrompt+"\n\n"+cut.EscapeTags(malformed)),
+	}
 }

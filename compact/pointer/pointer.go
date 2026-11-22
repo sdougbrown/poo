@@ -238,17 +238,28 @@ func (c *Compactor) Compact(ctx context.Context, in poo.CompactionEnv) (poo.Comp
 
 	var queries []string
 	notes := ""
+	fork := &poo.ForkSide{}
 	if in.Fork != nil {
 		reply, err := in.Fork(ctx, pointerRequest(), c.pointerMaxTokens, poo.ForkOptions{JSON: true})
 		// The reply is asked for as JSON; an endpoint that cannot be
 		// asked gets one more fork without the ask, and the reply is
 		// parsed leniently either way.
 		if err != nil {
+			// The endpoint refused the response-format ask: one more fork
+			// without it, and the reply is parsed leniently either way.
 			reply, err = in.Fork(ctx, pointerRequest(), c.pointerMaxTokens, poo.ForkOptions{})
 		}
 		if err == nil && len(reply.Message.ToolCalls()) == 0 {
 			queries, notes = parsePointers(reply.Message.Text())
+			// A reply that did not parse is one malformed pass away from
+			// machine-readable: the fork paid the window's prefill, so a
+			// small reformat ask is cheap next to doing the pass again.
+			if queries == nil && reformationWanted(reply.Message.Text()) {
+				queries, notes = c.reform(ctx, in, reply.Message.Text())
+				fork.Reformed = queries != nil
+			}
 		}
+		fork.Bytes = len(notes)
 	}
 
 	snippets := c.extract(in.History, c.queryLimit(queries))
@@ -277,6 +288,7 @@ func (c *Compactor) Compact(ctx context.Context, in poo.CompactionEnv) (poo.Comp
 			Cut:      r.Cut,
 			Messages: []poo.Message{poo.NewTextMessage(poo.RoleUser, replacement)},
 		},
+		Side: &poo.SideRequests{Fork: fork},
 	}, nil
 }
 
@@ -292,25 +304,32 @@ func (c *Compactor) extract(history poo.History, queries []string) []poo.History
 	seen := map[string]bool{}
 	used := 0
 	for _, query := range queries {
-		matches, err := history.Search(query)
+		// The query is the pointer's literal string: it is quoted
+		// before it reaches the search, so a query that reads as a
+		// pattern is still the text it was.
+		matches, err := history.Search(regexp.QuoteMeta(query))
 		if err != nil {
 			continue
 		}
-		re := regexp.QuoteMeta(query)
 		for _, m := range matches {
-			if !strings.Contains(strings.ToLower(m.Text), strings.ToLower(re)) {
-				continue
-			}
 			key := m.Text
 			if seen[key] {
 				continue
 			}
-			if used+len(m.Text) > c.snippetBudget {
-				return out
+			text := m.Text
+			if used+len(text) > c.snippetBudget {
+				// The budget is the whole digest's: a line that does
+				// not fit is cut to what remains, and the queries
+				// after it have nothing left to add.
+				if remaining := c.snippetBudget - used; remaining > 0 {
+					text = text[:remaining]
+				} else {
+					return out
+				}
 			}
 			seen[key] = true
-			used += len(m.Text)
-			out = append(out, m)
+			used += len(text)
+			out = append(out, poo.HistoryMatch{Turn: m.Turn, Text: text})
 		}
 	}
 	return out
@@ -335,6 +354,34 @@ func parsePointers(reply string) (queries []string, notes string) {
 		}
 	}
 	return nil, strings.TrimSpace(reply)
+}
+
+// reformationWanted reports that a pointer reply has something to
+// reform: it names content the reconstruction should keep, rather than
+// being empty.
+func reformationWanted(reply string) bool {
+	return strings.TrimSpace(reply) != ""
+}
+
+// reform asks the compaction role to re-form a malformed pointer reply
+// into the machine-readable shape. The input is the reply itself — a
+// few kilobytes next to the window's prefill the fork already paid —
+// and the output is parsed leniently like the fork's own reply.
+func (c *Compactor) reform(ctx context.Context, in poo.CompactionEnv, malformed string) ([]string, string) {
+	if in.Ask == nil {
+		return nil, strings.TrimSpace(malformed)
+	}
+	reply, err := in.Ask(ctx, reformRequest(malformed), c.pointerMaxTokens)
+	if err != nil || len(reply.Message.ToolCalls()) > 0 {
+		return nil, strings.TrimSpace(malformed)
+	}
+	queries, notes := parsePointers(reply.Message.Text())
+	if queries == nil {
+		// The reform did not parse either: the reply was prose worth
+		// keeping, and the notes carry it.
+		return nil, strings.TrimSpace(malformed)
+	}
+	return queries, notes
 }
 
 // seed returns the orientation messages: the first user message, the

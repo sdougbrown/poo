@@ -134,6 +134,9 @@ type ForkSide struct {
 	ToolCall bool `json:"tool_call,omitempty"`
 	// Error is why the fork failed, when it failed.
 	Error string `json:"error,omitempty"`
+	// Reformed reports that the reply did not parse and the compaction
+	// role re-formed it into the machine-readable shape.
+	Reformed bool `json:"reformed,omitempty"`
 }
 
 // TurnRange is a range of turns, counting from one.
