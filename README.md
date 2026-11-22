@@ -580,7 +580,10 @@ them, and the session log records each with its parent's handle. The
 engine the `poo` CLI runs is QuickJS (`poo/codemode/quickjs`), and the
 first engine, Starlark (`poo/codemode/starlark`), is one setting away. The
 seam is `poo/codemode.Engine`, and a binary that links no engine offers no
-codemode tool. The settings are `tools.codemode.*`.
+codemode tool. The settings are `tools.codemode.*`. A script may run in the
+background like any other call: pass `background: true`, and its result
+arrives as a job's. The script's own tool calls keep running after the run
+that started it ends, until the job's timeout.
 
 QuickJS runs as WebAssembly and does not require Node.js. A script is the
 body of an async JavaScript function: `await tools.<name>(args)` chains
