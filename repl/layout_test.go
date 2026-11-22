@@ -129,6 +129,19 @@ func TestTheStreamedBlockStaysAboveTheFooter(t *testing.T) {
 	}
 }
 
+func TestPreviewCanShrinkWhileTheLayoutIsSuspended(t *testing.T) {
+	vt := vt10x.New(vt10x.WithSize(40, 12))
+	l := aLayout(t, vt, 40, 12)
+	l.paintPreview([]string{"first preview row", "second preview row"})
+	l.suspend()
+	l.paintPreview([]string{"shorter preview"})
+	l.resume()
+	l.paintPreview([]string{"resumed preview"})
+	if lastRow(vt, "resumed preview") < 0 || lastRow(vt, "second preview row") >= 0 {
+		t.Fatalf("the resumed preview did not replace the old rows:\n%s", vt.String())
+	}
+}
+
 // TestAWriteUnderAStandingPreviewKeepsThePreview covers a write from
 // outside the run loop — a server's diagnostic — that lands while a
 // preview stands on the rows it would take: the new text is written and

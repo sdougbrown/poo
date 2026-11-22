@@ -135,8 +135,11 @@ func (l *layout) leaveLocked() {
 	if !l.active {
 		return
 	}
+	var b strings.Builder
+	l.clearPreviewLocked(&b)
 	l.active = false
-	l.emit(seqResetRegion + l.footerSeq())
+	b.WriteString(seqResetRegion + l.footerSeq())
+	l.emit(b.String())
 }
 
 // regionSeq sets the scroll region to the rows above the footer. The
