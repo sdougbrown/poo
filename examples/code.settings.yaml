@@ -75,10 +75,12 @@ roles:
 
 # The permission policy.
 permission:
-  # What to do with a side-effecting call no rule covers. The profile's
-  # own action applies when this is absent.
-  unmatched: ask
-  # The decision when the asker chain is exhausted. The default is deny.
+  # A side-effecting call no rule covers just runs: the isolation is
+  # the operator's job, done with the sandbox below. A bash command
+  # that carries one of the tripwire substrings is asked about instead.
+  unmatched: allow
+  # The decision when the asker chain is exhausted. A call a rule
+  # routed to ask means no when no asker answers.
   fallback: deny
   # A call the model keeps making is a permission case.
   doom_loop:
@@ -86,23 +88,33 @@ permission:
     near_threshold: 5
     action: ask
   # The rules, in order. The first match wins. A rule matches on the
-  # tool's name or on the tool's class, never on both.
+  # tool's name or on the tool's class, never on both. A command rule
+  # carries a prefix or substrings, never both.
   rules:
-    - tool: bash
-      command_prefix: "git status"
-      action: allow
     - class: read_only
       action: allow
+    # The tripwire: a bash command carrying one of these substrings,
+    # wherever it sits in the command, is asked about. The comparison
+    # is text, so the list is a tripwire and not a boundary — a
+    # command spelled around the substring (extra spaces, split flags)
+    # matches nothing.
+    - tool: bash
+      command_contains:
+        - "rm -rf"
+        - "git push --force"
+      action: ask
   # The asker chain, in order. The decide asker needs a decider model.
   # An empty list means no askers, so an ask goes straight to the fallback;
   # an absent list takes the binary's own chain.
   askers: [decide]
   chain_timeout_s: 120
-  # The decision asker's thresholds.
+  # The decision asker's thresholds. The timeout covers the decider's
+  # tail latency: a timeout defers the ask to the next asker, and an
+  # exhausted chain falls back to deny.
   decide:
     allow: 0.85
     deny: 0.99
-    timeout_ms: 1500
+    timeout_ms: 5000
 
 # The context window's settings. Compaction fires when the next answer no
 # longer fits the window or the endpoint's input cap.
