@@ -252,21 +252,101 @@ type Session struct {
 }
 
 // runState is the state of the active run.
-type runState struct {
-	// id identifies the run.
+// callOwner is the state a batch of tool calls owns: its claims, its
+// records, its permission asks and what its calls reported.
+//
+// A run embeds one, because a turn's calls belong to the run. A
+// background job builds one of its own, because its tool's calls belong
+// to the job: that owner is never finalized, raises no permission ask and
+// writes its records even after the run that started the job settled.
+type callOwner struct {
+	// run is the run this owner's calls belong to, for the work only a
+	// turn does: starting a job from a call, and the finalization's
+	// view. A background job's owner has none.
+	run *runState
+	// id is the run id the owner's records carry.
 	id string
-	// ctx is the run's context. Cancelling it stops the run's work.
+	// ctx bounds the owner's writes.
 	ctx context.Context
+	// turn is the run-relative turn the calls belong to, and the run's
+	// request count: a run's calls belong to the turn it is in.
+	turn int
+	// globalTurn is the session's number for that turn.
+	globalTurn int
+
+	// activityCtx is the current activity's context. The activity is
+	// the request, the tool batch, the compaction or the turn-end
+	// hooks, and an interrupt ends it.
+	activityCtx context.Context
+	// activityCancel ends the current activity.
+	activityCancel context.CancelCauseFunc
+	// interruptPending reports that an interrupt arrived and has not
+	// been acted on yet.
+	interruptPending bool
+	// pendingInterruptIDs are the inputs whose messages aborted the
+	// current activity.
+	pendingInterruptIDs []string
+
+	// pendingCalls are the calls that were issued but have no result
+	// yet.
+	pendingCalls map[string]*issuedCall
+	// settledCalls are the calls that have a result, by handle. A call
+	// gets exactly one result, so a call that finished at the same
+	// moment the run settled does not get a second one.
+	settledCalls map[string]bool
+	// nestedResults are the results of the owner's nested calls, waiting
+	// for the tool that made them to read them back, by handle. The
+	// owner's result writer is the only writer, and the tool that called
+	// the seam is the only reader: a nested call's result reaches its
+	// caller and never the model.
+	nestedResults map[string]NestedResult
+	// resultWrites counts the claimed results whose records are still
+	// being written. The finalization waits for them as it does for the
+	// pending calls.
+	resultWrites int
+	// callWrites counts the tool.call records whose writes are still in
+	// flight. The finalization waits for them, so no record of the run
+	// follows run.settled.
+	callWrites int
+	// sealed reports that the finalization owns the owner's remaining
+	// records. A claim that would write a call record or a call result
+	// checks the seal when it is claimed, so nothing is added after it.
+	sealed bool
+	// asks are the permission asks the owner has published and not yet
+	// answered, by ask id. The finalization resolves the ones still
+	// pending before it settles.
+	asks map[string]*PermissionRequest
+	// jobStarts counts the job acceptance records whose writes are still
+	// in flight.
+	jobStarts int
+	// workDone is signalled when a pending call gets its result.
+	workDone chan struct{}
+	// repeats and the current permission call belong to this owner.
+	repeats          *repeatCounter
+	permissionHandle string
+	permissionTool   string
+	// jobOwned reports that this owner belongs to a background job's tool
+	// calls, not to a turn.
+	//
+	// An owner raises no permission ask, writes no permission record and
+	// does not stop a batch on a settle candidate: the turn that started
+	// the job may already be over, and the job's own end record reports
+	// its outcome.
+	jobOwned bool
+
+	// candidates are the settle candidates the owner's calls collected.
+	candidates []candidate
+	// finalizing reports that the finalization is under way.
+	finalizing bool
+	// committed reports that the outcome is fixed.
+	committed bool
+}
+
+type runState struct {
+	// callOwner holds the claims, records and asks of the run's calls.
+	callOwner
 	// cancel stops the run's work, with a cause.
 	cancel context.CancelCauseFunc
-	// turn counts the provider requests made so far.
-	turn int
-	// globalTurn is the session's number for the turn the run is in.
-	//
-	// The run's turn number counts from one in every run, and the
-	// session's number counts from one for the life of the session. The
-	// compaction seam names a turn by the session's number.
-	globalTurn int
 	// requests counts the provider requests made so far.
 	requests int
 	// tokens counts the run's cumulative input and output tokens.
@@ -315,36 +395,6 @@ type runState struct {
 	// already had its one forced compaction.
 	refusalForced bool
 
-	// activityCtx is the current activity's context. The activity is
-	// the request, the tool batch, the compaction or the turn-end
-	// hooks, and an interrupt ends it.
-	activityCtx context.Context
-	// activityCancel ends the current activity.
-	activityCancel context.CancelCauseFunc
-	// interruptPending reports that an interrupt arrived and has not
-	// been acted on yet.
-	interruptPending bool
-	// pendingInterruptIDs are the inputs whose messages aborted the
-	// current activity.
-	pendingInterruptIDs []string
-
-	// pendingCalls are the calls that were issued but have no result
-	// yet.
-	pendingCalls map[string]*issuedCall
-	// settledCalls are the calls that have a result, by handle. A call
-	// gets exactly one result, so a call that finished at the same
-	// moment the run settled does not get a second one.
-	settledCalls map[string]bool
-	// nestedResults are the results of the run's nested calls, waiting
-	// for the tool that made them to read them back, by handle. The
-	// run's result writer is the only writer, and the tool that called
-	// the seam is the only reader: a nested call's result reaches its
-	// caller and never the model.
-	nestedResults map[string]NestedResult
-	// resultWrites counts the claimed results whose records are still
-	// being written. The finalization waits for them as it does for the
-	// pending calls.
-	resultWrites int
 	// runWrites counts the records a hook wrote for the run whose
 	// writes are still in flight. The finalization waits for them, so
 	// a hook that appends a message while the finalization is under
@@ -353,37 +403,6 @@ type runState struct {
 	// writeClaims are the claimed hook writes, so the seal can end a
 	// write the finalization stopped waiting for.
 	writeClaims []*runWriteClaim
-	// callWrites counts the tool.call records whose writes are still in
-	// flight. The finalization waits for them, so no record of the run
-	// follows run.settled.
-	callWrites int
-	// sealed reports that the finalization owns the run's remaining
-	// records. A claim that would write a call record, a call result or
-	// an input's acceptance checks the seal when it is claimed, so
-	// nothing is added for the run after it.
-	sealed bool
-	// asks are the permission asks the run has published and not yet
-	// answered, by ask id. The finalization resolves the ones still
-	// pending before it settles.
-	asks map[string]*PermissionRequest
-	// jobStarts counts the job acceptance records whose writes are still
-	// in flight. The finalization waits for them as it does for the
-	// pending calls.
-	jobStarts int
-	// workDone is signalled when a pending call gets its result.
-	workDone chan struct{}
-	// repeats and the current permission call belong to this run.
-	repeats          *repeatCounter
-	permissionHandle string
-	// jobOwned reports that this state belongs to a background job's tool
-	// calls, not to a turn.
-	//
-	// An owner raises no permission ask, writes no permission record and
-	// does not stop a batch on a settle candidate: the turn that started
-	// the job may already be over, and the job's own end record reports
-	// its outcome.
-	jobOwned       bool
-	permissionTool string
 
 	// accepting are the inputs whose acceptance record is still being
 	// written. The finalization waits for them, and reports the ones it
@@ -409,12 +428,6 @@ type runState struct {
 	// undelivered.
 	abandonedInputs []queuedInput
 
-	// candidates are the settle candidates the run has collected.
-	candidates []candidate
-	// finalizing reports that the finalization is under way.
-	finalizing bool
-	// committed reports that the outcome is fixed.
-	committed bool
 	// result is the committed outcome.
 	result Result
 	// finalizeDone is closed when the finalization ends.
@@ -1505,7 +1518,7 @@ func (s *Session) beginRunWriteLocked(run *runState) (context.Context, func(), b
 			}
 		}
 		run.runWrites--
-		s.signalWorkLocked(run)
+		s.signalWorkLocked(&run.callOwner)
 		s.mu.Unlock()
 	}
 	return ctx, release, true
@@ -1592,17 +1605,17 @@ var errCallRecordSealed = errors.New("poo: the finalization sealed the call reco
 // budget, because no claim is waiting for it any more. Either way, a
 // record the store does not take after the seal is abandoned rather than
 // a store failure: the run's outcome is already fixed.
-func (s *Session) writeCallRecord(run *runState, call *issuedCall, rec Record) error {
+func (s *Session) writeCallRecord(owner *callOwner, call *issuedCall, rec Record) error {
 	if call.recordCtx != nil {
-		return s.appendRecord(call.recordCtx, rec, run, nil)
+		return s.appendRecord(call.recordCtx, rec, owner.run, nil)
 	}
-	base := run.ctx
+	base := owner.ctx
 	if base == nil {
 		base = context.Background()
 	}
 	wctx, cancel := context.WithTimeout(context.WithoutCancel(base), s.recordBudget())
 	defer cancel()
-	return s.appendRecord(wctx, rec, run, nil)
+	return s.appendRecord(wctx, rec, owner.run, nil)
 }
 
 // defaultRecordWriteBudget bounds one record write or flush.

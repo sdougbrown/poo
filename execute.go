@@ -76,16 +76,16 @@ type callPlan struct {
 // It reports whether any call was processed: a call that got a result
 // other than skipped: truncated.
 func (s *Session) executeBatch(run *runState, turn int, calls []ToolCall, truncated bool) bool {
-	plans := s.planCalls(run, turn, calls, truncated)
+	plans := s.planCalls(&run.callOwner, turn, calls, truncated)
 	if len(plans) == 0 {
 		return false
 	}
 	// The batch is registered before it runs, so every call in it has an
 	// owner: its own dispatch, the skip path, or the seal. A call the
 	// batch never reaches is the finalization's to settle.
-	s.claimBatch(run, turn, plans)
+	s.claimBatch(&run.callOwner, turn, plans)
 	// A run that is winding down starts no new effect.
-	if s.runWindingDown(run) {
+	if s.runWindingDown(&run.callOwner) {
 		return false
 	}
 	processed := false
@@ -108,7 +108,7 @@ func (s *Session) executeBatch(run *runState, turn int, calls []ToolCall, trunca
 	s.startActivity(run)
 	defer s.endActivity(run)
 
-	s.runBatch(run, turn, plans, false)
+	s.runBatch(&run.callOwner, turn, plans, false)
 	return processed
 }
 
@@ -126,42 +126,42 @@ func (s *Session) executeBatch(run *runState, turn int, calls []ToolCall, trunca
 // nested batch arrives here from the tool that made it, inside the
 // parent call's activity. A nested call is a call of the turn, so the
 // turn's summary stays the model's.
-func (s *Session) runBatch(run *runState, turn int, plans []callPlan, parallel bool) {
+func (s *Session) runBatch(owner *callOwner, turn int, plans []callPlan, parallel bool) {
 	if parallel || s.batchIsParallel(plans) {
 		for i := range plans {
-			if s.runWindingDown(run) || s.interruptPending(run) {
+			if s.runWindingDown(owner) || s.interruptPending(owner) {
 				break
 			}
-			s.decideCall(run, turn, &plans[i])
+			s.decideCall(owner, turn, &plans[i])
 			if plans[i].policyErr != nil {
 				break
 			}
 		}
-		s.executeParallel(run, turn, plans)
+		s.executeParallel(owner, turn, plans)
 		// The calls that never started because of an interrupt get a
 		// visible result.
-		if s.interruptPending(run) {
-			s.skipPlans(run, turn, plans, SkippedInterruptedText)
-		} else if s.batchStopped(run) {
-			s.skipPlans(run, turn, plans, SkippedSettlingText)
+		if s.interruptPending(owner) {
+			s.skipPlans(owner, turn, plans, SkippedInterruptedText)
+		} else if s.batchStopped(owner) {
+			s.skipPlans(owner, turn, plans, SkippedSettlingText)
 		}
 		return
 	}
 	for _, p := range plans {
 		// An interrupt skips the calls that have not started, and the
 		// run continues.
-		if s.interruptPending(run) {
-			s.skipPlans(run, turn, plans, SkippedInterruptedText)
+		if s.interruptPending(owner) {
+			s.skipPlans(owner, turn, plans, SkippedInterruptedText)
 			return
 		}
 		// A fatal error or a cancellation ends the batch: the calls that
 		// have not started do not start.
-		if s.batchStopped(run) {
-			s.skipPlans(run, turn, plans, SkippedSettlingText)
+		if s.batchStopped(owner) {
+			s.skipPlans(owner, turn, plans, SkippedSettlingText)
 			return
 		}
-		s.decideCall(run, turn, &p)
-		s.executeOne(run, turn, p)
+		s.decideCall(owner, turn, &p)
+		s.executeOne(owner, turn, p)
 	}
 }
 
@@ -171,16 +171,16 @@ func (s *Session) runBatch(run *runState, turn int, plans []callPlan, parallel b
 // A batch runs to completion except for a cancellation or a fatal error,
 // which end it through the finalization, and an interrupt. A finished
 // call is not one of them: the calls around it still run.
-func (s *Session) batchStopped(run *runState) bool {
+func (s *Session) batchStopped(owner *callOwner) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if run.jobOwned {
+	if owner.jobOwned {
 		// A job's script keeps its remaining calls: its owner is never
 		// finalized, so a candidate here would stop the batch without
 		// settling anything. The job's end record reports the failure.
 		return false
 	}
-	for _, c := range run.candidates {
+	for _, c := range owner.candidates {
 		if c.reason != ReasonFinished {
 			return true
 		}
@@ -191,7 +191,7 @@ func (s *Session) batchStopped(run *runState) bool {
 // decideCall counts and authorizes one call before the next call is
 // counted. A reset therefore applies to every following call, including
 // calls whose tools will execute concurrently.
-func (s *Session) decideCall(run *runState, turn int, p *callPlan) {
+func (s *Session) decideCall(owner *callOwner, turn int, p *callPlan) {
 	primary := s.primaryArgOf(p.call.Name)
 	exact := exactKeyOf(p.call.Name, p.prepared, p.call.Arguments)
 	near := nearKeyOf(p.call.Name, primary, p.call.Arguments, p.invalid)
@@ -199,29 +199,29 @@ func (s *Session) decideCall(run *runState, turn int, p *callPlan) {
 		exact = "invalid:" + p.call.Name
 	}
 	s.mu.Lock()
-	if run.sealed || run.committed {
+	if owner.sealed || owner.committed {
 		s.mu.Unlock()
 		return
 	}
-	if run.repeats == nil {
-		run.repeats = newRepeatCounter()
+	if owner.repeats == nil {
+		owner.repeats = newRepeatCounter()
 	}
 	if s.repeatCounts == nil {
 		s.repeatCounts = map[string]repeatCounts{}
 	}
-	s.repeatCounts[p.handle] = run.repeats.count(p.call.Name, exact, near)
+	s.repeatCounts[p.handle] = owner.repeats.count(p.call.Name, exact, near)
 	s.repeatOrder = append(s.repeatOrder, p.handle)
-	run.permissionHandle, run.permissionTool = p.handle, p.call.Name
+	owner.permissionHandle, owner.permissionTool = p.handle, p.call.Name
 	s.mu.Unlock()
 	decision := Allow()
 	if policy := s.opts.Policy; policy != nil && p.complete && (p.prepared != nil || p.invalid) {
 		info := s.toolCallInfo(turn, p.handle, p.call.Name, p.prepared, *p)
 		info.PrepareFailed = p.invalid
-		decision, p.policyErr = s.callPolicy(s.activityContext(run), run, policy, turn, info)
+		decision, p.policyErr = s.callPolicy(s.activityContext(owner), owner, policy, turn, info)
 	}
 	p.policy = &decision
 	s.mu.Lock()
-	run.permissionHandle, run.permissionTool = "", ""
+	owner.permissionHandle, owner.permissionTool = "", ""
 	s.mu.Unlock()
 }
 
@@ -267,7 +267,7 @@ func (s *Session) nextHandle() string {
 // The plan validates every call, so a call that failed its validation
 // is known before its repeat counts are taken, and is counted toward
 // the near key.
-func (s *Session) planCalls(run *runState, turn int, calls []ToolCall, truncated bool) []callPlan {
+func (s *Session) planCalls(owner *callOwner, turn int, calls []ToolCall, truncated bool) []callPlan {
 	var plans []callPlan
 	for i, call := range calls {
 		handle := s.nextHandle()
@@ -373,7 +373,7 @@ func (s *Session) batchIsParallel(plans []callPlan) bool {
 // executeParallel runs the calls of a batch concurrently.
 //
 // Permission decisions are complete before the tools run concurrently.
-func (s *Session) executeParallel(run *runState, turn int, plans []callPlan) {
+func (s *Session) executeParallel(owner *callOwner, turn int, plans []callPlan) {
 	var wg sync.WaitGroup
 	for _, p := range plans {
 		wg.Add(1)
@@ -381,10 +381,10 @@ func (s *Session) executeParallel(run *runState, turn int, plans []callPlan) {
 			defer wg.Done()
 			// An interrupt that arrived before the call started skips
 			// it.
-			if p.policy == nil || s.interruptPending(run) || s.batchStopped(run) {
+			if p.policy == nil || s.interruptPending(owner) || s.batchStopped(owner) {
 				return
 			}
-			s.executeOne(run, turn, p)
+			s.executeOne(owner, turn, p)
 		}(p)
 	}
 	wg.Wait()
@@ -396,8 +396,8 @@ func (s *Session) executeParallel(run *runState, turn int, plans []callPlan) {
 // was interrupted while it ran is cancelled. A call in a truncated
 // response whose arguments are incomplete is skipped with a visible
 // result.
-func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
-	if s.runWindingDown(run) {
+func (s *Session) executeOne(owner *callOwner, turn int, plan callPlan) {
+	if s.runWindingDown(owner) {
 		return
 	}
 	handle := plan.handle
@@ -408,7 +408,7 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 	// the finalization to settle. It is not marked started until the
 	// record is written. A call claimed after the finalization has
 	// sealed the run is the finalization's.
-	if !s.issueCall(run, turn, handle, call, plan.summary, plan.parent) {
+	if !s.issueCall(owner, turn, handle, call, plan.summary, plan.parent) {
 		return
 	}
 
@@ -427,20 +427,20 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 		// The write is claimed against the seal, so a dispatch that was
 		// descheduled until the run settled writes nothing: the
 		// finalization owns the call's record then.
-		callRecord, ok := s.reserveCallRecord(run, handle)
+		callRecord, ok := s.reserveCallRecord(owner, handle)
 		if !ok {
 			return false
 		}
 		recorded = true
-		defer s.finishCallWrite(run, callRecord)
+		defer s.finishCallWrite(owner, callRecord)
 		// A nested call never runs as a job, whatever mode the model's
 		// path would have given it.
 		if m != "" && plan.parent != "" {
 			m = CallModeNested
 		}
-		if err := s.writeCallRecord(run, callRecord, &ToolCallRecord{
+		if err := s.writeCallRecord(owner, callRecord, &ToolCallRecord{
 			RecordMeta: NewRecordMetaFrom("tool.call", OriginModel),
-			RunID:      run.id,
+			RunID:      owner.id,
 			Turn:       turn,
 			Handle:     handle,
 			CallID:     call.CallID,
@@ -456,7 +456,7 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 				// finalization gives it its result.
 				return false
 			}
-			s.addCandidate(run, newCandidate(ReasonStoreError, SettleDetail{
+			s.addCandidate(owner, newCandidate(ReasonStoreError, SettleDetail{
 				Source: "store",
 				Text:   err.Error(),
 			}))
@@ -465,7 +465,7 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 		return true
 	}
 	payload := map[string]any{
-		"run_id": run.id,
+		"run_id": owner.id,
 		"handle": handle,
 		"tool":   call.Name,
 	}
@@ -486,7 +486,7 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 		if !record("") {
 			return
 		}
-		s.recordResult(run, turn, handle, call.Name, call.CallID, ToolResult{
+		s.recordResult(owner, turn, handle, call.Name, call.CallID, ToolResult{
 			Text:    SkippedTruncatedText,
 			IsError: true,
 		}, OutcomeSkipped)
@@ -498,7 +498,7 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 		if !record(CallModeSync) {
 			return
 		}
-		s.recordResult(run, turn, handle, call.Name, call.CallID, ToolResult{
+		s.recordResult(owner, turn, handle, call.Name, call.CallID, ToolResult{
 			Text:    fmt.Sprintf("unknown tool %q", call.Name),
 			IsError: true,
 		}, OutcomeError)
@@ -519,22 +519,22 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 		// rules do not apply, because the call is not a valid call.
 		if plan.policy != nil {
 			decision, err := *plan.policy, plan.policyErr
-			if s.runWindingDown(run) {
-				s.logLateHookDecision(run.id, handle, call.Name, turn)
+			if s.runWindingDown(owner) {
+				s.logLateHookDecision(owner.id, handle, call.Name, turn)
 				return
 			}
 			if err != nil {
-				s.recordResult(run, turn, handle, call.Name, call.CallID, ToolResult{
+				s.recordResult(owner, turn, handle, call.Name, call.CallID, ToolResult{
 					Text:    err.Error(),
 					IsError: true,
 				}, OutcomeError)
-				s.addCandidate(run, newCandidate(ReasonHookError, SettleDetail{
+				s.addCandidate(owner, newCandidate(ReasonHookError, SettleDetail{
 					Source: hookFailureSource(err, "before_tool"),
 					Text:   err.Error(),
 				}))
 				return
 			}
-			if s.interruptPending(run) {
+			if s.interruptPending(owner) {
 				return
 			}
 			if decision.Denied {
@@ -542,7 +542,7 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 				if text == "" {
 					text = "The call was refused."
 				}
-				s.recordResult(run, turn, handle, call.Name, call.CallID, ToolResult{
+				s.recordResult(owner, turn, handle, call.Name, call.CallID, ToolResult{
 					Text:    text,
 					IsError: true,
 				}, OutcomeDenied)
@@ -555,7 +555,7 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 		if plan.prepareErr != nil {
 			text = plan.prepareErr.Error()
 		}
-		s.recordResult(run, turn, handle, call.Name, call.CallID, ToolResult{
+		s.recordResult(owner, turn, handle, call.Name, call.CallID, ToolResult{
 			Text:    text,
 			IsError: true,
 		}, OutcomeError)
@@ -564,22 +564,22 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 
 	// The before-tool hooks run after the validation and before the
 	// call, and they may refuse it or answer it themselves.
-	decision, interrupted, err := s.runBeforeTool(run, turn, handle, call.Name, prepared, plan)
+	decision, interrupted, err := s.runBeforeTool(owner, turn, handle, call.Name, prepared, plan)
 	// The hook may have outlived the run: a decision that arrives after
 	// the finalization began is discarded, and the call starts nothing.
-	if s.runWindingDown(run) {
-		s.logLateHookDecision(run.id, handle, call.Name, turn)
+	if s.runWindingDown(owner) {
+		s.logLateHookDecision(owner.id, handle, call.Name, turn)
 		return
 	}
 	if err != nil {
 		if !record(CallModeSync) {
 			return
 		}
-		s.recordResult(run, turn, handle, call.Name, call.CallID, ToolResult{
+		s.recordResult(owner, turn, handle, call.Name, call.CallID, ToolResult{
 			Text:    err.Error(),
 			IsError: true,
 		}, OutcomeError)
-		s.addCandidate(run, newCandidate(ReasonHookError, SettleDetail{
+		s.addCandidate(owner, newCandidate(ReasonHookError, SettleDetail{
 			Source: hookFailureSource(err, "before_tool"),
 			Text:   err.Error(),
 		}))
@@ -588,12 +588,12 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 	// An interrupted authorization starts no call and admits no job. A
 	// result an earlier hook gave before the interrupt is still the
 	// call's result.
-	if interrupted || s.interruptPending(run) {
+	if interrupted || s.interruptPending(owner) {
 		if decision.Result != nil {
 			if !record(CallModeSync) {
 				return
 			}
-			s.recordResult(run, turn, handle, call.Name, call.CallID, *decision.Result, OutcomeOK)
+			s.recordResult(owner, turn, handle, call.Name, call.CallID, *decision.Result, OutcomeOK)
 		}
 		return
 	}
@@ -607,7 +607,7 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 		if text == "" {
 			text = "The call was refused."
 		}
-		s.recordResult(run, turn, handle, call.Name, call.CallID, ToolResult{
+		s.recordResult(owner, turn, handle, call.Name, call.CallID, ToolResult{
 			Text:    text,
 			IsError: true,
 		}, OutcomeDenied)
@@ -619,7 +619,7 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 		if !record(CallModeSync) {
 			return
 		}
-		s.recordResult(run, turn, handle, call.Name, call.CallID, *decision.Result, OutcomeOK)
+		s.recordResult(owner, turn, handle, call.Name, call.CallID, *decision.Result, OutcomeOK)
 		return
 	}
 
@@ -627,11 +627,13 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 	// arrives later as an input. An interrupt that arrived after the
 	// authorization refuses the admission. A nested call never becomes
 	// a job: it runs in the turn its parent runs in.
-	if plan.parent == "" && s.callBecomesJob(call.Name, plan.background) {
+	// A job's owner has no run, so a call it makes can never start a job:
+	// the job's script runs inside the job it already has.
+	if plan.parent == "" && owner.run != nil && s.callBecomesJob(call.Name, plan.background) {
 		if !record(CallModeJob) {
 			return
 		}
-		s.startJobCall(run, turn, handle, call, plan)
+		s.startJobCall(owner, turn, handle, call, plan)
 		return
 	}
 
@@ -640,7 +642,7 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 	if !record(CallModeSync) {
 		return
 	}
-	if s.runWindingDown(run) {
+	if s.runWindingDown(owner) {
 		// The finalization owns the issued call's result.
 		return
 	}
@@ -648,18 +650,18 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 	// the finalization never waits for a call that the winding-down run
 	// will not start. The claim is made against the seal, so nothing
 	// starts after the commit point.
-	if !s.startCall(run, handle) {
+	if !s.startCall(owner, handle) {
 		return
 	}
 
 	// The call runs under the run's activity context, so an interrupt
 	// cancels it. A nested call runs under its caller's context too, so
 	// the script's own deadline ends it.
-	callCtx := s.activityContext(run)
+	callCtx := s.activityContext(owner)
 	if plan.callCtx != nil {
 		callCtx = plan.callCtx
 	}
-	result, err := tool.Call(callCtx, prepared, s.toolEnv(run, turn, handle, plan))
+	result, err := tool.Call(callCtx, prepared, s.toolEnv(owner, turn, handle, plan))
 	// The outcome is decided by the core, not by the tool.
 	outcome := OutcomeOK
 	var fatalCandidate *candidate
@@ -670,14 +672,14 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 		// the call was cancelled, and the result carries the partial
 		// output with the note.
 		text := result.Text
-		if s.interruptPending(run) {
+		if s.interruptPending(owner) {
 			text = interruptNote(text)
 		} else {
 			text = text + "\n" + CancelledInterruptedText
 		}
 		result = ToolResult{Text: text, IsError: true}
 		outcome = OutcomeCancelled
-	case err == nil && s.interruptPending(run):
+	case err == nil && s.interruptPending(owner):
 		// The call was cut short by an interrupt, even though the tool
 		// returned a result: the tool saw the cancellation and gave
 		// back what it had. The outcome says the call was cancelled,
@@ -691,7 +693,7 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 			// that never started is skipped, and one that was running
 			// is cancelled. The partial output the tool returned stays
 			// in the result, with the note.
-			if s.interruptPending(run) {
+			if s.interruptPending(owner) {
 				result = ToolResult{Text: interruptNote(result.Text), IsError: true}
 			} else {
 				text := result.Text
@@ -728,7 +730,7 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 		// on the tool's name: FinishResult is the finish tool's own, and a
 		// consumer that renames the tool keeps the settle.
 		if raw, ok := prepared.(FinishResult); ok {
-			s.addCandidate(run, newCandidate(ReasonFinished, SettleDetail{
+			s.addCandidate(owner, newCandidate(ReasonFinished, SettleDetail{
 				Source: "finish",
 				Text:   "the model called finish with a valid result",
 				Result: raw.FinishResult(),
@@ -739,10 +741,10 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 	// The after-tool chain runs before the result is recorded or
 	// emitted, so the record, the event and the model see the same
 	// sanitized result.
-	out := s.recordToolResult(run, turn, handle, call.Name, call.CallID, s.toolCallInfo(turn, handle, call.Name, prepared, plan), result, outcome)
+	out := s.recordToolResult(owner, turn, handle, call.Name, call.CallID, s.toolCallInfo(turn, handle, call.Name, prepared, plan), result, outcome)
 	if fatalCandidate != nil {
 		fatalCandidate.detail.Text = out.result.Text
-		s.addCandidate(run, *fatalCandidate)
+		s.addCandidate(owner, *fatalCandidate)
 	}
 }
 
@@ -752,8 +754,8 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 // lock, and the job.started record is written before the goroutine
 // starts. The call's own result is the "started" one, and the batch
 // carries on.
-func (s *Session) startJobCall(run *runState, turn int, handle string, call ToolCall, plan callPlan) {
-	jobID, ok, winding := s.startJob(run, turn, handle, call.Name, plan.prepared, plan.summary, call.Arguments)
+func (s *Session) startJobCall(owner *callOwner, turn int, handle string, call ToolCall, plan callPlan) {
+	jobID, ok, winding := s.startJob(owner.run, turn, handle, call.Name, plan.prepared, plan.summary, call.Arguments)
 	if winding {
 		// The run settled while the job was being accepted; nothing
 		// else starts, and the finalization owns the run.
@@ -762,7 +764,7 @@ func (s *Session) startJobCall(run *runState, turn int, handle string, call Tool
 	if !ok {
 		// There was no free slot. The failure is recoverable: the
 		// model sees the message and may wait or cancel one.
-		s.recordResult(run, turn, handle, call.Name, call.CallID, ToolResult{
+		s.recordResult(owner, turn, handle, call.Name, call.CallID, ToolResult{
 			Text:    TooManyJobsText,
 			IsError: true,
 		}, OutcomeError)
@@ -770,12 +772,12 @@ func (s *Session) startJobCall(run *runState, turn int, handle string, call Tool
 	}
 
 	text := fmt.Sprintf(StartedText, jobID, call.Name)
-	s.recordResult(run, turn, handle, call.Name, call.CallID, ToolResult{Text: text}, OutcomeStarted)
+	s.recordResult(owner, turn, handle, call.Name, call.CallID, ToolResult{Text: text}, OutcomeStarted)
 	s.events.emit(EventJobStarted, map[string]any{
 		"job":    jobID,
 		"handle": handle,
 		"tool":   call.Name,
-		"run_id": run.id,
+		"run_id": owner.id,
 	})
 }
 
@@ -800,10 +802,10 @@ func (s *Session) prepareEnv() PrepareEnv {
 // A nested call's output goes to the tool that made it, not to the
 // model, so its caps are NestedOutputCapChars and not the session's
 // context-relative ones. The calling tool caps what it passes on.
-func (s *Session) toolEnv(run *runState, turn int, handle string, plan callPlan) ToolEnv {
-	env := s.toolEnvFor(run.id, handle)
+func (s *Session) toolEnv(owner *callOwner, turn int, handle string, plan callPlan) ToolEnv {
+	env := s.toolEnvFor(owner.id, handle)
 	if plan.parent == "" {
-		env.Nested = &nestedCaller{session: s, run: run, turn: turn, parent: handle}
+		env.Nested = &nestedCaller{session: s, owner: owner, turn: turn, parent: handle}
 	} else {
 		env.Settings.ObservationCapChars = NestedOutputCapChars
 		env.Settings.ReadOutputCapChars = NestedOutputCapChars
@@ -865,16 +867,16 @@ func (s *Session) toolInfos() []ToolInfo {
 // A call gets exactly one result. The call claims its result before the
 // record is written, so a call that the finalization already gave a
 // synthetic result to is not given a second one.
-func (s *Session) recordResult(run *runState, turn int, handle, tool, callID string, result ToolResult, outcome Outcome) {
-	won, tracked := s.claimResult(run, handle)
+func (s *Session) recordResult(owner *callOwner, turn int, handle, tool, callID string, result ToolResult, outcome Outcome) {
+	won, tracked := s.claimResult(owner, handle)
 	if !won {
 		// The finalization already gave the call a synthetic result.
-		s.logLateToolResult(run.id, handle, tool, turn)
+		s.logLateToolResult(owner.id, handle, tool, turn)
 		return
 	}
-	s.writeResult(run, turn, handle, tool, callID, result, outcome, afterToolOutcome{result: result})
+	s.writeResult(owner, turn, handle, tool, callID, result, outcome, afterToolOutcome{result: result})
 	if tracked {
-		s.finishResultWrite(run)
+		s.finishResultWrite(owner)
 	}
 }
 
@@ -884,33 +886,33 @@ func (s *Session) recordResult(run *runState, turn int, handle, tool, callID str
 // record, the event and the model all see the same sanitized result. A
 // hook that fails settles the run with hook_error, and the call keeps
 // the result the tool gave.
-func (s *Session) recordToolResult(run *runState, turn int, handle, tool, callID string, info ToolCallInfo, result ToolResult, outcome Outcome) afterToolOutcome {
-	out, err := s.runAfterTool(hookCompletionContext(run.ctx), run.id, "", turn, info, result)
+func (s *Session) recordToolResult(owner *callOwner, turn int, handle, tool, callID string, info ToolCallInfo, result ToolResult, outcome Outcome) afterToolOutcome {
+	out, err := s.runAfterTool(hookCompletionContext(owner.ctx), owner.id, "", turn, info, result)
 	if err != nil {
-		s.addCandidate(run, newCandidate(ReasonHookError, SettleDetail{
+		s.addCandidate(owner, newCandidate(ReasonHookError, SettleDetail{
 			Source: hookFailureSource(err, "after_tool"),
 			Text:   err.Error(),
 		}))
 	}
-	won, tracked := s.claimResult(run, handle)
+	won, tracked := s.claimResult(owner, handle)
 	if !won {
 		// The finalization already gave the call a synthetic result.
-		s.logLateToolResult(run.id, handle, tool, turn)
+		s.logLateToolResult(owner.id, handle, tool, turn)
 		return out
 	}
-	s.writeResult(run, turn, handle, tool, callID, out.result, outcome, out)
+	s.writeResult(owner, turn, handle, tool, callID, out.result, outcome, out)
 	if tracked {
-		s.finishResultWrite(run)
+		s.finishResultWrite(owner)
 	}
 	return out
 }
 
 // finishResultWrite marks the end of a claimed result's write, so the
 // finalization, which waits for it, can go on.
-func (s *Session) finishResultWrite(run *runState) {
+func (s *Session) finishResultWrite(owner *callOwner) {
 	s.mu.Lock()
-	run.resultWrites--
-	done := run.workDone
+	owner.resultWrites--
+	done := owner.workDone
 	s.mu.Unlock()
 	if done != nil {
 		select {
@@ -921,13 +923,13 @@ func (s *Session) finishResultWrite(run *runState) {
 }
 
 // finishCallWrite marks the end of a tool.call record's write.
-func (s *Session) finishCallWrite(run *runState, call *issuedCall) {
+func (s *Session) finishCallWrite(owner *callOwner, call *issuedCall) {
 	s.mu.Lock()
 	call.writing = false
 	cancel := call.recordCancel
 	call.recordCancel = nil
-	run.callWrites--
-	s.signalWorkLocked(run)
+	owner.callWrites--
+	s.signalWorkLocked(owner)
 	s.mu.Unlock()
 	if cancel != nil {
 		cancel(nil)
@@ -943,18 +945,18 @@ func (s *Session) finishCallWrite(run *runState, call *issuedCall) {
 // finalization's wait bounds it.
 //
 // The caller holds the session's lock.
-func (s *Session) beginCallRecordLocked(run *runState, call *issuedCall) {
-	base := run.ctx
+func (s *Session) beginCallRecordLocked(owner *callOwner, call *issuedCall) {
+	base := owner.ctx
 	if base == nil {
 		base = context.Background()
 	}
 	call.recorded = true
 	call.writing = true
 	call.recordCtx, call.recordCancel = context.WithCancelCause(context.WithoutCancel(base))
-	if run.workDone == nil {
-		run.workDone = make(chan struct{}, 1)
+	if owner.workDone == nil {
+		owner.workDone = make(chan struct{}, 1)
 	}
-	run.callWrites++
+	owner.callWrites++
 }
 
 // writeResult writes a call's result record and puts it in its reader's
@@ -973,7 +975,7 @@ func (s *Session) beginCallRecordLocked(run *runState, call *issuedCall) {
 //
 // The result's model-facing text starts with the handle line, so the
 // model can name the result later and a strategy can find it.
-func (s *Session) writeResult(run *runState, turn int, handle, tool, callID string, result ToolResult, outcome Outcome, out afterToolOutcome) {
+func (s *Session) writeResult(owner *callOwner, turn int, handle, tool, callID string, result ToolResult, outcome Outcome, out afterToolOutcome) {
 	text := modelFacingText(handle, tool, result.Text)
 	// A nested call's record and event hold its text to the session's
 	// cap; the caller reads the whole result.
@@ -984,7 +986,7 @@ func (s *Session) writeResult(run *runState, turn int, handle, tool, callID stri
 	}
 	rec := &ToolResultRecord{
 		RecordMeta:  NewRecordMetaFrom("tool.result", OriginTool),
-		RunID:       run.id,
+		RunID:       owner.id,
 		Turn:        turn,
 		Handle:      handle,
 		CallID:      callID,
@@ -1009,14 +1011,14 @@ func (s *Session) writeResult(run *runState, turn int, handle, tool, callID stri
 			IsError:    out.original.IsError,
 		}
 	}
-	if err := s.write(run.ctx, rec); err != nil {
-		s.noteStoreError(run, err)
+	if err := s.write(owner.ctx, rec); err != nil {
+		s.noteStoreError(owner, err)
 	}
 
 	// A nested call's result is the caller's, and it is recorded for the
 	// caller to read back rather than appended to the model's view.
 	if parent != "" {
-		s.storeNestedResult(run, NestedResult{
+		s.storeNestedResult(owner, NestedResult{
 			Handle:     handle,
 			Tool:       tool,
 			Outcome:    outcome,
@@ -1025,7 +1027,7 @@ func (s *Session) writeResult(run *runState, turn int, handle, tool, callID stri
 			IsError:    result.IsError,
 		})
 		payload := map[string]any{
-			"run_id":  run.id,
+			"run_id":  owner.id,
 			"handle":  handle,
 			"tool":    tool,
 			"outcome": string(outcome),
@@ -1046,18 +1048,18 @@ func (s *Session) writeResult(run *runState, turn int, handle, tool, callID stri
 	result.Text = text
 	s.rememberResult(handle, tool, outcome, result)
 
-	if err := s.write(run.ctx, &MessageRecord{
+	if err := s.write(owner.ctx, &MessageRecord{
 		RecordMeta: NewRecordMetaFrom("message", msg.Origin),
-		RunID:      run.id,
+		RunID:      owner.id,
 		Turn:       turn,
 		Role:       msg.Role,
 		Content:    msg.Content,
 	}); err != nil {
-		s.noteStoreError(run, err)
+		s.noteStoreError(owner, err)
 	}
 
 	s.events.emit(EventToolResult, map[string]any{
-		"run_id":  run.id,
+		"run_id":  owner.id,
 		"handle":  handle,
 		"tool":    tool,
 		"outcome": string(outcome),
@@ -1071,13 +1073,13 @@ func (s *Session) writeResult(run *runState, turn int, handle, tool, callID stri
 // The result waits under the session's lock until the batch that made
 // the call reads it back, and a result the finalization settled for a
 // call nobody waits for any more is dropped with the run.
-func (s *Session) storeNestedResult(run *runState, result NestedResult) {
+func (s *Session) storeNestedResult(owner *callOwner, result NestedResult) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if run.nestedResults == nil {
-		run.nestedResults = map[string]NestedResult{}
+	if owner.nestedResults == nil {
+		owner.nestedResults = map[string]NestedResult{}
 	}
-	run.nestedResults[result.Handle] = result
+	owner.nestedResults[result.Handle] = result
 }
 
 // rememberResult records a call's outcome and result in the turn's
@@ -1114,28 +1116,28 @@ func (s *Session) rememberResult(handle, tool string, outcome Outcome, result To
 // over when the batch never reaches it, and the seal settles whatever is
 // left when the run settles. The claim is made against the seal: a batch
 // that arrives after the finalization has sealed the run is left alone.
-func (s *Session) claimBatch(run *runState, turn int, plans []callPlan) {
+func (s *Session) claimBatch(owner *callOwner, turn int, plans []callPlan) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if run.sealed {
+	if owner.sealed {
 		return
 	}
-	if run.pendingCalls == nil {
-		run.pendingCalls = map[string]*issuedCall{}
+	if owner.pendingCalls == nil {
+		owner.pendingCalls = map[string]*issuedCall{}
 	}
 	for _, p := range plans {
-		if run.settledCalls[p.handle] {
+		if owner.settledCalls[p.handle] {
 			continue
 		}
-		if _, issued := run.pendingCalls[p.handle]; issued {
+		if _, issued := owner.pendingCalls[p.handle]; issued {
 			continue
 		}
-		run.pendingCalls[p.handle] = &issuedCall{
+		owner.pendingCalls[p.handle] = &issuedCall{
 			handle:     p.handle,
 			tool:       p.call.Name,
 			id:         p.call.CallID,
 			turn:       turn,
-			globalTurn: run.globalTurn,
+			globalTurn: owner.globalTurn,
 			arguments:  p.call.Arguments,
 			summary:    p.summary,
 			parent:     p.parent,
@@ -1143,7 +1145,7 @@ func (s *Session) claimBatch(run *runState, turn int, plans []callPlan) {
 		s.resultMeta[p.handle] = resultMeta{
 			tool:   p.call.Name,
 			callID: p.call.CallID,
-			turn:   run.globalTurn,
+			turn:   owner.globalTurn,
 			parent: p.parent,
 		}
 	}
@@ -1158,24 +1160,24 @@ func (s *Session) claimBatch(run *runState, turn int, plans []callPlan) {
 // the parent the call was given. The claim is made against the seal: it
 // reports false when the run is sealed, because the finalization owns
 // every call that is still outstanding.
-func (s *Session) issueCall(run *runState, turn int, handle string, call ToolCall, summary, parent string) bool {
+func (s *Session) issueCall(owner *callOwner, turn int, handle string, call ToolCall, summary, parent string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if run.sealed {
+	if owner.sealed {
 		return false
 	}
-	if entry, issued := run.pendingCalls[handle]; issued {
+	if entry, issued := owner.pendingCalls[handle]; issued {
 		return !entry.recorded && !entry.started
 	}
-	if run.settledCalls[handle] {
+	if owner.settledCalls[handle] {
 		return false
 	}
-	run.pendingCalls[handle] = &issuedCall{
+	owner.pendingCalls[handle] = &issuedCall{
 		handle:     handle,
 		tool:       call.Name,
 		id:         call.CallID,
 		turn:       turn,
-		globalTurn: run.globalTurn,
+		globalTurn: owner.globalTurn,
 		arguments:  call.Arguments,
 		summary:    summary,
 		parent:     parent,
@@ -1183,11 +1185,11 @@ func (s *Session) issueCall(run *runState, turn int, handle string, call ToolCal
 	s.resultMeta[handle] = resultMeta{
 		tool:   call.Name,
 		callID: call.CallID,
-		turn:   run.globalTurn,
+		turn:   owner.globalTurn,
 		parent: parent,
 	}
-	if run.workDone == nil {
-		run.workDone = make(chan struct{}, 1)
+	if owner.workDone == nil {
+		owner.workDone = make(chan struct{}, 1)
 	}
 	return true
 }
@@ -1199,17 +1201,17 @@ func (s *Session) issueCall(run *runState, turn int, handle string, call ToolCal
 // sealed, and the finalization writes the record instead. The returned
 // call holds the context the record is written under, so the finalization
 // can end the write when it seals the claim.
-func (s *Session) reserveCallRecord(run *runState, handle string) (*issuedCall, bool) {
+func (s *Session) reserveCallRecord(owner *callOwner, handle string) (*issuedCall, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if run.sealed {
+	if owner.sealed {
 		return nil, false
 	}
-	call, ok := run.pendingCalls[handle]
+	call, ok := owner.pendingCalls[handle]
 	if !ok || call.recorded {
 		return nil, false
 	}
-	s.beginCallRecordLocked(run, call)
+	s.beginCallRecordLocked(owner, call)
 	return call, true
 }
 
@@ -1218,13 +1220,13 @@ func (s *Session) reserveCallRecord(run *runState, handle string) (*issuedCall, 
 //
 // The claim is made against the seal: it reports false when the run is
 // sealed, so nothing starts after the commit point.
-func (s *Session) startCall(run *runState, handle string) bool {
+func (s *Session) startCall(owner *callOwner, handle string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if run.sealed || run.interruptPending {
+	if owner.sealed || owner.interruptPending {
 		return false
 	}
-	call, ok := run.pendingCalls[handle]
+	call, ok := owner.pendingCalls[handle]
 	if !ok {
 		return false
 	}
@@ -1243,31 +1245,31 @@ func (s *Session) startCall(run *runState, handle string) bool {
 // write is then counted in run.resultWrites until finishResultWrite, so
 // the finalization does not write run.settled while the result is still
 // being written.
-func (s *Session) claimResult(run *runState, handle string) (won, tracked bool) {
+func (s *Session) claimResult(owner *callOwner, handle string) (won, tracked bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if run.sealed {
+	if owner.sealed {
 		// The finalization owns every result that is still outstanding.
 		return false, false
 	}
-	_, pending := run.pendingCalls[handle]
-	delete(run.pendingCalls, handle)
-	if run.settledCalls == nil {
-		run.settledCalls = map[string]bool{}
+	_, pending := owner.pendingCalls[handle]
+	delete(owner.pendingCalls, handle)
+	if owner.settledCalls == nil {
+		owner.settledCalls = map[string]bool{}
 	}
-	taken := run.settledCalls[handle]
+	taken := owner.settledCalls[handle]
 	if pending {
 		// The call was issued, and the finalization may have given
 		// it a synthetic result already.
-		run.settledCalls[handle] = true
+		owner.settledCalls[handle] = true
 	}
 	tracked = pending && !taken
 	if tracked {
-		run.resultWrites++
+		owner.resultWrites++
 	}
-	if run.workDone != nil {
+	if owner.workDone != nil {
 		select {
-		case run.workDone <- struct{}{}:
+		case owner.workDone <- struct{}{}:
 		default:
 		}
 	}
@@ -1278,15 +1280,15 @@ func (s *Session) claimResult(run *runState, handle string) (won, tracked bool) 
 //
 // A candidate arriving after the commit point is logged and ignored: it
 // never mutates a settled run.
-func (s *Session) addCandidate(run *runState, c candidate) {
+func (s *Session) addCandidate(owner *callOwner, c candidate) {
 	s.mu.Lock()
-	if run.committed {
-		runID := run.id
+	if owner.committed {
+		runID := owner.id
 		s.mu.Unlock()
 		s.logLateCandidate(runID, c)
 		return
 	}
-	run.candidates = append(run.candidates, c)
+	owner.candidates = append(owner.candidates, c)
 	s.mu.Unlock()
 }
 

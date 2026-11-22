@@ -59,7 +59,7 @@ func (s *Session) interruptedActivityTurn(run *runState, turn int, resp *respons
 	// arrives after the commit point is dropped, like every other
 	// writer's.
 	for _, c := range cands {
-		s.addCandidate(run, c)
+		s.addCandidate(&run.callOwner, c)
 	}
 	s.clearInterrupt(run)
 }
@@ -116,7 +116,7 @@ func (s *Session) recordPartialCause(run *runState, turn int, resp *response, ca
 		return
 	}
 	if _, err := s.recordAssistantResponse(run, turn, resp, true, cause); err != nil && !errors.Is(err, errCallRecordSealed) {
-		s.noteStoreError(run, err)
+		s.noteStoreError(&run.callOwner, err)
 	}
 }
 
@@ -140,7 +140,7 @@ func (s *Session) skipCalls(run *runState, turn int, calls []ToolCall, text stri
 	for i, call := range calls {
 		plans[i] = callPlan{handle: handles[i], call: call, index: i}
 	}
-	s.skipPlans(run, turn, plans, text)
+	s.skipPlans(&run.callOwner, turn, plans, text)
 }
 
 // skipPlans records the calls of a batch that never started, with the
@@ -150,16 +150,16 @@ func (s *Session) skipCalls(run *runState, turn int, calls []ToolCall, text stri
 // finalization after the seal — is left alone: it gets its records from
 // that claim. The plans carry the handles and the parents the batch was
 // registered with, so a nested call's records say what it belonged to.
-func (s *Session) skipPlans(run *runState, turn int, plans []callPlan, text string) {
+func (s *Session) skipPlans(owner *callOwner, turn int, plans []callPlan, text string) {
 	s.sealRaceHook("skip")
 	for _, p := range plans {
-		callRecord, ok := s.claimSkippedCall(run, turn, p.handle, p.call)
+		callRecord, ok := s.claimSkippedCall(owner, turn, p.handle, p.call)
 		if !ok {
 			continue
 		}
-		_ = s.writeCallRecord(run, callRecord, &ToolCallRecord{
+		_ = s.writeCallRecord(owner, callRecord, &ToolCallRecord{
 			RecordMeta: NewRecordMetaFrom("tool.call", OriginModel),
-			RunID:      run.id,
+			RunID:      owner.id,
 			Turn:       turn,
 			Handle:     p.handle,
 			CallID:     p.call.CallID,
@@ -168,8 +168,8 @@ func (s *Session) skipPlans(run *runState, turn int, plans []callPlan, text stri
 			Arguments:  recordArgs(p.call.Arguments),
 			Parent:     p.parent,
 		})
-		s.finishCallWrite(run, callRecord)
-		s.recordResult(run, turn, p.handle, p.call.Name, p.call.CallID, ToolResult{
+		s.finishCallWrite(owner, callRecord)
+		s.recordResult(owner, turn, p.handle, p.call.Name, p.call.CallID, ToolResult{
 			Text:    text,
 			IsError: true,
 		}, OutcomeSkipped)
@@ -184,23 +184,23 @@ func (s *Session) skipPlans(run *runState, turn int, plans []callPlan, text stri
 // when the call already has an owner or the run is sealed, and the seal
 // then writes the call's record and its result. The returned call holds
 // the context the record is written under.
-func (s *Session) claimSkippedCall(run *runState, turn int, handle string, call ToolCall) (*issuedCall, bool) {
+func (s *Session) claimSkippedCall(owner *callOwner, turn int, handle string, call ToolCall) (*issuedCall, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if run.sealed {
+	if owner.sealed {
 		return nil, false
 	}
-	if entry, issued := run.pendingCalls[handle]; issued {
+	if entry, issued := owner.pendingCalls[handle]; issued {
 		// The batch registered the call, and its dispatch may already
 		// own the record or have started it: the call is not a skip
 		// then.
 		if entry.recorded || entry.started {
 			return nil, false
 		}
-		s.beginCallRecordLocked(run, entry)
+		s.beginCallRecordLocked(owner, entry)
 		return entry, true
 	}
-	if run.settledCalls[handle] || s.turnSummaryLocked(run.globalTurn, handle).Outcome != "" {
+	if owner.settledCalls[handle] || s.turnSummaryLocked(owner.globalTurn, handle).Outcome != "" {
 		// The call already has an outcome.
 		return nil, false
 	}
@@ -211,8 +211,8 @@ func (s *Session) claimSkippedCall(run *runState, turn int, handle string, call 
 		turn:      turn,
 		arguments: call.Arguments,
 	}
-	run.pendingCalls[handle] = entry
-	s.beginCallRecordLocked(run, entry)
+	owner.pendingCalls[handle] = entry
+	s.beginCallRecordLocked(owner, entry)
 	return entry, true
 }
 

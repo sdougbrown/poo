@@ -33,7 +33,7 @@ func testPermissionFinalizerHandoff(t *testing.T, stored bool) {
 	// bounded wait. The seal must join it, not cancel or replace it.
 	time.Sleep(10 * time.Millisecond)
 	go func() {
-		s.reportPermissionAnswered(run, PermissionAnswer{AskID: "a1", Decision: "deny", AnsweredBy: "cancelled", Provenance: ProvenanceCancelled})
+		s.reportPermissionAnswered(&run.callOwner, PermissionAnswer{AskID: "a1", Decision: "deny", AnsweredBy: "cancelled", Provenance: ProvenanceCancelled})
 		close(answerDone)
 	}()
 	select {

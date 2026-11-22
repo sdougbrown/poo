@@ -87,7 +87,7 @@ func TestARefusedDeliveryWriteBreaksTheFeeds(t *testing.T) {
 
 	// The run's delivery is the store's to refuse, and the session breaks
 	// at that write.
-	run := &runState{id: "r1"}
+	run := &runState{callOwner: callOwner{id: "r1"}}
 	if err := s.writeDelivery(context.Background(), run, &InputDeliveredRecord{
 		RecordMeta: NewRecordMeta("input.delivered"),
 		SessionID:  "s1",

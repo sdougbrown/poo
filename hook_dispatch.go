@@ -199,7 +199,7 @@ func (s *Session) runBeforeRun(run *runState, trigger RunTrigger) (startDecision
 	// discarded.
 	s.startActivity(run)
 	defer s.endActivity(run)
-	ctx := s.activityContext(run)
+	ctx := s.activityContext(&run.callOwner)
 	for _, h := range s.opts.BeforeRun {
 		out, err := s.callHook(ctx, h, func(hctx context.Context) (any, error) {
 			return h.BeforeRun(s.hookContext(hctx, 0, false), trigger)
@@ -225,7 +225,7 @@ func (s *Session) runBeforeRun(run *runState, trigger RunTrigger) (startDecision
 // hook that put them there, and the record says the same.
 func (s *Session) appendStartMessages(run *runState, decisions startDecisions) {
 	for _, added := range decisions.messages {
-		if s.runWindingDown(run) {
+		if s.runWindingDown(&run.callOwner) {
 			return
 		}
 		msg := hookMessage(added.message, added.name)
@@ -254,7 +254,7 @@ func (s *Session) runAfterTurn(run *runState, turn int, interrupted bool) (appen
 	// decisions are discarded.
 	s.startActivity(run)
 	defer s.endActivity(run)
-	ctx := s.activityContext(run)
+	ctx := s.activityContext(&run.callOwner)
 	for _, h := range s.opts.AfterTurn {
 		out, err := s.callHook(ctx, h, func(hctx context.Context) (any, error) {
 			return h.AfterTurn(s.hookContext(hctx, turn, interrupted))
@@ -314,7 +314,7 @@ func (s *Session) runBeforeSettle(run *runState, turn int, natural Reason) (Sett
 	// discarded.
 	s.startActivity(run)
 	defer s.endActivity(run)
-	ctx := s.activityContext(run)
+	ctx := s.activityContext(&run.callOwner)
 	var continues []hookAppend
 	for _, h := range s.opts.BeforeSettle {
 		out, err := s.callHook(ctx, h, func(hctx context.Context) (any, error) {
