@@ -749,6 +749,16 @@ func stoppedText(partial string, err error, reason string) string {
 //
 // The environment names the job, so a tool can tell a job from a call in
 // the turn.
+func (s *Session) jobToolEnv(job *jobState) ToolEnv {
+	env := s.toolEnvFor(job.runID, job.handle)
+	env.JobID = job.id
+	// A tool that orchestrates others gets a seam of its own, owned by
+	// the job: the calls it makes are recorded against the job's handle,
+	// and they keep running after the run that started the job settled.
+	env.Nested = &nestedCaller{session: s, run: job.owner, turn: job.turn, parent: job.handle}
+	return env
+}
+
 // ownerFailure returns the worst settle candidate a job's tool calls
 // raised, if any.
 //
@@ -787,16 +797,6 @@ func (s *Session) ownerFailure(owner *runState) (Reason, SettleDetail, bool) {
 		}
 	}
 	return worst, detail, worst != ""
-}
-
-func (s *Session) jobToolEnv(job *jobState) ToolEnv {
-	env := s.toolEnvFor(job.runID, job.handle)
-	env.JobID = job.id
-	// A tool that orchestrates others gets a seam of its own, owned by
-	// the job: the calls it makes are recorded against the job's handle,
-	// and they keep running after the run that started the job settled.
-	env.Nested = &nestedCaller{session: s, run: job.owner, turn: job.turn, parent: job.handle}
-	return env
 }
 
 // jobEnded builds the job.ended record and its event payload: the one
