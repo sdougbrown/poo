@@ -288,5 +288,5 @@ type ChatTransport interface {
 	// A transport that cannot fork returns a typed error: the
 	// compaction seam needs a fork, and a transport that cannot do one
 	// cannot take part in a compaction.
-	Fork(ctx context.Context, prev Rendered, appended []Message, maxTokens int) (StreamReader, error)
+	Fork(ctx context.Context, prev Rendered, appended []Message, maxTokens int, opts ForkOptions) (StreamReader, error)
 }

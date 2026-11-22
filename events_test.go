@@ -18,7 +18,7 @@ func (t *deltaTransport) Stream(ctx context.Context, req poo.ChatRequest) (poo.S
 }
 
 // Fork is not implemented by the fake.
-func (t *deltaTransport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.Message, maxTokens int) (poo.StreamReader, error) {
+func (t *deltaTransport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.Message, maxTokens int, opts poo.ForkOptions) (poo.StreamReader, error) {
 	return nil, errNoFork
 }
 

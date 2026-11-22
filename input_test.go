@@ -1003,7 +1003,7 @@ func (t *stallingTransport) Stream(ctx context.Context, req poo.ChatRequest) (po
 }
 
 // Fork is not implemented by the fake.
-func (t *stallingTransport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.Message, maxTokens int) (poo.StreamReader, error) {
+func (t *stallingTransport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.Message, maxTokens int, opts poo.ForkOptions) (poo.StreamReader, error) {
 	return nil, errNoFork
 }
 
@@ -1218,7 +1218,7 @@ func (t *partialTransport) Stream(ctx context.Context, req poo.ChatRequest) (poo
 }
 
 // Fork is not implemented by the fake.
-func (t *partialTransport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.Message, maxTokens int) (poo.StreamReader, error) {
+func (t *partialTransport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.Message, maxTokens int, opts poo.ForkOptions) (poo.StreamReader, error) {
 	return nil, errNoFork
 }
 

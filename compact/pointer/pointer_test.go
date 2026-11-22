@@ -1,0 +1,335 @@
+package pointer_test
+
+import (
+	"context"
+	"encoding/json"
+	"strings"
+	"testing"
+
+	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/compact/pointer"
+	"github.com/sdougbrown/poo/pootest"
+)
+
+// The pointer strategy: the chat model's fork names queries, the
+// retained history answers them, and the compaction model composes the
+// working context from the digest — never from the transcript whole.
+
+// echoTool answers with the text it was called with.
+type echoTool struct{}
+
+// Spec describes the tool.
+func (t *echoTool) Spec() poo.ToolSpec {
+	return poo.ToolSpec{
+		Name:        "echo",
+		Description: "echo the argument back",
+		Schema:      json.RawMessage(`{"type":"object","properties":{"text":{"type":"string"}},"additionalProperties":false}`),
+		Class:       poo.ClassReadOnly,
+	}
+}
+
+// Prepare accepts the call.
+func (t *echoTool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, error) {
+	var args struct {
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(raw, &args); err != nil {
+		return nil, err
+	}
+	return echoPrepared{text: args.Text}, nil
+}
+
+// Call answers.
+func (t *echoTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.ToolResult, error) {
+	return poo.ToolResult{Text: "echoed " + in.(echoPrepared).text}, nil
+}
+
+// echoPrepared is a prepared echo call.
+type echoPrepared struct {
+	text string
+}
+
+// Summary describes the call.
+func (p echoPrepared) Summary() string { return "echo " + p.text }
+
+// readSink is a test sink that also reads its records back, so the
+// strategy's queries run over the session's own records.
+type readSink struct {
+	*pootest.Sink
+}
+
+// Records returns the sink's records.
+func (r readSink) Records(context.Context) ([]poo.Record, error) {
+	return r.Sink.Records(), nil
+}
+
+// session builds a pointer session whose sink reads back.
+func session(t *testing.T, tr *pootest.Transport, opts pointer.Options) (*poo.Session, *pootest.Sink) {
+	t.Helper()
+	sink := pootest.NewSink()
+	s, err := poo.New(poo.Options{
+		Transport:    tr,
+		Tools:        map[string]poo.Tool{"echo": &echoTool{}},
+		ToolOrder:    []string{"echo"},
+		Sink:         readSink{Sink: sink},
+		SessionID:    "s1",
+		Model:        poo.ModelInfo{ModelID: "test-model", ContextLimit: 20000},
+		SystemPrompt: "the system prompt",
+		Compactor:    pointer.New(opts),
+	})
+	if err != nil {
+		t.Fatalf("building the session: %v", err)
+	}
+	t.Cleanup(func() { s.Close() })
+	return s, sink
+}
+
+// long returns a text of the given size with a sentinel at its front.
+func long(sentinel string) string {
+	return sentinel + " " + strings.Repeat("x", 3500)
+}
+
+// askRequests returns the requests a strategy made for itself.
+func askRequests(reqs []poo.ChatRequest) []poo.ChatRequest {
+	var out []poo.ChatRequest
+	for _, req := range reqs {
+		if len(req.Tools) == 0 {
+			out = append(out, req)
+		}
+	}
+	return out
+}
+
+// requestText renders the messages a request carries.
+func requestText(req poo.ChatRequest) string {
+	var b strings.Builder
+	for _, m := range req.Messages {
+		b.WriteString(m.Text())
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+// TestTheRunReconstructsFromTheQueries covers the strategy's whole job:
+// the fork names queries, the retained history answers them, and the
+// compose ask reads the digest — not the transcript whole.
+func TestTheRunReconstructsFromTheQueries(t *testing.T) {
+	tr := pootest.NewTransport(
+		pootest.Turn{Text: long("TURN-ONE"), Calls: []pootest.Call{{Name: "echo", Arguments: json.RawMessage(`{"text":"one"}`)}}},
+		pootest.Turn{Text: long("TURN-TWO"), Calls: []pootest.Call{{Name: "echo", Arguments: json.RawMessage(`{"text":"two"}`)}}},
+		pootest.Turn{Text: "## Goal\nfinish the task\n\n## Next Steps\n1. answer"},
+		pootest.Turn{Text: "the final answer"},
+	)
+	tr.SetForkTurns(pootest.Turn{Text: `{"queries": ["TURN-ONE", "the deploy"], "notes": "the deploy is pending"}`})
+	s, sink := session(t, tr, pointer.Options{Ratio: 0.05, KeepRecentTokens: 1})
+
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	res, err := s.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	if res.Reason != poo.ReasonEndTurn {
+		t.Fatalf("the run settled %q (%s), want end_turn", res.Reason, res.Detail.Text)
+	}
+
+	// The fork was asked for JSON.
+	forks := tr.Forks()
+	t.Logf("forks: %d", len(forks))
+	for i, f := range forks {
+		t.Logf("fork %d: json %v, appended %q", i, f.JSON, f.Appended[0].Text()[:80])
+	}
+	if !forks[0].JSON {
+		t.Error("the fork was not asked for a JSON reply")
+	}
+
+	// The compose request carries the orientation seed, the matches the
+	// queries hit, and the fork's notes — and none of the transcript
+	// the queries did not name.
+	asks := askRequests(tr.Requests())
+	if len(asks) != 1 {
+		t.Fatalf("the transport holds %d strategy requests, want 1", len(asks))
+	}
+	ask := asks[0].Messages[1].Text()
+	for _, want := range []string{
+		"<task>", "do the thing",
+		"<matches>", "TURN-ONE",
+		"<notes>", "the deploy is pending",
+	} {
+		if !strings.Contains(ask, want) {
+			t.Errorf("the compose request is %q, want it to carry %q", ask, want)
+		}
+	}
+	// The queries named turn 1 alone: turn 2's text stays out of the
+	// compose request.
+	if strings.Contains(ask, "TURN-TWO") {
+		t.Errorf("the compose request carries the transcript the queries did not name: %q", ask)
+	}
+
+	// The replacement carries the reconstruction and the retention
+	// pointer.
+	var compaction *poo.CompactionRecord
+	for _, rec := range sink.Records() {
+		if cr, ok := rec.(*poo.CompactionRecord); ok {
+			compaction = cr
+		}
+	}
+	if compaction == nil {
+		t.Fatal("the log holds no compaction")
+	}
+	if compaction.Strategy != pointer.Strategy {
+		t.Fatalf("the compaction's strategy is %q, want %q", compaction.Strategy, pointer.Strategy)
+	}
+	text := compaction.Replacement[0].Text()
+	for _, want := range []string{
+		"[Context compacted: turns 1-1 reconstructed below]",
+		"finish the task",
+		"retained in this session's store of session s1",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the replacement is %q, want it to carry %q", text, want)
+		}
+	}
+
+	// The run's last request carries the reconstruction, not the
+	// replaced turn.
+	last := tr.Requests()[len(tr.Requests())-1]
+	view := requestText(last)
+	if !strings.Contains(view, "finish the task") {
+		t.Errorf("the last request is %q, want the reconstruction in it", view)
+	}
+	if strings.Contains(view, "TURN-ONE") {
+		t.Errorf("the last request is %q, want the replaced turn gone from it", view)
+	}
+}
+
+// TestAReplyThatDoesNotParseIsTheNotes covers the lenient parse: a fork
+// reply that is not JSON steers the compose ask as notes, and no
+// matches are collected.
+func TestAReplyThatDoesNotParseIsTheNotes(t *testing.T) {
+	tr := pootest.NewTransport(
+		pootest.Turn{Text: long("TURN-ONE"), Calls: []pootest.Call{{Name: "echo", Arguments: json.RawMessage(`{"text":"one"}`)}}},
+		pootest.Turn{Text: long("TURN-TWO"), Calls: []pootest.Call{{Name: "echo", Arguments: json.RawMessage(`{"text":"two"}`)}}},
+		pootest.Turn{Text: "## Goal\nfinish the task"},
+		pootest.Turn{Text: "the final answer"},
+	)
+	tr.SetForkTurns(pootest.Turn{Text: "- the deploy is pending\n- main.go is edited"})
+	s, _ := session(t, tr, pointer.Options{Ratio: 0.05, KeepRecentTokens: 1})
+
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	if _, err := s.Wait(context.Background()); err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+
+	asks := askRequests(tr.Requests())
+	if len(asks) != 1 {
+		t.Fatalf("the transport holds %d strategy requests, want 1", len(asks))
+	}
+	ask := asks[0].Messages[1].Text()
+	for _, want := range []string{"<notes>", "the deploy is pending", "<task>"} {
+		if !strings.Contains(ask, want) {
+			t.Errorf("the compose request is %q, want it to carry %q", ask, want)
+		}
+	}
+	if strings.Contains(ask, "TURN-ONE") {
+		t.Errorf("the compose request is %q, want no extracted content from an unparseable reply", ask)
+	}
+}
+
+// TestAReconstructionThatCannotCompleteFallsBackToTheMine covers the
+// fallback: a compose ask the output limit cut short hands the run to
+// the full-span strategy, whose compaction is the one on the record.
+func TestAReconstructionThatCannotCompleteFallsBackToTheMine(t *testing.T) {
+	tr := pootest.NewTransport(
+		pootest.Turn{Text: long("TURN-ONE"), Calls: []pootest.Call{{Name: "echo", Arguments: json.RawMessage(`{"text":"x"}`)}}},
+		pootest.Turn{Text: long("TURN-TWO"), Calls: []pootest.Call{{Name: "echo", Arguments: json.RawMessage(`{"text":"x"}`)}}},
+		pootest.Turn{Text: "## Goal\nfinish the task", Finish: "length"},
+		pootest.Turn{Text: "## Goal\nfinish the task"},
+		pootest.Turn{Text: "the final answer"},
+	)
+	tr.SetForkTurns(
+		pootest.Turn{Text: `{"queries": ["TURN-ONE"]}`},
+		pootest.Turn{Text: "- the fallback pointers"},
+	)
+	s, sink := session(t, tr, pointer.Options{Ratio: 0.05, KeepRecentTokens: 1})
+
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	res, err := s.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	if res.Reason != poo.ReasonEndTurn {
+		t.Fatalf("the run settled %q (%s), want end_turn", res.Reason, res.Detail.Text)
+	}
+
+	var strategy string
+	for _, rec := range sink.Records() {
+		if cr, ok := rec.(*poo.CompactionRecord); ok {
+			strategy = cr.Strategy
+		}
+	}
+	if strategy != "mine" {
+		t.Fatalf("the fallback's compaction strategy is %q, want mine", strategy)
+	}
+	// The full-span rung made its own pointer pass: two forks on the
+	// record.
+	if got := len(tr.Forks()); got != 2 {
+		t.Errorf("the transport holds %d forks, want the selective pass and the fallback's", got)
+	}
+}
+
+// TestAStoreThatCannotBeReadStillComposes covers the seam's absence: a
+// session whose sink cannot read its records back composes from the
+// seed and the notes alone.
+func TestAStoreThatCannotBeReadStillComposes(t *testing.T) {
+	tr := pootest.NewTransport(
+		pootest.Turn{Text: long("TURN-ONE"), Calls: []pootest.Call{{Name: "echo", Arguments: json.RawMessage(`{"text":"one"}`)}}},
+		pootest.Turn{Text: long("TURN-TWO"), Calls: []pootest.Call{{Name: "echo", Arguments: json.RawMessage(`{"text":"two"}`)}}},
+		pootest.Turn{Text: "## Goal\nfinish the task"},
+		pootest.Turn{Text: "the final answer"},
+	)
+	tr.SetForkTurns(pootest.Turn{Text: `{"queries": ["TURN-ONE"], "notes": "the notes"}`})
+	sink := pootest.NewSink()
+	s, err := poo.New(poo.Options{
+		Transport:    tr,
+		Tools:        map[string]poo.Tool{"echo": &echoTool{}},
+		ToolOrder:    []string{"echo"},
+		Sink:         sink,
+		SessionID:    "s1",
+		Model:        poo.ModelInfo{ModelID: "test-model", ContextLimit: 20000},
+		SystemPrompt: "the system prompt",
+		Compactor:    pointer.New(pointer.Options{Ratio: 0.05, KeepRecentTokens: 1}),
+	})
+	if err != nil {
+		t.Fatalf("building the session: %v", err)
+	}
+	t.Cleanup(func() { s.Close() })
+
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	res, err := s.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	if res.Reason != poo.ReasonEndTurn {
+		t.Fatalf("the run settled %q (%s), want end_turn", res.Reason, res.Detail.Text)
+	}
+
+	asks := askRequests(tr.Requests())
+	if len(asks) != 1 {
+		t.Fatalf("the transport holds %d strategy requests, want 1", len(asks))
+	}
+	ask := asks[0].Messages[1].Text()
+	if strings.Contains(ask, "TURN-ONE") {
+		t.Errorf("the compose request is %q, want no extracted content from an unreadable store", ask)
+	}
+	if !strings.Contains(ask, "the notes") || !strings.Contains(ask, "do the thing") {
+		t.Errorf("the compose request is %q, want the notes and the seed in it", ask)
+	}
+}

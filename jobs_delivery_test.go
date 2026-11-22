@@ -592,8 +592,8 @@ func (b *openRunHoldTransport) Stream(ctx context.Context, req poo.ChatRequest) 
 }
 
 // Fork hands the fork to the scripted transport.
-func (b *openRunHoldTransport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.Message, maxTokens int) (poo.StreamReader, error) {
-	return b.inner.Fork(ctx, prev, appended, maxTokens)
+func (b *openRunHoldTransport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.Message, maxTokens int, opts poo.ForkOptions) (poo.StreamReader, error) {
+	return b.inner.Fork(ctx, prev, appended, maxTokens, poo.ForkOptions{})
 }
 
 // TestOnIdleHoldDeliversToAnOpenRun covers the delivery table: a

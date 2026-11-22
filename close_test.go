@@ -533,7 +533,7 @@ func (stalledTransport) Stream(ctx context.Context, req poo.ChatRequest) (poo.St
 	return nil, poo.Rendered{}, ctx.Err()
 }
 
-func (stalledTransport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.Message, maxTokens int) (poo.StreamReader, error) {
+func (stalledTransport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.Message, maxTokens int, opts poo.ForkOptions) (poo.StreamReader, error) {
 	<-ctx.Done()
 	return nil, ctx.Err()
 }

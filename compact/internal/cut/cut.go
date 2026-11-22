@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/sdougbrown/poo"
@@ -231,6 +232,21 @@ func argumentPath(raw json.RawMessage) string {
 		return ""
 	}
 	return args.Path
+}
+
+// Retention is the pointer a replacement ends with.
+//
+// The store keeps every original message, so the text the cut removed
+// is not gone. The pointer names the turns and the session they belong
+// to, and the history tool that reads them, so a model that misses a
+// detail knows where to look.
+func Retention(turns poo.TurnRange, sessionID string) string {
+	where := ""
+	if sessionID != "" {
+		where = " of session " + sessionID
+	}
+	return "[The turns replaced above are retained in this session's store" + where +
+		" (turns " + strconv.Itoa(turns.First) + "-" + strconv.Itoa(turns.Last) + "): nothing was deleted. The history tool reads them: search the retained turns with a pattern, or read one whole with its turn number.]"
 }
 
 // bullets renders paths as a list, one per line.

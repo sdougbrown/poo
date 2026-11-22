@@ -45,7 +45,7 @@ func (t *promptTransport) Stream(ctx context.Context, req ChatRequest) (StreamRe
 }
 
 // Fork refuses to fork: the tests never compact.
-func (t *promptTransport) Fork(ctx context.Context, prev Rendered, appended []Message, maxTokens int) (StreamReader, error) {
+func (t *promptTransport) Fork(ctx context.Context, prev Rendered, appended []Message, maxTokens int, opts ForkOptions) (StreamReader, error) {
 	return nil, errors.New("the transport cannot fork")
 }
 

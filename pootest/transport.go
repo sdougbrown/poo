@@ -125,6 +125,8 @@ type Fork struct {
 	Appended []poo.Message
 	// MaxTokens is the output limit the fork asked for.
 	MaxTokens int
+	// JSON reports that the fork asked the endpoint for a JSON reply.
+	JSON bool
 }
 
 // The transport is the session's own chat transport, and it can compact
@@ -294,6 +296,7 @@ func (t *Transport) Forks() []Fork {
 			Prev:      copyRendered(f.Prev),
 			Appended:  poo.CloneMessages(f.Appended),
 			MaxTokens: f.MaxTokens,
+			JSON:      f.JSON,
 		})
 	}
 	return out
@@ -335,7 +338,7 @@ func (t *Transport) Stream(ctx context.Context, req poo.ChatRequest) (poo.Stream
 //
 // The fork's snapshot is recorded, so a test can assert that the forked
 // request carried the prefix it was supposed to.
-func (t *Transport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.Message, maxTokens int) (poo.StreamReader, error) {
+func (t *Transport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.Message, maxTokens int, opts poo.ForkOptions) (poo.StreamReader, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -343,6 +346,7 @@ func (t *Transport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.
 		Prev:      copyRendered(prev),
 		Appended:  poo.CloneMessages(appended),
 		MaxTokens: maxTokens,
+		JSON:      opts.JSON,
 	})
 	if t.err != nil {
 		return nil, t.err

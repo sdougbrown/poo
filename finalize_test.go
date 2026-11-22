@@ -893,7 +893,7 @@ func (r *closedReader) Close() error {
 }
 
 // Fork is not implemented by the fake.
-func (t *lateAnswerTransport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.Message, maxTokens int) (poo.StreamReader, error) {
+func (t *lateAnswerTransport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.Message, maxTokens int, opts poo.ForkOptions) (poo.StreamReader, error) {
 	return nil, errNoFork
 }
 
@@ -1017,7 +1017,7 @@ func (t *finalizingContextTransport) Stream(ctx context.Context, req poo.ChatReq
 }
 
 // Fork is not implemented by the fake.
-func (t *finalizingContextTransport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.Message, maxTokens int) (poo.StreamReader, error) {
+func (t *finalizingContextTransport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.Message, maxTokens int, opts poo.ForkOptions) (poo.StreamReader, error) {
 	return nil, errNoFork
 }
 

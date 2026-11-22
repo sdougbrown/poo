@@ -124,7 +124,7 @@ func TestARequiredForeignBlockFailsTheRequest(t *testing.T) {
 		t.Fatalf("starting the request: %v", err)
 	}
 	reader.Close()
-	_, err = tr.Fork(context.Background(), rendered, []poo.Message{providerMessage(foreignBlock(true))}, 64)
+	_, err = tr.Fork(context.Background(), rendered, []poo.Message{providerMessage(foreignBlock(true))}, 64, poo.ForkOptions{})
 	assertSessionIncompatible(t, err)
 }
 
@@ -175,7 +175,7 @@ func TestARequiredBlockAfterAToolResultFailsTheRequest(t *testing.T) {
 		t.Fatalf("starting the request: %v", err)
 	}
 	reader.Close()
-	_, err = tr.Fork(context.Background(), rendered, []poo.Message{message}, 64)
+	_, err = tr.Fork(context.Background(), rendered, []poo.Message{message}, 64, poo.ForkOptions{})
 	assertSessionIncompatible(t, err)
 }
 
@@ -238,7 +238,7 @@ func TestARequiredForeignBlockInAUserMessageFailsTheRequest(t *testing.T) {
 		t.Fatalf("starting the request: %v", err)
 	}
 	reader.Close()
-	_, err = tr.Fork(context.Background(), rendered, []poo.Message{message}, 64)
+	_, err = tr.Fork(context.Background(), rendered, []poo.Message{message}, 64, poo.ForkOptions{})
 	assertSessionIncompatible(t, err)
 }
 
@@ -328,7 +328,7 @@ func TestARequiredEmptyBlockFailsTheRequest(t *testing.T) {
 	read(t, reader)
 	reader.Close()
 
-	_, err = tr.Fork(context.Background(), rendered, []poo.Message{userMessage(emptyBlock(true))}, 64)
+	_, err = tr.Fork(context.Background(), rendered, []poo.Message{userMessage(emptyBlock(true))}, 64, poo.ForkOptions{})
 	assertSessionIncompatible(t, err)
 	if n := srv.count(); n != 1 {
 		t.Errorf("the endpoint received %d requests, want the one the fork was refused for", n)

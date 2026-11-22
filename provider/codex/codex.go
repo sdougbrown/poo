@@ -234,7 +234,7 @@ func (t *Transport) Stream(ctx context.Context, req poo.ChatRequest) (poo.Stream
 // reads, and its session is the cache key the fork names. The output limit
 // is the caller's. The endpoint takes none, so the fork does not rewrite
 // one.
-func (t *Transport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.Message, maxTokens int) (poo.StreamReader, error) {
+func (t *Transport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.Message, maxTokens int, opts poo.ForkOptions) (poo.StreamReader, error) {
 	if prev.API != poo.APIResponses {
 		return nil, &poo.ProviderError{
 			Kind:    poo.ProviderKindInvalidRequest,

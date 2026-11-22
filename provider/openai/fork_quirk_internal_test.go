@@ -71,7 +71,7 @@ func TestAForkShapesTheMessagesItAppends(t *testing.T) {
 
 	picture := poo.ToolResultMessage("call_1", "read", "read: shot.png", false,
 		[]poo.Attachment{{Modality: poo.ModalityImage, MediaType: "image/png", Data: []byte{1, 2, 3}}})
-	reader, err := tr.Fork(context.Background(), rendered, []poo.Message{picture}, 2048)
+	reader, err := tr.Fork(context.Background(), rendered, []poo.Message{picture}, 2048, poo.ForkOptions{})
 	if err != nil {
 		t.Fatalf("forking: %v", err)
 	}

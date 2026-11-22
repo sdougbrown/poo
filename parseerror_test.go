@@ -74,7 +74,7 @@ func (t *failingTransport) Stream(context.Context, poo.ChatRequest) (poo.StreamR
 }
 
 // Fork is not used by the test.
-func (t *failingTransport) Fork(context.Context, poo.Rendered, []poo.Message, int) (poo.StreamReader, error) {
+func (t *failingTransport) Fork(context.Context, poo.Rendered, []poo.Message, int, poo.ForkOptions) (poo.StreamReader, error) {
 	return nil, errors.New("the transport does not fork")
 }
 

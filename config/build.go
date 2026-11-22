@@ -20,6 +20,7 @@ import (
 	"github.com/sdougbrown/poo/compact/handoff"
 	"github.com/sdougbrown/poo/compact/mine"
 	"github.com/sdougbrown/poo/compact/native"
+	pointerstrategy "github.com/sdougbrown/poo/compact/pointer"
 	"github.com/sdougbrown/poo/compact/summary"
 	"github.com/sdougbrown/poo/decide"
 	"github.com/sdougbrown/poo/exec"
@@ -2186,6 +2187,24 @@ func (r *Runtime) resolveSession(opts BuildOptions, workingDir string) error {
 			summaryOptions.MaxTokens = *settings.Context.Summary.MaxTokens
 		}
 		r.Options.Compactor = summary.New(summaryOptions)
+	case "pointer":
+		pointerOptions := pointerstrategy.Options{}
+		if settings.Context.Pointer.Ratio != nil {
+			pointerOptions.Ratio = *settings.Context.Pointer.Ratio
+		}
+		if settings.Context.Pointer.KeepRecentTokens != nil {
+			pointerOptions.KeepRecentTokens = *settings.Context.Pointer.KeepRecentTokens
+		}
+		if settings.Context.Pointer.MaxTokens != nil {
+			pointerOptions.MaxTokens = *settings.Context.Pointer.MaxTokens
+		}
+		if settings.Context.Pointer.PointerMaxTokens != nil {
+			pointerOptions.PointerMaxTokens = *settings.Context.Pointer.PointerMaxTokens
+		}
+		if settings.Context.Pointer.SnippetBudget != nil {
+			pointerOptions.SnippetBudget = *settings.Context.Pointer.SnippetBudget
+		}
+		r.Options.Compactor = pointerstrategy.New(pointerOptions)
 	case "mine":
 		mineOptions := mine.Options{}
 		if settings.Context.Mine.Ratio != nil {

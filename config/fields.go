@@ -52,6 +52,11 @@ func fieldsOf(s *Settings) SettingsFields {
 	f.ContextMineKeepRecentTokens = count(s.Context.Mine.KeepRecentTokens)
 	f.ContextMineMaxTokens = count(s.Context.Mine.MaxTokens)
 	f.ContextMinePointerMaxTokens = count(s.Context.Mine.PointerMaxTokens)
+	f.ContextPointerRatio = share(s.Context.Pointer.Ratio)
+	f.ContextPointerKeepRecentTokens = count(s.Context.Pointer.KeepRecentTokens)
+	f.ContextPointerMaxTokens = count(s.Context.Pointer.MaxTokens)
+	f.ContextPointerPointerMaxTokens = count(s.Context.Pointer.PointerMaxTokens)
+	f.ContextPointerSnippetBudget = count(s.Context.Pointer.SnippetBudget)
 
 	f.ToolsReadRestrictToWorkingDir = flag(s.Tools.Read.RestrictToWorkingDir)
 	f.ToolsGrepRestrictToWorkingDir = flag(s.Tools.Grep.RestrictToWorkingDir)

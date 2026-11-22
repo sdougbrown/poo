@@ -33,6 +33,11 @@ type CompactionEnv struct {
 	// HistoryTool reports that the session's tools include the history
 	// tool the retention pointer points at.
 	HistoryTool bool
+	// History is the record of the session's turns its store retains,
+	// or nil when the store cannot be read back. It is how a strategy
+	// extracts what the view no longer holds without reading the whole
+	// transcript.
+	History History
 	// Fork re-sends the last main request with messages appended. It is
 	// the cheapest way to ask the model something, and the only way to
 	// see what the model itself saw. A strategy that asks about the
@@ -45,14 +50,26 @@ type CompactionEnv struct {
 	Ask AskFunc
 }
 
+// ForkOptions is the fork's own request-side asks.
+//
+// JSON asks the endpoint for a JSON reply, by the response format the
+// API supports. The ask rides the request as a top-level parameter, so
+// the prefix the endpoint cached is untouched; an API that has no such
+// parameter, or an endpoint that refuses the field, fails the request,
+// and the strategy can ask again without it.
+type ForkOptions struct {
+	// JSON asks the endpoint for a JSON reply.
+	JSON bool
+}
+
 // ForkFunc sends a request that is byte-identical to the last main
-// request, apart from the appended messages, the output limit and the
-// tool choice, which the fork sets to none: the fork's ask cannot be
-// answered with work.
+// request, apart from the appended messages, the output limit, the
+// tool choice, which the fork sets to none, and the response format
+// the options ask for.
 //
 // Core binds it to the transport's Fork and to the last request's
 // snapshot, so a strategy cannot build a fork request any other way.
-type ForkFunc func(ctx context.Context, appended []Message, maxTokens int) (Reply, error)
+type ForkFunc func(ctx context.Context, appended []Message, maxTokens int, opts ForkOptions) (Reply, error)
 
 // AskFunc sends the messages alone, as a request of the strategy's own.
 //

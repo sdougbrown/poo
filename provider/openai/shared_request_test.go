@@ -36,7 +36,7 @@ func TestAForksTimeToTheFirstTokenIncludesTheWaitForHeaders(t *testing.T) {
 	}
 
 	delay = 100 * time.Millisecond
-	reader, err := tr.Fork(context.Background(), rendered, nil, 16)
+	reader, err := tr.Fork(context.Background(), rendered, nil, 16, poo.ForkOptions{})
 	if err != nil {
 		t.Fatalf("forking: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestABodyThatBreaksMidReadIsANetworkFailure(t *testing.T) {
 	_, rendered, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	check(t, err)
 
-	_, err = tr.Fork(context.Background(), rendered, nil, 16)
+	_, err = tr.Fork(context.Background(), rendered, nil, 16, poo.ForkOptions{})
 	check(t, err)
 }
 

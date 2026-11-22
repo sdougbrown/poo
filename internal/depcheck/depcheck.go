@@ -149,6 +149,7 @@ func (c Checker) rules() []rule {
 				m + "/compact/internal/cut",
 				m + "/compact/mine",
 				m + "/compact/native",
+				m + "/compact/pointer",
 				m + "/compact/summary",
 				m + "/config",
 				// The settings package's models-file reader: one foreign

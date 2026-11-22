@@ -177,6 +177,8 @@ type ForkCall struct {
 	Appended []poo.Message
 	// MaxTokens is the output limit the compactor asked for.
 	MaxTokens int
+	// JSON reports that the compactor asked for a JSON reply.
+	JSON bool
 }
 
 // NewCompactor returns a compactor that answers with the given decision.
@@ -253,11 +255,16 @@ func (c *Compactor) Compact(ctx context.Context, in poo.CompactionEnv) (poo.Comp
 //
 // It is a helper for a compactor that wants to reach the model.
 func (c *Compactor) Fork(ctx context.Context, fork poo.ForkFunc, appended []poo.Message, maxTokens int) (poo.Reply, error) {
+	return c.ForkJSON(ctx, fork, appended, maxTokens, false)
+}
+
+// ForkJSON calls the fork function with the options and records the call.
+func (c *Compactor) ForkJSON(ctx context.Context, fork poo.ForkFunc, appended []poo.Message, maxTokens int, json bool) (poo.Reply, error) {
 	c.mu.Lock()
-	c.forks = append(c.forks, ForkCall{Appended: appended, MaxTokens: maxTokens})
+	c.forks = append(c.forks, ForkCall{Appended: appended, MaxTokens: maxTokens, JSON: json})
 	c.mu.Unlock()
 	if fork == nil {
 		return poo.Reply{}, fmt.Errorf("pootest: there is no fork to call")
 	}
-	return fork(ctx, appended, maxTokens)
+	return fork(ctx, appended, maxTokens, poo.ForkOptions{JSON: json})
 }

@@ -92,7 +92,7 @@ func (c *Compactor) Compact(ctx context.Context, in poo.CompactionEnv) (poo.Comp
 		return poo.Compaction{}, errors.New("handoff: there is no fork to call")
 	}
 	msg := poo.NewTextMessage(poo.RoleUser, instruction)
-	reply, err := in.Fork(ctx, []poo.Message{msg}, c.maxTokens)
+	reply, err := in.Fork(ctx, []poo.Message{msg}, c.maxTokens, poo.ForkOptions{})
 	if err != nil {
 		return poo.Compaction{}, err
 	}

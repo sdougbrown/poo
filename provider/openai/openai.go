@@ -162,7 +162,7 @@ func (t *Transport) Stream(ctx context.Context, req poo.ChatRequest) (poo.Stream
 // and only the two changed fields are rewritten.
 //
 // A fork is retried within the plan's budget, like any other request.
-func (t *Transport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.Message, maxTokens int) (poo.StreamReader, error) {
+func (t *Transport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.Message, maxTokens int, opts poo.ForkOptions) (poo.StreamReader, error) {
 	if prev.API != poo.APIChatCompletions {
 		return nil, &poo.ProviderError{
 			Kind:    poo.ProviderKindInvalidRequest,
@@ -193,6 +193,12 @@ func (t *Transport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.
 	body, err = chat.WithoutTools(body)
 	if err != nil {
 		return nil, err
+	}
+	if opts.JSON {
+		body, err = chat.JSONResponse(body)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	open := func(ctx context.Context) (support.Reader, error) {

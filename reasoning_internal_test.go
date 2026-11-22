@@ -14,7 +14,7 @@ func (stubTransport) Stream(context.Context, ChatRequest) (StreamReader, Rendere
 	return nil, Rendered{}, errors.New("not used")
 }
 
-func (stubTransport) Fork(context.Context, Rendered, []Message, int) (StreamReader, error) {
+func (stubTransport) Fork(context.Context, Rendered, []Message, int, ForkOptions) (StreamReader, error) {
 	return nil, errors.New("not used")
 }
 

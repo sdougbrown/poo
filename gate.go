@@ -192,6 +192,7 @@ func (s *Session) compact(run *runState) (compactionOutcome, error) {
 		Budget:      s.budget(),
 		SessionID:   s.ID(),
 		HistoryTool: s.offersHistoryTool(),
+		History:     s.retainedHistory(),
 		Fork:        s.forkFunc(run),
 		Ask:         s.askFunc(run),
 	}
@@ -357,7 +358,7 @@ func compactionForm(c Compaction) string {
 // The fork is bound to the transport and to the last main request's
 // snapshot, so a strategy cannot build a fork request any other way.
 func (s *Session) forkFunc(run *runState) ForkFunc {
-	return func(ctx context.Context, appended []Message, maxTokens int) (Reply, error) {
+	return func(ctx context.Context, appended []Message, maxTokens int, opts ForkOptions) (Reply, error) {
 		s.mu.Lock()
 		rendered := run.lastRendered
 		has := run.hasRendered
@@ -368,7 +369,7 @@ func (s *Session) forkFunc(run *runState) ForkFunc {
 		if !has {
 			return Reply{}, fmt.Errorf("poo: there is no request to fork")
 		}
-		reader, err := s.opts.Transport.Fork(ctx, rendered, appended, maxTokens)
+		reader, err := s.opts.Transport.Fork(ctx, rendered, appended, maxTokens, opts)
 		if err != nil {
 			return Reply{}, err
 		}
