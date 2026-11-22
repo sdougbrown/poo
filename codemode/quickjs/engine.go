@@ -375,11 +375,19 @@ func encodeResults(results []poo.NestedResult) ([]byte, error) {
 		Outcome    string          `json:"outcome"`
 		Text       string          `json:"text"`
 		IsError    bool            `json:"is_error"`
-		Structured json.RawMessage `json:"structured,omitempty"`
+		Structured json.RawMessage `json:"structured"`
 	}
 	values := make([]toolResult, len(results))
 	for i, r := range results {
-		values[i] = toolResult{Handle: r.Handle, Tool: r.Tool, Outcome: string(r.Outcome), Text: r.Text, IsError: r.IsError, Structured: r.Structured}
+		structured := r.Structured
+		switch {
+		case len(structured) == 0:
+			structured = json.RawMessage("null")
+		case !json.Valid(structured):
+			encoded, _ := json.Marshal(string(structured))
+			structured = encoded
+		}
+		values[i] = toolResult{Handle: r.Handle, Tool: r.Tool, Outcome: string(r.Outcome), Text: r.Text, IsError: r.IsError, Structured: structured}
 	}
 	return json.Marshal(values)
 }

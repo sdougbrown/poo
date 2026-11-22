@@ -183,6 +183,62 @@ func (f *structuredList) Call(ctx context.Context, calls []poo.NestedCall) ([]po
 	return results, nil
 }
 
+func TestAScriptSeesAWhitespacePaddedPayloadAsADict(t *testing.T) {
+	res, err := run(t, `
+r = call("read", {"path": "x"})
+exit(r["structured"]["k"])
+`, &whitespacePadded{}, codemode.Limits{})
+	if err != nil {
+		t.Fatalf("the run failed: %v", err)
+	}
+	if string(res.Value) != "1" {
+		t.Errorf("the script returned %s, want the payload's field", res.Value)
+	}
+}
+
+func TestAScriptKeepsAPaddedInvalidPayloadWhole(t *testing.T) {
+	res, err := run(t, `
+r = call("read", {"path": "x"})
+exit(r["structured"])
+`, &paddedInvalid{}, codemode.Limits{})
+	if err != nil {
+		t.Fatalf("the run failed: %v", err)
+	}
+	if string(res.Value) != `"  {not json"` {
+		t.Errorf("the script returned %s, want the payload kept whole", res.Value)
+	}
+}
+
+type whitespacePadded struct {
+	fakeNested
+}
+
+func (f *whitespacePadded) Call(ctx context.Context, calls []poo.NestedCall) ([]poo.NestedResult, error) {
+	results, err := f.fakeNested.Call(ctx, calls)
+	if err != nil {
+		return nil, err
+	}
+	for i := range results {
+		results[i].Structured = json.RawMessage("  \n\t{\"k\":1}  ")
+	}
+	return results, nil
+}
+
+type paddedInvalid struct {
+	fakeNested
+}
+
+func (f *paddedInvalid) Call(ctx context.Context, calls []poo.NestedCall) ([]poo.NestedResult, error) {
+	results, err := f.fakeNested.Call(ctx, calls)
+	if err != nil {
+		return nil, err
+	}
+	for i := range results {
+		results[i].Structured = json.RawMessage("  {not json")
+	}
+	return results, nil
+}
+
 // TestAScriptSeesADenialAsData covers refusals: the script gets the
 // denial as a result and carries on.
 func TestAScriptSeesADenialAsData(t *testing.T) {
