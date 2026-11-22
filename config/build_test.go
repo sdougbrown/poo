@@ -1980,18 +1980,19 @@ func TestTheSettingsDisableAProfileTool(t *testing.T) {
 }
 
 // TestADisablingABackgroundToolTakesTheJobToolsWithIt covers the tools the
-// core adds for another tool: with bash disabled nothing the session offers
-// may run in the background, so the job tools are not offered either.
+// core adds for another tool: with every tool that may run in the
+// background disabled, the job tools are not offered either. bash and
+// codemode are the two the code profile can run in the background.
 func TestADisablingABackgroundToolTakesTheJobToolsWithIt(t *testing.T) {
 	settings, err := config.Parse([]byte(theModelSettings+`tools:
-  disabled: [bash]
+  disabled: [bash, codemode]
 `), config.FormatYAML)
 	if err != nil {
 		t.Fatalf("decoding the settings: %v", err)
 	}
 	runtime := build(t, settings, config.Overrides{})
 
-	want := []string{"read", "grep", "edit", "fetch", "codemode"}
+	want := []string{"read", "grep", "edit", "fetch"}
 	if !slices.Equal(runtime.Options.ToolOrder, want) {
 		t.Errorf("the tools are %v, want %v", runtime.Options.ToolOrder, want)
 	}
@@ -1999,6 +2000,33 @@ func TestADisablingABackgroundToolTakesTheJobToolsWithIt(t *testing.T) {
 		if slices.ContainsFunc(runtime.Profile.Tools, func(tool poo.ToolInfo) bool { return tool.Name == name }) {
 			t.Errorf("the profile offers the %q tool with no background tool left", name)
 		}
+	}
+}
+
+// TestOneBackgroundToolLeftKeepsTheJobTools covers the boundary the
+// drop rule turns on: the job tools go only when no tool that may run in
+// the background remains. The code profile has two, so disabling one
+// keeps the job tools for the other.
+func TestOneBackgroundToolLeftKeepsTheJobTools(t *testing.T) {
+	for _, test := range []struct{ disabled, gone string }{
+		{"bash", "bash"},
+		{"codemode", "codemode"},
+	} {
+		t.Run(test.disabled, func(t *testing.T) {
+			settings, err := config.Parse([]byte(theModelSettings+"tools:\n  disabled: ["+test.disabled+"]\n"), config.FormatYAML)
+			if err != nil {
+				t.Fatalf("decoding the settings: %v", err)
+			}
+			runtime := build(t, settings, config.Overrides{})
+			if slices.Contains(runtime.Options.ToolOrder, test.gone) {
+				t.Errorf("the disabled tool %q is still offered", test.gone)
+			}
+			for _, name := range []string{profile.JobsToolName, profile.CancelJobToolName} {
+				if !slices.ContainsFunc(runtime.Profile.Tools, func(tool poo.ToolInfo) bool { return tool.Name == name }) {
+					t.Errorf("the profile does not offer %q with a background tool left", name)
+				}
+			}
+		})
 	}
 }
 

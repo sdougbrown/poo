@@ -108,9 +108,10 @@ type ToolEnv struct {
 	// Decider is the decision model, or nil when there is none.
 	Decider decide.Decider
 	// Nested runs nested tool calls, or nil when this call cannot make
-	// one. Only a call that runs in the turn has it; a background job
-	// does not, and a nested call's own tool does not, so the nesting
-	// is one call deep.
+	// one. A call the model made gets the turn's seam, and a background
+	// job's call gets one owned by the job, so its tool keeps calling
+	// after the run that started the job settled. A nested call's own
+	// tool gets none, so the nesting is one call deep.
 	Nested NestedCaller
 	// Tools are the session's tools, in offer order, so a tool that
 	// scripts its siblings can name them for the model.

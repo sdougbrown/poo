@@ -174,6 +174,12 @@ func (s *Session) runBatch(run *runState, turn int, plans []callPlan, parallel b
 func (s *Session) batchStopped(run *runState) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if run.jobOwned {
+		// A job's script keeps its remaining calls: its owner is never
+		// finalized, so a candidate here would stop the batch without
+		// settling anything. The job's end record reports the failure.
+		return false
+	}
 	for _, c := range run.candidates {
 		if c.reason != ReasonFinished {
 			return true
@@ -747,7 +753,7 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 // starts. The call's own result is the "started" one, and the batch
 // carries on.
 func (s *Session) startJobCall(run *runState, turn int, handle string, call ToolCall, plan callPlan) {
-	jobID, ok, winding := s.startJob(run, handle, call.Name, plan.prepared, plan.summary, call.Arguments)
+	jobID, ok, winding := s.startJob(run, turn, handle, call.Name, plan.prepared, plan.summary, call.Arguments)
 	if winding {
 		// The run settled while the job was being accepted; nothing
 		// else starts, and the finalization owns the run.
@@ -810,9 +816,10 @@ func (s *Session) toolEnv(run *runState, turn int, handle string, plan callPlan)
 //
 // A job runs under the session, so the run it names may be gone by the
 // time the job runs. The environment still names the run that started
-// it, so a tool can tie its work back to the call. A job gets no nested
-// caller: the seam belongs to a call in the turn, and a job's nested
-// calls would outlive the result they belong to.
+// it, so a tool can tie its work back to the call. This builds no nested
+// caller: toolEnv gives a turn's call the run's seam, and jobToolEnv
+// gives a job's call one owned by the job, where the calls a script makes
+// are recorded against the job and keep running after the run ends.
 func (s *Session) toolEnvFor(runID, handle string) ToolEnv {
 	// The model is swapped under the session's lock while a background job
 	// may be starting a call, so the snapshot is taken under it too.

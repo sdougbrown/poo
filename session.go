@@ -375,7 +375,15 @@ type runState struct {
 	// repeats and the current permission call belong to this run.
 	repeats          *repeatCounter
 	permissionHandle string
-	permissionTool   string
+	// jobOwned reports that this state belongs to a background job's tool
+	// calls, not to a turn.
+	//
+	// An owner raises no permission ask, writes no permission record and
+	// does not stop a batch on a settle candidate: the turn that started
+	// the job may already be over, and the job's own end record reports
+	// its outcome.
+	jobOwned       bool
+	permissionTool string
 
 	// accepting are the inputs whose acceptance record is still being
 	// written. The finalization waits for them, and reports the ones it

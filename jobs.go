@@ -230,6 +230,13 @@ type jobState struct {
 	tool string
 	// runID identifies the run that started the job.
 	runID string
+	// turn is the run-relative turn the job's call came from, so the
+	// calls its tool makes of its own carry the job's numbering.
+	turn int
+	// owner holds the calls the job's tool makes, so a script keeps
+	// calling tools after the run that started the job has settled. The
+	// finalization never sees this owner, so it never seals it.
+	owner *runState
 	// summary describes the call, for the jobs tool.
 	summary string
 	// startedAt is when the job started.
@@ -409,7 +416,7 @@ func WithJobs(o JobOptions) Option {
 // so two calls that race for the last slot admit exactly one of them.
 // The job.started record is written before the goroutine starts, so a
 // log shows the job was accepted even when it never ran.
-func (s *Session) startJob(run *runState, handle, tool string, prepared Prepared, summary string, arguments json.RawMessage) (string, bool, bool) {
+func (s *Session) startJob(run *runState, turn int, handle, tool string, prepared Prepared, summary string, arguments json.RawMessage) (string, bool, bool) {
 	// The slot is reserved under the lock, and the job is registered
 	// there too, so a job that is admitted is a job the session knows
 	// about. A run that is winding down admits nothing: no new effect
@@ -430,11 +437,24 @@ func (s *Session) startJob(run *runState, handle, tool string, prepared Prepared
 	s.jobSeq++
 	jobID := fmt.Sprintf("j%d", s.jobSeq)
 	ctx, cancel := context.WithCancelCause(s.jobCtx)
+	// The owner carries the run's id, because its records belong to that
+	// run, and the job's own context, because a settle of the run must
+	// not stop the calls the job's tool makes.
+	owner := &runState{
+		id:         run.id,
+		ctx:        ctx,
+		cancel:     cancel,
+		turn:       turn,
+		globalTurn: run.globalTurn,
+		jobOwned:   true,
+	}
 	job := &jobState{
 		id:        jobID,
 		handle:    handle,
 		tool:      tool,
 		runID:     run.id,
+		turn:      turn,
+		owner:     owner,
 		summary:   summary,
 		startedAt: time.Now(),
 		ctx:       ctx,
@@ -596,8 +616,18 @@ func (s *Session) runJob(job *jobState, prepared Prepared) {
 	s.mu.Unlock()
 	timedOut := errors.Is(ctx.Err(), context.DeadlineExceeded)
 	// A fatal error means the environment is unusable. The failure
-	// belongs to the job, and the receiving run settles tool_fatal.
+	// belongs to the job, and the receiving run settles tool_fatal. A
+	// fatal error a nested call reported is the job's too: the tool
+	// itself returns no error, so the owner's candidates are the only
+	// place that failure is visible.
 	fatal := err != nil && errors.Is(err, ErrFatal)
+	// A failure one of the script's own calls raised is the job's: the
+	// tool returns no error for it, so the owner's candidates are the
+	// only place it is visible.
+	failure, failureDetail, failed := s.ownerFailure(job.owner)
+	if failed && failure == ReasonToolFatal {
+		fatal = true
+	}
 
 	// The job's context decides a timeout or a cancellation before a
 	// nil error can call the job successful: a cooperative tool returns
@@ -614,6 +644,14 @@ func (s *Session) runJob(job *jobState, prepared Prepared) {
 		// The job was stopped on purpose, or the session is closing.
 		outcome = OutcomeCancelled
 		text = stoppedText(result.Text, err, "the job was cancelled")
+	case err == nil && failed && failure != ReasonToolFatal:
+		// A call the script made failed in a way a turn would settle the
+		// run for. The tool returned no error, so the job reports it
+		// beside whatever the script did produce.
+		outcome = OutcomeError
+		if failureDetail.Text != "" {
+			text = result.Text + "\n" + failureDetail.Text
+		}
 	case err == nil:
 	case errors.Is(err, context.Canceled):
 		outcome = OutcomeCancelled
@@ -714,7 +752,51 @@ func stoppedText(partial string, err error, reason string) string {
 func (s *Session) jobToolEnv(job *jobState) ToolEnv {
 	env := s.toolEnvFor(job.runID, job.handle)
 	env.JobID = job.id
+	// A tool that orchestrates others gets a seam of its own, owned by
+	// the job: the calls it makes are recorded against the job's handle,
+	// and they keep running after the run that started the job settled.
+	env.Nested = &nestedCaller{session: s, run: job.owner, turn: job.turn, parent: job.handle}
 	return env
+}
+
+// ownerFailure returns the worst settle candidate a job's tool calls
+// raised, if any.
+//
+// The tool's own error says nothing about the calls it made on the
+// session's behalf. In a turn the finalization reads these candidates and
+// settles the run; a job's owner is never finalized, so the job's end
+// record reports them instead. A tool_fatal candidate makes the job
+// fatal, which settles the run that receives the result the way a
+// synchronous call does; a store or hook failure makes the job an error
+// and carries its detail into the result text.
+func (s *Session) ownerFailure(owner *runState) (Reason, SettleDetail, bool) {
+	if owner == nil {
+		return "", SettleDetail{}, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	worst, detail := Reason(""), SettleDetail{}
+	rank := func(r Reason) int {
+		switch r {
+		case ReasonToolFatal:
+			return 3
+		case ReasonStoreError:
+			return 2
+		case ReasonHookError:
+			return 1
+		}
+		return 0
+	}
+	for _, c := range owner.candidates {
+		if rank(c.reason) > rank(worst) {
+			worst, detail = c.reason, c.detail
+			continue
+		}
+		if worst == "" && rank(c.reason) == 0 {
+			worst, detail = c.reason, c.detail
+		}
+	}
+	return worst, detail, worst != ""
 }
 
 // jobEnded builds the job.ended record and its event payload: the one

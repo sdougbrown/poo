@@ -135,7 +135,7 @@ func TestTheToolWithoutTheSeamIsARecoverableError(t *testing.T) {
 	if !res.IsError {
 		t.Error("the call without a seam is not an error result")
 	}
-	if res.Text != "codemode runs only as a call the model makes: a nested call or a background job has no tools to call" {
+	if res.Text != "codemode runs only as a call the model makes: a script cannot run codemode itself" {
 		t.Errorf("the result is %q, want the depth-limit message", res.Text)
 	}
 }

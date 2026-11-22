@@ -1320,7 +1320,7 @@ print(r["text"])
 	if inner == nil {
 		t.Fatal("the log holds no record for the inner codemode call")
 	}
-	if !inner.IsError || !strings.Contains(inner.Text, "a nested call or a background job has no tools to call") {
+	if !inner.IsError || !strings.Contains(inner.Text, "a script cannot run codemode itself") {
 		t.Errorf("the inner call's result is %q/%v, want the depth-limit error", inner.Text, inner.IsError)
 	}
 	if outer == nil {
@@ -1332,7 +1332,7 @@ print(r["text"])
 	if !strings.Contains(outer.Text, "True") {
 		t.Errorf("the script's print of is_error is %q, want the error visible as data", outer.Text)
 	}
-	if !strings.Contains(outer.Text, "a nested call or a background job has no tools to call") {
+	if !strings.Contains(outer.Text, "a script cannot run codemode itself") {
 		t.Errorf("the model's result is %q, want it to carry the inner call's reason", outer.Text)
 	}
 }
