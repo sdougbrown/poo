@@ -68,6 +68,9 @@ type RunOptions struct {
 	Parallel int
 	// MaxTurns is the turn limit passed to poo.
 	MaxTurns int
+	// Strategy pins the compaction strategy the runs use, when it
+	// names one. Empty takes poo's own default.
+	Strategy string
 	// Out is the directory the report and the logs go to.
 	Out string
 	// RunsDir is the root the per-invocation scratch working dirs are
@@ -144,6 +147,9 @@ type Report struct {
 	Sandbox string `json:"sandbox,omitempty"`
 	// Executor is the executor the runs' commands went through.
 	Executor string `json:"executor,omitempty"`
+	// Strategy is the compaction strategy the runs were pinned to,
+	// when the run pinned one.
+	Strategy string `json:"strategy,omitempty"`
 	// Dir is where the report was written.
 	Dir string `json:"dir"`
 	// Results are the runs, in a stable order.
@@ -254,6 +260,7 @@ func (r *Runner) Run(ctx context.Context) (*Report, error) {
 		GitSHA:    gitSHA(),
 		Sandbox:   r.opts.Sandbox,
 		Executor:  r.opts.Executor,
+		Strategy:  r.opts.Strategy,
 	}
 	if err := os.MkdirAll(r.opts.Out, 0o755); err != nil {
 		return nil, fmt.Errorf("eval: creating %s: %w", r.opts.Out, err)
@@ -740,6 +747,9 @@ func (r *Runner) runPoo(ctx context.Context, j cell, workdir, logPath string) (i
 		// the model runs go through it, in a sandbox of their own
 		// when the run asks for one.
 		args = append(args, "--executor", r.opts.Executor)
+	}
+	if r.opts.Strategy != "" {
+		args = append(args, "--context-strategy", r.opts.Strategy)
 	}
 	args = append(args, j.task.Prompt)
 

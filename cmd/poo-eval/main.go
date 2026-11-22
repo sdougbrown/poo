@@ -127,6 +127,7 @@ type runOptions struct {
 	seeds       int
 	parallel    int
 	maxTurns    int
+	strategy    string
 	out         string
 	modelsFile  string
 	tasksDir    string
@@ -151,6 +152,7 @@ func runRun(args []string) int {
 	fs.IntVar(&o.seeds, "seeds", 0, "How many times each task runs against each model")
 	fs.IntVar(&o.parallel, "parallel", 0, "How many runs may be in flight at once")
 	fs.IntVar(&o.maxTurns, "max-turns", 0, "The turn limit passed to poo")
+	fs.StringVar(&o.strategy, "strategy", "", "The compaction strategy to pin: summary, mine, pointer, native or handoff")
 	fs.StringVar(&o.out, "out", "", "Where the report goes")
 	fs.StringVar(&o.modelsFile, "models-file", "", "The model catalog")
 	fs.StringVar(&o.tasksDir, "tasks-dir", "", "The task set")
@@ -242,6 +244,7 @@ func runRun(args []string) int {
 		Seeds:        o.seeds,
 		Parallel:     o.parallel,
 		MaxTurns:     o.maxTurns,
+		Strategy:     o.strategy,
 		Out:          o.out,
 		RunsDir:      runsDir,
 		PooBinary:    o.pooBinary,

@@ -1,0 +1,13 @@
+{
+  "repo": "fixture:long-read-recall",
+  "prompt": "The file config/services.yaml is the deployment config for every service this team runs. Read the whole file with the read tool — do not use grep and do not script over it, read it — and then answer: which service carries a retry_budget_ms of 41200, and which incident id does that service's comment name? Answer in one line as `<service> <incident id>`. Do not change any file: this is a question, not a task to fix.",
+  "timeout_s": 900,
+  "tags": [
+    "readonly",
+    "explain",
+    "long",
+    "compact"
+  ],
+  "expected_paths": [],
+  "description": "One service's retry budget, buried in a config the run must read whole; the window compacts while it reads."
+}

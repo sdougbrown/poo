@@ -1,0 +1,5768 @@
+# Deployment config: every service this team runs, with its rate
+# limits and its retry budget. One incident id names the change
+# that set a budget; the ids come from the incident tracker.
+services:
+  - name: auth-api-eu3
+    rate_limit_rps: 1684
+    retry_budget_ms: 33000
+    # INC-1662 raised after the backlog review
+  - name: auth-worker-eu6
+    rate_limit_rps: 2275
+    retry_budget_ms: 33000
+    # INC-6684 raised after the backlog review
+  - name: auth-edge-eu3
+    rate_limit_rps: 1777
+    retry_budget_ms: 38000
+    # INC-5427 matched to the upstream's own budget
+  - name: auth-core-eu2
+    rate_limit_rps: 2006
+    retry_budget_ms: 37000
+    # INC-1113 raised after the backlog review
+  - name: auth-sync-eu8
+    rate_limit_rps: 3869
+    retry_budget_ms: 10000
+    # INC-6707 raised after the backlog review
+  - name: auth-batch-eu9
+    rate_limit_rps: 1236
+    retry_budget_ms: 17000
+    # INC-7808 raised after the backlog review
+  - name: auth-relay-eu3
+    rate_limit_rps: 795
+    retry_budget_ms: 19000
+    # INC-9161 doubled for the sale window
+  - name: auth-probe-eu7
+    rate_limit_rps: 2906
+    retry_budget_ms: 30000
+    # INC-4666 tuned to the queue depth
+  - name: auth-mirror-eu4
+    rate_limit_rps: 3049
+    retry_budget_ms: 29000
+    # INC-9702 raised after the backlog review
+  - name: auth-gate-eu7
+    rate_limit_rps: 450
+    retry_budget_ms: 18000
+    # INC-1361 lowered after the timeout audit
+  - name: billing-api-eu9
+    rate_limit_rps: 3485
+    retry_budget_ms: 37000
+    # INC-8057 lowered after the timeout audit
+  - name: billing-worker-eu4
+    rate_limit_rps: 3862
+    retry_budget_ms: 9000
+    # INC-2024 set when the service shipped
+  - name: billing-edge-eu1
+    rate_limit_rps: 1018
+    retry_budget_ms: 24000
+    # INC-6508 raised after the backlog review
+  - name: billing-core-eu3
+    rate_limit_rps: 1697
+    retry_budget_ms: 17000
+    # INC-7743 matched to the upstream's own budget
+  - name: billing-sync-eu8
+    rate_limit_rps: 3001
+    retry_budget_ms: 8000
+    # INC-4695 set when the service shipped
+  - name: billing-batch-eu4
+    rate_limit_rps: 1709
+    retry_budget_ms: 7000
+    # INC-6468 lowered after the timeout audit
+  - name: billing-relay-eu2
+    rate_limit_rps: 853
+    retry_budget_ms: 11000
+    # INC-5918 doubled for the sale window
+  - name: billing-probe-eu7
+    rate_limit_rps: 3236
+    retry_budget_ms: 32000
+    # INC-4179 tuned to the queue depth
+  - name: billing-mirror-eu9
+    rate_limit_rps: 2179
+    retry_budget_ms: 24000
+    # INC-7294 tuned to the queue depth
+  - name: billing-gate-eu3
+    rate_limit_rps: 1498
+    retry_budget_ms: 18000
+    # INC-9610 raised after the backlog review
+  - name: cache-api-eu6
+    rate_limit_rps: 1066
+    retry_budget_ms: 16000
+    # INC-3980 doubled for the sale window
+  - name: cache-worker-eu7
+    rate_limit_rps: 1543
+    retry_budget_ms: 34000
+    # INC-3900 matched to the upstream's own budget
+  - name: cache-edge-eu0
+    rate_limit_rps: 2993
+    retry_budget_ms: 4000
+    # INC-3437 lowered after the timeout audit
+  - name: cache-core-eu2
+    rate_limit_rps: 1373
+    retry_budget_ms: 30000
+    # INC-2651 tuned to the queue depth
+  - name: cache-sync-eu4
+    rate_limit_rps: 2960
+    retry_budget_ms: 18000
+    # INC-1187 raised after the backlog review
+  - name: cache-batch-eu5
+    rate_limit_rps: 1881
+    retry_budget_ms: 24000
+    # INC-2749 set when the service shipped
+  - name: cache-relay-eu1
+    rate_limit_rps: 947
+    retry_budget_ms: 35000
+    # INC-9454 tuned to the queue depth
+  - name: cache-probe-eu0
+    rate_limit_rps: 1215
+    retry_budget_ms: 6000
+    # INC-4812 tuned to the queue depth
+  - name: cache-mirror-eu1
+    rate_limit_rps: 378
+    retry_budget_ms: 31000
+    # INC-9379 lowered after the timeout audit
+  - name: cache-gate-eu9
+    rate_limit_rps: 1889
+    retry_budget_ms: 14000
+    # INC-2720 matched to the upstream's own budget
+  - name: dispatch-api-eu6
+    rate_limit_rps: 2594
+    retry_budget_ms: 20000
+    # INC-4153 lowered after the timeout audit
+  - name: dispatch-worker-eu8
+    rate_limit_rps: 3191
+    retry_budget_ms: 10000
+    # INC-9741 lowered after the timeout audit
+  - name: dispatch-edge-eu7
+    rate_limit_rps: 1616
+    retry_budget_ms: 20000
+    # INC-2210 tuned to the queue depth
+  - name: dispatch-core-eu0
+    rate_limit_rps: 3562
+    retry_budget_ms: 32000
+    # INC-9477 set when the service shipped
+  - name: dispatch-sync-eu2
+    rate_limit_rps: 3249
+    retry_budget_ms: 33000
+    # INC-1880 set when the service shipped
+  - name: dispatch-batch-eu3
+    rate_limit_rps: 2891
+    retry_budget_ms: 17000
+    # INC-4151 raised after the backlog review
+  - name: dispatch-relay-eu9
+    rate_limit_rps: 601
+    retry_budget_ms: 18000
+    # INC-6153 raised after the backlog review
+  - name: dispatch-probe-eu4
+    rate_limit_rps: 1691
+    retry_budget_ms: 33000
+    # INC-7913 doubled for the sale window
+  - name: dispatch-mirror-eu2
+    rate_limit_rps: 410
+    retry_budget_ms: 7000
+    # INC-4290 matched to the upstream's own budget
+  - name: dispatch-gate-eu4
+    rate_limit_rps: 3078
+    retry_budget_ms: 18000
+    # INC-7617 raised after the backlog review
+  - name: email-api-eu7
+    rate_limit_rps: 1339
+    retry_budget_ms: 13000
+    # INC-4975 lowered after the timeout audit
+  - name: email-worker-eu7
+    rate_limit_rps: 3507
+    retry_budget_ms: 28000
+    # INC-3274 set when the service shipped
+  - name: email-edge-eu8
+    rate_limit_rps: 2769
+    retry_budget_ms: 14000
+    # INC-7436 lowered after the timeout audit
+  - name: email-core-eu8
+    rate_limit_rps: 2259
+    retry_budget_ms: 15000
+    # INC-4717 set when the service shipped
+  - name: email-sync-eu9
+    rate_limit_rps: 1543
+    retry_budget_ms: 30000
+    # INC-8446 doubled for the sale window
+  - name: email-batch-eu2
+    rate_limit_rps: 2170
+    retry_budget_ms: 10000
+    # INC-7413 lowered after the timeout audit
+  - name: email-relay-eu4
+    rate_limit_rps: 197
+    retry_budget_ms: 7000
+    # INC-1228 doubled for the sale window
+  - name: email-probe-eu7
+    rate_limit_rps: 164
+    retry_budget_ms: 36000
+    # INC-3764 doubled for the sale window
+  - name: email-mirror-eu0
+    rate_limit_rps: 1228
+    retry_budget_ms: 6000
+    # INC-4684 doubled for the sale window
+  - name: email-gate-eu7
+    rate_limit_rps: 1650
+    retry_budget_ms: 15000
+    # INC-9482 lowered after the timeout audit
+  - name: federate-api-eu1
+    rate_limit_rps: 2667
+    retry_budget_ms: 31000
+    # INC-1001 tuned to the queue depth
+  - name: federate-worker-eu6
+    rate_limit_rps: 624
+    retry_budget_ms: 9000
+    # INC-6453 lowered after the timeout audit
+  - name: federate-edge-eu7
+    rate_limit_rps: 3988
+    retry_budget_ms: 25000
+    # INC-2810 raised after the backlog review
+  - name: federate-core-eu0
+    rate_limit_rps: 2107
+    retry_budget_ms: 4000
+    # INC-2023 lowered after the timeout audit
+  - name: federate-sync-eu5
+    rate_limit_rps: 3616
+    retry_budget_ms: 8000
+    # INC-9411 lowered after the timeout audit
+  - name: federate-batch-eu5
+    rate_limit_rps: 2311
+    retry_budget_ms: 23000
+    # INC-4542 lowered after the timeout audit
+  - name: federate-relay-eu1
+    rate_limit_rps: 1685
+    retry_budget_ms: 19000
+    # INC-4846 set when the service shipped
+  - name: federate-probe-eu8
+    rate_limit_rps: 1041
+    retry_budget_ms: 26000
+    # INC-7180 matched to the upstream's own budget
+  - name: federate-mirror-eu4
+    rate_limit_rps: 3594
+    retry_budget_ms: 8000
+    # INC-8211 raised after the backlog review
+  - name: federate-gate-eu9
+    rate_limit_rps: 312
+    retry_budget_ms: 35000
+    # INC-7973 tuned to the queue depth
+  - name: gateway-api-eu9
+    rate_limit_rps: 3903
+    retry_budget_ms: 32000
+    # INC-4076 matched to the upstream's own budget
+  - name: gateway-worker-eu3
+    rate_limit_rps: 1701
+    retry_budget_ms: 32000
+    # INC-8923 matched to the upstream's own budget
+  - name: gateway-edge-eu5
+    rate_limit_rps: 2802
+    retry_budget_ms: 9000
+    # INC-5280 lowered after the timeout audit
+  - name: gateway-core-eu3
+    rate_limit_rps: 2991
+    retry_budget_ms: 6000
+    # INC-5695 matched to the upstream's own budget
+  - name: gateway-sync-eu0
+    rate_limit_rps: 3128
+    retry_budget_ms: 14000
+    # INC-6960 matched to the upstream's own budget
+  - name: gateway-batch-eu1
+    rate_limit_rps: 1366
+    retry_budget_ms: 11000
+    # INC-2311 doubled for the sale window
+  - name: gateway-relay-eu2
+    rate_limit_rps: 3844
+    retry_budget_ms: 35000
+    # INC-4022 set when the service shipped
+  - name: gateway-probe-eu4
+    rate_limit_rps: 1409
+    retry_budget_ms: 7000
+    # INC-6055 doubled for the sale window
+  - name: gateway-mirror-eu7
+    rate_limit_rps: 437
+    retry_budget_ms: 33000
+    # INC-8315 set when the service shipped
+  - name: gateway-gate-eu0
+    rate_limit_rps: 3457
+    retry_budget_ms: 19000
+    # INC-9326 raised after the backlog review
+  - name: hook-api-eu4
+    rate_limit_rps: 475
+    retry_budget_ms: 33000
+    # INC-6498 lowered after the timeout audit
+  - name: hook-worker-eu1
+    rate_limit_rps: 1049
+    retry_budget_ms: 26000
+    # INC-6704 doubled for the sale window
+  - name: hook-edge-eu9
+    rate_limit_rps: 908
+    retry_budget_ms: 15000
+    # INC-9195 raised after the backlog review
+  - name: hook-core-eu3
+    rate_limit_rps: 2620
+    retry_budget_ms: 35000
+    # INC-5345 matched to the upstream's own budget
+  - name: hook-sync-eu3
+    rate_limit_rps: 319
+    retry_budget_ms: 15000
+    # INC-8778 doubled for the sale window
+  - name: hook-batch-eu1
+    rate_limit_rps: 3356
+    retry_budget_ms: 12000
+    # INC-2189 matched to the upstream's own budget
+  - name: hook-relay-eu4
+    rate_limit_rps: 278
+    retry_budget_ms: 27000
+    # INC-1730 set when the service shipped
+  - name: hook-probe-eu2
+    rate_limit_rps: 2633
+    retry_budget_ms: 38000
+    # INC-5534 set when the service shipped
+  - name: hook-mirror-eu2
+    rate_limit_rps: 3259
+    retry_budget_ms: 26000
+    # INC-6549 doubled for the sale window
+  - name: hook-gate-eu6
+    rate_limit_rps: 2530
+    retry_budget_ms: 14000
+    # INC-9264 raised after the backlog review
+  - name: index-api-eu0
+    rate_limit_rps: 1237
+    retry_budget_ms: 34000
+    # INC-7244 tuned to the queue depth
+  - name: index-worker-eu8
+    rate_limit_rps: 3712
+    retry_budget_ms: 13000
+    # INC-6638 doubled for the sale window
+  - name: index-edge-eu2
+    rate_limit_rps: 1371
+    retry_budget_ms: 38000
+    # INC-8321 raised after the backlog review
+  - name: index-core-eu0
+    rate_limit_rps: 455
+    retry_budget_ms: 32000
+    # INC-8418 set when the service shipped
+  - name: index-sync-eu9
+    rate_limit_rps: 1261
+    retry_budget_ms: 37000
+    # INC-5119 set when the service shipped
+  - name: index-batch-eu4
+    rate_limit_rps: 3752
+    retry_budget_ms: 22000
+    # INC-8196 matched to the upstream's own budget
+  - name: index-relay-eu5
+    rate_limit_rps: 938
+    retry_budget_ms: 23000
+    # INC-9248 raised after the backlog review
+  - name: index-probe-eu3
+    rate_limit_rps: 3335
+    retry_budget_ms: 20000
+    # INC-3716 tuned to the queue depth
+  - name: index-mirror-eu9
+    rate_limit_rps: 3983
+    retry_budget_ms: 21000
+    # INC-2567 lowered after the timeout audit
+  - name: index-gate-eu7
+    rate_limit_rps: 3198
+    retry_budget_ms: 39000
+    # INC-6834 raised after the backlog review
+  - name: jobber-api-eu8
+    rate_limit_rps: 2659
+    retry_budget_ms: 33000
+    # INC-9481 lowered after the timeout audit
+  - name: jobber-worker-eu8
+    rate_limit_rps: 1224
+    retry_budget_ms: 37000
+    # INC-1464 set when the service shipped
+  - name: jobber-edge-eu4
+    rate_limit_rps: 389
+    retry_budget_ms: 10000
+    # INC-6644 set when the service shipped
+  - name: jobber-core-eu5
+    rate_limit_rps: 244
+    retry_budget_ms: 31000
+    # INC-4722 doubled for the sale window
+  - name: jobber-sync-eu2
+    rate_limit_rps: 1405
+    retry_budget_ms: 25000
+    # INC-6625 doubled for the sale window
+  - name: jobber-batch-eu9
+    rate_limit_rps: 629
+    retry_budget_ms: 8000
+    # INC-7855 set when the service shipped
+  - name: jobber-relay-eu5
+    rate_limit_rps: 3885
+    retry_budget_ms: 29000
+    # INC-3776 raised after the backlog review
+  - name: jobber-probe-eu5
+    rate_limit_rps: 1821
+    retry_budget_ms: 23000
+    # INC-8952 lowered after the timeout audit
+  - name: jobber-mirror-eu9
+    rate_limit_rps: 195
+    retry_budget_ms: 6000
+    # INC-9057 set when the service shipped
+  - name: jobber-gate-eu8
+    rate_limit_rps: 2699
+    retry_budget_ms: 21000
+    # INC-2112 matched to the upstream's own budget
+  - name: kafka-api-eu4
+    rate_limit_rps: 1673
+    retry_budget_ms: 10000
+    # INC-5777 matched to the upstream's own budget
+  - name: kafka-worker-eu0
+    rate_limit_rps: 1902
+    retry_budget_ms: 34000
+    # INC-9661 doubled for the sale window
+  - name: kafka-edge-eu7
+    rate_limit_rps: 420
+    retry_budget_ms: 24000
+    # INC-3403 set when the service shipped
+  - name: kafka-core-eu9
+    rate_limit_rps: 3206
+    retry_budget_ms: 9000
+    # INC-7335 doubled for the sale window
+  - name: kafka-sync-eu7
+    rate_limit_rps: 2961
+    retry_budget_ms: 18000
+    # INC-4916 lowered after the timeout audit
+  - name: kafka-batch-eu9
+    rate_limit_rps: 3847
+    retry_budget_ms: 4000
+    # INC-9644 set when the service shipped
+  - name: kafka-relay-eu8
+    rate_limit_rps: 2100
+    retry_budget_ms: 9000
+    # INC-1849 tuned to the queue depth
+  - name: kafka-probe-eu1
+    rate_limit_rps: 180
+    retry_budget_ms: 26000
+    # INC-9306 raised after the backlog review
+  - name: kafka-mirror-eu0
+    rate_limit_rps: 1710
+    retry_budget_ms: 8000
+    # INC-7838 set when the service shipped
+  - name: kafka-gate-eu9
+    rate_limit_rps: 1038
+    retry_budget_ms: 37000
+    # INC-8331 raised after the backlog review
+  - name: ledger-api-eu9
+    rate_limit_rps: 304
+    retry_budget_ms: 37000
+    # INC-6883 tuned to the queue depth
+  - name: ledger-worker-eu7
+    rate_limit_rps: 3877
+    retry_budget_ms: 24000
+    # INC-7778 set when the service shipped
+  - name: ledger-edge-eu4
+    rate_limit_rps: 1039
+    retry_budget_ms: 27000
+    # INC-6002 lowered after the timeout audit
+  - name: ledger-core-eu8
+    rate_limit_rps: 3536
+    retry_budget_ms: 31000
+    # INC-3634 lowered after the timeout audit
+  - name: ledger-sync-eu7
+    rate_limit_rps: 825
+    retry_budget_ms: 13000
+    # INC-3375 tuned to the queue depth
+  - name: ledger-batch-eu5
+    rate_limit_rps: 2205
+    retry_budget_ms: 6000
+    # INC-9404 tuned to the queue depth
+  - name: ledger-relay-eu0
+    rate_limit_rps: 527
+    retry_budget_ms: 4000
+    # INC-6607 tuned to the queue depth
+  - name: ledger-probe-eu0
+    rate_limit_rps: 760
+    retry_budget_ms: 10000
+    # INC-2642 matched to the upstream's own budget
+  - name: ledger-mirror-eu6
+    rate_limit_rps: 3207
+    retry_budget_ms: 4000
+    # INC-5384 doubled for the sale window
+  - name: ledger-gate-eu7
+    rate_limit_rps: 589
+    retry_budget_ms: 39000
+    # INC-4674 set when the service shipped
+  - name: mailer-api-eu4
+    rate_limit_rps: 1315
+    retry_budget_ms: 8000
+    # INC-9011 raised after the backlog review
+  - name: mailer-worker-eu7
+    rate_limit_rps: 3157
+    retry_budget_ms: 13000
+    # INC-2700 set when the service shipped
+  - name: mailer-edge-eu1
+    rate_limit_rps: 2168
+    retry_budget_ms: 19000
+    # INC-1329 matched to the upstream's own budget
+  - name: mailer-core-eu0
+    rate_limit_rps: 1418
+    retry_budget_ms: 21000
+    # INC-6878 raised after the backlog review
+  - name: mailer-sync-eu2
+    rate_limit_rps: 3445
+    retry_budget_ms: 12000
+    # INC-7708 set when the service shipped
+  - name: mailer-batch-eu4
+    rate_limit_rps: 160
+    retry_budget_ms: 8000
+    # INC-9326 raised after the backlog review
+  - name: mailer-relay-eu6
+    rate_limit_rps: 2107
+    retry_budget_ms: 37000
+    # INC-6155 set when the service shipped
+  - name: mailer-probe-eu2
+    rate_limit_rps: 669
+    retry_budget_ms: 10000
+    # INC-9367 matched to the upstream's own budget
+  - name: mailer-mirror-eu6
+    rate_limit_rps: 1225
+    retry_budget_ms: 25000
+    # INC-6932 raised after the backlog review
+  - name: mailer-gate-eu8
+    rate_limit_rps: 629
+    retry_budget_ms: 4000
+    # INC-9988 raised after the backlog review
+  - name: notify-api-eu9
+    rate_limit_rps: 1900
+    retry_budget_ms: 31000
+    # INC-4708 tuned to the queue depth
+  - name: notify-worker-eu6
+    rate_limit_rps: 2786
+    retry_budget_ms: 7000
+    # INC-9882 lowered after the timeout audit
+  - name: notify-edge-eu5
+    rate_limit_rps: 3110
+    retry_budget_ms: 13000
+    # INC-6218 raised after the backlog review
+  - name: notify-core-eu9
+    rate_limit_rps: 3624
+    retry_budget_ms: 5000
+    # INC-1403 raised after the backlog review
+  - name: notify-sync-eu5
+    rate_limit_rps: 78
+    retry_budget_ms: 34000
+    # INC-2252 set when the service shipped
+  - name: notify-batch-eu0
+    rate_limit_rps: 325
+    retry_budget_ms: 11000
+    # INC-3498 raised after the backlog review
+  - name: notify-relay-eu6
+    rate_limit_rps: 2498
+    retry_budget_ms: 12000
+    # INC-5686 tuned to the queue depth
+  - name: notify-probe-eu9
+    rate_limit_rps: 2452
+    retry_budget_ms: 35000
+    # INC-7792 doubled for the sale window
+  - name: notify-mirror-eu6
+    rate_limit_rps: 64
+    retry_budget_ms: 26000
+    # INC-4529 doubled for the sale window
+  - name: notify-gate-eu4
+    rate_limit_rps: 3777
+    retry_budget_ms: 18000
+    # INC-4647 tuned to the queue depth
+  - name: orders-api-eu3
+    rate_limit_rps: 2215
+    retry_budget_ms: 29000
+    # INC-3932 matched to the upstream's own budget
+  - name: orders-worker-eu3
+    rate_limit_rps: 3974
+    retry_budget_ms: 37000
+    # INC-6843 set when the service shipped
+  - name: orders-edge-eu7
+    rate_limit_rps: 3168
+    retry_budget_ms: 32000
+    # INC-8875 lowered after the timeout audit
+  - name: orders-core-eu5
+    rate_limit_rps: 330
+    retry_budget_ms: 13000
+    # INC-3340 raised after the backlog review
+  - name: orders-sync-eu0
+    rate_limit_rps: 168
+    retry_budget_ms: 18000
+    # INC-4374 doubled for the sale window
+  - name: orders-batch-eu3
+    rate_limit_rps: 667
+    retry_budget_ms: 6000
+    # INC-4364 doubled for the sale window
+  - name: orders-relay-eu1
+    rate_limit_rps: 1470
+    retry_budget_ms: 19000
+    # INC-5529 raised after the backlog review
+  - name: orders-probe-eu2
+    rate_limit_rps: 1323
+    retry_budget_ms: 8000
+    # INC-2953 lowered after the timeout audit
+  - name: orders-mirror-eu2
+    rate_limit_rps: 3558
+    retry_budget_ms: 29000
+    # INC-3821 set when the service shipped
+  - name: orders-gate-eu8
+    rate_limit_rps: 3697
+    retry_budget_ms: 30000
+    # INC-4108 matched to the upstream's own budget
+  - name: presence-api-eu5
+    rate_limit_rps: 347
+    retry_budget_ms: 19000
+    # INC-1744 doubled for the sale window
+  - name: presence-worker-eu5
+    rate_limit_rps: 1521
+    retry_budget_ms: 37000
+    # INC-2285 doubled for the sale window
+  - name: presence-edge-eu3
+    rate_limit_rps: 155
+    retry_budget_ms: 4000
+    # INC-9886 set when the service shipped
+  - name: presence-core-eu2
+    rate_limit_rps: 197
+    retry_budget_ms: 32000
+    # INC-8230 lowered after the timeout audit
+  - name: presence-sync-eu9
+    rate_limit_rps: 2108
+    retry_budget_ms: 38000
+    # INC-9088 matched to the upstream's own budget
+  - name: presence-batch-eu8
+    rate_limit_rps: 2265
+    retry_budget_ms: 27000
+    # INC-2469 raised after the backlog review
+  - name: presence-relay-eu6
+    rate_limit_rps: 492
+    retry_budget_ms: 15000
+    # INC-2460 matched to the upstream's own budget
+  - name: presence-probe-eu5
+    rate_limit_rps: 1597
+    retry_budget_ms: 6000
+    # INC-3120 lowered after the timeout audit
+  - name: presence-mirror-eu2
+    rate_limit_rps: 2869
+    retry_budget_ms: 28000
+    # INC-5458 raised after the backlog review
+  - name: presence-gate-eu5
+    rate_limit_rps: 1052
+    retry_budget_ms: 24000
+    # INC-1095 tuned to the queue depth
+  - name: queue-api-eu5
+    rate_limit_rps: 3159
+    retry_budget_ms: 30000
+    # INC-6768 lowered after the timeout audit
+  - name: queue-worker-eu8
+    rate_limit_rps: 297
+    retry_budget_ms: 8000
+    # INC-3511 lowered after the timeout audit
+  - name: queue-edge-eu8
+    rate_limit_rps: 3865
+    retry_budget_ms: 34000
+    # INC-9648 lowered after the timeout audit
+  - name: queue-core-eu8
+    rate_limit_rps: 2930
+    retry_budget_ms: 29000
+    # INC-5969 lowered after the timeout audit
+  - name: queue-sync-eu8
+    rate_limit_rps: 1724
+    retry_budget_ms: 20000
+    # INC-8347 set when the service shipped
+  - name: queue-batch-eu0
+    rate_limit_rps: 415
+    retry_budget_ms: 12000
+    # INC-3527 doubled for the sale window
+  - name: queue-relay-eu8
+    rate_limit_rps: 1703
+    retry_budget_ms: 20000
+    # INC-2537 doubled for the sale window
+  - name: queue-probe-eu7
+    rate_limit_rps: 3842
+    retry_budget_ms: 5000
+    # INC-6389 lowered after the timeout audit
+  - name: queue-mirror-eu8
+    rate_limit_rps: 614
+    retry_budget_ms: 9000
+    # INC-6405 tuned to the queue depth
+  - name: queue-gate-eu0
+    rate_limit_rps: 1966
+    retry_budget_ms: 34000
+    # INC-8427 raised after the backlog review
+  - name: render-api-eu9
+    rate_limit_rps: 908
+    retry_budget_ms: 8000
+    # INC-2871 raised after the backlog review
+  - name: render-worker-eu3
+    rate_limit_rps: 821
+    retry_budget_ms: 7000
+    # INC-6596 raised after the backlog review
+  - name: render-edge-eu8
+    rate_limit_rps: 240
+    retry_budget_ms: 39000
+    # INC-1938 lowered after the timeout audit
+  - name: render-core-eu0
+    rate_limit_rps: 2495
+    retry_budget_ms: 37000
+    # INC-9876 doubled for the sale window
+  - name: render-sync-eu2
+    rate_limit_rps: 3381
+    retry_budget_ms: 4000
+    # INC-3462 matched to the upstream's own budget
+  - name: render-batch-eu5
+    rate_limit_rps: 3410
+    retry_budget_ms: 13000
+    # INC-9924 lowered after the timeout audit
+  - name: render-relay-eu5
+    rate_limit_rps: 1105
+    retry_budget_ms: 5000
+    # INC-6108 lowered after the timeout audit
+  - name: render-probe-eu2
+    rate_limit_rps: 3431
+    retry_budget_ms: 26000
+    # INC-1198 raised after the backlog review
+  - name: render-mirror-eu3
+    rate_limit_rps: 1910
+    retry_budget_ms: 7000
+    # INC-7621 matched to the upstream's own budget
+  - name: render-gate-eu6
+    rate_limit_rps: 3117
+    retry_budget_ms: 8000
+    # INC-9619 lowered after the timeout audit
+  - name: session-api-eu7
+    rate_limit_rps: 3723
+    retry_budget_ms: 33000
+    # INC-9984 set when the service shipped
+  - name: session-worker-eu7
+    rate_limit_rps: 2857
+    retry_budget_ms: 15000
+    # INC-8456 set when the service shipped
+  - name: session-edge-eu5
+    rate_limit_rps: 1196
+    retry_budget_ms: 17000
+    # INC-7430 set when the service shipped
+  - name: session-core-eu7
+    rate_limit_rps: 223
+    retry_budget_ms: 14000
+    # INC-2674 raised after the backlog review
+  - name: session-sync-eu5
+    rate_limit_rps: 2380
+    retry_budget_ms: 17000
+    # INC-5356 tuned to the queue depth
+  - name: session-batch-eu2
+    rate_limit_rps: 1816
+    retry_budget_ms: 37000
+    # INC-8686 set when the service shipped
+  - name: session-relay-eu1
+    rate_limit_rps: 2984
+    retry_budget_ms: 9000
+    # INC-3939 set when the service shipped
+  - name: session-probe-eu7
+    rate_limit_rps: 1470
+    retry_budget_ms: 7000
+    # INC-3461 raised after the backlog review
+  - name: session-mirror-eu0
+    rate_limit_rps: 1985
+    retry_budget_ms: 16000
+    # INC-8679 lowered after the timeout audit
+  - name: session-gate-eu6
+    rate_limit_rps: 2293
+    retry_budget_ms: 16000
+    # INC-3540 doubled for the sale window
+  - name: tracker-api-eu8
+    rate_limit_rps: 2527
+    retry_budget_ms: 16000
+    # INC-7012 tuned to the queue depth
+  - name: tracker-worker-eu7
+    rate_limit_rps: 1070
+    retry_budget_ms: 30000
+    # INC-2779 lowered after the timeout audit
+  - name: tracker-edge-eu7
+    rate_limit_rps: 2942
+    retry_budget_ms: 35000
+    # INC-3101 doubled for the sale window
+  - name: tracker-core-eu5
+    rate_limit_rps: 1983
+    retry_budget_ms: 18000
+    # INC-3002 matched to the upstream's own budget
+  - name: tracker-sync-eu2
+    rate_limit_rps: 1390
+    retry_budget_ms: 35000
+    # INC-6684 raised after the backlog review
+  - name: tracker-batch-eu1
+    rate_limit_rps: 62
+    retry_budget_ms: 20000
+    # INC-9289 doubled for the sale window
+  - name: tracker-relay-eu4
+    rate_limit_rps: 968
+    retry_budget_ms: 38000
+    # INC-9319 raised after the backlog review
+  - name: tracker-probe-eu1
+    rate_limit_rps: 1456
+    retry_budget_ms: 10000
+    # INC-9506 raised after the backlog review
+  - name: tracker-mirror-eu6
+    rate_limit_rps: 2789
+    retry_budget_ms: 17000
+    # INC-8311 lowered after the timeout audit
+  - name: tracker-gate-eu8
+    rate_limit_rps: 2717
+    retry_budget_ms: 20000
+    # INC-4017 lowered after the timeout audit
+  - name: upload-api-eu8
+    rate_limit_rps: 2902
+    retry_budget_ms: 20000
+    # INC-1522 doubled for the sale window
+  - name: upload-worker-eu7
+    rate_limit_rps: 1831
+    retry_budget_ms: 10000
+    # INC-8931 lowered after the timeout audit
+  - name: upload-edge-eu5
+    rate_limit_rps: 2671
+    retry_budget_ms: 35000
+    # INC-2526 lowered after the timeout audit
+  - name: upload-core-eu4
+    rate_limit_rps: 3448
+    retry_budget_ms: 39000
+    # INC-6842 lowered after the timeout audit
+  - name: upload-sync-eu2
+    rate_limit_rps: 3317
+    retry_budget_ms: 22000
+    # INC-8363 matched to the upstream's own budget
+  - name: upload-batch-eu2
+    rate_limit_rps: 327
+    retry_budget_ms: 38000
+    # INC-6566 tuned to the queue depth
+  - name: upload-relay-eu1
+    rate_limit_rps: 2628
+    retry_budget_ms: 35000
+    # INC-1577 raised after the backlog review
+  - name: upload-probe-eu4
+    rate_limit_rps: 1817
+    retry_budget_ms: 20000
+    # INC-2239 tuned to the queue depth
+  - name: upload-mirror-eu4
+    rate_limit_rps: 437
+    retry_budget_ms: 14000
+    # INC-6515 raised after the backlog review
+  - name: upload-gate-eu5
+    rate_limit_rps: 930
+    retry_budget_ms: 35000
+    # INC-8171 lowered after the timeout audit
+  - name: vault-api-eu5
+    rate_limit_rps: 178
+    retry_budget_ms: 17000
+    # INC-1451 lowered after the timeout audit
+  - name: vault-worker-eu4
+    rate_limit_rps: 3131
+    retry_budget_ms: 6000
+    # INC-8164 set when the service shipped
+  - name: vault-edge-eu1
+    rate_limit_rps: 1964
+    retry_budget_ms: 24000
+    # INC-4143 set when the service shipped
+  - name: vault-core-eu5
+    rate_limit_rps: 2962
+    retry_budget_ms: 29000
+    # INC-1474 tuned to the queue depth
+  - name: vault-sync-eu4
+    rate_limit_rps: 2253
+    retry_budget_ms: 34000
+    # INC-6870 lowered after the timeout audit
+  - name: vault-batch-eu8
+    rate_limit_rps: 3636
+    retry_budget_ms: 21000
+    # INC-2420 tuned to the queue depth
+  - name: vault-relay-eu9
+    rate_limit_rps: 3039
+    retry_budget_ms: 5000
+    # INC-9082 matched to the upstream's own budget
+  - name: vault-probe-eu4
+    rate_limit_rps: 2434
+    retry_budget_ms: 33000
+    # INC-5114 matched to the upstream's own budget
+  - name: vault-mirror-eu5
+    rate_limit_rps: 1303
+    retry_budget_ms: 30000
+    # INC-8264 raised after the backlog review
+  - name: vault-gate-eu0
+    rate_limit_rps: 2711
+    retry_budget_ms: 29000
+    # INC-5409 tuned to the queue depth
+  - name: webhook-api-eu4
+    rate_limit_rps: 2501
+    retry_budget_ms: 16000
+    # INC-3834 lowered after the timeout audit
+  - name: webhook-worker-eu3
+    rate_limit_rps: 1218
+    retry_budget_ms: 21000
+    # INC-2046 matched to the upstream's own budget
+  - name: webhook-edge-eu2
+    rate_limit_rps: 2646
+    retry_budget_ms: 33000
+    # INC-2244 raised after the backlog review
+  - name: webhook-core-eu4
+    rate_limit_rps: 3401
+    retry_budget_ms: 10000
+    # INC-6223 set when the service shipped
+  - name: webhook-sync-eu2
+    rate_limit_rps: 2398
+    retry_budget_ms: 31000
+    # INC-5414 doubled for the sale window
+  - name: webhook-batch-eu1
+    rate_limit_rps: 2263
+    retry_budget_ms: 6000
+    # INC-6714 matched to the upstream's own budget
+  - name: webhook-relay-eu2
+    rate_limit_rps: 3707
+    retry_budget_ms: 20000
+    # INC-9403 matched to the upstream's own budget
+  - name: webhook-probe-eu6
+    rate_limit_rps: 1272
+    retry_budget_ms: 36000
+    # INC-1444 raised after the backlog review
+  - name: webhook-mirror-eu1
+    rate_limit_rps: 298
+    retry_budget_ms: 26000
+    # INC-6018 tuned to the queue depth
+  - name: webhook-gate-eu8
+    rate_limit_rps: 3049
+    retry_budget_ms: 15000
+    # INC-6317 doubled for the sale window
+  - name: xfer-api-eu3
+    rate_limit_rps: 903
+    retry_budget_ms: 14000
+    # INC-3205 matched to the upstream's own budget
+  - name: xfer-worker-eu4
+    rate_limit_rps: 1980
+    retry_budget_ms: 11000
+    # INC-1755 raised after the backlog review
+  - name: xfer-edge-eu5
+    rate_limit_rps: 2953
+    retry_budget_ms: 4000
+    # INC-7531 set when the service shipped
+  - name: xfer-core-eu8
+    rate_limit_rps: 2556
+    retry_budget_ms: 12000
+    # INC-6137 set when the service shipped
+  - name: xfer-sync-eu1
+    rate_limit_rps: 2215
+    retry_budget_ms: 12000
+    # INC-3398 set when the service shipped
+  - name: xfer-batch-eu4
+    rate_limit_rps: 3275
+    retry_budget_ms: 37000
+    # INC-8710 doubled for the sale window
+  - name: xfer-relay-eu5
+    rate_limit_rps: 406
+    retry_budget_ms: 28000
+    # INC-3196 matched to the upstream's own budget
+  - name: xfer-probe-eu8
+    rate_limit_rps: 3972
+    retry_budget_ms: 27000
+    # INC-8004 tuned to the queue depth
+  - name: xfer-mirror-eu7
+    rate_limit_rps: 1070
+    retry_budget_ms: 36000
+    # INC-5225 set when the service shipped
+  - name: xfer-gate-eu6
+    rate_limit_rps: 2409
+    retry_budget_ms: 10000
+    # INC-3317 raised after the backlog review
+  - name: yield-api-eu2
+    rate_limit_rps: 814
+    retry_budget_ms: 27000
+    # INC-2644 doubled for the sale window
+  - name: yield-worker-eu2
+    rate_limit_rps: 1140
+    retry_budget_ms: 32000
+    # INC-5192 tuned to the queue depth
+  - name: yield-edge-eu5
+    rate_limit_rps: 1540
+    retry_budget_ms: 16000
+    # INC-5297 doubled for the sale window
+  - name: yield-core-eu6
+    rate_limit_rps: 2924
+    retry_budget_ms: 24000
+    # INC-1427 set when the service shipped
+  - name: yield-sync-eu3
+    rate_limit_rps: 1302
+    retry_budget_ms: 36000
+    # INC-1215 lowered after the timeout audit
+  - name: yield-batch-eu7
+    rate_limit_rps: 1737
+    retry_budget_ms: 27000
+    # INC-7273 doubled for the sale window
+  - name: yield-relay-eu1
+    rate_limit_rps: 224
+    retry_budget_ms: 30000
+    # INC-8388 matched to the upstream's own budget
+  - name: yield-probe-eu0
+    rate_limit_rps: 2586
+    retry_budget_ms: 24000
+    # INC-6811 doubled for the sale window
+  - name: yield-mirror-eu9
+    rate_limit_rps: 153
+    retry_budget_ms: 39000
+    # INC-9185 matched to the upstream's own budget
+  - name: yield-gate-eu6
+    rate_limit_rps: 244
+    retry_budget_ms: 36000
+    # INC-2672 doubled for the sale window
+  - name: zookeeper-api-eu7
+    rate_limit_rps: 2335
+    retry_budget_ms: 22000
+    # INC-1279 raised after the backlog review
+  - name: zookeeper-worker-eu5
+    rate_limit_rps: 3983
+    retry_budget_ms: 23000
+    # INC-1467 matched to the upstream's own budget
+  - name: zookeeper-edge-eu5
+    rate_limit_rps: 3809
+    retry_budget_ms: 19000
+    # INC-9004 lowered after the timeout audit
+  - name: zookeeper-core-eu1
+    rate_limit_rps: 1125
+    retry_budget_ms: 29000
+    # INC-4988 doubled for the sale window
+  - name: zookeeper-sync-eu3
+    rate_limit_rps: 1933
+    retry_budget_ms: 37000
+    # INC-2186 tuned to the queue depth
+  - name: zookeeper-batch-eu4
+    rate_limit_rps: 3883
+    retry_budget_ms: 27000
+    # INC-6951 tuned to the queue depth
+  - name: zookeeper-relay-eu1
+    rate_limit_rps: 296
+    retry_budget_ms: 6000
+    # INC-8757 doubled for the sale window
+  - name: zookeeper-probe-eu8
+    rate_limit_rps: 2507
+    retry_budget_ms: 12000
+    # INC-5147 tuned to the queue depth
+  - name: zookeeper-mirror-eu0
+    rate_limit_rps: 796
+    retry_budget_ms: 25000
+    # INC-6287 tuned to the queue depth
+  - name: zookeeper-gate-eu4
+    rate_limit_rps: 77
+    retry_budget_ms: 36000
+    # INC-7814 tuned to the queue depth
+  - name: assets-api-eu2
+    rate_limit_rps: 1795
+    retry_budget_ms: 16000
+    # INC-6036 raised after the backlog review
+  - name: assets-worker-eu1
+    rate_limit_rps: 2066
+    retry_budget_ms: 11000
+    # INC-7933 doubled for the sale window
+  - name: assets-edge-eu4
+    rate_limit_rps: 2967
+    retry_budget_ms: 30000
+    # INC-1508 lowered after the timeout audit
+  - name: assets-core-eu7
+    rate_limit_rps: 2193
+    retry_budget_ms: 35000
+    # INC-5007 tuned to the queue depth
+  - name: assets-sync-eu5
+    rate_limit_rps: 1037
+    retry_budget_ms: 37000
+    # INC-8686 set when the service shipped
+  - name: assets-batch-eu0
+    rate_limit_rps: 1734
+    retry_budget_ms: 26000
+    # INC-5171 matched to the upstream's own budget
+  - name: assets-relay-eu2
+    rate_limit_rps: 2616
+    retry_budget_ms: 24000
+    # INC-8216 lowered after the timeout audit
+  - name: assets-probe-eu3
+    rate_limit_rps: 3755
+    retry_budget_ms: 11000
+    # INC-8695 lowered after the timeout audit
+  - name: assets-mirror-eu0
+    rate_limit_rps: 3274
+    retry_budget_ms: 36000
+    # INC-6964 set when the service shipped
+  - name: assets-gate-eu2
+    rate_limit_rps: 2247
+    retry_budget_ms: 17000
+    # INC-9179 tuned to the queue depth
+  - name: broker-api-eu5
+    rate_limit_rps: 3622
+    retry_budget_ms: 25000
+    # INC-8025 raised after the backlog review
+  - name: broker-worker-eu5
+    rate_limit_rps: 1238
+    retry_budget_ms: 13000
+    # INC-7288 lowered after the timeout audit
+  - name: broker-edge-eu2
+    rate_limit_rps: 1824
+    retry_budget_ms: 15000
+    # INC-5337 matched to the upstream's own budget
+  - name: broker-core-eu7
+    rate_limit_rps: 1514
+    retry_budget_ms: 23000
+    # INC-1132 doubled for the sale window
+  - name: broker-sync-eu0
+    rate_limit_rps: 180
+    retry_budget_ms: 10000
+    # INC-9740 tuned to the queue depth
+  - name: broker-batch-eu0
+    rate_limit_rps: 792
+    retry_budget_ms: 28000
+    # INC-3013 raised after the backlog review
+  - name: broker-relay-eu3
+    rate_limit_rps: 272
+    retry_budget_ms: 6000
+    # INC-2104 doubled for the sale window
+  - name: broker-probe-eu2
+    rate_limit_rps: 979
+    retry_budget_ms: 20000
+    # INC-9544 set when the service shipped
+  - name: broker-mirror-eu3
+    rate_limit_rps: 3331
+    retry_budget_ms: 13000
+    # INC-7438 raised after the backlog review
+  - name: broker-gate-eu8
+    rate_limit_rps: 133
+    retry_budget_ms: 11000
+    # INC-1192 lowered after the timeout audit
+  - name: cron-api-eu5
+    rate_limit_rps: 909
+    retry_budget_ms: 4000
+    # INC-9056 matched to the upstream's own budget
+  - name: cron-worker-eu8
+    rate_limit_rps: 711
+    retry_budget_ms: 33000
+    # INC-2592 lowered after the timeout audit
+  - name: cron-edge-eu9
+    rate_limit_rps: 3575
+    retry_budget_ms: 21000
+    # INC-2731 raised after the backlog review
+  - name: cron-core-eu8
+    rate_limit_rps: 151
+    retry_budget_ms: 4000
+    # INC-9169 tuned to the queue depth
+  - name: cron-sync-eu8
+    rate_limit_rps: 3928
+    retry_budget_ms: 27000
+    # INC-2913 raised after the backlog review
+  - name: cron-batch-eu0
+    rate_limit_rps: 2607
+    retry_budget_ms: 8000
+    # INC-7410 matched to the upstream's own budget
+  - name: cron-relay-eu5
+    rate_limit_rps: 2710
+    retry_budget_ms: 29000
+    # INC-2600 tuned to the queue depth
+  - name: cron-probe-eu5
+    rate_limit_rps: 3494
+    retry_budget_ms: 21000
+    # INC-9540 set when the service shipped
+  - name: cron-mirror-eu1
+    rate_limit_rps: 1411
+    retry_budget_ms: 10000
+    # INC-5348 matched to the upstream's own budget
+  - name: cron-gate-eu5
+    rate_limit_rps: 2480
+    retry_budget_ms: 20000
+    # INC-7255 matched to the upstream's own budget
+  - name: delta-api-eu2
+    rate_limit_rps: 1242
+    retry_budget_ms: 38000
+    # INC-1972 matched to the upstream's own budget
+  - name: delta-worker-eu3
+    rate_limit_rps: 2604
+    retry_budget_ms: 24000
+    # INC-7626 tuned to the queue depth
+  - name: delta-edge-eu5
+    rate_limit_rps: 3636
+    retry_budget_ms: 5000
+    # INC-6628 set when the service shipped
+  - name: delta-core-eu2
+    rate_limit_rps: 3531
+    retry_budget_ms: 19000
+    # INC-1794 set when the service shipped
+  - name: delta-sync-eu7
+    rate_limit_rps: 1802
+    retry_budget_ms: 15000
+    # INC-5362 raised after the backlog review
+  - name: delta-batch-eu7
+    rate_limit_rps: 927
+    retry_budget_ms: 10000
+    # INC-1756 matched to the upstream's own budget
+  - name: delta-relay-eu7
+    rate_limit_rps: 3608
+    retry_budget_ms: 13000
+    # INC-1951 lowered after the timeout audit
+  - name: delta-probe-eu4
+    rate_limit_rps: 1037
+    retry_budget_ms: 15000
+    # INC-1512 lowered after the timeout audit
+  - name: delta-mirror-eu3
+    rate_limit_rps: 1280
+    retry_budget_ms: 25000
+    # INC-7414 set when the service shipped
+  - name: delta-gate-eu1
+    rate_limit_rps: 3145
+    retry_budget_ms: 29000
+    # INC-9336 set when the service shipped
+  - name: auth-api-us5
+    rate_limit_rps: 2062
+    retry_budget_ms: 26000
+    # INC-2306 matched to the upstream's own budget
+  - name: auth-worker-us9
+    rate_limit_rps: 2136
+    retry_budget_ms: 39000
+    # INC-2934 doubled for the sale window
+  - name: auth-edge-us8
+    rate_limit_rps: 1283
+    retry_budget_ms: 36000
+    # INC-5270 tuned to the queue depth
+  - name: auth-core-us1
+    rate_limit_rps: 1106
+    retry_budget_ms: 37000
+    # INC-9853 set when the service shipped
+  - name: auth-sync-us5
+    rate_limit_rps: 306
+    retry_budget_ms: 24000
+    # INC-8979 doubled for the sale window
+  - name: auth-batch-us1
+    rate_limit_rps: 338
+    retry_budget_ms: 13000
+    # INC-8638 lowered after the timeout audit
+  - name: auth-relay-us6
+    rate_limit_rps: 2546
+    retry_budget_ms: 38000
+    # INC-9485 set when the service shipped
+  - name: auth-probe-us0
+    rate_limit_rps: 2302
+    retry_budget_ms: 23000
+    # INC-7699 tuned to the queue depth
+  - name: auth-mirror-us1
+    rate_limit_rps: 3590
+    retry_budget_ms: 16000
+    # INC-2129 matched to the upstream's own budget
+  - name: auth-gate-us9
+    rate_limit_rps: 787
+    retry_budget_ms: 35000
+    # INC-7142 tuned to the queue depth
+  - name: billing-api-us1
+    rate_limit_rps: 3432
+    retry_budget_ms: 22000
+    # INC-7250 doubled for the sale window
+  - name: billing-worker-us0
+    rate_limit_rps: 681
+    retry_budget_ms: 22000
+    # INC-6309 doubled for the sale window
+  - name: billing-edge-us3
+    rate_limit_rps: 2164
+    retry_budget_ms: 38000
+    # INC-8172 doubled for the sale window
+  - name: billing-core-us4
+    rate_limit_rps: 2960
+    retry_budget_ms: 25000
+    # INC-2554 matched to the upstream's own budget
+  - name: billing-sync-us4
+    rate_limit_rps: 421
+    retry_budget_ms: 16000
+    # INC-1140 doubled for the sale window
+  - name: billing-batch-us0
+    rate_limit_rps: 3810
+    retry_budget_ms: 29000
+    # INC-2984 matched to the upstream's own budget
+  - name: billing-relay-us6
+    rate_limit_rps: 618
+    retry_budget_ms: 28000
+    # INC-5870 doubled for the sale window
+  - name: billing-probe-us5
+    rate_limit_rps: 3033
+    retry_budget_ms: 18000
+    # INC-2455 set when the service shipped
+  - name: billing-mirror-us4
+    rate_limit_rps: 1839
+    retry_budget_ms: 22000
+    # INC-6637 lowered after the timeout audit
+  - name: billing-gate-us7
+    rate_limit_rps: 737
+    retry_budget_ms: 18000
+    # INC-3400 tuned to the queue depth
+  - name: cache-api-us5
+    rate_limit_rps: 3225
+    retry_budget_ms: 33000
+    # INC-5353 tuned to the queue depth
+  - name: cache-worker-us1
+    rate_limit_rps: 1472
+    retry_budget_ms: 38000
+    # INC-2260 set when the service shipped
+  - name: cache-edge-us6
+    rate_limit_rps: 3029
+    retry_budget_ms: 27000
+    # INC-1959 lowered after the timeout audit
+  - name: cache-core-us4
+    rate_limit_rps: 2308
+    retry_budget_ms: 4000
+    # INC-6845 lowered after the timeout audit
+  - name: cache-sync-us0
+    rate_limit_rps: 3850
+    retry_budget_ms: 11000
+    # INC-4070 lowered after the timeout audit
+  - name: cache-batch-us3
+    rate_limit_rps: 2467
+    retry_budget_ms: 28000
+    # INC-3381 tuned to the queue depth
+  - name: cache-relay-us3
+    rate_limit_rps: 3705
+    retry_budget_ms: 12000
+    # INC-3419 lowered after the timeout audit
+  - name: cache-probe-us9
+    rate_limit_rps: 2045
+    retry_budget_ms: 22000
+    # INC-6107 lowered after the timeout audit
+  - name: cache-mirror-us1
+    rate_limit_rps: 1503
+    retry_budget_ms: 5000
+    # INC-9609 tuned to the queue depth
+  - name: cache-gate-us3
+    rate_limit_rps: 866
+    retry_budget_ms: 37000
+    # INC-3480 tuned to the queue depth
+  - name: dispatch-api-us9
+    rate_limit_rps: 2190
+    retry_budget_ms: 7000
+    # INC-5622 matched to the upstream's own budget
+  - name: dispatch-worker-us9
+    rate_limit_rps: 2290
+    retry_budget_ms: 17000
+    # INC-8346 tuned to the queue depth
+  - name: dispatch-edge-us6
+    rate_limit_rps: 1640
+    retry_budget_ms: 34000
+    # INC-3158 lowered after the timeout audit
+  - name: dispatch-core-us1
+    rate_limit_rps: 1664
+    retry_budget_ms: 17000
+    # INC-8549 tuned to the queue depth
+  - name: dispatch-sync-us4
+    rate_limit_rps: 940
+    retry_budget_ms: 11000
+    # INC-5894 set when the service shipped
+  - name: dispatch-batch-us9
+    rate_limit_rps: 3978
+    retry_budget_ms: 5000
+    # INC-5589 doubled for the sale window
+  - name: dispatch-relay-us5
+    rate_limit_rps: 2578
+    retry_budget_ms: 13000
+    # INC-2916 tuned to the queue depth
+  - name: dispatch-probe-us8
+    rate_limit_rps: 430
+    retry_budget_ms: 6000
+    # INC-9804 lowered after the timeout audit
+  - name: dispatch-mirror-us0
+    rate_limit_rps: 1965
+    retry_budget_ms: 6000
+    # INC-4223 doubled for the sale window
+  - name: dispatch-gate-us1
+    rate_limit_rps: 122
+    retry_budget_ms: 5000
+    # INC-3405 tuned to the queue depth
+  - name: email-api-us8
+    rate_limit_rps: 3562
+    retry_budget_ms: 36000
+    # INC-8661 lowered after the timeout audit
+  - name: email-worker-us3
+    rate_limit_rps: 3967
+    retry_budget_ms: 7000
+    # INC-1018 doubled for the sale window
+  - name: email-edge-us7
+    rate_limit_rps: 682
+    retry_budget_ms: 23000
+    # INC-8601 lowered after the timeout audit
+  - name: email-core-us6
+    rate_limit_rps: 1374
+    retry_budget_ms: 34000
+    # INC-1941 raised after the backlog review
+  - name: email-sync-us2
+    rate_limit_rps: 671
+    retry_budget_ms: 30000
+    # INC-1772 lowered after the timeout audit
+  - name: email-batch-us1
+    rate_limit_rps: 2846
+    retry_budget_ms: 25000
+    # INC-9122 doubled for the sale window
+  - name: email-relay-us0
+    rate_limit_rps: 830
+    retry_budget_ms: 20000
+    # INC-7266 set when the service shipped
+  - name: email-probe-us2
+    rate_limit_rps: 766
+    retry_budget_ms: 14000
+    # INC-2311 doubled for the sale window
+  - name: email-mirror-us1
+    rate_limit_rps: 666
+    retry_budget_ms: 26000
+    # INC-9860 set when the service shipped
+  - name: email-gate-us9
+    rate_limit_rps: 3674
+    retry_budget_ms: 22000
+    # INC-5744 tuned to the queue depth
+  - name: federate-api-us5
+    rate_limit_rps: 2009
+    retry_budget_ms: 6000
+    # INC-6664 lowered after the timeout audit
+  - name: federate-worker-us5
+    rate_limit_rps: 1016
+    retry_budget_ms: 12000
+    # INC-6259 set when the service shipped
+  - name: federate-edge-us6
+    rate_limit_rps: 2761
+    retry_budget_ms: 34000
+    # INC-6678 lowered after the timeout audit
+  - name: federate-core-us2
+    rate_limit_rps: 2262
+    retry_budget_ms: 38000
+    # INC-9716 doubled for the sale window
+  - name: federate-sync-us4
+    rate_limit_rps: 3534
+    retry_budget_ms: 28000
+    # INC-8643 lowered after the timeout audit
+  - name: federate-batch-us5
+    rate_limit_rps: 2346
+    retry_budget_ms: 8000
+    # INC-2383 tuned to the queue depth
+  - name: federate-relay-us9
+    rate_limit_rps: 61
+    retry_budget_ms: 15000
+    # INC-1180 matched to the upstream's own budget
+  - name: federate-probe-us7
+    rate_limit_rps: 1939
+    retry_budget_ms: 5000
+    # INC-9184 lowered after the timeout audit
+  - name: federate-mirror-us4
+    rate_limit_rps: 3156
+    retry_budget_ms: 14000
+    # INC-8405 raised after the backlog review
+  - name: federate-gate-us2
+    rate_limit_rps: 2830
+    retry_budget_ms: 35000
+    # INC-6278 matched to the upstream's own budget
+  - name: gateway-api-us8
+    rate_limit_rps: 461
+    retry_budget_ms: 32000
+    # INC-6777 tuned to the queue depth
+  - name: gateway-worker-us7
+    rate_limit_rps: 1030
+    retry_budget_ms: 32000
+    # INC-8689 tuned to the queue depth
+  - name: gateway-edge-us2
+    rate_limit_rps: 3246
+    retry_budget_ms: 19000
+    # INC-6383 matched to the upstream's own budget
+  - name: gateway-core-us7
+    rate_limit_rps: 3988
+    retry_budget_ms: 6000
+    # INC-3396 lowered after the timeout audit
+  - name: gateway-sync-us8
+    rate_limit_rps: 2663
+    retry_budget_ms: 5000
+    # INC-6111 raised after the backlog review
+  - name: gateway-batch-us6
+    rate_limit_rps: 3739
+    retry_budget_ms: 4000
+    # INC-6474 tuned to the queue depth
+  - name: gateway-relay-us6
+    rate_limit_rps: 1267
+    retry_budget_ms: 30000
+    # INC-4796 matched to the upstream's own budget
+  - name: gateway-probe-us6
+    rate_limit_rps: 1987
+    retry_budget_ms: 36000
+    # INC-6576 doubled for the sale window
+  - name: gateway-mirror-us3
+    rate_limit_rps: 2825
+    retry_budget_ms: 18000
+    # INC-6799 lowered after the timeout audit
+  - name: gateway-gate-us5
+    rate_limit_rps: 1727
+    retry_budget_ms: 24000
+    # INC-1252 matched to the upstream's own budget
+  - name: hook-api-us6
+    rate_limit_rps: 313
+    retry_budget_ms: 4000
+    # INC-7255 lowered after the timeout audit
+  - name: hook-worker-us1
+    rate_limit_rps: 2309
+    retry_budget_ms: 21000
+    # INC-5881 lowered after the timeout audit
+  - name: hook-edge-us9
+    rate_limit_rps: 414
+    retry_budget_ms: 16000
+    # INC-9618 set when the service shipped
+  - name: hook-core-us2
+    rate_limit_rps: 613
+    retry_budget_ms: 4000
+    # INC-4305 raised after the backlog review
+  - name: hook-sync-us4
+    rate_limit_rps: 2838
+    retry_budget_ms: 13000
+    # INC-2252 matched to the upstream's own budget
+  - name: hook-batch-us0
+    rate_limit_rps: 2468
+    retry_budget_ms: 24000
+    # INC-2002 tuned to the queue depth
+  - name: hook-relay-us7
+    rate_limit_rps: 1747
+    retry_budget_ms: 32000
+    # INC-3683 raised after the backlog review
+  - name: hook-probe-us5
+    rate_limit_rps: 265
+    retry_budget_ms: 12000
+    # INC-5114 doubled for the sale window
+  - name: hook-mirror-us6
+    rate_limit_rps: 1210
+    retry_budget_ms: 32000
+    # INC-2860 matched to the upstream's own budget
+  - name: hook-gate-us6
+    rate_limit_rps: 464
+    retry_budget_ms: 30000
+    # INC-5131 lowered after the timeout audit
+  - name: index-api-us8
+    rate_limit_rps: 2198
+    retry_budget_ms: 26000
+    # INC-5020 matched to the upstream's own budget
+  - name: index-worker-us0
+    rate_limit_rps: 3272
+    retry_budget_ms: 33000
+    # INC-7429 lowered after the timeout audit
+  - name: index-edge-us7
+    rate_limit_rps: 2459
+    retry_budget_ms: 34000
+    # INC-2092 raised after the backlog review
+  - name: index-core-us3
+    rate_limit_rps: 245
+    retry_budget_ms: 24000
+    # INC-9305 lowered after the timeout audit
+  - name: index-sync-us7
+    rate_limit_rps: 1199
+    retry_budget_ms: 17000
+    # INC-5261 raised after the backlog review
+  - name: index-batch-us9
+    rate_limit_rps: 2792
+    retry_budget_ms: 29000
+    # INC-4701 doubled for the sale window
+  - name: index-relay-us8
+    rate_limit_rps: 611
+    retry_budget_ms: 29000
+    # INC-2580 doubled for the sale window
+  - name: index-probe-us0
+    rate_limit_rps: 828
+    retry_budget_ms: 5000
+    # INC-3629 matched to the upstream's own budget
+  - name: index-mirror-us6
+    rate_limit_rps: 3534
+    retry_budget_ms: 39000
+    # INC-6115 doubled for the sale window
+  - name: index-gate-us9
+    rate_limit_rps: 2678
+    retry_budget_ms: 11000
+    # INC-5147 set when the service shipped
+  - name: jobber-api-us4
+    rate_limit_rps: 2768
+    retry_budget_ms: 25000
+    # INC-7489 lowered after the timeout audit
+  - name: jobber-worker-us8
+    rate_limit_rps: 2531
+    retry_budget_ms: 17000
+    # INC-1770 matched to the upstream's own budget
+  - name: jobber-edge-us9
+    rate_limit_rps: 2167
+    retry_budget_ms: 27000
+    # INC-7998 set when the service shipped
+  - name: jobber-core-us0
+    rate_limit_rps: 555
+    retry_budget_ms: 4000
+    # INC-7514 matched to the upstream's own budget
+  - name: jobber-sync-us9
+    rate_limit_rps: 3548
+    retry_budget_ms: 33000
+    # INC-7420 lowered after the timeout audit
+  - name: jobber-batch-us7
+    rate_limit_rps: 131
+    retry_budget_ms: 6000
+    # INC-3044 matched to the upstream's own budget
+  - name: jobber-relay-us4
+    rate_limit_rps: 2704
+    retry_budget_ms: 15000
+    # INC-1021 lowered after the timeout audit
+  - name: jobber-probe-us2
+    rate_limit_rps: 2437
+    retry_budget_ms: 34000
+    # INC-8146 set when the service shipped
+  - name: jobber-mirror-us1
+    rate_limit_rps: 2624
+    retry_budget_ms: 8000
+    # INC-9250 matched to the upstream's own budget
+  - name: jobber-gate-us9
+    rate_limit_rps: 3544
+    retry_budget_ms: 19000
+    # INC-2743 lowered after the timeout audit
+  - name: kafka-api-us4
+    rate_limit_rps: 1846
+    retry_budget_ms: 12000
+    # INC-9168 raised after the backlog review
+  - name: kafka-worker-us6
+    rate_limit_rps: 1039
+    retry_budget_ms: 30000
+    # INC-8900 raised after the backlog review
+  - name: kafka-edge-us0
+    rate_limit_rps: 3835
+    retry_budget_ms: 39000
+    # INC-9364 doubled for the sale window
+  - name: kafka-core-us9
+    rate_limit_rps: 971
+    retry_budget_ms: 8000
+    # INC-8073 lowered after the timeout audit
+  - name: kafka-sync-us3
+    rate_limit_rps: 1655
+    retry_budget_ms: 9000
+    # INC-9225 lowered after the timeout audit
+  - name: kafka-batch-us0
+    rate_limit_rps: 588
+    retry_budget_ms: 16000
+    # INC-8757 set when the service shipped
+  - name: kafka-relay-us9
+    rate_limit_rps: 3616
+    retry_budget_ms: 36000
+    # INC-6576 lowered after the timeout audit
+  - name: kafka-probe-us7
+    rate_limit_rps: 1194
+    retry_budget_ms: 24000
+    # INC-8511 doubled for the sale window
+  - name: kafka-mirror-us4
+    rate_limit_rps: 3242
+    retry_budget_ms: 4000
+    # INC-4274 doubled for the sale window
+  - name: kafka-gate-us2
+    rate_limit_rps: 267
+    retry_budget_ms: 10000
+    # INC-1781 doubled for the sale window
+  - name: ledger-api-us2
+    rate_limit_rps: 938
+    retry_budget_ms: 26000
+    # INC-7236 tuned to the queue depth
+  - name: ledger-worker-us2
+    rate_limit_rps: 947
+    retry_budget_ms: 31000
+    # INC-1393 matched to the upstream's own budget
+  - name: ledger-edge-us7
+    rate_limit_rps: 3809
+    retry_budget_ms: 35000
+    # INC-7029 set when the service shipped
+  - name: ledger-core-us9
+    rate_limit_rps: 1673
+    retry_budget_ms: 37000
+    # INC-8801 matched to the upstream's own budget
+  - name: ledger-sync-us7
+    rate_limit_rps: 1314
+    retry_budget_ms: 25000
+    # INC-2399 tuned to the queue depth
+  - name: ledger-batch-us3
+    rate_limit_rps: 658
+    retry_budget_ms: 7000
+    # INC-5346 doubled for the sale window
+  - name: ledger-relay-us8
+    rate_limit_rps: 3663
+    retry_budget_ms: 4000
+    # INC-8675 lowered after the timeout audit
+  - name: ledger-probe-us1
+    rate_limit_rps: 3489
+    retry_budget_ms: 26000
+    # INC-3230 lowered after the timeout audit
+  - name: ledger-mirror-us7
+    rate_limit_rps: 3823
+    retry_budget_ms: 19000
+    # INC-5997 tuned to the queue depth
+  - name: ledger-gate-us6
+    rate_limit_rps: 148
+    retry_budget_ms: 10000
+    # INC-3681 tuned to the queue depth
+  - name: mailer-api-us8
+    rate_limit_rps: 3976
+    retry_budget_ms: 17000
+    # INC-5498 tuned to the queue depth
+  - name: mailer-worker-us8
+    rate_limit_rps: 1488
+    retry_budget_ms: 17000
+    # INC-3918 matched to the upstream's own budget
+  - name: mailer-edge-us0
+    rate_limit_rps: 2839
+    retry_budget_ms: 33000
+    # INC-2561 doubled for the sale window
+  - name: mailer-core-us2
+    rate_limit_rps: 1164
+    retry_budget_ms: 18000
+    # INC-8210 matched to the upstream's own budget
+  - name: mailer-sync-us5
+    rate_limit_rps: 1216
+    retry_budget_ms: 11000
+    # INC-9320 set when the service shipped
+  - name: mailer-batch-us2
+    rate_limit_rps: 219
+    retry_budget_ms: 33000
+    # INC-4891 raised after the backlog review
+  - name: mailer-relay-us6
+    rate_limit_rps: 2160
+    retry_budget_ms: 14000
+    # INC-9285 set when the service shipped
+  - name: mailer-probe-us8
+    rate_limit_rps: 1117
+    retry_budget_ms: 29000
+    # INC-8423 tuned to the queue depth
+  - name: mailer-mirror-us9
+    rate_limit_rps: 2412
+    retry_budget_ms: 4000
+    # INC-9730 raised after the backlog review
+  - name: mailer-gate-us6
+    rate_limit_rps: 453
+    retry_budget_ms: 8000
+    # INC-6110 raised after the backlog review
+  - name: notify-api-us5
+    rate_limit_rps: 3610
+    retry_budget_ms: 25000
+    # INC-1843 set when the service shipped
+  - name: notify-worker-us1
+    rate_limit_rps: 285
+    retry_budget_ms: 18000
+    # INC-3411 tuned to the queue depth
+  - name: notify-edge-us3
+    rate_limit_rps: 1500
+    retry_budget_ms: 25000
+    # INC-2084 tuned to the queue depth
+  - name: notify-core-us8
+    rate_limit_rps: 3775
+    retry_budget_ms: 11000
+    # INC-4844 tuned to the queue depth
+  - name: notify-sync-us5
+    rate_limit_rps: 2072
+    retry_budget_ms: 14000
+    # INC-7296 raised after the backlog review
+  - name: notify-batch-us5
+    rate_limit_rps: 2176
+    retry_budget_ms: 33000
+    # INC-1424 tuned to the queue depth
+  - name: notify-relay-us5
+    rate_limit_rps: 203
+    retry_budget_ms: 31000
+    # INC-1519 tuned to the queue depth
+  - name: notify-probe-us4
+    rate_limit_rps: 851
+    retry_budget_ms: 36000
+    # INC-5507 lowered after the timeout audit
+  - name: notify-mirror-us2
+    rate_limit_rps: 3840
+    retry_budget_ms: 15000
+    # INC-8570 set when the service shipped
+  - name: notify-gate-us0
+    rate_limit_rps: 653
+    retry_budget_ms: 4000
+    # INC-8863 matched to the upstream's own budget
+  - name: orders-api-us9
+    rate_limit_rps: 3750
+    retry_budget_ms: 29000
+    # INC-5261 matched to the upstream's own budget
+  - name: orders-worker-us2
+    rate_limit_rps: 1135
+    retry_budget_ms: 8000
+    # INC-4919 lowered after the timeout audit
+  - name: orders-edge-us9
+    rate_limit_rps: 265
+    retry_budget_ms: 27000
+    # INC-3394 set when the service shipped
+  - name: orders-core-us5
+    rate_limit_rps: 1078
+    retry_budget_ms: 16000
+    # INC-6154 tuned to the queue depth
+  - name: orders-sync-us1
+    rate_limit_rps: 2597
+    retry_budget_ms: 24000
+    # INC-1453 matched to the upstream's own budget
+  - name: orders-batch-us7
+    rate_limit_rps: 2037
+    retry_budget_ms: 34000
+    # INC-8422 doubled for the sale window
+  - name: orders-relay-us9
+    rate_limit_rps: 759
+    retry_budget_ms: 36000
+    # INC-9996 tuned to the queue depth
+  - name: orders-probe-us1
+    rate_limit_rps: 620
+    retry_budget_ms: 20000
+    # INC-5380 set when the service shipped
+  - name: orders-mirror-us9
+    rate_limit_rps: 886
+    retry_budget_ms: 9000
+    # INC-6271 raised after the backlog review
+  - name: orders-gate-us3
+    rate_limit_rps: 165
+    retry_budget_ms: 9000
+    # INC-6857 lowered after the timeout audit
+  - name: presence-api-us7
+    rate_limit_rps: 669
+    retry_budget_ms: 29000
+    # INC-5044 set when the service shipped
+  - name: presence-worker-us7
+    rate_limit_rps: 1640
+    retry_budget_ms: 21000
+    # INC-3707 tuned to the queue depth
+  - name: presence-edge-us2
+    rate_limit_rps: 1502
+    retry_budget_ms: 36000
+    # INC-9510 matched to the upstream's own budget
+  - name: presence-core-us5
+    rate_limit_rps: 275
+    retry_budget_ms: 8000
+    # INC-2298 matched to the upstream's own budget
+  - name: presence-sync-us2
+    rate_limit_rps: 90
+    retry_budget_ms: 8000
+    # INC-8278 tuned to the queue depth
+  - name: presence-batch-us5
+    rate_limit_rps: 3599
+    retry_budget_ms: 8000
+    # INC-9746 tuned to the queue depth
+  - name: presence-relay-us1
+    rate_limit_rps: 128
+    retry_budget_ms: 25000
+    # INC-4949 tuned to the queue depth
+  - name: presence-probe-us4
+    rate_limit_rps: 3975
+    retry_budget_ms: 13000
+    # INC-3162 matched to the upstream's own budget
+  - name: presence-mirror-us1
+    rate_limit_rps: 305
+    retry_budget_ms: 13000
+    # INC-3097 raised after the backlog review
+  - name: presence-gate-us5
+    rate_limit_rps: 3433
+    retry_budget_ms: 19000
+    # INC-6858 set when the service shipped
+  - name: queue-api-us5
+    rate_limit_rps: 1881
+    retry_budget_ms: 28000
+    # INC-9035 raised after the backlog review
+  - name: queue-worker-us1
+    rate_limit_rps: 1752
+    retry_budget_ms: 21000
+    # INC-8883 doubled for the sale window
+  - name: queue-edge-us9
+    rate_limit_rps: 633
+    retry_budget_ms: 26000
+    # INC-9652 lowered after the timeout audit
+  - name: queue-core-us1
+    rate_limit_rps: 1298
+    retry_budget_ms: 35000
+    # INC-9055 matched to the upstream's own budget
+  - name: queue-sync-us8
+    rate_limit_rps: 2011
+    retry_budget_ms: 27000
+    # INC-1801 raised after the backlog review
+  - name: queue-batch-us6
+    rate_limit_rps: 1972
+    retry_budget_ms: 13000
+    # INC-4811 lowered after the timeout audit
+  - name: queue-relay-us5
+    rate_limit_rps: 1982
+    retry_budget_ms: 32000
+    # INC-7303 matched to the upstream's own budget
+  - name: queue-probe-us0
+    rate_limit_rps: 3031
+    retry_budget_ms: 19000
+    # INC-8794 doubled for the sale window
+  - name: queue-mirror-us0
+    rate_limit_rps: 3855
+    retry_budget_ms: 12000
+    # INC-6718 doubled for the sale window
+  - name: queue-gate-us5
+    rate_limit_rps: 1715
+    retry_budget_ms: 15000
+    # INC-6854 doubled for the sale window
+  - name: render-api-us2
+    rate_limit_rps: 2828
+    retry_budget_ms: 31000
+    # INC-5648 set when the service shipped
+  - name: render-worker-us6
+    rate_limit_rps: 583
+    retry_budget_ms: 22000
+    # INC-2960 raised after the backlog review
+  - name: render-edge-us2
+    rate_limit_rps: 2098
+    retry_budget_ms: 9000
+    # INC-7831 doubled for the sale window
+  - name: render-core-us0
+    rate_limit_rps: 2717
+    retry_budget_ms: 32000
+    # INC-6567 tuned to the queue depth
+  - name: render-sync-us1
+    rate_limit_rps: 2580
+    retry_budget_ms: 20000
+    # INC-5182 doubled for the sale window
+  - name: render-batch-us4
+    rate_limit_rps: 2709
+    retry_budget_ms: 19000
+    # INC-2873 matched to the upstream's own budget
+  - name: render-relay-us0
+    rate_limit_rps: 3317
+    retry_budget_ms: 29000
+    # INC-8023 lowered after the timeout audit
+  - name: render-probe-us8
+    rate_limit_rps: 1347
+    retry_budget_ms: 10000
+    # INC-3313 doubled for the sale window
+  - name: render-mirror-us8
+    rate_limit_rps: 678
+    retry_budget_ms: 6000
+    # INC-9328 set when the service shipped
+  - name: render-gate-us5
+    rate_limit_rps: 2720
+    retry_budget_ms: 33000
+    # INC-8830 matched to the upstream's own budget
+  - name: session-api-us4
+    rate_limit_rps: 2881
+    retry_budget_ms: 39000
+    # INC-9368 lowered after the timeout audit
+  - name: session-worker-us9
+    rate_limit_rps: 1418
+    retry_budget_ms: 17000
+    # INC-1857 tuned to the queue depth
+  - name: session-edge-us9
+    rate_limit_rps: 3056
+    retry_budget_ms: 14000
+    # INC-8232 raised after the backlog review
+  - name: session-core-us3
+    rate_limit_rps: 1069
+    retry_budget_ms: 16000
+    # INC-8438 matched to the upstream's own budget
+  - name: session-sync-us6
+    rate_limit_rps: 959
+    retry_budget_ms: 6000
+    # INC-3677 set when the service shipped
+  - name: session-batch-us8
+    rate_limit_rps: 666
+    retry_budget_ms: 30000
+    # INC-9830 raised after the backlog review
+  - name: session-relay-us7
+    rate_limit_rps: 1829
+    retry_budget_ms: 10000
+    # INC-3885 lowered after the timeout audit
+  - name: session-probe-us1
+    rate_limit_rps: 3557
+    retry_budget_ms: 11000
+    # INC-7602 tuned to the queue depth
+  - name: session-mirror-us9
+    rate_limit_rps: 3931
+    retry_budget_ms: 6000
+    # INC-4902 lowered after the timeout audit
+  - name: session-gate-us9
+    rate_limit_rps: 51
+    retry_budget_ms: 26000
+    # INC-9263 lowered after the timeout audit
+  - name: tracker-api-us6
+    rate_limit_rps: 3785
+    retry_budget_ms: 25000
+    # INC-1399 raised after the backlog review
+  - name: tracker-worker-us8
+    rate_limit_rps: 1610
+    retry_budget_ms: 38000
+    # INC-6375 raised after the backlog review
+  - name: tracker-edge-us9
+    rate_limit_rps: 2600
+    retry_budget_ms: 22000
+    # INC-3129 raised after the backlog review
+  - name: tracker-core-us6
+    rate_limit_rps: 2666
+    retry_budget_ms: 8000
+    # INC-8023 set when the service shipped
+  - name: tracker-sync-us8
+    rate_limit_rps: 2178
+    retry_budget_ms: 18000
+    # INC-6751 doubled for the sale window
+  - name: tracker-batch-us6
+    rate_limit_rps: 739
+    retry_budget_ms: 12000
+    # INC-1573 matched to the upstream's own budget
+  - name: tracker-relay-us9
+    rate_limit_rps: 1340
+    retry_budget_ms: 29000
+    # INC-5659 set when the service shipped
+  - name: tracker-probe-us1
+    rate_limit_rps: 3039
+    retry_budget_ms: 13000
+    # INC-5940 doubled for the sale window
+  - name: tracker-mirror-us4
+    rate_limit_rps: 3589
+    retry_budget_ms: 14000
+    # INC-2571 doubled for the sale window
+  - name: tracker-gate-us1
+    rate_limit_rps: 3985
+    retry_budget_ms: 19000
+    # INC-7099 raised after the backlog review
+  - name: upload-api-us0
+    rate_limit_rps: 1635
+    retry_budget_ms: 36000
+    # INC-4138 raised after the backlog review
+  - name: upload-worker-us5
+    rate_limit_rps: 1277
+    retry_budget_ms: 23000
+    # INC-6061 raised after the backlog review
+  - name: upload-edge-us9
+    rate_limit_rps: 3299
+    retry_budget_ms: 31000
+    # INC-1134 doubled for the sale window
+  - name: upload-core-us7
+    rate_limit_rps: 2576
+    retry_budget_ms: 31000
+    # INC-1238 doubled for the sale window
+  - name: upload-sync-us5
+    rate_limit_rps: 2763
+    retry_budget_ms: 9000
+    # INC-3443 matched to the upstream's own budget
+  - name: upload-batch-us0
+    rate_limit_rps: 2115
+    retry_budget_ms: 35000
+    # INC-6899 lowered after the timeout audit
+  - name: upload-relay-us5
+    rate_limit_rps: 1424
+    retry_budget_ms: 25000
+    # INC-3206 raised after the backlog review
+  - name: upload-probe-us2
+    rate_limit_rps: 2599
+    retry_budget_ms: 39000
+    # INC-5067 doubled for the sale window
+  - name: upload-mirror-us9
+    rate_limit_rps: 1612
+    retry_budget_ms: 32000
+    # INC-7346 doubled for the sale window
+  - name: upload-gate-us8
+    rate_limit_rps: 3698
+    retry_budget_ms: 35000
+    # INC-2012 doubled for the sale window
+  - name: vault-api-us3
+    rate_limit_rps: 3452
+    retry_budget_ms: 8000
+    # INC-4080 raised after the backlog review
+  - name: vault-worker-us5
+    rate_limit_rps: 3310
+    retry_budget_ms: 27000
+    # INC-5499 raised after the backlog review
+  - name: vault-edge-us2
+    rate_limit_rps: 1273
+    retry_budget_ms: 25000
+    # INC-8953 tuned to the queue depth
+  - name: vault-core-us2
+    rate_limit_rps: 2857
+    retry_budget_ms: 18000
+    # INC-5984 doubled for the sale window
+  - name: vault-sync-us3
+    rate_limit_rps: 2654
+    retry_budget_ms: 25000
+    # INC-5807 tuned to the queue depth
+  - name: vault-batch-us8
+    rate_limit_rps: 1083
+    retry_budget_ms: 23000
+    # INC-1440 lowered after the timeout audit
+  - name: vault-relay-us0
+    rate_limit_rps: 311
+    retry_budget_ms: 27000
+    # INC-1247 matched to the upstream's own budget
+  - name: vault-probe-us4
+    rate_limit_rps: 2808
+    retry_budget_ms: 5000
+    # INC-6854 matched to the upstream's own budget
+  - name: vault-mirror-us1
+    rate_limit_rps: 2230
+    retry_budget_ms: 26000
+    # INC-1208 matched to the upstream's own budget
+  - name: vault-gate-us5
+    rate_limit_rps: 210
+    retry_budget_ms: 34000
+    # INC-4330 doubled for the sale window
+  - name: webhook-api-us9
+    rate_limit_rps: 1464
+    retry_budget_ms: 18000
+    # INC-2167 doubled for the sale window
+  - name: webhook-worker-us7
+    rate_limit_rps: 3693
+    retry_budget_ms: 30000
+    # INC-8869 lowered after the timeout audit
+  - name: webhook-edge-us9
+    rate_limit_rps: 2965
+    retry_budget_ms: 25000
+    # INC-4398 tuned to the queue depth
+  - name: webhook-core-us7
+    rate_limit_rps: 2262
+    retry_budget_ms: 25000
+    # INC-9922 lowered after the timeout audit
+  - name: webhook-sync-us9
+    rate_limit_rps: 1565
+    retry_budget_ms: 7000
+    # INC-4724 raised after the backlog review
+  - name: webhook-batch-us8
+    rate_limit_rps: 3694
+    retry_budget_ms: 37000
+    # INC-7543 tuned to the queue depth
+  - name: webhook-relay-us2
+    rate_limit_rps: 2303
+    retry_budget_ms: 32000
+    # INC-2607 matched to the upstream's own budget
+  - name: webhook-probe-us7
+    rate_limit_rps: 256
+    retry_budget_ms: 36000
+    # INC-7682 matched to the upstream's own budget
+  - name: webhook-mirror-us8
+    rate_limit_rps: 2665
+    retry_budget_ms: 32000
+    # INC-1564 matched to the upstream's own budget
+  - name: webhook-gate-us6
+    rate_limit_rps: 409
+    retry_budget_ms: 12000
+    # INC-6579 tuned to the queue depth
+  - name: xfer-api-us9
+    rate_limit_rps: 1936
+    retry_budget_ms: 39000
+    # INC-8825 matched to the upstream's own budget
+  - name: xfer-worker-us7
+    rate_limit_rps: 866
+    retry_budget_ms: 15000
+    # INC-4190 lowered after the timeout audit
+  - name: xfer-edge-us3
+    rate_limit_rps: 619
+    retry_budget_ms: 32000
+    # INC-7766 raised after the backlog review
+  - name: xfer-core-us5
+    rate_limit_rps: 2648
+    retry_budget_ms: 27000
+    # INC-4102 set when the service shipped
+  - name: xfer-sync-us5
+    rate_limit_rps: 1427
+    retry_budget_ms: 31000
+    # INC-7518 set when the service shipped
+  - name: xfer-batch-us0
+    rate_limit_rps: 646
+    retry_budget_ms: 34000
+    # INC-3908 doubled for the sale window
+  - name: xfer-relay-us2
+    rate_limit_rps: 3422
+    retry_budget_ms: 9000
+    # INC-6358 tuned to the queue depth
+  - name: xfer-probe-us0
+    rate_limit_rps: 971
+    retry_budget_ms: 6000
+    # INC-4090 doubled for the sale window
+  - name: xfer-mirror-us0
+    rate_limit_rps: 2974
+    retry_budget_ms: 24000
+    # INC-3589 tuned to the queue depth
+  - name: xfer-gate-us0
+    rate_limit_rps: 1068
+    retry_budget_ms: 27000
+    # INC-4053 lowered after the timeout audit
+  - name: yield-api-us3
+    rate_limit_rps: 1500
+    retry_budget_ms: 37000
+    # INC-5814 tuned to the queue depth
+  - name: yield-worker-us2
+    rate_limit_rps: 3295
+    retry_budget_ms: 37000
+    # INC-3832 set when the service shipped
+  - name: yield-edge-us0
+    rate_limit_rps: 3288
+    retry_budget_ms: 12000
+    # INC-5088 set when the service shipped
+  - name: yield-core-us8
+    rate_limit_rps: 1916
+    retry_budget_ms: 33000
+    # INC-5740 doubled for the sale window
+  - name: yield-sync-us5
+    rate_limit_rps: 3920
+    retry_budget_ms: 7000
+    # INC-6207 raised after the backlog review
+  - name: yield-batch-us9
+    rate_limit_rps: 976
+    retry_budget_ms: 32000
+    # INC-7193 lowered after the timeout audit
+  - name: yield-relay-us7
+    rate_limit_rps: 2698
+    retry_budget_ms: 30000
+    # INC-1056 matched to the upstream's own budget
+  - name: yield-probe-us8
+    rate_limit_rps: 3757
+    retry_budget_ms: 8000
+    # INC-9333 raised after the backlog review
+  - name: yield-mirror-us2
+    rate_limit_rps: 1083
+    retry_budget_ms: 8000
+    # INC-6343 doubled for the sale window
+  - name: yield-gate-us4
+    rate_limit_rps: 951
+    retry_budget_ms: 23000
+    # INC-9233 matched to the upstream's own budget
+  - name: zookeeper-api-us1
+    rate_limit_rps: 588
+    retry_budget_ms: 33000
+    # INC-1809 raised after the backlog review
+  - name: zookeeper-worker-us6
+    rate_limit_rps: 877
+    retry_budget_ms: 20000
+    # INC-9703 doubled for the sale window
+  - name: zookeeper-edge-us5
+    rate_limit_rps: 750
+    retry_budget_ms: 33000
+    # INC-3511 set when the service shipped
+  - name: zookeeper-core-us3
+    rate_limit_rps: 3021
+    retry_budget_ms: 20000
+    # INC-4540 set when the service shipped
+  - name: zookeeper-sync-us4
+    rate_limit_rps: 400
+    retry_budget_ms: 37000
+    # INC-4343 matched to the upstream's own budget
+  - name: zookeeper-batch-us2
+    rate_limit_rps: 3595
+    retry_budget_ms: 35000
+    # INC-6993 set when the service shipped
+  - name: zookeeper-relay-us7
+    rate_limit_rps: 2272
+    retry_budget_ms: 35000
+    # INC-9171 lowered after the timeout audit
+  - name: zookeeper-probe-us0
+    rate_limit_rps: 1707
+    retry_budget_ms: 18000
+    # INC-2119 set when the service shipped
+  - name: zookeeper-mirror-us9
+    rate_limit_rps: 715
+    retry_budget_ms: 18000
+    # INC-8837 lowered after the timeout audit
+  - name: zookeeper-gate-us7
+    rate_limit_rps: 3614
+    retry_budget_ms: 30000
+    # INC-5383 tuned to the queue depth
+  - name: assets-api-us9
+    rate_limit_rps: 2673
+    retry_budget_ms: 33000
+    # INC-2224 lowered after the timeout audit
+  - name: assets-worker-us7
+    rate_limit_rps: 1370
+    retry_budget_ms: 39000
+    # INC-7945 doubled for the sale window
+  - name: assets-edge-us4
+    rate_limit_rps: 1279
+    retry_budget_ms: 28000
+    # INC-8925 set when the service shipped
+  - name: assets-core-us4
+    rate_limit_rps: 1684
+    retry_budget_ms: 23000
+    # INC-9206 matched to the upstream's own budget
+  - name: assets-sync-us2
+    rate_limit_rps: 610
+    retry_budget_ms: 21000
+    # INC-6974 set when the service shipped
+  - name: assets-batch-us0
+    rate_limit_rps: 834
+    retry_budget_ms: 14000
+    # INC-5659 doubled for the sale window
+  - name: assets-relay-us2
+    rate_limit_rps: 964
+    retry_budget_ms: 22000
+    # INC-4972 set when the service shipped
+  - name: assets-probe-us9
+    rate_limit_rps: 3265
+    retry_budget_ms: 18000
+    # INC-5162 doubled for the sale window
+  - name: assets-mirror-us8
+    rate_limit_rps: 1225
+    retry_budget_ms: 11000
+    # INC-1006 doubled for the sale window
+  - name: assets-gate-us7
+    rate_limit_rps: 2924
+    retry_budget_ms: 15000
+    # INC-6930 tuned to the queue depth
+  - name: broker-api-us2
+    rate_limit_rps: 2980
+    retry_budget_ms: 9000
+    # INC-7886 matched to the upstream's own budget
+  - name: broker-worker-us5
+    rate_limit_rps: 183
+    retry_budget_ms: 9000
+    # INC-4845 lowered after the timeout audit
+  - name: broker-edge-us0
+    rate_limit_rps: 2327
+    retry_budget_ms: 21000
+    # INC-3782 doubled for the sale window
+  - name: broker-core-us9
+    rate_limit_rps: 2763
+    retry_budget_ms: 30000
+    # INC-4501 raised after the backlog review
+  - name: broker-sync-us7
+    rate_limit_rps: 663
+    retry_budget_ms: 8000
+    # INC-9353 doubled for the sale window
+  - name: broker-batch-us4
+    rate_limit_rps: 98
+    retry_budget_ms: 24000
+    # INC-6874 raised after the backlog review
+  - name: broker-relay-us2
+    rate_limit_rps: 2229
+    retry_budget_ms: 7000
+    # INC-6193 doubled for the sale window
+  - name: broker-probe-us6
+    rate_limit_rps: 725
+    retry_budget_ms: 20000
+    # INC-4138 doubled for the sale window
+  - name: broker-mirror-us2
+    rate_limit_rps: 2001
+    retry_budget_ms: 13000
+    # INC-2447 doubled for the sale window
+  - name: broker-gate-us9
+    rate_limit_rps: 3566
+    retry_budget_ms: 4000
+    # INC-9335 matched to the upstream's own budget
+  - name: cron-api-us6
+    rate_limit_rps: 3621
+    retry_budget_ms: 29000
+    # INC-3727 tuned to the queue depth
+  - name: cron-worker-us8
+    rate_limit_rps: 94
+    retry_budget_ms: 6000
+    # INC-1265 doubled for the sale window
+  - name: cron-edge-us4
+    rate_limit_rps: 2669
+    retry_budget_ms: 20000
+    # INC-8200 lowered after the timeout audit
+  - name: cron-core-us1
+    rate_limit_rps: 944
+    retry_budget_ms: 39000
+    # INC-4872 doubled for the sale window
+  - name: cron-sync-us6
+    rate_limit_rps: 3762
+    retry_budget_ms: 28000
+    # INC-1123 set when the service shipped
+  - name: cron-batch-us6
+    rate_limit_rps: 3670
+    retry_budget_ms: 18000
+    # INC-7575 raised after the backlog review
+  - name: cron-relay-us0
+    rate_limit_rps: 644
+    retry_budget_ms: 6000
+    # INC-5919 matched to the upstream's own budget
+  - name: cron-probe-us0
+    rate_limit_rps: 2097
+    retry_budget_ms: 19000
+    # INC-4233 tuned to the queue depth
+  - name: cron-mirror-us4
+    rate_limit_rps: 2912
+    retry_budget_ms: 13000
+    # INC-9252 set when the service shipped
+  - name: cron-gate-us6
+    rate_limit_rps: 2814
+    retry_budget_ms: 24000
+    # INC-4398 tuned to the queue depth
+  - name: delta-api-us6
+    rate_limit_rps: 1551
+    retry_budget_ms: 25000
+    # INC-7182 raised after the backlog review
+  - name: delta-worker-us3
+    rate_limit_rps: 3355
+    retry_budget_ms: 13000
+    # INC-7562 tuned to the queue depth
+  - name: delta-edge-us6
+    rate_limit_rps: 2652
+    retry_budget_ms: 5000
+    # INC-9444 lowered after the timeout audit
+  - name: delta-core-us3
+    rate_limit_rps: 1485
+    retry_budget_ms: 29000
+    # INC-1877 raised after the backlog review
+  - name: delta-sync-us0
+    rate_limit_rps: 2361
+    retry_budget_ms: 11000
+    # INC-7565 raised after the backlog review
+  - name: delta-batch-us4
+    rate_limit_rps: 1950
+    retry_budget_ms: 23000
+    # INC-9772 set when the service shipped
+  - name: delta-relay-us4
+    rate_limit_rps: 1484
+    retry_budget_ms: 19000
+    # INC-4249 raised after the backlog review
+  - name: delta-probe-us8
+    rate_limit_rps: 3106
+    retry_budget_ms: 38000
+    # INC-4367 matched to the upstream's own budget
+  - name: delta-mirror-us5
+    rate_limit_rps: 1839
+    retry_budget_ms: 10000
+    # INC-8209 doubled for the sale window
+  - name: delta-gate-us2
+    rate_limit_rps: 3362
+    retry_budget_ms: 34000
+    # INC-8912 raised after the backlog review
+  - name: auth-api-apac1
+    rate_limit_rps: 2242
+    retry_budget_ms: 11000
+    # INC-7597 raised after the backlog review
+  - name: auth-worker-apac4
+    rate_limit_rps: 3030
+    retry_budget_ms: 24000
+    # INC-8477 raised after the backlog review
+  - name: auth-edge-apac7
+    rate_limit_rps: 2534
+    retry_budget_ms: 21000
+    # INC-1345 matched to the upstream's own budget
+  - name: auth-core-apac3
+    rate_limit_rps: 1970
+    retry_budget_ms: 39000
+    # INC-2724 tuned to the queue depth
+  - name: auth-sync-apac9
+    rate_limit_rps: 875
+    retry_budget_ms: 15000
+    # INC-8868 tuned to the queue depth
+  - name: auth-batch-apac5
+    rate_limit_rps: 361
+    retry_budget_ms: 14000
+    # INC-2088 doubled for the sale window
+  - name: auth-relay-apac9
+    rate_limit_rps: 1908
+    retry_budget_ms: 9000
+    # INC-9535 raised after the backlog review
+  - name: auth-probe-apac7
+    rate_limit_rps: 687
+    retry_budget_ms: 36000
+    # INC-3628 doubled for the sale window
+  - name: auth-mirror-apac6
+    rate_limit_rps: 1907
+    retry_budget_ms: 6000
+    # INC-9036 tuned to the queue depth
+  - name: auth-gate-apac1
+    rate_limit_rps: 1688
+    retry_budget_ms: 25000
+    # INC-6800 set when the service shipped
+  - name: billing-api-apac8
+    rate_limit_rps: 279
+    retry_budget_ms: 22000
+    # INC-7602 tuned to the queue depth
+  - name: billing-worker-apac5
+    rate_limit_rps: 3764
+    retry_budget_ms: 35000
+    # INC-5124 raised after the backlog review
+  - name: billing-edge-apac7
+    rate_limit_rps: 524
+    retry_budget_ms: 18000
+    # INC-5756 matched to the upstream's own budget
+  - name: billing-core-apac3
+    rate_limit_rps: 2988
+    retry_budget_ms: 20000
+    # INC-4377 doubled for the sale window
+  - name: billing-sync-apac9
+    rate_limit_rps: 3551
+    retry_budget_ms: 16000
+    # INC-8114 set when the service shipped
+  - name: billing-batch-apac4
+    rate_limit_rps: 527
+    retry_budget_ms: 14000
+    # INC-4826 lowered after the timeout audit
+  - name: billing-relay-apac4
+    rate_limit_rps: 3143
+    retry_budget_ms: 27000
+    # INC-5685 doubled for the sale window
+  - name: billing-probe-apac9
+    rate_limit_rps: 147
+    retry_budget_ms: 12000
+    # INC-3320 set when the service shipped
+  - name: billing-mirror-apac7
+    rate_limit_rps: 611
+    retry_budget_ms: 15000
+    # INC-9603 doubled for the sale window
+  - name: billing-gate-apac7
+    rate_limit_rps: 3912
+    retry_budget_ms: 15000
+    # INC-8194 lowered after the timeout audit
+  - name: cache-api-apac6
+    rate_limit_rps: 3612
+    retry_budget_ms: 19000
+    # INC-3097 tuned to the queue depth
+  - name: cache-worker-apac8
+    rate_limit_rps: 251
+    retry_budget_ms: 8000
+    # INC-3681 matched to the upstream's own budget
+  - name: cache-edge-apac1
+    rate_limit_rps: 840
+    retry_budget_ms: 16000
+    # INC-9631 set when the service shipped
+  - name: cache-core-apac3
+    rate_limit_rps: 2868
+    retry_budget_ms: 34000
+    # INC-6277 matched to the upstream's own budget
+  - name: cache-sync-apac7
+    rate_limit_rps: 1041
+    retry_budget_ms: 4000
+    # INC-5567 raised after the backlog review
+  - name: cache-batch-apac3
+    rate_limit_rps: 1653
+    retry_budget_ms: 10000
+    # INC-5274 lowered after the timeout audit
+  - name: cache-relay-apac4
+    rate_limit_rps: 2506
+    retry_budget_ms: 14000
+    # INC-1431 doubled for the sale window
+  - name: cache-probe-apac2
+    rate_limit_rps: 831
+    retry_budget_ms: 19000
+    # INC-3846 lowered after the timeout audit
+  - name: cache-mirror-apac0
+    rate_limit_rps: 690
+    retry_budget_ms: 29000
+    # INC-7534 matched to the upstream's own budget
+  - name: cache-gate-apac0
+    rate_limit_rps: 3918
+    retry_budget_ms: 10000
+    # INC-5758 doubled for the sale window
+  - name: dispatch-api-apac4
+    rate_limit_rps: 3098
+    retry_budget_ms: 27000
+    # INC-3955 lowered after the timeout audit
+  - name: dispatch-worker-apac0
+    rate_limit_rps: 378
+    retry_budget_ms: 5000
+    # INC-1270 tuned to the queue depth
+  - name: dispatch-edge-apac8
+    rate_limit_rps: 1088
+    retry_budget_ms: 32000
+    # INC-2031 doubled for the sale window
+  - name: dispatch-core-apac2
+    rate_limit_rps: 604
+    retry_budget_ms: 16000
+    # INC-3576 lowered after the timeout audit
+  - name: dispatch-sync-apac3
+    rate_limit_rps: 2985
+    retry_budget_ms: 20000
+    # INC-9359 set when the service shipped
+  - name: dispatch-batch-apac6
+    rate_limit_rps: 2810
+    retry_budget_ms: 25000
+    # INC-7762 set when the service shipped
+  - name: dispatch-relay-apac7
+    rate_limit_rps: 3319
+    retry_budget_ms: 6000
+    # INC-5674 doubled for the sale window
+  - name: dispatch-probe-apac2
+    rate_limit_rps: 1653
+    retry_budget_ms: 27000
+    # INC-9241 lowered after the timeout audit
+  - name: dispatch-mirror-apac0
+    rate_limit_rps: 3445
+    retry_budget_ms: 17000
+    # INC-5258 matched to the upstream's own budget
+  - name: dispatch-gate-apac9
+    rate_limit_rps: 802
+    retry_budget_ms: 37000
+    # INC-4822 matched to the upstream's own budget
+  - name: email-api-apac0
+    rate_limit_rps: 3064
+    retry_budget_ms: 33000
+    # INC-5271 raised after the backlog review
+  - name: email-worker-apac2
+    rate_limit_rps: 2403
+    retry_budget_ms: 37000
+    # INC-5599 matched to the upstream's own budget
+  - name: email-edge-apac4
+    rate_limit_rps: 1502
+    retry_budget_ms: 16000
+    # INC-5575 raised after the backlog review
+  - name: email-core-apac2
+    rate_limit_rps: 2613
+    retry_budget_ms: 32000
+    # INC-7616 matched to the upstream's own budget
+  - name: email-sync-apac9
+    rate_limit_rps: 1039
+    retry_budget_ms: 4000
+    # INC-8412 doubled for the sale window
+  - name: email-batch-apac1
+    rate_limit_rps: 1580
+    retry_budget_ms: 34000
+    # INC-6782 set when the service shipped
+  - name: email-relay-apac7
+    rate_limit_rps: 1939
+    retry_budget_ms: 22000
+    # INC-7427 matched to the upstream's own budget
+  - name: email-probe-apac3
+    rate_limit_rps: 614
+    retry_budget_ms: 18000
+    # INC-3455 doubled for the sale window
+  - name: email-mirror-apac5
+    rate_limit_rps: 2054
+    retry_budget_ms: 31000
+    # INC-8518 tuned to the queue depth
+  - name: email-gate-apac0
+    rate_limit_rps: 2813
+    retry_budget_ms: 7000
+    # INC-3173 matched to the upstream's own budget
+  - name: federate-api-apac4
+    rate_limit_rps: 3278
+    retry_budget_ms: 26000
+    # INC-8079 doubled for the sale window
+  - name: federate-worker-apac3
+    rate_limit_rps: 444
+    retry_budget_ms: 7000
+    # INC-7649 doubled for the sale window
+  - name: federate-edge-apac6
+    rate_limit_rps: 2126
+    retry_budget_ms: 34000
+    # INC-7987 lowered after the timeout audit
+  - name: federate-core-apac6
+    rate_limit_rps: 1328
+    retry_budget_ms: 32000
+    # INC-8933 lowered after the timeout audit
+  - name: federate-sync-apac7
+    rate_limit_rps: 1026
+    retry_budget_ms: 31000
+    # INC-7646 raised after the backlog review
+  - name: federate-batch-apac8
+    rate_limit_rps: 2275
+    retry_budget_ms: 32000
+    # INC-8553 raised after the backlog review
+  - name: federate-relay-apac5
+    rate_limit_rps: 2020
+    retry_budget_ms: 29000
+    # INC-8470 tuned to the queue depth
+  - name: federate-probe-apac6
+    rate_limit_rps: 2960
+    retry_budget_ms: 24000
+    # INC-8079 raised after the backlog review
+  - name: federate-mirror-apac1
+    rate_limit_rps: 3880
+    retry_budget_ms: 26000
+    # INC-9205 doubled for the sale window
+  - name: federate-gate-apac6
+    rate_limit_rps: 3824
+    retry_budget_ms: 6000
+    # INC-5288 lowered after the timeout audit
+  - name: gateway-api-apac8
+    rate_limit_rps: 2968
+    retry_budget_ms: 7000
+    # INC-9179 lowered after the timeout audit
+  - name: gateway-worker-apac3
+    rate_limit_rps: 1152
+    retry_budget_ms: 11000
+    # INC-9858 raised after the backlog review
+  - name: gateway-edge-apac3
+    rate_limit_rps: 984
+    retry_budget_ms: 22000
+    # INC-2157 matched to the upstream's own budget
+  - name: gateway-core-apac3
+    rate_limit_rps: 3804
+    retry_budget_ms: 38000
+    # INC-3159 doubled for the sale window
+  - name: gateway-sync-apac0
+    rate_limit_rps: 2701
+    retry_budget_ms: 25000
+    # INC-6498 doubled for the sale window
+  - name: gateway-batch-apac1
+    rate_limit_rps: 1001
+    retry_budget_ms: 13000
+    # INC-5379 raised after the backlog review
+  - name: gateway-relay-apac4
+    rate_limit_rps: 3750
+    retry_budget_ms: 34000
+    # INC-5680 lowered after the timeout audit
+  - name: gateway-probe-apac1
+    rate_limit_rps: 1417
+    retry_budget_ms: 8000
+    # INC-9415 matched to the upstream's own budget
+  - name: gateway-mirror-apac7
+    rate_limit_rps: 935
+    retry_budget_ms: 33000
+    # INC-6660 tuned to the queue depth
+  - name: gateway-gate-apac2
+    rate_limit_rps: 1394
+    retry_budget_ms: 28000
+    # INC-8468 raised after the backlog review
+  - name: hook-api-apac8
+    rate_limit_rps: 3951
+    retry_budget_ms: 27000
+    # INC-5597 set when the service shipped
+  - name: hook-worker-apac2
+    rate_limit_rps: 3331
+    retry_budget_ms: 26000
+    # INC-4755 set when the service shipped
+  - name: hook-edge-apac5
+    rate_limit_rps: 2242
+    retry_budget_ms: 5000
+    # INC-1844 doubled for the sale window
+  - name: hook-core-apac9
+    rate_limit_rps: 1041
+    retry_budget_ms: 30000
+    # INC-3334 raised after the backlog review
+  - name: hook-sync-apac7
+    rate_limit_rps: 1748
+    retry_budget_ms: 23000
+    # INC-9835 set when the service shipped
+  - name: hook-batch-apac6
+    rate_limit_rps: 3633
+    retry_budget_ms: 30000
+    # INC-6953 lowered after the timeout audit
+  - name: hook-relay-apac4
+    rate_limit_rps: 1473
+    retry_budget_ms: 37000
+    # INC-5043 lowered after the timeout audit
+  - name: hook-probe-apac7
+    rate_limit_rps: 2643
+    retry_budget_ms: 30000
+    # INC-9154 tuned to the queue depth
+  - name: hook-mirror-apac1
+    rate_limit_rps: 2026
+    retry_budget_ms: 18000
+    # INC-6523 doubled for the sale window
+  - name: hook-gate-apac7
+    rate_limit_rps: 2178
+    retry_budget_ms: 33000
+    # INC-9548 lowered after the timeout audit
+  - name: index-api-apac5
+    rate_limit_rps: 440
+    retry_budget_ms: 15000
+    # INC-3590 lowered after the timeout audit
+  - name: index-worker-apac9
+    rate_limit_rps: 3589
+    retry_budget_ms: 20000
+    # INC-2613 matched to the upstream's own budget
+  - name: index-edge-apac9
+    rate_limit_rps: 1431
+    retry_budget_ms: 20000
+    # INC-6051 tuned to the queue depth
+  - name: index-core-apac4
+    rate_limit_rps: 1130
+    retry_budget_ms: 32000
+    # INC-2640 raised after the backlog review
+  - name: index-sync-apac8
+    rate_limit_rps: 2958
+    retry_budget_ms: 10000
+    # INC-8939 doubled for the sale window
+  - name: index-batch-apac9
+    rate_limit_rps: 577
+    retry_budget_ms: 20000
+    # INC-6477 tuned to the queue depth
+  - name: index-relay-apac9
+    rate_limit_rps: 1417
+    retry_budget_ms: 13000
+    # INC-1664 set when the service shipped
+  - name: index-probe-apac2
+    rate_limit_rps: 811
+    retry_budget_ms: 22000
+    # INC-3986 lowered after the timeout audit
+  - name: index-mirror-apac0
+    rate_limit_rps: 1718
+    retry_budget_ms: 20000
+    # INC-4999 doubled for the sale window
+  - name: index-gate-apac2
+    rate_limit_rps: 3210
+    retry_budget_ms: 32000
+    # INC-4418 raised after the backlog review
+  - name: jobber-api-apac2
+    rate_limit_rps: 1638
+    retry_budget_ms: 19000
+    # INC-2430 lowered after the timeout audit
+  - name: jobber-worker-apac8
+    rate_limit_rps: 3774
+    retry_budget_ms: 23000
+    # INC-3389 doubled for the sale window
+  - name: jobber-edge-apac9
+    rate_limit_rps: 3010
+    retry_budget_ms: 35000
+    # INC-7992 doubled for the sale window
+  - name: jobber-core-apac7
+    rate_limit_rps: 1933
+    retry_budget_ms: 9000
+    # INC-6702 raised after the backlog review
+  - name: jobber-sync-apac4
+    rate_limit_rps: 1580
+    retry_budget_ms: 18000
+    # INC-2356 set when the service shipped
+  - name: jobber-batch-apac2
+    rate_limit_rps: 3240
+    retry_budget_ms: 9000
+    # INC-4218 tuned to the queue depth
+  - name: jobber-relay-apac5
+    rate_limit_rps: 791
+    retry_budget_ms: 15000
+    # INC-8996 set when the service shipped
+  - name: jobber-probe-apac5
+    rate_limit_rps: 1102
+    retry_budget_ms: 24000
+    # INC-1144 doubled for the sale window
+  - name: jobber-mirror-apac6
+    rate_limit_rps: 2087
+    retry_budget_ms: 14000
+    # INC-2948 matched to the upstream's own budget
+  - name: jobber-gate-apac1
+    rate_limit_rps: 1023
+    retry_budget_ms: 20000
+    # INC-1918 set when the service shipped
+  - name: kafka-api-apac1
+    rate_limit_rps: 1277
+    retry_budget_ms: 30000
+    # INC-8572 matched to the upstream's own budget
+  - name: kafka-worker-apac0
+    rate_limit_rps: 3457
+    retry_budget_ms: 16000
+    # INC-4046 set when the service shipped
+  - name: kafka-edge-apac7
+    rate_limit_rps: 3662
+    retry_budget_ms: 24000
+    # INC-4032 doubled for the sale window
+  - name: kafka-core-apac8
+    rate_limit_rps: 3485
+    retry_budget_ms: 10000
+    # INC-8127 raised after the backlog review
+  - name: kafka-sync-apac6
+    rate_limit_rps: 1580
+    retry_budget_ms: 5000
+    # INC-2743 lowered after the timeout audit
+  - name: kafka-batch-apac5
+    rate_limit_rps: 2818
+    retry_budget_ms: 5000
+    # INC-3890 set when the service shipped
+  - name: kafka-relay-apac0
+    rate_limit_rps: 1987
+    retry_budget_ms: 30000
+    # INC-4988 matched to the upstream's own budget
+  - name: kafka-probe-apac6
+    rate_limit_rps: 2654
+    retry_budget_ms: 27000
+    # INC-2691 raised after the backlog review
+  - name: kafka-mirror-apac3
+    rate_limit_rps: 1680
+    retry_budget_ms: 25000
+    # INC-3647 matched to the upstream's own budget
+  - name: kafka-gate-apac1
+    rate_limit_rps: 2722
+    retry_budget_ms: 27000
+    # INC-5958 tuned to the queue depth
+  - name: ledger-api-apac3
+    rate_limit_rps: 3134
+    retry_budget_ms: 22000
+    # INC-5693 lowered after the timeout audit
+  - name: ledger-worker-apac1
+    rate_limit_rps: 3234
+    retry_budget_ms: 24000
+    # INC-4819 doubled for the sale window
+  - name: ledger-edge-apac8
+    rate_limit_rps: 1973
+    retry_budget_ms: 7000
+    # INC-1548 lowered after the timeout audit
+  - name: ledger-core-apac7
+    rate_limit_rps: 762
+    retry_budget_ms: 32000
+    # INC-9937 doubled for the sale window
+  - name: ledger-sync-apac4
+    rate_limit_rps: 1006
+    retry_budget_ms: 26000
+    # INC-5108 tuned to the queue depth
+  - name: ledger-batch-apac6
+    rate_limit_rps: 1420
+    retry_budget_ms: 6000
+    # INC-2649 tuned to the queue depth
+  - name: ledger-relay-apac5
+    rate_limit_rps: 1882
+    retry_budget_ms: 18000
+    # INC-4281 set when the service shipped
+  - name: ledger-probe-apac1
+    rate_limit_rps: 82
+    retry_budget_ms: 5000
+    # INC-2076 set when the service shipped
+  - name: ledger-mirror-apac8
+    rate_limit_rps: 2142
+    retry_budget_ms: 8000
+    # INC-5651 tuned to the queue depth
+  - name: ledger-gate-apac5
+    rate_limit_rps: 3668
+    retry_budget_ms: 30000
+    # INC-2885 matched to the upstream's own budget
+  - name: mailer-api-apac3
+    rate_limit_rps: 3076
+    retry_budget_ms: 32000
+    # INC-2562 lowered after the timeout audit
+  - name: mailer-worker-apac8
+    rate_limit_rps: 2635
+    retry_budget_ms: 16000
+    # INC-4840 set when the service shipped
+  - name: mailer-edge-apac5
+    rate_limit_rps: 233
+    retry_budget_ms: 33000
+    # INC-2073 set when the service shipped
+  - name: mailer-core-apac1
+    rate_limit_rps: 334
+    retry_budget_ms: 34000
+    # INC-1757 tuned to the queue depth
+  - name: mailer-sync-apac0
+    rate_limit_rps: 3090
+    retry_budget_ms: 10000
+    # INC-4418 raised after the backlog review
+  - name: mailer-batch-apac5
+    rate_limit_rps: 902
+    retry_budget_ms: 19000
+    # INC-4062 matched to the upstream's own budget
+  - name: mailer-relay-apac5
+    rate_limit_rps: 1309
+    retry_budget_ms: 17000
+    # INC-1116 matched to the upstream's own budget
+  - name: mailer-probe-apac6
+    rate_limit_rps: 2740
+    retry_budget_ms: 20000
+    # INC-5249 raised after the backlog review
+  - name: mailer-mirror-apac2
+    rate_limit_rps: 1427
+    retry_budget_ms: 20000
+    # INC-7160 matched to the upstream's own budget
+  - name: mailer-gate-apac5
+    rate_limit_rps: 2573
+    retry_budget_ms: 36000
+    # INC-7021 matched to the upstream's own budget
+  - name: notify-api-apac8
+    rate_limit_rps: 266
+    retry_budget_ms: 23000
+    # INC-4161 tuned to the queue depth
+  - name: notify-worker-apac9
+    rate_limit_rps: 2080
+    retry_budget_ms: 9000
+    # INC-5020 raised after the backlog review
+  - name: notify-edge-apac5
+    rate_limit_rps: 1090
+    retry_budget_ms: 25000
+    # INC-6318 raised after the backlog review
+  - name: notify-core-apac5
+    rate_limit_rps: 2581
+    retry_budget_ms: 24000
+    # INC-5316 raised after the backlog review
+  - name: notify-sync-apac7
+    rate_limit_rps: 1765
+    retry_budget_ms: 22000
+    # INC-1158 tuned to the queue depth
+  - name: notify-batch-apac2
+    rate_limit_rps: 1831
+    retry_budget_ms: 8000
+    # INC-9985 doubled for the sale window
+  - name: notify-relay-apac3
+    rate_limit_rps: 3463
+    retry_budget_ms: 10000
+    # INC-5326 doubled for the sale window
+  - name: notify-probe-apac1
+    rate_limit_rps: 334
+    retry_budget_ms: 15000
+    # INC-7725 lowered after the timeout audit
+  - name: notify-mirror-apac3
+    rate_limit_rps: 1467
+    retry_budget_ms: 4000
+    # INC-2275 lowered after the timeout audit
+  - name: notify-gate-apac2
+    rate_limit_rps: 3252
+    retry_budget_ms: 34000
+    # INC-2932 tuned to the queue depth
+  - name: orders-api-apac5
+    rate_limit_rps: 3812
+    retry_budget_ms: 8000
+    # INC-6763 matched to the upstream's own budget
+  - name: orders-worker-apac0
+    rate_limit_rps: 3697
+    retry_budget_ms: 8000
+    # INC-9547 matched to the upstream's own budget
+  - name: orders-edge-apac6
+    rate_limit_rps: 3817
+    retry_budget_ms: 7000
+    # INC-2304 tuned to the queue depth
+  - name: orders-core-apac2
+    rate_limit_rps: 3548
+    retry_budget_ms: 27000
+    # INC-7191 matched to the upstream's own budget
+  - name: orders-sync-apac1
+    rate_limit_rps: 2838
+    retry_budget_ms: 34000
+    # INC-8019 raised after the backlog review
+  - name: orders-batch-apac4
+    rate_limit_rps: 714
+    retry_budget_ms: 27000
+    # INC-7175 set when the service shipped
+  - name: orders-relay-apac9
+    rate_limit_rps: 3045
+    retry_budget_ms: 19000
+    # INC-2108 doubled for the sale window
+  - name: orders-probe-apac9
+    rate_limit_rps: 1633
+    retry_budget_ms: 9000
+    # INC-1860 set when the service shipped
+  - name: orders-mirror-apac6
+    rate_limit_rps: 2195
+    retry_budget_ms: 29000
+    # INC-7167 doubled for the sale window
+  - name: orders-gate-apac8
+    rate_limit_rps: 1857
+    retry_budget_ms: 13000
+    # INC-2671 raised after the backlog review
+  - name: presence-api-apac8
+    rate_limit_rps: 3212
+    retry_budget_ms: 26000
+    # INC-3921 lowered after the timeout audit
+  - name: presence-worker-apac8
+    rate_limit_rps: 2757
+    retry_budget_ms: 28000
+    # INC-7532 tuned to the queue depth
+  - name: presence-edge-apac6
+    rate_limit_rps: 701
+    retry_budget_ms: 15000
+    # INC-8670 matched to the upstream's own budget
+  - name: presence-core-apac8
+    rate_limit_rps: 1411
+    retry_budget_ms: 25000
+    # INC-8971 set when the service shipped
+  - name: presence-sync-apac6
+    rate_limit_rps: 2051
+    retry_budget_ms: 18000
+    # INC-4803 raised after the backlog review
+  - name: presence-batch-apac3
+    rate_limit_rps: 1585
+    retry_budget_ms: 39000
+    # INC-5574 raised after the backlog review
+  - name: presence-relay-apac9
+    rate_limit_rps: 129
+    retry_budget_ms: 10000
+    # INC-4233 tuned to the queue depth
+  - name: presence-probe-apac4
+    rate_limit_rps: 1596
+    retry_budget_ms: 33000
+    # INC-6138 lowered after the timeout audit
+  - name: presence-mirror-apac8
+    rate_limit_rps: 359
+    retry_budget_ms: 6000
+    # INC-8266 matched to the upstream's own budget
+  - name: presence-gate-apac6
+    rate_limit_rps: 1813
+    retry_budget_ms: 23000
+    # INC-2677 doubled for the sale window
+  - name: queue-api-apac7
+    rate_limit_rps: 3589
+    retry_budget_ms: 9000
+    # INC-4125 lowered after the timeout audit
+  - name: queue-worker-apac6
+    rate_limit_rps: 978
+    retry_budget_ms: 6000
+    # INC-3670 lowered after the timeout audit
+  - name: queue-edge-apac7
+    rate_limit_rps: 1127
+    retry_budget_ms: 38000
+    # INC-6351 raised after the backlog review
+  - name: queue-core-apac4
+    rate_limit_rps: 3432
+    retry_budget_ms: 16000
+    # INC-3377 set when the service shipped
+  - name: queue-sync-apac4
+    rate_limit_rps: 3929
+    retry_budget_ms: 24000
+    # INC-9589 matched to the upstream's own budget
+  - name: queue-batch-apac5
+    rate_limit_rps: 1044
+    retry_budget_ms: 35000
+    # INC-5604 set when the service shipped
+  - name: queue-relay-apac0
+    rate_limit_rps: 3014
+    retry_budget_ms: 28000
+    # INC-5961 lowered after the timeout audit
+  - name: queue-probe-apac5
+    rate_limit_rps: 3273
+    retry_budget_ms: 14000
+    # INC-6482 lowered after the timeout audit
+  - name: queue-mirror-apac2
+    rate_limit_rps: 3809
+    retry_budget_ms: 23000
+    # INC-8603 set when the service shipped
+  - name: queue-gate-apac1
+    rate_limit_rps: 246
+    retry_budget_ms: 15000
+    # INC-5279 lowered after the timeout audit
+  - name: render-api-apac7
+    rate_limit_rps: 207
+    retry_budget_ms: 32000
+    # INC-7484 tuned to the queue depth
+  - name: render-worker-apac8
+    rate_limit_rps: 2879
+    retry_budget_ms: 10000
+    # INC-3841 matched to the upstream's own budget
+  - name: render-edge-apac5
+    rate_limit_rps: 1037
+    retry_budget_ms: 29000
+    # INC-8052 set when the service shipped
+  - name: render-core-apac0
+    rate_limit_rps: 356
+    retry_budget_ms: 22000
+    # INC-1825 raised after the backlog review
+  - name: render-sync-apac3
+    rate_limit_rps: 771
+    retry_budget_ms: 24000
+    # INC-4385 matched to the upstream's own budget
+  - name: render-batch-apac0
+    rate_limit_rps: 1179
+    retry_budget_ms: 9000
+    # INC-2132 matched to the upstream's own budget
+  - name: render-relay-apac1
+    rate_limit_rps: 164
+    retry_budget_ms: 39000
+    # INC-9635 doubled for the sale window
+  - name: render-probe-apac2
+    rate_limit_rps: 2874
+    retry_budget_ms: 32000
+    # INC-5638 tuned to the queue depth
+  - name: render-mirror-apac7
+    rate_limit_rps: 3973
+    retry_budget_ms: 11000
+    # INC-6027 raised after the backlog review
+  - name: render-gate-apac5
+    rate_limit_rps: 1645
+    retry_budget_ms: 39000
+    # INC-5697 doubled for the sale window
+  - name: session-api-apac5
+    rate_limit_rps: 2522
+    retry_budget_ms: 29000
+    # INC-5383 lowered after the timeout audit
+  - name: session-worker-apac0
+    rate_limit_rps: 644
+    retry_budget_ms: 10000
+    # INC-9596 lowered after the timeout audit
+  - name: session-edge-apac1
+    rate_limit_rps: 3870
+    retry_budget_ms: 20000
+    # INC-9176 doubled for the sale window
+  - name: session-core-apac1
+    rate_limit_rps: 752
+    retry_budget_ms: 25000
+    # INC-6892 lowered after the timeout audit
+  - name: session-sync-apac8
+    rate_limit_rps: 3782
+    retry_budget_ms: 17000
+    # INC-7527 raised after the backlog review
+  - name: session-batch-apac0
+    rate_limit_rps: 755
+    retry_budget_ms: 31000
+    # INC-4669 raised after the backlog review
+  - name: session-relay-apac0
+    rate_limit_rps: 3289
+    retry_budget_ms: 9000
+    # INC-2301 matched to the upstream's own budget
+  - name: session-probe-apac8
+    rate_limit_rps: 471
+    retry_budget_ms: 6000
+    # INC-1970 raised after the backlog review
+  - name: session-mirror-apac6
+    rate_limit_rps: 2983
+    retry_budget_ms: 8000
+    # INC-2029 matched to the upstream's own budget
+  - name: session-gate-apac5
+    rate_limit_rps: 2397
+    retry_budget_ms: 9000
+    # INC-4494 lowered after the timeout audit
+  - name: tracker-api-apac8
+    rate_limit_rps: 886
+    retry_budget_ms: 18000
+    # INC-1915 doubled for the sale window
+  - name: tracker-worker-apac5
+    rate_limit_rps: 3501
+    retry_budget_ms: 4000
+    # INC-6558 tuned to the queue depth
+  - name: tracker-edge-apac4
+    rate_limit_rps: 3705
+    retry_budget_ms: 13000
+    # INC-7391 doubled for the sale window
+  - name: tracker-core-apac2
+    rate_limit_rps: 442
+    retry_budget_ms: 11000
+    # INC-2599 doubled for the sale window
+  - name: tracker-sync-apac2
+    rate_limit_rps: 3440
+    retry_budget_ms: 18000
+    # INC-1760 doubled for the sale window
+  - name: tracker-batch-apac1
+    rate_limit_rps: 1294
+    retry_budget_ms: 21000
+    # INC-7366 doubled for the sale window
+  - name: tracker-relay-apac9
+    rate_limit_rps: 361
+    retry_budget_ms: 24000
+    # INC-7839 matched to the upstream's own budget
+  - name: tracker-probe-apac3
+    rate_limit_rps: 2589
+    retry_budget_ms: 14000
+    # INC-3103 raised after the backlog review
+  - name: tracker-mirror-apac5
+    rate_limit_rps: 2594
+    retry_budget_ms: 33000
+    # INC-1624 tuned to the queue depth
+  - name: tracker-gate-apac9
+    rate_limit_rps: 1227
+    retry_budget_ms: 17000
+    # INC-4732 matched to the upstream's own budget
+  - name: upload-api-apac0
+    rate_limit_rps: 2390
+    retry_budget_ms: 19000
+    # INC-3390 lowered after the timeout audit
+  - name: upload-worker-apac5
+    rate_limit_rps: 2995
+    retry_budget_ms: 4000
+    # INC-5486 doubled for the sale window
+  - name: upload-edge-apac3
+    rate_limit_rps: 2409
+    retry_budget_ms: 19000
+    # INC-5732 lowered after the timeout audit
+  - name: upload-core-apac6
+    rate_limit_rps: 237
+    retry_budget_ms: 4000
+    # INC-5490 tuned to the queue depth
+  - name: upload-sync-apac7
+    rate_limit_rps: 2156
+    retry_budget_ms: 6000
+    # INC-7025 lowered after the timeout audit
+  - name: upload-batch-apac3
+    rate_limit_rps: 1083
+    retry_budget_ms: 35000
+    # INC-7609 lowered after the timeout audit
+  - name: upload-relay-apac8
+    rate_limit_rps: 1499
+    retry_budget_ms: 32000
+    # INC-8844 tuned to the queue depth
+  - name: upload-probe-apac5
+    rate_limit_rps: 788
+    retry_budget_ms: 12000
+    # INC-2880 matched to the upstream's own budget
+  - name: upload-mirror-apac0
+    rate_limit_rps: 1232
+    retry_budget_ms: 18000
+    # INC-9219 set when the service shipped
+  - name: upload-gate-apac1
+    rate_limit_rps: 2550
+    retry_budget_ms: 33000
+    # INC-1929 tuned to the queue depth
+  - name: vault-api-apac4
+    rate_limit_rps: 365
+    retry_budget_ms: 38000
+    # INC-3240 doubled for the sale window
+  - name: vault-worker-apac6
+    rate_limit_rps: 516
+    retry_budget_ms: 19000
+    # INC-4302 set when the service shipped
+  - name: vault-edge-apac8
+    rate_limit_rps: 1765
+    retry_budget_ms: 9000
+    # INC-3845 tuned to the queue depth
+  - name: vault-core-apac3
+    rate_limit_rps: 2651
+    retry_budget_ms: 20000
+    # INC-8202 matched to the upstream's own budget
+  - name: vault-sync-apac0
+    rate_limit_rps: 1214
+    retry_budget_ms: 11000
+    # INC-1285 lowered after the timeout audit
+  - name: vault-batch-apac9
+    rate_limit_rps: 165
+    retry_budget_ms: 33000
+    # INC-9591 set when the service shipped
+  - name: vault-relay-apac4
+    rate_limit_rps: 1130
+    retry_budget_ms: 18000
+    # INC-7747 tuned to the queue depth
+  - name: vault-probe-apac7
+    rate_limit_rps: 1401
+    retry_budget_ms: 17000
+    # INC-8834 doubled for the sale window
+  - name: vault-mirror-apac4
+    rate_limit_rps: 1469
+    retry_budget_ms: 9000
+    # INC-7040 matched to the upstream's own budget
+  - name: vault-gate-apac3
+    rate_limit_rps: 1022
+    retry_budget_ms: 28000
+    # INC-9725 set when the service shipped
+  - name: webhook-api-apac5
+    rate_limit_rps: 3753
+    retry_budget_ms: 19000
+    # INC-3096 doubled for the sale window
+  - name: webhook-worker-apac0
+    rate_limit_rps: 3519
+    retry_budget_ms: 33000
+    # INC-2102 raised after the backlog review
+  - name: webhook-edge-apac6
+    rate_limit_rps: 1625
+    retry_budget_ms: 29000
+    # INC-5259 set when the service shipped
+  - name: webhook-core-apac6
+    rate_limit_rps: 773
+    retry_budget_ms: 5000
+    # INC-1789 matched to the upstream's own budget
+  - name: webhook-sync-apac7
+    rate_limit_rps: 2984
+    retry_budget_ms: 12000
+    # INC-7998 tuned to the queue depth
+  - name: webhook-batch-apac2
+    rate_limit_rps: 1412
+    retry_budget_ms: 38000
+    # INC-3561 doubled for the sale window
+  - name: webhook-relay-apac2
+    rate_limit_rps: 3621
+    retry_budget_ms: 28000
+    # INC-9762 doubled for the sale window
+  - name: webhook-probe-apac4
+    rate_limit_rps: 304
+    retry_budget_ms: 4000
+    # INC-2608 set when the service shipped
+  - name: webhook-mirror-apac8
+    rate_limit_rps: 1600
+    retry_budget_ms: 31000
+    # INC-6108 tuned to the queue depth
+  - name: webhook-gate-apac8
+    rate_limit_rps: 2468
+    retry_budget_ms: 13000
+    # INC-9653 raised after the backlog review
+  - name: xfer-api-apac8
+    rate_limit_rps: 2983
+    retry_budget_ms: 15000
+    # INC-7680 lowered after the timeout audit
+  - name: xfer-worker-apac7
+    rate_limit_rps: 3973
+    retry_budget_ms: 23000
+    # INC-1781 set when the service shipped
+  - name: xfer-edge-apac7
+    rate_limit_rps: 384
+    retry_budget_ms: 23000
+    # INC-5833 set when the service shipped
+  - name: xfer-core-apac7
+    rate_limit_rps: 176
+    retry_budget_ms: 15000
+    # INC-7313 raised after the backlog review
+  - name: xfer-sync-apac8
+    rate_limit_rps: 3129
+    retry_budget_ms: 27000
+    # INC-4141 raised after the backlog review
+  - name: xfer-batch-apac9
+    rate_limit_rps: 2674
+    retry_budget_ms: 19000
+    # INC-5224 raised after the backlog review
+  - name: xfer-relay-apac0
+    rate_limit_rps: 3034
+    retry_budget_ms: 15000
+    # INC-1597 tuned to the queue depth
+  - name: xfer-probe-apac4
+    rate_limit_rps: 3444
+    retry_budget_ms: 25000
+    # INC-2118 matched to the upstream's own budget
+  - name: xfer-mirror-apac3
+    rate_limit_rps: 1115
+    retry_budget_ms: 12000
+    # INC-5702 tuned to the queue depth
+  - name: xfer-gate-apac1
+    rate_limit_rps: 1229
+    retry_budget_ms: 26000
+    # INC-5153 lowered after the timeout audit
+  - name: yield-api-apac4
+    rate_limit_rps: 1361
+    retry_budget_ms: 29000
+    # INC-3653 matched to the upstream's own budget
+  - name: yield-worker-apac4
+    rate_limit_rps: 3017
+    retry_budget_ms: 15000
+    # INC-8869 raised after the backlog review
+  - name: yield-edge-apac7
+    rate_limit_rps: 1679
+    retry_budget_ms: 29000
+    # INC-8769 tuned to the queue depth
+  - name: yield-core-apac9
+    rate_limit_rps: 2908
+    retry_budget_ms: 35000
+    # INC-4801 matched to the upstream's own budget
+  - name: yield-sync-apac3
+    rate_limit_rps: 180
+    retry_budget_ms: 33000
+    # INC-9229 set when the service shipped
+  - name: yield-batch-apac6
+    rate_limit_rps: 2306
+    retry_budget_ms: 12000
+    # INC-2572 lowered after the timeout audit
+  - name: yield-relay-apac5
+    rate_limit_rps: 2002
+    retry_budget_ms: 20000
+    # INC-7590 matched to the upstream's own budget
+  - name: yield-probe-apac2
+    rate_limit_rps: 2318
+    retry_budget_ms: 21000
+    # INC-4357 doubled for the sale window
+  - name: yield-mirror-apac5
+    rate_limit_rps: 378
+    retry_budget_ms: 31000
+    # INC-4163 raised after the backlog review
+  - name: yield-gate-apac8
+    rate_limit_rps: 3054
+    retry_budget_ms: 28000
+    # INC-9582 matched to the upstream's own budget
+  - name: zookeeper-api-apac7
+    rate_limit_rps: 2648
+    retry_budget_ms: 21000
+    # INC-3443 matched to the upstream's own budget
+  - name: zookeeper-worker-apac3
+    rate_limit_rps: 3519
+    retry_budget_ms: 9000
+    # INC-9041 raised after the backlog review
+  - name: zookeeper-edge-apac0
+    rate_limit_rps: 1682
+    retry_budget_ms: 30000
+    # INC-5730 set when the service shipped
+  - name: zookeeper-core-apac4
+    rate_limit_rps: 2089
+    retry_budget_ms: 26000
+    # INC-3429 lowered after the timeout audit
+  - name: zookeeper-sync-apac6
+    rate_limit_rps: 1930
+    retry_budget_ms: 38000
+    # INC-4600 tuned to the queue depth
+  - name: zookeeper-batch-apac8
+    rate_limit_rps: 706
+    retry_budget_ms: 25000
+    # INC-1236 doubled for the sale window
+  - name: zookeeper-relay-apac6
+    rate_limit_rps: 3012
+    retry_budget_ms: 39000
+    # INC-9123 set when the service shipped
+  - name: zookeeper-probe-apac6
+    rate_limit_rps: 543
+    retry_budget_ms: 19000
+    # INC-2513 lowered after the timeout audit
+  - name: zookeeper-mirror-apac3
+    rate_limit_rps: 940
+    retry_budget_ms: 11000
+    # INC-8477 doubled for the sale window
+  - name: zookeeper-gate-apac8
+    rate_limit_rps: 2610
+    retry_budget_ms: 30000
+    # INC-9847 matched to the upstream's own budget
+  - name: assets-api-apac1
+    rate_limit_rps: 1112
+    retry_budget_ms: 10000
+    # INC-6314 set when the service shipped
+  - name: assets-worker-apac7
+    rate_limit_rps: 1603
+    retry_budget_ms: 6000
+    # INC-9807 raised after the backlog review
+  - name: assets-edge-apac5
+    rate_limit_rps: 698
+    retry_budget_ms: 37000
+    # INC-2043 set when the service shipped
+  - name: assets-core-apac2
+    rate_limit_rps: 259
+    retry_budget_ms: 12000
+    # INC-7305 doubled for the sale window
+  - name: assets-sync-apac1
+    rate_limit_rps: 2626
+    retry_budget_ms: 15000
+    # INC-3184 raised after the backlog review
+  - name: assets-batch-apac2
+    rate_limit_rps: 2042
+    retry_budget_ms: 34000
+    # INC-9272 doubled for the sale window
+  - name: assets-relay-apac2
+    rate_limit_rps: 3070
+    retry_budget_ms: 35000
+    # INC-4268 set when the service shipped
+  - name: assets-probe-apac2
+    rate_limit_rps: 614
+    retry_budget_ms: 36000
+    # INC-2064 doubled for the sale window
+  - name: assets-mirror-apac0
+    rate_limit_rps: 1838
+    retry_budget_ms: 9000
+    # INC-5192 tuned to the queue depth
+  - name: assets-gate-apac2
+    rate_limit_rps: 3239
+    retry_budget_ms: 35000
+    # INC-8157 raised after the backlog review
+  - name: broker-api-apac6
+    rate_limit_rps: 2830
+    retry_budget_ms: 17000
+    # INC-3781 raised after the backlog review
+  - name: broker-worker-apac2
+    rate_limit_rps: 165
+    retry_budget_ms: 26000
+    # INC-6792 lowered after the timeout audit
+  - name: broker-edge-apac5
+    rate_limit_rps: 796
+    retry_budget_ms: 30000
+    # INC-3356 lowered after the timeout audit
+  - name: broker-core-apac3
+    rate_limit_rps: 2293
+    retry_budget_ms: 31000
+    # INC-7954 matched to the upstream's own budget
+  - name: broker-sync-apac8
+    rate_limit_rps: 1197
+    retry_budget_ms: 18000
+    # INC-9180 tuned to the queue depth
+  - name: broker-batch-apac8
+    rate_limit_rps: 3928
+    retry_budget_ms: 28000
+    # INC-4184 lowered after the timeout audit
+  - name: broker-relay-apac4
+    rate_limit_rps: 1276
+    retry_budget_ms: 21000
+    # INC-6990 doubled for the sale window
+  - name: broker-probe-apac4
+    rate_limit_rps: 475
+    retry_budget_ms: 35000
+    # INC-1996 raised after the backlog review
+  - name: broker-mirror-apac0
+    rate_limit_rps: 1849
+    retry_budget_ms: 25000
+    # INC-4058 tuned to the queue depth
+  - name: broker-gate-apac3
+    rate_limit_rps: 3895
+    retry_budget_ms: 7000
+    # INC-1097 doubled for the sale window
+  - name: cron-api-apac1
+    rate_limit_rps: 2075
+    retry_budget_ms: 10000
+    # INC-7849 matched to the upstream's own budget
+  - name: cron-worker-apac9
+    rate_limit_rps: 1972
+    retry_budget_ms: 23000
+    # INC-6018 doubled for the sale window
+  - name: cron-edge-apac6
+    rate_limit_rps: 2075
+    retry_budget_ms: 19000
+    # INC-7133 matched to the upstream's own budget
+  - name: cron-core-apac8
+    rate_limit_rps: 3574
+    retry_budget_ms: 21000
+    # INC-2622 matched to the upstream's own budget
+  - name: cron-sync-apac8
+    rate_limit_rps: 1674
+    retry_budget_ms: 7000
+    # INC-8053 set when the service shipped
+  - name: cron-batch-apac6
+    rate_limit_rps: 2641
+    retry_budget_ms: 22000
+    # INC-2328 doubled for the sale window
+  - name: cron-relay-apac3
+    rate_limit_rps: 157
+    retry_budget_ms: 23000
+    # INC-1047 tuned to the queue depth
+  - name: cron-probe-apac2
+    rate_limit_rps: 3835
+    retry_budget_ms: 35000
+    # INC-6765 raised after the backlog review
+  - name: cron-mirror-apac5
+    rate_limit_rps: 3019
+    retry_budget_ms: 7000
+    # INC-3985 tuned to the queue depth
+  - name: cron-gate-apac4
+    rate_limit_rps: 565
+    retry_budget_ms: 19000
+    # INC-5104 matched to the upstream's own budget
+  - name: delta-api-apac8
+    rate_limit_rps: 2440
+    retry_budget_ms: 37000
+    # INC-5633 lowered after the timeout audit
+  - name: delta-worker-apac2
+    rate_limit_rps: 1125
+    retry_budget_ms: 38000
+    # INC-5400 raised after the backlog review
+  - name: delta-edge-apac1
+    rate_limit_rps: 2093
+    retry_budget_ms: 4000
+    # INC-5303 set when the service shipped
+  - name: delta-core-apac0
+    rate_limit_rps: 2780
+    retry_budget_ms: 15000
+    # INC-9355 tuned to the queue depth
+  - name: delta-sync-apac9
+    rate_limit_rps: 1989
+    retry_budget_ms: 30000
+    # INC-7741 matched to the upstream's own budget
+  - name: delta-batch-apac9
+    rate_limit_rps: 389
+    retry_budget_ms: 22000
+    # INC-6287 doubled for the sale window
+  - name: delta-relay-apac3
+    rate_limit_rps: 371
+    retry_budget_ms: 23000
+    # INC-9921 lowered after the timeout audit
+  - name: delta-probe-apac7
+    rate_limit_rps: 3590
+    retry_budget_ms: 20000
+    # INC-9352 tuned to the queue depth
+  - name: delta-mirror-apac0
+    rate_limit_rps: 1600
+    retry_budget_ms: 27000
+    # INC-4812 matched to the upstream's own budget
+  - name: delta-gate-apac0
+    rate_limit_rps: 462
+    retry_budget_ms: 38000
+    # INC-7521 raised after the backlog review
+  - name: auth-api-sa9
+    rate_limit_rps: 1412
+    retry_budget_ms: 29000
+    # INC-2930 lowered after the timeout audit
+  - name: auth-worker-sa1
+    rate_limit_rps: 2881
+    retry_budget_ms: 8000
+    # INC-5543 raised after the backlog review
+  - name: auth-edge-sa0
+    rate_limit_rps: 339
+    retry_budget_ms: 12000
+    # INC-6240 tuned to the queue depth
+  - name: auth-core-sa8
+    rate_limit_rps: 1469
+    retry_budget_ms: 35000
+    # INC-7649 tuned to the queue depth
+  - name: auth-sync-sa6
+    rate_limit_rps: 3061
+    retry_budget_ms: 34000
+    # INC-1019 doubled for the sale window
+  - name: auth-batch-sa0
+    rate_limit_rps: 3753
+    retry_budget_ms: 30000
+    # INC-1956 doubled for the sale window
+  - name: auth-relay-sa1
+    rate_limit_rps: 2221
+    retry_budget_ms: 22000
+    # INC-8471 raised after the backlog review
+  - name: auth-probe-sa3
+    rate_limit_rps: 241
+    retry_budget_ms: 34000
+    # INC-1258 tuned to the queue depth
+  - name: auth-mirror-sa9
+    rate_limit_rps: 2230
+    retry_budget_ms: 29000
+    # INC-3336 set when the service shipped
+  - name: auth-gate-sa3
+    rate_limit_rps: 2313
+    retry_budget_ms: 38000
+    # INC-7107 doubled for the sale window
+  - name: billing-api-sa4
+    rate_limit_rps: 3379
+    retry_budget_ms: 38000
+    # INC-5205 tuned to the queue depth
+  - name: billing-worker-sa3
+    rate_limit_rps: 1872
+    retry_budget_ms: 22000
+    # INC-5226 doubled for the sale window
+  - name: billing-edge-sa7
+    rate_limit_rps: 1224
+    retry_budget_ms: 29000
+    # INC-6017 raised after the backlog review
+  - name: billing-core-sa2
+    rate_limit_rps: 658
+    retry_budget_ms: 35000
+    # INC-7364 tuned to the queue depth
+  - name: billing-sync-sa1
+    rate_limit_rps: 3527
+    retry_budget_ms: 29000
+    # INC-9453 tuned to the queue depth
+  - name: billing-batch-sa0
+    rate_limit_rps: 1693
+    retry_budget_ms: 14000
+    # INC-8221 lowered after the timeout audit
+  - name: billing-relay-sa9
+    rate_limit_rps: 1807
+    retry_budget_ms: 16000
+    # INC-8271 lowered after the timeout audit
+  - name: billing-probe-sa8
+    rate_limit_rps: 1544
+    retry_budget_ms: 31000
+    # INC-5743 tuned to the queue depth
+  - name: billing-mirror-sa0
+    rate_limit_rps: 2360
+    retry_budget_ms: 21000
+    # INC-6528 tuned to the queue depth
+  - name: billing-gate-sa6
+    rate_limit_rps: 356
+    retry_budget_ms: 13000
+    # INC-9780 matched to the upstream's own budget
+  - name: cache-api-sa1
+    rate_limit_rps: 482
+    retry_budget_ms: 10000
+    # INC-3896 doubled for the sale window
+  - name: cache-worker-sa6
+    rate_limit_rps: 1289
+    retry_budget_ms: 7000
+    # INC-5027 set when the service shipped
+  - name: cache-edge-sa6
+    rate_limit_rps: 2490
+    retry_budget_ms: 30000
+    # INC-3406 tuned to the queue depth
+  - name: cache-core-sa1
+    rate_limit_rps: 1941
+    retry_budget_ms: 16000
+    # INC-6338 lowered after the timeout audit
+  - name: cache-sync-sa3
+    rate_limit_rps: 165
+    retry_budget_ms: 29000
+    # INC-9648 lowered after the timeout audit
+  - name: cache-batch-sa7
+    rate_limit_rps: 807
+    retry_budget_ms: 34000
+    # INC-6003 raised after the backlog review
+  - name: cache-relay-sa5
+    rate_limit_rps: 191
+    retry_budget_ms: 20000
+    # INC-6884 set when the service shipped
+  - name: cache-probe-sa3
+    rate_limit_rps: 582
+    retry_budget_ms: 24000
+    # INC-2829 doubled for the sale window
+  - name: cache-mirror-sa5
+    rate_limit_rps: 2959
+    retry_budget_ms: 10000
+    # INC-4862 tuned to the queue depth
+  - name: cache-gate-sa7
+    rate_limit_rps: 922
+    retry_budget_ms: 26000
+    # INC-9357 lowered after the timeout audit
+  - name: dispatch-api-sa0
+    rate_limit_rps: 565
+    retry_budget_ms: 15000
+    # INC-4276 matched to the upstream's own budget
+  - name: dispatch-worker-sa6
+    rate_limit_rps: 1640
+    retry_budget_ms: 34000
+    # INC-3475 lowered after the timeout audit
+  - name: dispatch-edge-sa9
+    rate_limit_rps: 1977
+    retry_budget_ms: 35000
+    # INC-7590 raised after the backlog review
+  - name: dispatch-core-sa2
+    rate_limit_rps: 3883
+    retry_budget_ms: 36000
+    # INC-7133 tuned to the queue depth
+  - name: dispatch-sync-sa3
+    rate_limit_rps: 958
+    retry_budget_ms: 37000
+    # INC-3614 set when the service shipped
+  - name: dispatch-batch-sa0
+    rate_limit_rps: 491
+    retry_budget_ms: 6000
+    # INC-5099 tuned to the queue depth
+  - name: dispatch-relay-sa1
+    rate_limit_rps: 1023
+    retry_budget_ms: 27000
+    # INC-8088 set when the service shipped
+  - name: dispatch-probe-sa5
+    rate_limit_rps: 1351
+    retry_budget_ms: 13000
+    # INC-5916 matched to the upstream's own budget
+  - name: dispatch-mirror-sa8
+    rate_limit_rps: 3098
+    retry_budget_ms: 10000
+    # INC-5986 doubled for the sale window
+  - name: dispatch-gate-sa8
+    rate_limit_rps: 490
+    retry_budget_ms: 17000
+    # INC-7058 matched to the upstream's own budget
+  - name: email-api-sa4
+    rate_limit_rps: 1483
+    retry_budget_ms: 27000
+    # INC-5883 set when the service shipped
+  - name: email-worker-sa3
+    rate_limit_rps: 3246
+    retry_budget_ms: 26000
+    # INC-6118 lowered after the timeout audit
+  - name: email-edge-sa0
+    rate_limit_rps: 1869
+    retry_budget_ms: 37000
+    # INC-6165 raised after the backlog review
+  - name: email-core-sa7
+    rate_limit_rps: 889
+    retry_budget_ms: 19000
+    # INC-9755 raised after the backlog review
+  - name: email-sync-sa2
+    rate_limit_rps: 3751
+    retry_budget_ms: 12000
+    # INC-5943 tuned to the queue depth
+  - name: email-batch-sa2
+    rate_limit_rps: 256
+    retry_budget_ms: 18000
+    # INC-3058 lowered after the timeout audit
+  - name: email-relay-sa7
+    rate_limit_rps: 566
+    retry_budget_ms: 12000
+    # INC-4327 raised after the backlog review
+  - name: email-probe-sa7
+    rate_limit_rps: 3414
+    retry_budget_ms: 21000
+    # INC-1027 matched to the upstream's own budget
+  - name: email-mirror-sa5
+    rate_limit_rps: 3030
+    retry_budget_ms: 13000
+    # INC-6770 matched to the upstream's own budget
+  - name: email-gate-sa7
+    rate_limit_rps: 259
+    retry_budget_ms: 5000
+    # INC-9215 matched to the upstream's own budget
+  - name: federate-api-sa1
+    rate_limit_rps: 2035
+    retry_budget_ms: 25000
+    # INC-8367 tuned to the queue depth
+  - name: federate-worker-sa0
+    rate_limit_rps: 1851
+    retry_budget_ms: 29000
+    # INC-8455 doubled for the sale window
+  - name: federate-edge-sa1
+    rate_limit_rps: 2071
+    retry_budget_ms: 38000
+    # INC-3136 lowered after the timeout audit
+  - name: federate-core-sa7
+    rate_limit_rps: 1356
+    retry_budget_ms: 18000
+    # INC-8998 raised after the backlog review
+  - name: federate-sync-sa0
+    rate_limit_rps: 399
+    retry_budget_ms: 21000
+    # INC-7528 lowered after the timeout audit
+  - name: federate-batch-sa5
+    rate_limit_rps: 2395
+    retry_budget_ms: 32000
+    # INC-9666 lowered after the timeout audit
+  - name: federate-relay-sa9
+    rate_limit_rps: 2668
+    retry_budget_ms: 27000
+    # INC-5310 matched to the upstream's own budget
+  - name: federate-probe-sa5
+    rate_limit_rps: 1604
+    retry_budget_ms: 14000
+    # INC-1690 tuned to the queue depth
+  - name: federate-mirror-sa9
+    rate_limit_rps: 2695
+    retry_budget_ms: 15000
+    # INC-1434 lowered after the timeout audit
+  - name: federate-gate-sa6
+    rate_limit_rps: 3243
+    retry_budget_ms: 26000
+    # INC-5579 doubled for the sale window
+  - name: gateway-api-sa4
+    rate_limit_rps: 2196
+    retry_budget_ms: 16000
+    # INC-4709 matched to the upstream's own budget
+  - name: gateway-worker-sa1
+    rate_limit_rps: 2908
+    retry_budget_ms: 4000
+    # INC-1785 set when the service shipped
+  - name: gateway-edge-sa8
+    rate_limit_rps: 1500
+    retry_budget_ms: 15000
+    # INC-8921 doubled for the sale window
+  - name: gateway-core-sa5
+    rate_limit_rps: 3033
+    retry_budget_ms: 31000
+    # INC-5704 set when the service shipped
+  - name: gateway-sync-sa9
+    rate_limit_rps: 1826
+    retry_budget_ms: 35000
+    # INC-6748 raised after the backlog review
+  - name: gateway-batch-sa6
+    rate_limit_rps: 1750
+    retry_budget_ms: 26000
+    # INC-4361 matched to the upstream's own budget
+  - name: gateway-relay-sa2
+    rate_limit_rps: 3627
+    retry_budget_ms: 12000
+    # INC-4420 raised after the backlog review
+  - name: gateway-probe-sa3
+    rate_limit_rps: 1276
+    retry_budget_ms: 29000
+    # INC-3222 raised after the backlog review
+  - name: gateway-mirror-sa6
+    rate_limit_rps: 1102
+    retry_budget_ms: 9000
+    # INC-7976 doubled for the sale window
+  - name: gateway-gate-sa6
+    rate_limit_rps: 497
+    retry_budget_ms: 34000
+    # INC-8067 raised after the backlog review
+  - name: hook-api-sa5
+    rate_limit_rps: 3209
+    retry_budget_ms: 33000
+    # INC-2704 lowered after the timeout audit
+  - name: hook-worker-sa2
+    rate_limit_rps: 2414
+    retry_budget_ms: 20000
+    # INC-7158 matched to the upstream's own budget
+  - name: hook-edge-sa5
+    rate_limit_rps: 3812
+    retry_budget_ms: 23000
+    # INC-2496 matched to the upstream's own budget
+  - name: hook-core-sa7
+    rate_limit_rps: 3799
+    retry_budget_ms: 11000
+    # INC-6265 matched to the upstream's own budget
+  - name: hook-sync-sa0
+    rate_limit_rps: 2389
+    retry_budget_ms: 28000
+    # INC-1130 raised after the backlog review
+  - name: hook-batch-sa6
+    rate_limit_rps: 2928
+    retry_budget_ms: 35000
+    # INC-1392 matched to the upstream's own budget
+  - name: hook-relay-sa3
+    rate_limit_rps: 2140
+    retry_budget_ms: 27000
+    # INC-2630 lowered after the timeout audit
+  - name: hook-probe-sa5
+    rate_limit_rps: 2852
+    retry_budget_ms: 32000
+    # INC-2860 set when the service shipped
+  - name: hook-mirror-sa5
+    rate_limit_rps: 317
+    retry_budget_ms: 30000
+    # INC-6102 lowered after the timeout audit
+  - name: hook-gate-sa6
+    rate_limit_rps: 2050
+    retry_budget_ms: 19000
+    # INC-8839 tuned to the queue depth
+  - name: index-api-sa4
+    rate_limit_rps: 919
+    retry_budget_ms: 39000
+    # INC-8042 raised after the backlog review
+  - name: index-worker-sa5
+    rate_limit_rps: 1693
+    retry_budget_ms: 7000
+    # INC-2594 tuned to the queue depth
+  - name: index-edge-sa2
+    rate_limit_rps: 1461
+    retry_budget_ms: 6000
+    # INC-9427 raised after the backlog review
+  - name: index-core-sa7
+    rate_limit_rps: 1919
+    retry_budget_ms: 6000
+    # INC-8042 raised after the backlog review
+  - name: index-sync-sa8
+    rate_limit_rps: 1797
+    retry_budget_ms: 20000
+    # INC-8637 set when the service shipped
+  - name: index-batch-sa5
+    rate_limit_rps: 2906
+    retry_budget_ms: 29000
+    # INC-6859 matched to the upstream's own budget
+  - name: index-relay-sa8
+    rate_limit_rps: 3059
+    retry_budget_ms: 29000
+    # INC-8873 set when the service shipped
+  - name: index-probe-sa1
+    rate_limit_rps: 956
+    retry_budget_ms: 38000
+    # INC-9783 doubled for the sale window
+  - name: index-mirror-sa2
+    rate_limit_rps: 1619
+    retry_budget_ms: 8000
+    # INC-6010 set when the service shipped
+  - name: index-gate-sa2
+    rate_limit_rps: 1037
+    retry_budget_ms: 18000
+    # INC-4743 set when the service shipped
+  - name: jobber-api-sa5
+    rate_limit_rps: 1607
+    retry_budget_ms: 29000
+    # INC-7614 raised after the backlog review
+  - name: jobber-worker-sa6
+    rate_limit_rps: 1109
+    retry_budget_ms: 22000
+    # INC-9419 set when the service shipped
+  - name: jobber-edge-sa4
+    rate_limit_rps: 3859
+    retry_budget_ms: 36000
+    # INC-3747 raised after the backlog review
+  - name: jobber-core-sa4
+    rate_limit_rps: 2882
+    retry_budget_ms: 5000
+    # INC-1575 matched to the upstream's own budget
+  - name: jobber-sync-sa7
+    rate_limit_rps: 2966
+    retry_budget_ms: 19000
+    # INC-5090 tuned to the queue depth
+  - name: jobber-batch-sa6
+    rate_limit_rps: 2367
+    retry_budget_ms: 30000
+    # INC-6786 tuned to the queue depth
+  - name: jobber-relay-sa8
+    rate_limit_rps: 434
+    retry_budget_ms: 27000
+    # INC-5860 doubled for the sale window
+  - name: jobber-probe-sa9
+    rate_limit_rps: 1164
+    retry_budget_ms: 35000
+    # INC-9743 lowered after the timeout audit
+  - name: jobber-mirror-sa4
+    rate_limit_rps: 2268
+    retry_budget_ms: 6000
+    # INC-1363 lowered after the timeout audit
+  - name: jobber-gate-sa2
+    rate_limit_rps: 3064
+    retry_budget_ms: 34000
+    # INC-9674 matched to the upstream's own budget
+  - name: kafka-api-sa8
+    rate_limit_rps: 202
+    retry_budget_ms: 7000
+    # INC-2907 raised after the backlog review
+  - name: kafka-worker-sa5
+    rate_limit_rps: 2663
+    retry_budget_ms: 29000
+    # INC-7302 doubled for the sale window
+  - name: kafka-edge-sa8
+    rate_limit_rps: 2415
+    retry_budget_ms: 11000
+    # INC-5402 raised after the backlog review
+  - name: kafka-core-sa6
+    rate_limit_rps: 2736
+    retry_budget_ms: 32000
+    # INC-4420 tuned to the queue depth
+  - name: kafka-sync-sa0
+    rate_limit_rps: 2589
+    retry_budget_ms: 37000
+    # INC-8166 doubled for the sale window
+  - name: kafka-batch-sa3
+    rate_limit_rps: 2012
+    retry_budget_ms: 39000
+    # INC-6981 tuned to the queue depth
+  - name: kafka-relay-sa2
+    rate_limit_rps: 3101
+    retry_budget_ms: 17000
+    # INC-5273 lowered after the timeout audit
+  - name: kafka-probe-sa5
+    rate_limit_rps: 2988
+    retry_budget_ms: 8000
+    # INC-8087 set when the service shipped
+  - name: kafka-mirror-sa3
+    rate_limit_rps: 558
+    retry_budget_ms: 28000
+    # INC-4758 raised after the backlog review
+  - name: kafka-gate-sa1
+    rate_limit_rps: 3364
+    retry_budget_ms: 32000
+    # INC-4910 raised after the backlog review
+  - name: ledger-api-sa4
+    rate_limit_rps: 385
+    retry_budget_ms: 26000
+    # INC-7464 set when the service shipped
+  - name: ledger-worker-sa7
+    rate_limit_rps: 1090
+    retry_budget_ms: 6000
+    # INC-6573 matched to the upstream's own budget
+  - name: ledger-edge-sa6
+    rate_limit_rps: 3642
+    retry_budget_ms: 17000
+    # INC-4832 tuned to the queue depth
+  - name: ledger-core-sa1
+    rate_limit_rps: 3404
+    retry_budget_ms: 35000
+    # INC-2813 matched to the upstream's own budget
+  - name: ledger-sync-sa2
+    rate_limit_rps: 3608
+    retry_budget_ms: 18000
+    # INC-1345 matched to the upstream's own budget
+  - name: ledger-batch-sa9
+    rate_limit_rps: 2330
+    retry_budget_ms: 27000
+    # INC-4827 matched to the upstream's own budget
+  - name: ledger-relay-sa6
+    rate_limit_rps: 975
+    retry_budget_ms: 5000
+    # INC-6831 doubled for the sale window
+  - name: ledger-probe-sa1
+    rate_limit_rps: 1819
+    retry_budget_ms: 30000
+    # INC-3076 set when the service shipped
+  - name: ledger-mirror-sa3
+    rate_limit_rps: 574
+    retry_budget_ms: 19000
+    # INC-5313 doubled for the sale window
+  - name: ledger-gate-sa3
+    rate_limit_rps: 177
+    retry_budget_ms: 33000
+    # INC-1609 tuned to the queue depth
+  - name: mailer-api-sa0
+    rate_limit_rps: 1821
+    retry_budget_ms: 11000
+    # INC-1364 lowered after the timeout audit
+  - name: mailer-worker-sa8
+    rate_limit_rps: 3106
+    retry_budget_ms: 28000
+    # INC-1139 doubled for the sale window
+  - name: mailer-edge-sa0
+    rate_limit_rps: 202
+    retry_budget_ms: 6000
+    # INC-6576 lowered after the timeout audit
+  - name: mailer-core-sa4
+    rate_limit_rps: 3022
+    retry_budget_ms: 9000
+    # INC-4252 doubled for the sale window
+  - name: mailer-sync-sa4
+    rate_limit_rps: 1826
+    retry_budget_ms: 12000
+    # INC-5053 raised after the backlog review
+  - name: mailer-batch-sa0
+    rate_limit_rps: 1821
+    retry_budget_ms: 17000
+    # INC-7281 lowered after the timeout audit
+  - name: mailer-relay-sa2
+    rate_limit_rps: 1573
+    retry_budget_ms: 17000
+    # INC-8928 doubled for the sale window
+  - name: mailer-probe-sa4
+    rate_limit_rps: 1343
+    retry_budget_ms: 36000
+    # INC-4546 set when the service shipped
+  - name: mailer-mirror-sa5
+    rate_limit_rps: 3492
+    retry_budget_ms: 4000
+    # INC-4741 tuned to the queue depth
+  - name: mailer-gate-sa1
+    rate_limit_rps: 3099
+    retry_budget_ms: 13000
+    # INC-1328 tuned to the queue depth
+  - name: notify-api-sa1
+    rate_limit_rps: 1176
+    retry_budget_ms: 12000
+    # INC-4083 matched to the upstream's own budget
+  - name: notify-worker-sa5
+    rate_limit_rps: 78
+    retry_budget_ms: 30000
+    # INC-2144 lowered after the timeout audit
+  - name: notify-edge-sa2
+    rate_limit_rps: 3012
+    retry_budget_ms: 12000
+    # INC-2951 matched to the upstream's own budget
+  - name: notify-core-sa0
+    rate_limit_rps: 384
+    retry_budget_ms: 8000
+    # INC-9591 doubled for the sale window
+  - name: notify-sync-sa8
+    rate_limit_rps: 3203
+    retry_budget_ms: 19000
+    # INC-4814 matched to the upstream's own budget
+  - name: notify-batch-sa8
+    rate_limit_rps: 1256
+    retry_budget_ms: 28000
+    # INC-8983 set when the service shipped
+  - name: notify-relay-sa6
+    rate_limit_rps: 929
+    retry_budget_ms: 8000
+    # INC-2072 lowered after the timeout audit
+  - name: notify-probe-sa2
+    rate_limit_rps: 1120
+    retry_budget_ms: 34000
+    # INC-3419 set when the service shipped
+  - name: notify-mirror-sa8
+    rate_limit_rps: 3735
+    retry_budget_ms: 9000
+    # INC-1704 doubled for the sale window
+  - name: notify-gate-sa1
+    rate_limit_rps: 1575
+    retry_budget_ms: 20000
+    # INC-6444 raised after the backlog review
+  - name: orders-api-sa1
+    rate_limit_rps: 1239
+    retry_budget_ms: 22000
+    # INC-5925 set when the service shipped
+  - name: orders-worker-sa8
+    rate_limit_rps: 3351
+    retry_budget_ms: 11000
+    # INC-8762 doubled for the sale window
+  - name: orders-edge-sa1
+    rate_limit_rps: 468
+    retry_budget_ms: 21000
+    # INC-1448 tuned to the queue depth
+  - name: orders-core-sa2
+    rate_limit_rps: 1570
+    retry_budget_ms: 9000
+    # INC-9676 raised after the backlog review
+  - name: orders-sync-sa6
+    rate_limit_rps: 1395
+    retry_budget_ms: 4000
+    # INC-9809 set when the service shipped
+  - name: orders-batch-sa2
+    rate_limit_rps: 348
+    retry_budget_ms: 11000
+    # INC-5568 doubled for the sale window
+  - name: orders-relay-sa7
+    rate_limit_rps: 216
+    retry_budget_ms: 23000
+    # INC-4951 tuned to the queue depth
+  - name: orders-probe-sa0
+    rate_limit_rps: 3619
+    retry_budget_ms: 37000
+    # INC-4988 matched to the upstream's own budget
+  - name: orders-mirror-sa8
+    rate_limit_rps: 830
+    retry_budget_ms: 22000
+    # INC-1314 matched to the upstream's own budget
+  - name: orders-gate-sa2
+    rate_limit_rps: 2134
+    retry_budget_ms: 4000
+    # INC-8808 lowered after the timeout audit
+  - name: presence-api-sa3
+    rate_limit_rps: 1999
+    retry_budget_ms: 22000
+    # INC-7897 raised after the backlog review
+  - name: presence-worker-sa2
+    rate_limit_rps: 3858
+    retry_budget_ms: 20000
+    # INC-3658 matched to the upstream's own budget
+  - name: presence-edge-sa6
+    rate_limit_rps: 455
+    retry_budget_ms: 22000
+    # INC-7864 doubled for the sale window
+  - name: presence-core-sa2
+    rate_limit_rps: 3525
+    retry_budget_ms: 6000
+    # INC-1904 matched to the upstream's own budget
+  - name: presence-sync-sa6
+    rate_limit_rps: 3070
+    retry_budget_ms: 26000
+    # INC-7831 tuned to the queue depth
+  - name: presence-batch-sa7
+    rate_limit_rps: 54
+    retry_budget_ms: 29000
+    # INC-3857 set when the service shipped
+  - name: presence-relay-sa3
+    rate_limit_rps: 1725
+    retry_budget_ms: 29000
+    # INC-2442 raised after the backlog review
+  - name: presence-probe-sa4
+    rate_limit_rps: 1891
+    retry_budget_ms: 24000
+    # INC-9377 matched to the upstream's own budget
+  - name: presence-mirror-sa7
+    rate_limit_rps: 1175
+    retry_budget_ms: 14000
+    # INC-3066 raised after the backlog review
+  - name: presence-gate-sa8
+    rate_limit_rps: 2201
+    retry_budget_ms: 12000
+    # INC-1920 doubled for the sale window
+  - name: queue-api-sa2
+    rate_limit_rps: 3505
+    retry_budget_ms: 31000
+    # INC-6627 doubled for the sale window
+  - name: queue-worker-sa3
+    rate_limit_rps: 2283
+    retry_budget_ms: 16000
+    # INC-3524 doubled for the sale window
+  - name: queue-edge-sa7
+    rate_limit_rps: 747
+    retry_budget_ms: 5000
+    # INC-4937 set when the service shipped
+  - name: queue-core-sa3
+    rate_limit_rps: 3065
+    retry_budget_ms: 11000
+    # INC-7060 lowered after the timeout audit
+  - name: queue-sync-sa1
+    rate_limit_rps: 1463
+    retry_budget_ms: 5000
+    # INC-2895 matched to the upstream's own budget
+  - name: queue-batch-sa1
+    rate_limit_rps: 2968
+    retry_budget_ms: 30000
+    # INC-4642 raised after the backlog review
+  - name: queue-relay-sa9
+    rate_limit_rps: 555
+    retry_budget_ms: 5000
+    # INC-1726 lowered after the timeout audit
+  - name: queue-probe-sa5
+    rate_limit_rps: 2519
+    retry_budget_ms: 5000
+    # INC-1295 matched to the upstream's own budget
+  - name: queue-mirror-sa4
+    rate_limit_rps: 1783
+    retry_budget_ms: 16000
+    # INC-9951 lowered after the timeout audit
+  - name: queue-gate-sa4
+    rate_limit_rps: 892
+    retry_budget_ms: 32000
+    # INC-1132 matched to the upstream's own budget
+  - name: render-api-sa3
+    rate_limit_rps: 1346
+    retry_budget_ms: 28000
+    # INC-6062 doubled for the sale window
+  - name: render-worker-sa8
+    rate_limit_rps: 1804
+    retry_budget_ms: 33000
+    # INC-1824 matched to the upstream's own budget
+  - name: render-edge-sa3
+    rate_limit_rps: 3403
+    retry_budget_ms: 36000
+    # INC-5699 set when the service shipped
+  - name: render-core-sa2
+    rate_limit_rps: 1563
+    retry_budget_ms: 14000
+    # INC-3308 raised after the backlog review
+  - name: render-sync-sa7
+    rate_limit_rps: 2557
+    retry_budget_ms: 17000
+    # INC-3572 lowered after the timeout audit
+  - name: render-batch-sa8
+    rate_limit_rps: 290
+    retry_budget_ms: 20000
+    # INC-5266 lowered after the timeout audit
+  - name: render-relay-sa2
+    rate_limit_rps: 1530
+    retry_budget_ms: 38000
+    # INC-5668 raised after the backlog review
+  - name: render-probe-sa3
+    rate_limit_rps: 1182
+    retry_budget_ms: 21000
+    # INC-8043 lowered after the timeout audit
+  - name: render-mirror-sa4
+    rate_limit_rps: 3371
+    retry_budget_ms: 36000
+    # INC-8748 doubled for the sale window
+  - name: render-gate-sa3
+    rate_limit_rps: 1304
+    retry_budget_ms: 12000
+    # INC-4589 lowered after the timeout audit
+  - name: session-api-sa2
+    rate_limit_rps: 2222
+    retry_budget_ms: 6000
+    # INC-1316 raised after the backlog review
+  - name: session-worker-sa3
+    rate_limit_rps: 1001
+    retry_budget_ms: 30000
+    # INC-8683 raised after the backlog review
+  - name: session-edge-sa6
+    rate_limit_rps: 1098
+    retry_budget_ms: 11000
+    # INC-5155 raised after the backlog review
+  - name: session-core-sa0
+    rate_limit_rps: 2761
+    retry_budget_ms: 15000
+    # INC-8742 doubled for the sale window
+  - name: session-sync-sa0
+    rate_limit_rps: 1611
+    retry_budget_ms: 35000
+    # INC-2403 set when the service shipped
+  - name: session-batch-sa8
+    rate_limit_rps: 1624
+    retry_budget_ms: 20000
+    # INC-5525 raised after the backlog review
+  - name: session-relay-sa7
+    rate_limit_rps: 3329
+    retry_budget_ms: 36000
+    # INC-2843 set when the service shipped
+  - name: session-probe-sa7
+    rate_limit_rps: 374
+    retry_budget_ms: 13000
+    # INC-3020 matched to the upstream's own budget
+  - name: session-mirror-sa9
+    rate_limit_rps: 639
+    retry_budget_ms: 16000
+    # INC-6729 lowered after the timeout audit
+  - name: session-gate-sa6
+    rate_limit_rps: 1558
+    retry_budget_ms: 34000
+    # INC-7890 doubled for the sale window
+  - name: tracker-api-sa9
+    rate_limit_rps: 705
+    retry_budget_ms: 24000
+    # INC-5810 lowered after the timeout audit
+  - name: tracker-worker-sa2
+    rate_limit_rps: 2375
+    retry_budget_ms: 13000
+    # INC-5759 raised after the backlog review
+  - name: tracker-edge-sa3
+    rate_limit_rps: 147
+    retry_budget_ms: 33000
+    # INC-2995 set when the service shipped
+  - name: tracker-core-sa1
+    rate_limit_rps: 441
+    retry_budget_ms: 6000
+    # INC-1579 raised after the backlog review
+  - name: tracker-sync-sa7
+    rate_limit_rps: 1150
+    retry_budget_ms: 32000
+    # INC-4860 tuned to the queue depth
+  - name: tracker-batch-sa8
+    rate_limit_rps: 1414
+    retry_budget_ms: 15000
+    # INC-9436 set when the service shipped
+  - name: tracker-relay-sa8
+    rate_limit_rps: 3003
+    retry_budget_ms: 37000
+    # INC-6637 set when the service shipped
+  - name: tracker-probe-sa5
+    rate_limit_rps: 459
+    retry_budget_ms: 32000
+    # INC-7416 lowered after the timeout audit
+  - name: tracker-mirror-sa8
+    rate_limit_rps: 2275
+    retry_budget_ms: 14000
+    # INC-1639 matched to the upstream's own budget
+  - name: tracker-gate-sa7
+    rate_limit_rps: 927
+    retry_budget_ms: 19000
+    # INC-6485 set when the service shipped
+  - name: upload-api-sa5
+    rate_limit_rps: 1097
+    retry_budget_ms: 13000
+    # INC-4093 matched to the upstream's own budget
+  - name: upload-worker-sa5
+    rate_limit_rps: 1589
+    retry_budget_ms: 38000
+    # INC-8690 raised after the backlog review
+  - name: upload-edge-sa7
+    rate_limit_rps: 3842
+    retry_budget_ms: 9000
+    # INC-7943 raised after the backlog review
+  - name: upload-core-sa8
+    rate_limit_rps: 174
+    retry_budget_ms: 7000
+    # INC-8362 matched to the upstream's own budget
+  - name: upload-sync-sa4
+    rate_limit_rps: 659
+    retry_budget_ms: 37000
+    # INC-2123 matched to the upstream's own budget
+  - name: upload-batch-sa0
+    rate_limit_rps: 3581
+    retry_budget_ms: 6000
+    # INC-1611 raised after the backlog review
+  - name: upload-relay-sa2
+    rate_limit_rps: 2775
+    retry_budget_ms: 14000
+    # INC-8724 lowered after the timeout audit
+  - name: upload-probe-sa4
+    rate_limit_rps: 110
+    retry_budget_ms: 11000
+    # INC-9003 doubled for the sale window
+  - name: upload-mirror-sa4
+    rate_limit_rps: 3487
+    retry_budget_ms: 18000
+    # INC-3798 lowered after the timeout audit
+  - name: upload-gate-sa6
+    rate_limit_rps: 691
+    retry_budget_ms: 32000
+    # INC-3588 lowered after the timeout audit
+  - name: vault-api-sa3
+    rate_limit_rps: 3057
+    retry_budget_ms: 36000
+    # INC-8831 tuned to the queue depth
+  - name: vault-worker-sa5
+    rate_limit_rps: 712
+    retry_budget_ms: 32000
+    # INC-2181 lowered after the timeout audit
+  - name: vault-edge-sa6
+    rate_limit_rps: 1308
+    retry_budget_ms: 27000
+    # INC-4849 matched to the upstream's own budget
+  - name: vault-core-sa4
+    rate_limit_rps: 3607
+    retry_budget_ms: 9000
+    # INC-8536 lowered after the timeout audit
+  - name: vault-sync-sa1
+    rate_limit_rps: 3880
+    retry_budget_ms: 28000
+    # INC-6036 matched to the upstream's own budget
+  - name: vault-batch-sa7
+    rate_limit_rps: 195
+    retry_budget_ms: 36000
+    # INC-5809 set when the service shipped
+  - name: vault-relay-sa4
+    rate_limit_rps: 880
+    retry_budget_ms: 12000
+    # INC-5741 doubled for the sale window
+  - name: vault-probe-sa8
+    rate_limit_rps: 485
+    retry_budget_ms: 18000
+    # INC-7864 doubled for the sale window
+  - name: vault-mirror-sa6
+    rate_limit_rps: 2310
+    retry_budget_ms: 36000
+    # INC-6549 tuned to the queue depth
+  - name: vault-gate-sa1
+    rate_limit_rps: 1517
+    retry_budget_ms: 27000
+    # INC-6355 set when the service shipped
+  - name: webhook-api-sa1
+    rate_limit_rps: 3942
+    retry_budget_ms: 28000
+    # INC-3466 doubled for the sale window
+  - name: webhook-worker-sa4
+    rate_limit_rps: 171
+    retry_budget_ms: 16000
+    # INC-3346 lowered after the timeout audit
+  - name: webhook-edge-sa6
+    rate_limit_rps: 1568
+    retry_budget_ms: 24000
+    # INC-8140 tuned to the queue depth
+  - name: webhook-core-sa3
+    rate_limit_rps: 318
+    retry_budget_ms: 31000
+    # INC-9226 lowered after the timeout audit
+  - name: webhook-sync-sa9
+    rate_limit_rps: 237
+    retry_budget_ms: 17000
+    # INC-3475 raised after the backlog review
+  - name: webhook-batch-sa8
+    rate_limit_rps: 1271
+    retry_budget_ms: 30000
+    # INC-4464 raised after the backlog review
+  - name: webhook-relay-sa7
+    rate_limit_rps: 2905
+    retry_budget_ms: 11000
+    # INC-1521 raised after the backlog review
+  - name: webhook-probe-sa0
+    rate_limit_rps: 2487
+    retry_budget_ms: 21000
+    # INC-1944 set when the service shipped
+  - name: webhook-mirror-sa4
+    rate_limit_rps: 3625
+    retry_budget_ms: 39000
+    # INC-2036 doubled for the sale window
+  - name: webhook-gate-sa9
+    rate_limit_rps: 1254
+    retry_budget_ms: 5000
+    # INC-9294 matched to the upstream's own budget
+  - name: xfer-api-sa1
+    rate_limit_rps: 954
+    retry_budget_ms: 21000
+    # INC-7475 matched to the upstream's own budget
+  - name: xfer-worker-sa1
+    rate_limit_rps: 3667
+    retry_budget_ms: 19000
+    # INC-5794 tuned to the queue depth
+  - name: xfer-edge-sa9
+    rate_limit_rps: 815
+    retry_budget_ms: 10000
+    # INC-3791 raised after the backlog review
+  - name: xfer-core-sa4
+    rate_limit_rps: 359
+    retry_budget_ms: 30000
+    # INC-6175 tuned to the queue depth
+  - name: xfer-sync-sa5
+    rate_limit_rps: 2779
+    retry_budget_ms: 22000
+    # INC-6806 doubled for the sale window
+  - name: xfer-batch-sa0
+    rate_limit_rps: 2532
+    retry_budget_ms: 28000
+    # INC-5440 matched to the upstream's own budget
+  - name: xfer-relay-sa3
+    rate_limit_rps: 3755
+    retry_budget_ms: 17000
+    # INC-1055 matched to the upstream's own budget
+  - name: xfer-probe-sa4
+    rate_limit_rps: 3150
+    retry_budget_ms: 21000
+    # INC-5857 tuned to the queue depth
+  - name: xfer-mirror-sa8
+    rate_limit_rps: 833
+    retry_budget_ms: 6000
+    # INC-2808 doubled for the sale window
+  - name: xfer-gate-sa3
+    rate_limit_rps: 3627
+    retry_budget_ms: 20000
+    # INC-8387 lowered after the timeout audit
+  - name: yield-api-sa7
+    rate_limit_rps: 2962
+    retry_budget_ms: 15000
+    # INC-6103 doubled for the sale window
+  - name: yield-worker-sa1
+    rate_limit_rps: 3196
+    retry_budget_ms: 20000
+    # INC-3769 doubled for the sale window
+  - name: yield-edge-sa0
+    rate_limit_rps: 3232
+    retry_budget_ms: 16000
+    # INC-5825 lowered after the timeout audit
+  - name: yield-core-sa5
+    rate_limit_rps: 3366
+    retry_budget_ms: 31000
+    # INC-7448 doubled for the sale window
+  - name: yield-sync-sa7
+    rate_limit_rps: 944
+    retry_budget_ms: 29000
+    # INC-3144 matched to the upstream's own budget
+  - name: yield-batch-sa0
+    rate_limit_rps: 1141
+    retry_budget_ms: 14000
+    # INC-5955 doubled for the sale window
+  - name: yield-relay-sa2
+    rate_limit_rps: 1090
+    retry_budget_ms: 31000
+    # INC-9468 tuned to the queue depth
+  - name: yield-probe-sa4
+    rate_limit_rps: 1225
+    retry_budget_ms: 34000
+    # INC-8476 doubled for the sale window
+  - name: yield-mirror-sa0
+    rate_limit_rps: 2362
+    retry_budget_ms: 21000
+    # INC-9632 set when the service shipped
+  - name: yield-gate-sa4
+    rate_limit_rps: 2960
+    retry_budget_ms: 9000
+    # INC-1247 tuned to the queue depth
+  - name: zookeeper-api-sa3
+    rate_limit_rps: 1006
+    retry_budget_ms: 35000
+    # INC-4764 lowered after the timeout audit
+  - name: zookeeper-worker-sa6
+    rate_limit_rps: 1870
+    retry_budget_ms: 27000
+    # INC-8135 lowered after the timeout audit
+  - name: zookeeper-edge-sa0
+    rate_limit_rps: 2624
+    retry_budget_ms: 27000
+    # INC-9733 doubled for the sale window
+  - name: zookeeper-core-sa9
+    rate_limit_rps: 1799
+    retry_budget_ms: 24000
+    # INC-1290 tuned to the queue depth
+  - name: zookeeper-sync-sa7
+    rate_limit_rps: 3091
+    retry_budget_ms: 17000
+    # INC-3011 raised after the backlog review
+  - name: zookeeper-batch-sa5
+    rate_limit_rps: 1627
+    retry_budget_ms: 22000
+    # INC-1214 tuned to the queue depth
+  - name: zookeeper-relay-sa0
+    rate_limit_rps: 3720
+    retry_budget_ms: 13000
+    # INC-3325 doubled for the sale window
+  - name: zookeeper-probe-sa4
+    rate_limit_rps: 3523
+    retry_budget_ms: 22000
+    # INC-4717 tuned to the queue depth
+  - name: zookeeper-mirror-sa2
+    rate_limit_rps: 1194
+    retry_budget_ms: 36000
+    # INC-1335 set when the service shipped
+  - name: zookeeper-gate-sa9
+    rate_limit_rps: 755
+    retry_budget_ms: 38000
+    # INC-6987 tuned to the queue depth
+  - name: assets-api-sa0
+    rate_limit_rps: 2506
+    retry_budget_ms: 18000
+    # INC-6744 set when the service shipped
+  - name: assets-worker-sa8
+    rate_limit_rps: 309
+    retry_budget_ms: 21000
+    # INC-6228 raised after the backlog review
+  - name: assets-edge-sa3
+    rate_limit_rps: 1912
+    retry_budget_ms: 30000
+    # INC-5916 doubled for the sale window
+  - name: assets-core-sa8
+    rate_limit_rps: 3747
+    retry_budget_ms: 18000
+    # INC-7738 matched to the upstream's own budget
+  - name: assets-sync-sa8
+    rate_limit_rps: 1414
+    retry_budget_ms: 11000
+    # INC-1979 raised after the backlog review
+  - name: assets-batch-sa2
+    rate_limit_rps: 1281
+    retry_budget_ms: 34000
+    # INC-3231 set when the service shipped
+  - name: assets-relay-sa9
+    rate_limit_rps: 1260
+    retry_budget_ms: 17000
+    # INC-2934 lowered after the timeout audit
+  - name: assets-probe-sa3
+    rate_limit_rps: 3868
+    retry_budget_ms: 38000
+    # INC-7838 doubled for the sale window
+  - name: assets-mirror-sa1
+    rate_limit_rps: 950
+    retry_budget_ms: 18000
+    # INC-9658 tuned to the queue depth
+  - name: assets-gate-sa4
+    rate_limit_rps: 402
+    retry_budget_ms: 10000
+    # INC-7162 tuned to the queue depth
+  - name: broker-api-sa0
+    rate_limit_rps: 3515
+    retry_budget_ms: 35000
+    # INC-8286 lowered after the timeout audit
+  - name: broker-worker-sa7
+    rate_limit_rps: 1921
+    retry_budget_ms: 13000
+    # INC-7028 lowered after the timeout audit
+  - name: broker-edge-sa1
+    rate_limit_rps: 1517
+    retry_budget_ms: 27000
+    # INC-2174 set when the service shipped
+  - name: broker-core-sa3
+    rate_limit_rps: 452
+    retry_budget_ms: 4000
+    # INC-8327 raised after the backlog review
+  - name: broker-sync-sa3
+    rate_limit_rps: 227
+    retry_budget_ms: 6000
+    # INC-1630 lowered after the timeout audit
+  - name: broker-batch-sa8
+    rate_limit_rps: 367
+    retry_budget_ms: 27000
+    # INC-3435 lowered after the timeout audit
+  - name: broker-relay-sa1
+    rate_limit_rps: 707
+    retry_budget_ms: 10000
+    # INC-7130 lowered after the timeout audit
+  - name: broker-probe-sa3
+    rate_limit_rps: 1360
+    retry_budget_ms: 26000
+    # INC-5688 raised after the backlog review
+  - name: broker-mirror-sa9
+    rate_limit_rps: 1775
+    retry_budget_ms: 36000
+    # INC-6657 matched to the upstream's own budget
+  - name: broker-gate-sa7
+    rate_limit_rps: 595
+    retry_budget_ms: 38000
+    # INC-8839 tuned to the queue depth
+  - name: cron-api-sa3
+    rate_limit_rps: 3570
+    retry_budget_ms: 27000
+    # INC-6670 lowered after the timeout audit
+  - name: cron-worker-sa4
+    rate_limit_rps: 1697
+    retry_budget_ms: 9000
+    # INC-1103 doubled for the sale window
+  - name: cron-edge-sa1
+    rate_limit_rps: 772
+    retry_budget_ms: 5000
+    # INC-7755 set when the service shipped
+  - name: cron-core-sa2
+    rate_limit_rps: 1527
+    retry_budget_ms: 20000
+    # INC-1042 doubled for the sale window
+  - name: cron-sync-sa4
+    rate_limit_rps: 3413
+    retry_budget_ms: 23000
+    # INC-3251 raised after the backlog review
+  - name: cron-batch-sa9
+    rate_limit_rps: 1832
+    retry_budget_ms: 35000
+    # INC-5889 raised after the backlog review
+  - name: cron-relay-sa9
+    rate_limit_rps: 1486
+    retry_budget_ms: 29000
+    # INC-8587 lowered after the timeout audit
+  - name: cron-probe-sa2
+    rate_limit_rps: 3524
+    retry_budget_ms: 6000
+    # INC-8355 lowered after the timeout audit
+  - name: cron-mirror-sa8
+    rate_limit_rps: 2451
+    retry_budget_ms: 13000
+    # INC-8282 lowered after the timeout audit
+  - name: cron-gate-sa9
+    rate_limit_rps: 3871
+    retry_budget_ms: 27000
+    # INC-7365 raised after the backlog review
+  - name: delta-api-sa7
+    rate_limit_rps: 1106
+    retry_budget_ms: 34000
+    # INC-6741 set when the service shipped
+  - name: delta-worker-sa9
+    rate_limit_rps: 601
+    retry_budget_ms: 19000
+    # INC-1640 raised after the backlog review
+  - name: delta-edge-sa9
+    rate_limit_rps: 853
+    retry_budget_ms: 30000
+    # INC-4223 lowered after the timeout audit
+  - name: delta-core-sa5
+    rate_limit_rps: 612
+    retry_budget_ms: 4000
+    # INC-7764 matched to the upstream's own budget
+  - name: delta-sync-sa0
+    rate_limit_rps: 1408
+    retry_budget_ms: 19000
+    # INC-5304 doubled for the sale window
+  - name: delta-batch-sa0
+    rate_limit_rps: 1461
+    retry_budget_ms: 8000
+    # INC-5402 matched to the upstream's own budget
+  - name: delta-relay-sa0
+    rate_limit_rps: 669
+    retry_budget_ms: 7000
+    # INC-3427 lowered after the timeout audit
+  - name: delta-probe-sa5
+    rate_limit_rps: 155
+    retry_budget_ms: 14000
+    # INC-7249 set when the service shipped
+  - name: delta-mirror-sa6
+    rate_limit_rps: 144
+    retry_budget_ms: 24000
+    # INC-8328 doubled for the sale window
+  - name: delta-gate-sa6
+    rate_limit_rps: 926
+    retry_budget_ms: 11000
+    # INC-5021 lowered after the timeout audit
+  - name: archival
+    rate_limit_rps: 640
+    retry_budget_ms: 41200
+    # INC-2214 the archive sweep overran its budget.
+  - name: misc-0-sync-eu
+    rate_limit_rps: 1246
+    retry_budget_ms: 22000
+    # INC-5664 set when the service shipped
+  - name: misc-1-batch-us
+    rate_limit_rps: 2192
+    retry_budget_ms: 34000
+    # INC-8329 raised after the backlog review
+  - name: misc-2-edge-apac
+    rate_limit_rps: 685
+    retry_budget_ms: 19000
+    # INC-1048 set when the service shipped
+  - name: misc-3-relay-sa
+    rate_limit_rps: 2558
+    retry_budget_ms: 12000
+    # INC-2935 set when the service shipped
+  - name: misc-4-gate-eu
+    rate_limit_rps: 2420
+    retry_budget_ms: 12000
+    # INC-3524 raised after the backlog review
+  - name: misc-5-probe-us
+    rate_limit_rps: 3478
+    retry_budget_ms: 27000
+    # INC-7862 set when the service shipped
+  - name: misc-6-probe-apac
+    rate_limit_rps: 1578
+    retry_budget_ms: 23000
+    # INC-8698 raised after the backlog review
+  - name: misc-7-edge-sa
+    rate_limit_rps: 2676
+    retry_budget_ms: 20000
+    # INC-4736 set when the service shipped
+  - name: misc-8-probe-eu
+    rate_limit_rps: 52
+    retry_budget_ms: 31000
+    # INC-6531 set when the service shipped
+  - name: misc-9-sync-us
+    rate_limit_rps: 3849
+    retry_budget_ms: 27000
+    # INC-5727 raised after the backlog review
+  - name: misc-10-mirror-apac
+    rate_limit_rps: 290
+    retry_budget_ms: 27000
+    # INC-8979 set when the service shipped
+  - name: misc-11-core-sa
+    rate_limit_rps: 3044
+    retry_budget_ms: 17000
+    # INC-3674 set when the service shipped
+  - name: misc-12-edge-eu
+    rate_limit_rps: 3197
+    retry_budget_ms: 12000
+    # INC-9850 raised after the backlog review
+  - name: misc-13-relay-us
+    rate_limit_rps: 2311
+    retry_budget_ms: 16000
+    # INC-6907 set when the service shipped
+  - name: misc-14-batch-apac
+    rate_limit_rps: 2877
+    retry_budget_ms: 14000
+    # INC-6974 raised after the backlog review
+  - name: misc-15-edge-sa
+    rate_limit_rps: 2491
+    retry_budget_ms: 39000
+    # INC-9987 set when the service shipped
+  - name: misc-16-api-eu
+    rate_limit_rps: 2151
+    retry_budget_ms: 17000
+    # INC-3830 set when the service shipped
+  - name: misc-17-relay-us
+    rate_limit_rps: 751
+    retry_budget_ms: 29000
+    # INC-1168 set when the service shipped
+  - name: misc-18-edge-apac
+    rate_limit_rps: 2666
+    retry_budget_ms: 4000
+    # INC-4273 set when the service shipped
+  - name: misc-19-worker-sa
+    rate_limit_rps: 728
+    retry_budget_ms: 29000
+    # INC-1050 raised after the backlog review
+  - name: misc-20-relay-eu
+    rate_limit_rps: 1838
+    retry_budget_ms: 38000
+    # INC-8612 raised after the backlog review
+  - name: misc-21-edge-us
+    rate_limit_rps: 1908
+    retry_budget_ms: 31000
+    # INC-6212 raised after the backlog review
+  - name: misc-22-gate-apac
+    rate_limit_rps: 1529
+    retry_budget_ms: 19000
+    # INC-4230 set when the service shipped
+  - name: misc-23-api-sa
+    rate_limit_rps: 441
+    retry_budget_ms: 31000
+    # INC-5289 raised after the backlog review
+  - name: misc-24-mirror-eu
+    rate_limit_rps: 1362
+    retry_budget_ms: 25000
+    # INC-4673 raised after the backlog review
+  - name: misc-25-sync-us
+    rate_limit_rps: 1590
+    retry_budget_ms: 35000
+    # INC-6401 raised after the backlog review
+  - name: misc-26-relay-apac
+    rate_limit_rps: 2591
+    retry_budget_ms: 7000
+    # INC-9221 raised after the backlog review
+  - name: misc-27-mirror-sa
+    rate_limit_rps: 2317
+    retry_budget_ms: 13000
+    # INC-2733 raised after the backlog review
+  - name: misc-28-sync-eu
+    rate_limit_rps: 1251
+    retry_budget_ms: 25000
+    # INC-8238 raised after the backlog review
+  - name: misc-29-core-us
+    rate_limit_rps: 1901
+    retry_budget_ms: 37000
+    # INC-2522 raised after the backlog review
+  - name: misc-30-gate-apac
+    rate_limit_rps: 1611
+    retry_budget_ms: 32000
+    # INC-2138 set when the service shipped
+  - name: misc-31-sync-sa
+    rate_limit_rps: 3803
+    retry_budget_ms: 27000
+    # INC-4347 raised after the backlog review
+  - name: misc-32-sync-eu
+    rate_limit_rps: 1576
+    retry_budget_ms: 33000
+    # INC-2456 raised after the backlog review
+  - name: misc-33-edge-us
+    rate_limit_rps: 3467
+    retry_budget_ms: 37000
+    # INC-2271 set when the service shipped
+  - name: misc-34-core-apac
+    rate_limit_rps: 2878
+    retry_budget_ms: 28000
+    # INC-9084 raised after the backlog review
+  - name: misc-35-probe-sa
+    rate_limit_rps: 2870
+    retry_budget_ms: 4000
+    # INC-5981 set when the service shipped
+  - name: misc-36-relay-eu
+    rate_limit_rps: 3757
+    retry_budget_ms: 8000
+    # INC-8054 set when the service shipped
+  - name: misc-37-relay-us
+    rate_limit_rps: 1121
+    retry_budget_ms: 38000
+    # INC-7352 raised after the backlog review
+  - name: misc-38-batch-apac
+    rate_limit_rps: 1352
+    retry_budget_ms: 27000
+    # INC-6496 set when the service shipped
+  - name: misc-39-api-sa
+    rate_limit_rps: 842
+    retry_budget_ms: 28000
+    # INC-5673 set when the service shipped
+  - name: misc-40-relay-eu
+    rate_limit_rps: 2071
+    retry_budget_ms: 16000
+    # INC-7773 raised after the backlog review
+  - name: misc-41-probe-us
+    rate_limit_rps: 3551
+    retry_budget_ms: 10000
+    # INC-5691 set when the service shipped
+  - name: misc-42-sync-apac
+    rate_limit_rps: 807
+    retry_budget_ms: 7000
+    # INC-7177 set when the service shipped
+  - name: misc-43-relay-sa
+    rate_limit_rps: 1941
+    retry_budget_ms: 29000
+    # INC-6264 raised after the backlog review
+  - name: misc-44-batch-eu
+    rate_limit_rps: 1118
+    retry_budget_ms: 26000
+    # INC-6668 raised after the backlog review
+  - name: misc-45-relay-us
+    rate_limit_rps: 3682
+    retry_budget_ms: 12000
+    # INC-9713 raised after the backlog review
+  - name: misc-46-worker-apac
+    rate_limit_rps: 3212
+    retry_budget_ms: 12000
+    # INC-9933 set when the service shipped
+  - name: misc-47-batch-sa
+    rate_limit_rps: 360
+    retry_budget_ms: 14000
+    # INC-2266 raised after the backlog review
+  - name: misc-48-edge-eu
+    rate_limit_rps: 1121
+    retry_budget_ms: 39000
+    # INC-6285 raised after the backlog review
+  - name: misc-49-core-us
+    rate_limit_rps: 3849
+    retry_budget_ms: 38000
+    # INC-5888 raised after the backlog review
+  - name: misc-50-mirror-apac
+    rate_limit_rps: 1832
+    retry_budget_ms: 26000
+    # INC-1818 raised after the backlog review
+  - name: misc-51-core-sa
+    rate_limit_rps: 790
+    retry_budget_ms: 12000
+    # INC-2226 raised after the backlog review
+  - name: misc-52-gate-eu
+    rate_limit_rps: 3022
+    retry_budget_ms: 24000
+    # INC-6732 raised after the backlog review
+  - name: misc-53-core-us
+    rate_limit_rps: 753
+    retry_budget_ms: 9000
+    # INC-4421 set when the service shipped
+  - name: misc-54-worker-apac
+    rate_limit_rps: 487
+    retry_budget_ms: 8000
+    # INC-7593 raised after the backlog review
+  - name: misc-55-worker-sa
+    rate_limit_rps: 3273
+    retry_budget_ms: 18000
+    # INC-1850 set when the service shipped
+  - name: misc-56-api-eu
+    rate_limit_rps: 2395
+    retry_budget_ms: 23000
+    # INC-3667 raised after the backlog review
+  - name: misc-57-core-us
+    rate_limit_rps: 1334
+    retry_budget_ms: 11000
+    # INC-9371 raised after the backlog review
+  - name: misc-58-core-apac
+    rate_limit_rps: 699
+    retry_budget_ms: 36000
+    # INC-8994 raised after the backlog review
+  - name: misc-59-relay-sa
+    rate_limit_rps: 3998
+    retry_budget_ms: 31000
+    # INC-1272 set when the service shipped
+  - name: misc-60-batch-eu
+    rate_limit_rps: 1460
+    retry_budget_ms: 26000
+    # INC-4812 set when the service shipped
+  - name: misc-61-relay-us
+    rate_limit_rps: 1031
+    retry_budget_ms: 17000
+    # INC-2934 set when the service shipped
+  - name: misc-62-api-apac
+    rate_limit_rps: 3580
+    retry_budget_ms: 16000
+    # INC-3765 raised after the backlog review
+  - name: misc-63-core-sa
+    rate_limit_rps: 2548
+    retry_budget_ms: 33000
+    # INC-1321 raised after the backlog review
+  - name: misc-64-sync-eu
+    rate_limit_rps: 3935
+    retry_budget_ms: 16000
+    # INC-5354 set when the service shipped
+  - name: misc-65-gate-us
+    rate_limit_rps: 2435
+    retry_budget_ms: 32000
+    # INC-2890 raised after the backlog review
+  - name: misc-66-sync-apac
+    rate_limit_rps: 2985
+    retry_budget_ms: 15000
+    # INC-3772 raised after the backlog review
+  - name: misc-67-probe-sa
+    rate_limit_rps: 910
+    retry_budget_ms: 16000
+    # INC-8052 set when the service shipped
+  - name: misc-68-probe-eu
+    rate_limit_rps: 3607
+    retry_budget_ms: 31000
+    # INC-2347 raised after the backlog review
+  - name: misc-69-edge-us
+    rate_limit_rps: 119
+    retry_budget_ms: 27000
+    # INC-3493 raised after the backlog review
+  - name: misc-70-sync-apac
+    rate_limit_rps: 352
+    retry_budget_ms: 29000
+    # INC-3626 set when the service shipped
+  - name: misc-71-batch-sa
+    rate_limit_rps: 1786
+    retry_budget_ms: 14000
+    # INC-1913 raised after the backlog review
+  - name: misc-72-sync-eu
+    rate_limit_rps: 2065
+    retry_budget_ms: 25000
+    # INC-2442 set when the service shipped
+  - name: misc-73-core-us
+    rate_limit_rps: 956
+    retry_budget_ms: 7000
+    # INC-2078 raised after the backlog review
+  - name: misc-74-batch-apac
+    rate_limit_rps: 1331
+    retry_budget_ms: 39000
+    # INC-8474 set when the service shipped
+  - name: misc-75-relay-sa
+    rate_limit_rps: 1484
+    retry_budget_ms: 6000
+    # INC-8720 set when the service shipped
+  - name: misc-76-relay-eu
+    rate_limit_rps: 3176
+    retry_budget_ms: 33000
+    # INC-2004 raised after the backlog review
+  - name: misc-77-relay-us
+    rate_limit_rps: 827
+    retry_budget_ms: 20000
+    # INC-9653 raised after the backlog review
+  - name: misc-78-relay-apac
+    rate_limit_rps: 1252
+    retry_budget_ms: 13000
+    # INC-3537 set when the service shipped
+  - name: misc-79-sync-sa
+    rate_limit_rps: 3531
+    retry_budget_ms: 24000
+    # INC-2651 raised after the backlog review
+  - name: misc-80-gate-eu
+    rate_limit_rps: 957
+    retry_budget_ms: 36000
+    # INC-1848 set when the service shipped
+  - name: misc-81-relay-us
+    rate_limit_rps: 479
+    retry_budget_ms: 39000
+    # INC-4457 set when the service shipped
+  - name: misc-82-core-apac
+    rate_limit_rps: 1772
+    retry_budget_ms: 12000
+    # INC-5222 raised after the backlog review
+  - name: misc-83-edge-sa
+    rate_limit_rps: 2782
+    retry_budget_ms: 38000
+    # INC-1960 set when the service shipped
+  - name: misc-84-batch-eu
+    rate_limit_rps: 541
+    retry_budget_ms: 14000
+    # INC-6780 set when the service shipped
+  - name: misc-85-probe-us
+    rate_limit_rps: 3211
+    retry_budget_ms: 12000
+    # INC-1342 raised after the backlog review
+  - name: misc-86-batch-apac
+    rate_limit_rps: 1980
+    retry_budget_ms: 30000
+    # INC-8088 raised after the backlog review
+  - name: misc-87-probe-sa
+    rate_limit_rps: 1819
+    retry_budget_ms: 25000
+    # INC-3555 raised after the backlog review
+  - name: misc-88-probe-eu
+    rate_limit_rps: 3656
+    retry_budget_ms: 8000
+    # INC-9298 raised after the backlog review
+  - name: misc-89-relay-us
+    rate_limit_rps: 2923
+    retry_budget_ms: 34000
+    # INC-5866 set when the service shipped
+  - name: misc-90-gate-apac
+    rate_limit_rps: 1264
+    retry_budget_ms: 38000
+    # INC-4504 set when the service shipped
+  - name: misc-91-probe-sa
+    rate_limit_rps: 2657
+    retry_budget_ms: 7000
+    # INC-2098 set when the service shipped
+  - name: misc-92-sync-eu
+    rate_limit_rps: 151
+    retry_budget_ms: 31000
+    # INC-3164 raised after the backlog review
+  - name: misc-93-sync-us
+    rate_limit_rps: 2361
+    retry_budget_ms: 31000
+    # INC-6556 set when the service shipped
+  - name: misc-94-api-apac
+    rate_limit_rps: 2582
+    retry_budget_ms: 26000
+    # INC-9037 raised after the backlog review
+  - name: misc-95-relay-sa
+    rate_limit_rps: 2765
+    retry_budget_ms: 32000
+    # INC-2999 set when the service shipped
+  - name: misc-96-batch-eu
+    rate_limit_rps: 2350
+    retry_budget_ms: 4000
+    # INC-9251 set when the service shipped
+  - name: misc-97-api-us
+    rate_limit_rps: 3711
+    retry_budget_ms: 30000
+    # INC-5668 raised after the backlog review
+  - name: misc-98-probe-apac
+    rate_limit_rps: 3807
+    retry_budget_ms: 6000
+    # INC-2014 raised after the backlog review
+  - name: misc-99-core-sa
+    rate_limit_rps: 2043
+    retry_budget_ms: 23000
+    # INC-1178 set when the service shipped
+  - name: misc-100-core-eu
+    rate_limit_rps: 2467
+    retry_budget_ms: 34000
+    # INC-4991 set when the service shipped
+  - name: misc-101-api-us
+    rate_limit_rps: 1904
+    retry_budget_ms: 9000
+    # INC-2765 raised after the backlog review
+  - name: misc-102-batch-apac
+    rate_limit_rps: 3912
+    retry_budget_ms: 20000
+    # INC-3061 raised after the backlog review
+  - name: misc-103-sync-sa
+    rate_limit_rps: 343
+    retry_budget_ms: 22000
+    # INC-5561 set when the service shipped
+  - name: misc-104-edge-eu
+    rate_limit_rps: 1157
+    retry_budget_ms: 32000
+    # INC-8016 set when the service shipped
+  - name: misc-105-relay-us
+    rate_limit_rps: 3415
+    retry_budget_ms: 19000
+    # INC-2297 set when the service shipped
+  - name: misc-106-probe-apac
+    rate_limit_rps: 1694
+    retry_budget_ms: 31000
+    # INC-2570 raised after the backlog review
+  - name: misc-107-edge-sa
+    rate_limit_rps: 3887
+    retry_budget_ms: 12000
+    # INC-8909 raised after the backlog review
+  - name: misc-108-worker-eu
+    rate_limit_rps: 3290
+    retry_budget_ms: 7000
+    # INC-4422 raised after the backlog review
+  - name: misc-109-worker-us
+    rate_limit_rps: 1316
+    retry_budget_ms: 33000
+    # INC-9613 set when the service shipped
+  - name: misc-110-probe-apac
+    rate_limit_rps: 2498
+    retry_budget_ms: 37000
+    # INC-6817 set when the service shipped
+  - name: misc-111-api-sa
+    rate_limit_rps: 1986
+    retry_budget_ms: 16000
+    # INC-5752 set when the service shipped
+  - name: misc-112-gate-eu
+    rate_limit_rps: 3315
+    retry_budget_ms: 27000
+    # INC-4297 raised after the backlog review
+  - name: misc-113-api-us
+    rate_limit_rps: 1957
+    retry_budget_ms: 30000
+    # INC-6540 set when the service shipped
+  - name: misc-114-core-apac
+    rate_limit_rps: 3515
+    retry_budget_ms: 38000
+    # INC-6583 raised after the backlog review
+  - name: misc-115-relay-sa
+    rate_limit_rps: 877
+    retry_budget_ms: 15000
+    # INC-3590 raised after the backlog review
+  - name: misc-116-edge-eu
+    rate_limit_rps: 1050
+    retry_budget_ms: 37000
+    # INC-9380 set when the service shipped
+  - name: misc-117-gate-us
+    rate_limit_rps: 3982
+    retry_budget_ms: 6000
+    # INC-8958 raised after the backlog review
+  - name: misc-118-worker-apac
+    rate_limit_rps: 1324
+    retry_budget_ms: 30000
+    # INC-4175 raised after the backlog review
+  - name: misc-119-sync-sa
+    rate_limit_rps: 193
+    retry_budget_ms: 27000
+    # INC-6184 set when the service shipped
+  - name: misc-120-relay-eu
+    rate_limit_rps: 717
+    retry_budget_ms: 14000
+    # INC-5423 raised after the backlog review
+  - name: misc-121-probe-us
+    rate_limit_rps: 2428
+    retry_budget_ms: 25000
+    # INC-5820 raised after the backlog review
+  - name: misc-122-worker-apac
+    rate_limit_rps: 641
+    retry_budget_ms: 10000
+    # INC-1243 raised after the backlog review
+  - name: misc-123-mirror-sa
+    rate_limit_rps: 3236
+    retry_budget_ms: 20000
+    # INC-2101 raised after the backlog review
+  - name: misc-124-relay-eu
+    rate_limit_rps: 3396
+    retry_budget_ms: 15000
+    # INC-7772 set when the service shipped
+  - name: misc-125-edge-us
+    rate_limit_rps: 2698
+    retry_budget_ms: 36000
+    # INC-2734 raised after the backlog review
+  - name: misc-126-core-apac
+    rate_limit_rps: 2228
+    retry_budget_ms: 9000
+    # INC-1821 set when the service shipped
+  - name: misc-127-mirror-sa
+    rate_limit_rps: 3724
+    retry_budget_ms: 28000
+    # INC-9647 raised after the backlog review
+  - name: misc-128-sync-eu
+    rate_limit_rps: 2433
+    retry_budget_ms: 11000
+    # INC-6359 set when the service shipped
+  - name: misc-129-sync-us
+    rate_limit_rps: 1498
+    retry_budget_ms: 13000
+    # INC-4294 raised after the backlog review
+  - name: misc-130-gate-apac
+    rate_limit_rps: 2110
+    retry_budget_ms: 11000
+    # INC-9328 set when the service shipped
+  - name: misc-131-relay-sa
+    rate_limit_rps: 2114
+    retry_budget_ms: 9000
+    # INC-9434 set when the service shipped
+  - name: misc-132-worker-eu
+    rate_limit_rps: 1645
+    retry_budget_ms: 29000
+    # INC-5014 raised after the backlog review
+  - name: misc-133-gate-us
+    rate_limit_rps: 1224
+    retry_budget_ms: 14000
+    # INC-8722 raised after the backlog review
+  - name: misc-134-mirror-apac
+    rate_limit_rps: 1152
+    retry_budget_ms: 16000
+    # INC-9785 set when the service shipped
+  - name: misc-135-sync-sa
+    rate_limit_rps: 970
+    retry_budget_ms: 16000
+    # INC-7720 set when the service shipped
+  - name: misc-136-worker-eu
+    rate_limit_rps: 2484
+    retry_budget_ms: 34000
+    # INC-2063 raised after the backlog review
+  - name: misc-137-sync-us
+    rate_limit_rps: 2061
+    retry_budget_ms: 34000
+    # INC-8543 raised after the backlog review
+  - name: misc-138-relay-apac
+    rate_limit_rps: 254
+    retry_budget_ms: 36000
+    # INC-6821 set when the service shipped
+  - name: misc-139-mirror-sa
+    rate_limit_rps: 572
+    retry_budget_ms: 31000
+    # INC-2711 raised after the backlog review
+  - name: misc-140-api-eu
+    rate_limit_rps: 1217
+    retry_budget_ms: 17000
+    # INC-9955 set when the service shipped
+  - name: misc-141-sync-us
+    rate_limit_rps: 2029
+    retry_budget_ms: 27000
+    # INC-5222 raised after the backlog review
+  - name: misc-142-core-apac
+    rate_limit_rps: 2463
+    retry_budget_ms: 14000
+    # INC-8607 set when the service shipped
+  - name: misc-143-worker-sa
+    rate_limit_rps: 1947
+    retry_budget_ms: 15000
+    # INC-5322 set when the service shipped
+  - name: misc-144-edge-eu
+    rate_limit_rps: 2222
+    retry_budget_ms: 12000
+    # INC-7340 set when the service shipped
+  - name: misc-145-api-us
+    rate_limit_rps: 1385
+    retry_budget_ms: 29000
+    # INC-6673 set when the service shipped
+  - name: misc-146-batch-apac
+    rate_limit_rps: 459
+    retry_budget_ms: 28000
+    # INC-9432 set when the service shipped
+  - name: misc-147-core-sa
+    rate_limit_rps: 2094
+    retry_budget_ms: 9000
+    # INC-4864 raised after the backlog review
+  - name: misc-148-api-eu
+    rate_limit_rps: 3239
+    retry_budget_ms: 27000
+    # INC-7436 raised after the backlog review
+  - name: misc-149-worker-us
+    rate_limit_rps: 720
+    retry_budget_ms: 9000
+    # INC-5120 set when the service shipped
+  - name: misc-150-probe-apac
+    rate_limit_rps: 1034
+    retry_budget_ms: 24000
+    # INC-6761 raised after the backlog review
+  - name: misc-151-sync-sa
+    rate_limit_rps: 3407
+    retry_budget_ms: 13000
+    # INC-2354 raised after the backlog review
+  - name: misc-152-batch-eu
+    rate_limit_rps: 2667
+    retry_budget_ms: 16000
+    # INC-1217 set when the service shipped
+  - name: misc-153-sync-us
+    rate_limit_rps: 1870
+    retry_budget_ms: 17000
+    # INC-5242 raised after the backlog review
+  - name: misc-154-core-apac
+    rate_limit_rps: 1720
+    retry_budget_ms: 5000
+    # INC-9313 set when the service shipped
+  - name: misc-155-gate-sa
+    rate_limit_rps: 945
+    retry_budget_ms: 34000
+    # INC-2344 set when the service shipped
+  - name: misc-156-batch-eu
+    rate_limit_rps: 1759
+    retry_budget_ms: 25000
+    # INC-7662 set when the service shipped
+  - name: misc-157-mirror-us
+    rate_limit_rps: 3097
+    retry_budget_ms: 34000
+    # INC-8058 set when the service shipped
+  - name: misc-158-sync-apac
+    rate_limit_rps: 1226
+    retry_budget_ms: 36000
+    # INC-9813 set when the service shipped
+  - name: misc-159-worker-sa
+    rate_limit_rps: 3783
+    retry_budget_ms: 31000
+    # INC-5003 raised after the backlog review
+  - name: misc-160-batch-eu
+    rate_limit_rps: 942
+    retry_budget_ms: 17000
+    # INC-1605 set when the service shipped
+  - name: misc-161-core-us
+    rate_limit_rps: 907
+    retry_budget_ms: 22000
+    # INC-3697 set when the service shipped
+  - name: misc-162-sync-apac
+    rate_limit_rps: 2986
+    retry_budget_ms: 26000
+    # INC-2331 set when the service shipped
+  - name: misc-163-relay-sa
+    rate_limit_rps: 2632
+    retry_budget_ms: 14000
+    # INC-5459 raised after the backlog review
+  - name: misc-164-worker-eu
+    rate_limit_rps: 2744
+    retry_budget_ms: 25000
+    # INC-9702 set when the service shipped
+  - name: misc-165-edge-us
+    rate_limit_rps: 2908
+    retry_budget_ms: 32000
+    # INC-3063 raised after the backlog review
+  - name: misc-166-relay-apac
+    rate_limit_rps: 1320
+    retry_budget_ms: 37000
+    # INC-5441 raised after the backlog review
+  - name: misc-167-core-sa
+    rate_limit_rps: 3935
+    retry_budget_ms: 8000
+    # INC-6991 set when the service shipped
+  - name: misc-168-mirror-eu
+    rate_limit_rps: 1182
+    retry_budget_ms: 13000
+    # INC-7490 set when the service shipped
+  - name: misc-169-batch-us
+    rate_limit_rps: 989
+    retry_budget_ms: 37000
+    # INC-9889 raised after the backlog review
+  - name: misc-170-gate-apac
+    rate_limit_rps: 2553
+    retry_budget_ms: 34000
+    # INC-1988 raised after the backlog review
+  - name: misc-171-core-sa
+    rate_limit_rps: 3303
+    retry_budget_ms: 7000
+    # INC-4311 set when the service shipped
+  - name: misc-172-relay-eu
+    rate_limit_rps: 3332
+    retry_budget_ms: 29000
+    # INC-9673 set when the service shipped
+  - name: misc-173-relay-us
+    rate_limit_rps: 3373
+    retry_budget_ms: 37000
+    # INC-5761 set when the service shipped
+  - name: misc-174-core-apac
+    rate_limit_rps: 3928
+    retry_budget_ms: 7000
+    # INC-5578 set when the service shipped
+  - name: misc-175-edge-sa
+    rate_limit_rps: 3182
+    retry_budget_ms: 9000
+    # INC-8396 set when the service shipped
+  - name: misc-176-mirror-eu
+    rate_limit_rps: 3818
+    retry_budget_ms: 27000
+    # INC-9705 set when the service shipped
+  - name: misc-177-core-us
+    rate_limit_rps: 398
+    retry_budget_ms: 7000
+    # INC-4587 raised after the backlog review
+  - name: misc-178-sync-apac
+    rate_limit_rps: 3661
+    retry_budget_ms: 18000
+    # INC-8070 raised after the backlog review
+  - name: misc-179-sync-sa
+    rate_limit_rps: 3436
+    retry_budget_ms: 14000
+    # INC-4787 set when the service shipped
+  - name: misc-180-relay-eu
+    rate_limit_rps: 2745
+    retry_budget_ms: 5000
+    # INC-2435 raised after the backlog review
+  - name: misc-181-mirror-us
+    rate_limit_rps: 1307
+    retry_budget_ms: 14000
+    # INC-5960 set when the service shipped
+  - name: misc-182-api-apac
+    rate_limit_rps: 2282
+    retry_budget_ms: 27000
+    # INC-7501 raised after the backlog review
+  - name: misc-183-core-sa
+    rate_limit_rps: 809
+    retry_budget_ms: 5000
+    # INC-1376 set when the service shipped
+  - name: misc-184-batch-eu
+    rate_limit_rps: 1010
+    retry_budget_ms: 17000
+    # INC-4905 set when the service shipped
+  - name: misc-185-edge-us
+    rate_limit_rps: 3047
+    retry_budget_ms: 34000
+    # INC-4999 raised after the backlog review
+  - name: misc-186-core-apac
+    rate_limit_rps: 2742
+    retry_budget_ms: 22000
+    # INC-2035 raised after the backlog review
+  - name: misc-187-relay-sa
+    rate_limit_rps: 1857
+    retry_budget_ms: 28000
+    # INC-9563 set when the service shipped
+  - name: misc-188-gate-eu
+    rate_limit_rps: 3884
+    retry_budget_ms: 32000
+    # INC-6293 set when the service shipped
+  - name: misc-189-probe-us
+    rate_limit_rps: 3506
+    retry_budget_ms: 23000
+    # INC-2358 set when the service shipped
+  - name: misc-190-worker-apac
+    rate_limit_rps: 2857
+    retry_budget_ms: 4000
+    # INC-2470 raised after the backlog review
+  - name: misc-191-mirror-sa
+    rate_limit_rps: 273
+    retry_budget_ms: 31000
+    # INC-9703 set when the service shipped
+  - name: misc-192-probe-eu
+    rate_limit_rps: 172
+    retry_budget_ms: 20000
+    # INC-2053 raised after the backlog review
+  - name: misc-193-relay-us
+    rate_limit_rps: 1359
+    retry_budget_ms: 14000
+    # INC-2676 set when the service shipped
+  - name: misc-194-core-apac
+    rate_limit_rps: 3184
+    retry_budget_ms: 11000
+    # INC-9970 set when the service shipped
+  - name: misc-195-gate-sa
+    rate_limit_rps: 2101
+    retry_budget_ms: 39000
+    # INC-8874 set when the service shipped
+  - name: misc-196-gate-eu
+    rate_limit_rps: 3804
+    retry_budget_ms: 31000
+    # INC-7112 raised after the backlog review
+  - name: misc-197-edge-us
+    rate_limit_rps: 2927
+    retry_budget_ms: 17000
+    # INC-2905 raised after the backlog review
+  - name: misc-198-batch-apac
+    rate_limit_rps: 78
+    retry_budget_ms: 29000
+    # INC-5877 raised after the backlog review
+  - name: misc-199-core-sa
+    rate_limit_rps: 3816
+    retry_budget_ms: 5000
+    # INC-6390 raised after the backlog review
+  - name: misc-200-probe-eu
+    rate_limit_rps: 3220
+    retry_budget_ms: 36000
+    # INC-7470 set when the service shipped
+  - name: misc-201-core-us
+    rate_limit_rps: 604
+    retry_budget_ms: 19000
+    # INC-9294 set when the service shipped
+  - name: misc-202-edge-apac
+    rate_limit_rps: 690
+    retry_budget_ms: 9000
+    # INC-7879 raised after the backlog review
+  - name: misc-203-sync-sa
+    rate_limit_rps: 2777
+    retry_budget_ms: 13000
+    # INC-6215 raised after the backlog review
+  - name: misc-204-batch-eu
+    rate_limit_rps: 2470
+    retry_budget_ms: 23000
+    # INC-5525 raised after the backlog review
+  - name: misc-205-worker-us
+    rate_limit_rps: 1295
+    retry_budget_ms: 33000
+    # INC-9420 set when the service shipped
+  - name: misc-206-probe-apac
+    rate_limit_rps: 1365
+    retry_budget_ms: 5000
+    # INC-1991 raised after the backlog review
+  - name: misc-207-relay-sa
+    rate_limit_rps: 1450
+    retry_budget_ms: 31000
+    # INC-5282 raised after the backlog review
+  - name: misc-208-sync-eu
+    rate_limit_rps: 2234
+    retry_budget_ms: 27000
+    # INC-2618 raised after the backlog review
+  - name: misc-209-gate-us
+    rate_limit_rps: 3834
+    retry_budget_ms: 5000
+    # INC-2159 set when the service shipped
+  - name: misc-210-mirror-apac
+    rate_limit_rps: 1391
+    retry_budget_ms: 16000
+    # INC-7628 raised after the backlog review
+  - name: misc-211-sync-sa
+    rate_limit_rps: 3446
+    retry_budget_ms: 26000
+    # INC-7655 set when the service shipped
+  - name: misc-212-batch-eu
+    rate_limit_rps: 2754
+    retry_budget_ms: 15000
+    # INC-9040 raised after the backlog review
+  - name: misc-213-core-us
+    rate_limit_rps: 2839
+    retry_budget_ms: 21000
+    # INC-7407 raised after the backlog review
+  - name: misc-214-gate-apac
+    rate_limit_rps: 579
+    retry_budget_ms: 14000
+    # INC-8791 set when the service shipped
+  - name: misc-215-mirror-sa
+    rate_limit_rps: 378
+    retry_budget_ms: 6000
+    # INC-5110 set when the service shipped
+  - name: misc-216-sync-eu
+    rate_limit_rps: 2482
+    retry_budget_ms: 23000
+    # INC-5070 set when the service shipped
+  - name: misc-217-batch-us
+    rate_limit_rps: 3011
+    retry_budget_ms: 23000
+    # INC-4465 raised after the backlog review
+  - name: misc-218-batch-apac
+    rate_limit_rps: 1392
+    retry_budget_ms: 15000
+    # INC-6333 set when the service shipped
+  - name: misc-219-gate-sa
+    rate_limit_rps: 3809
+    retry_budget_ms: 30000
+    # INC-2455 raised after the backlog review
+  - name: misc-220-sync-eu
+    rate_limit_rps: 3525
+    retry_budget_ms: 38000
+    # INC-3135 set when the service shipped
+  - name: misc-221-worker-us
+    rate_limit_rps: 490
+    retry_budget_ms: 7000
+    # INC-7304 set when the service shipped
+  - name: misc-222-relay-apac
+    rate_limit_rps: 3332
+    retry_budget_ms: 19000
+    # INC-2064 set when the service shipped
+  - name: misc-223-batch-sa
+    rate_limit_rps: 2147
+    retry_budget_ms: 7000
+    # INC-7211 raised after the backlog review
+  - name: misc-224-sync-eu
+    rate_limit_rps: 3377
+    retry_budget_ms: 9000
+    # INC-5450 raised after the backlog review
+  - name: misc-225-api-us
+    rate_limit_rps: 3832
+    retry_budget_ms: 36000
+    # INC-2233 raised after the backlog review
+  - name: misc-226-edge-apac
+    rate_limit_rps: 3237
+    retry_budget_ms: 9000
+    # INC-2116 raised after the backlog review
+  - name: misc-227-gate-sa
+    rate_limit_rps: 2801
+    retry_budget_ms: 31000
+    # INC-8803 set when the service shipped
+  - name: misc-228-edge-eu
+    rate_limit_rps: 2476
+    retry_budget_ms: 5000
+    # INC-2265 raised after the backlog review
+  - name: misc-229-core-us
+    rate_limit_rps: 3829
+    retry_budget_ms: 26000
+    # INC-8952 raised after the backlog review
+  - name: misc-230-sync-apac
+    rate_limit_rps: 1255
+    retry_budget_ms: 21000
+    # INC-6948 raised after the backlog review
+  - name: misc-231-relay-sa
+    rate_limit_rps: 1704
+    retry_budget_ms: 4000
+    # INC-7768 set when the service shipped
+  - name: misc-232-gate-eu
+    rate_limit_rps: 959
+    retry_budget_ms: 19000
+    # INC-6831 set when the service shipped
+  - name: misc-233-api-us
+    rate_limit_rps: 1884
+    retry_budget_ms: 12000
+    # INC-8402 raised after the backlog review
+  - name: misc-234-edge-apac
+    rate_limit_rps: 3172
+    retry_budget_ms: 4000
+    # INC-3514 set when the service shipped
+  - name: misc-235-mirror-sa
+    rate_limit_rps: 3386
+    retry_budget_ms: 13000
+    # INC-4844 raised after the backlog review
+  - name: misc-236-probe-eu
+    rate_limit_rps: 315
+    retry_budget_ms: 22000
+    # INC-9639 set when the service shipped
+  - name: misc-237-probe-us
+    rate_limit_rps: 51
+    retry_budget_ms: 24000
+    # INC-4205 raised after the backlog review
+  - name: misc-238-core-apac
+    rate_limit_rps: 1895
+    retry_budget_ms: 26000
+    # INC-9777 set when the service shipped
+  - name: misc-239-core-sa
+    rate_limit_rps: 2880
+    retry_budget_ms: 13000
+    # INC-4049 raised after the backlog review

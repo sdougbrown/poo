@@ -35,6 +35,9 @@ type runOptions struct {
 	maxTurns int
 	// maxOutput is the model's output-token limit.
 	maxOutput int
+	// contextStrategy is the compaction strategy the run pins, when
+	// the flag names one.
+	contextStrategy string
 	// logPath is the session log path.
 	logPath string
 	// workingDir is the directory the tools work in.
@@ -60,6 +63,7 @@ func runFlagSpecs() []clicontract.Flag {
 		clicontract.Flag{Name: "reasoning-effort", Kind: clicontract.String, Usage: "The reasoning_effort to send, for models that think only when asked"},
 		clicontract.Flag{Name: "max-turns", Kind: clicontract.Int, Usage: "The turn limit"},
 		clicontract.Flag{Name: "max-output", Kind: clicontract.Int, Usage: "The model's output-token limit"},
+		clicontract.Flag{Name: "context-strategy", Kind: clicontract.String, Usage: "The compaction strategy: summary, mine, pointer, native or handoff"},
 		clicontract.Flag{Name: "log", Kind: clicontract.String, Usage: "The session log path"},
 	)
 	specs = append(specs, toolFlagSpecs()...)
@@ -78,6 +82,7 @@ func (o *runOptions) bind(inv clicontract.Invocation) {
 	o.reasoningEffort = inv.Flags["reasoning-effort"]
 	o.maxTurns = inv.Ints["max-turns"]
 	o.maxOutput = inv.Ints["max-output"]
+	o.contextStrategy = inv.Flags["context-strategy"]
 	o.logPath = inv.Flags["log"]
 	o.workingDir = inv.Flags["working-dir"]
 	o.executor = inv.Flags["executor"]
@@ -386,6 +391,11 @@ func (o *runOptions) validate(rest []string) error {
 	if o.maxOutput < 0 {
 		return errors.New("--max-output must not be negative")
 	}
+	switch o.contextStrategy {
+	case "", "summary", "mine", "pointer", "native", "handoff":
+	default:
+		return errors.New("--context-strategy must be summary, mine, pointer, native or handoff")
+	}
 	if len(rest) == 0 {
 		return errors.New("a prompt is required")
 	}
@@ -400,6 +410,10 @@ func (o *runOptions) apply(settings *config.Settings) error {
 	o.endpointFlags.apply(settings)
 	if o.maxTurns > 0 {
 		settings.Limits.MaxTurns = o.maxTurns
+	}
+	if o.contextStrategy != "" {
+		strategy := o.contextStrategy
+		settings.Context.Strategy = &strategy
 	}
 	// The timeout is the run's deadline, not its budget: the deadline
 	// ends the run, and the settings' limits.max_duration_s is the

@@ -54,3 +54,21 @@
   context_limit: 262144
   notes: >-
     Capped from 1M. Thinks before answering.
+
+- name: glm-flash
+  endpoint: http://grace:4000/v1
+  model_id: glm-flash
+  context_limit: 32768
+  notes: >-
+    The home router's GLM, capped to 32768 so the window bites: a
+    compaction model at a size where compaction is measured, not
+    hypothetical. Native tool calls.
+
+- name: deepseek-flash-128k
+  endpoint: http://grace:4000/v1
+  model_id: deepseek-flash
+  context_limit: 131072
+  notes: >-
+    The home router's deepseek alias, capped to 131072: the middle
+    window where the long tasks strain but a compaction is still
+    possible. Native tool calls.

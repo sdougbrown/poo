@@ -70,6 +70,7 @@ func TestTheReadOnlyPromptsDoNotNameTheAnswer(t *testing.T) {
 		"find-version-mismatch":        {"__version__"},
 		"long-find-error-in-log":       {"req-8f2a41c9"},
 		"long-find-definition-in-tree": {"src/pipeline/ingest/handlers/loader.py"},
+		"long-read-recall":             {"archival", "INC-2214"},
 	}
 
 	for _, task := range tasks {
@@ -154,6 +155,7 @@ func TestTheReadOnlyChecksAcceptTheRightAnswer(t *testing.T) {
 		"find-version-mismatch":        "pyproject.toml declares version 1.4.0 and src/shop/__init__.py declares __version__ = 1.3.0, so src/shop/__init__.py is out of step with the changelog.",
 		"long-find-error-in-log":       "The one ERROR line carries request id req-8f2a41c9.",
 		"long-find-definition-in-tree": "The definition is in src/pipeline/ingest/handlers/loader.py.",
+		"long-read-recall":             "archival INC-2214",
 	}
 
 	for _, task := range tasks {
