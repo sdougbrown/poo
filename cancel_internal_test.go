@@ -17,13 +17,13 @@ func TestOnlyTheFinalizationsOwnCancelIsNotACandidate(t *testing.T) {
 	} {
 		ctx, cancel := context.WithCancelCause(context.Background())
 		cancel(tc.cause)
-		if got := cancelledByFinalize(&runState{ctx: ctx}); got != tc.want {
+		if got := cancelledByFinalize(&runState{callOwner: callOwner{ctx: ctx}}); got != tc.want {
 			t.Errorf("%s: cancelledByFinalize is %v, want %v", name, got, tc.want)
 		}
 	}
 	live, cancel := context.WithCancelCause(context.Background())
 	defer cancel(nil)
-	if cancelledByFinalize(&runState{ctx: live}) {
+	if cancelledByFinalize(&runState{callOwner: callOwner{ctx: live}}) {
 		t.Error("a live context reads as cancelled by finalize")
 	}
 }

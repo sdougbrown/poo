@@ -440,14 +440,16 @@ func (s *Session) startJob(run *runState, turn int, handle, tool string, prepare
 	// The owner carries the run's id, because its records belong to that
 	// run, and the job's own context, because a settle of the run must
 	// not stop the calls the job's tool makes.
-	owner := &runState{
-		id:         run.id,
-		ctx:        ctx,
-		cancel:     cancel,
-		turn:       turn,
-		globalTurn: run.globalTurn,
-		jobOwned:   true,
-	}
+	owner := &runState{callOwner: callOwner{
+		id:           run.id,
+		ctx:          ctx,
+		turn:         turn,
+		globalTurn:   run.globalTurn,
+		jobOwned:     true,
+		pendingCalls: map[string]*issuedCall{},
+		workDone:     make(chan struct{}, 1),
+		repeats:      newRepeatCounter(),
+	}}
 	job := &jobState{
 		id:        jobID,
 		handle:    handle,

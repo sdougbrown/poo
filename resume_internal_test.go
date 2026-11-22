@@ -18,14 +18,16 @@ func TestResumeSettlesANonNaturalCandidate(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancelCause(context.Background())
 	run := &runState{
-		id:           "run",
-		ctx:          ctx,
-		cancel:       cancel,
-		pendingCalls: map[string]*issuedCall{},
-		candidates: []candidate{newCandidate(ReasonToolFatal, SettleDetail{
-			Source: "tool:echo",
-			Text:   "the tool failed",
-		})},
+		callOwner: callOwner{
+			id:           "run",
+			ctx:          ctx,
+			pendingCalls: map[string]*issuedCall{},
+			candidates: []candidate{newCandidate(ReasonToolFatal, SettleDetail{
+				Source: "tool:echo",
+				Text:   "the tool failed",
+			})},
+		},
+		cancel: cancel,
 	}
 	s.run = run
 

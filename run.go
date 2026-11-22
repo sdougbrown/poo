@@ -82,13 +82,16 @@ func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, n
 	runID := NewULID()
 	runCtx, cancel := context.WithCancelCause(ctx)
 	run := &runState{
-		id:              runID,
-		ctx:             runCtx,
+		callOwner: callOwner{
+			id:           runID,
+			ctx:          runCtx,
+			pendingCalls: map[string]*issuedCall{},
+			workDone:     make(chan struct{}, 1),
+			repeats:      newRepeatCounter(),
+		},
 		cancel:          cancel,
 		startedAt:       time.Now(),
 		trigger:         trigger,
-		pendingCalls:    map[string]*issuedCall{},
-		workDone:        make(chan struct{}, 1),
 		finalizeDone:    make(chan struct{}),
 		finalizeStarted: make(chan struct{}),
 		wake:            make(chan struct{}, 1),
@@ -97,7 +100,6 @@ func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, n
 	// The turn summaries and the results belong to the session, not to
 	// the run: a turn keeps its number across the runs, and a handle
 	// names a call for the life of the session.
-	run.repeats = newRepeatCounter()
 	s.transitionLocked(StateRequesting)
 	// The results that were held are delivered at the start of the run,
 	// before the prompt text. They are the session's own work coming

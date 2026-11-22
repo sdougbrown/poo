@@ -49,7 +49,7 @@ func (*sealingInputSink) Flush(context.Context) error { return nil }
 func TestAnInputAcceptedWhileTheFinalizationWaitsHasAFate(t *testing.T) {
 	sink := &sealingInputSink{entered: make(chan struct{}), release: make(chan struct{})}
 	ctx, cancel := context.WithCancelCause(context.Background())
-	r := &runState{id: "run", ctx: ctx, cancel: cancel, pendingCalls: map[string]*issuedCall{}, workDone: make(chan struct{}, 1)}
+	r := &runState{callOwner: callOwner{id: "run", ctx: ctx, pendingCalls: map[string]*issuedCall{}, workDone: make(chan struct{}, 1)}, cancel: cancel}
 	s := &Session{opts: Options{Sink: sink, Model: ModelInfo{ContextLimit: 32768}}, state: StateExecuting, run: r, events: newEventBus(nil), messageIDs: &MessageIDs{}}
 	SetRecordWriteBudget(s, 100*time.Millisecond)
 	commit := make(chan struct{})

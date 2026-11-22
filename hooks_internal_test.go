@@ -16,7 +16,7 @@ import (
 // cancellation.
 func TestTheActivityContextEndsWithErrInterrupted(t *testing.T) {
 	s := &Session{}
-	run := &runState{ctx: context.Background()}
+	run := &runState{callOwner: callOwner{ctx: context.Background()}}
 	s.startActivity(run)
 	s.mu.Lock()
 	s.raiseInterruptLocked(run, "i1")
