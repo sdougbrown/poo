@@ -62,8 +62,12 @@ const (
 	// tail only has to hold the live edge of the work.
 	DefaultKeepRecentTokens = 12000
 
-	// DefaultMaxTokens is the output limit of the mining request.
-	DefaultMaxTokens = 4096
+	// DefaultMaxTokens is the output limit of the mining request. It
+	// sits over the summary strategy's default: a reconstruction of a
+	// long session carries the working state of hundreds of turns, and
+	// a reconstruction the limit cut short is refused, so the room has
+	// to be there.
+	DefaultMaxTokens = 32768
 
 	// DefaultPointerMaxTokens is the output limit of the fork's pointer
 	// pass.
