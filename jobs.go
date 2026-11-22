@@ -621,7 +621,11 @@ func (s *Session) runJob(job *jobState, prepared Prepared) {
 	// itself returns no error, so the owner's candidates are the only
 	// place that failure is visible.
 	fatal := err != nil && errors.Is(err, ErrFatal)
-	if job.owner != nil && s.ownerFatal(job.owner) {
+	// A failure one of the script's own calls raised is the job's: the
+	// tool returns no error for it, so the owner's candidates are the
+	// only place it is visible.
+	failure, failureDetail, failed := s.ownerFailure(job.owner)
+	if failed && failure == ReasonToolFatal {
 		fatal = true
 	}
 
@@ -640,6 +644,14 @@ func (s *Session) runJob(job *jobState, prepared Prepared) {
 		// The job was stopped on purpose, or the session is closing.
 		outcome = OutcomeCancelled
 		text = stoppedText(result.Text, err, "the job was cancelled")
+	case err == nil && failed && failure != ReasonToolFatal:
+		// A call the script made failed in a way a turn would settle the
+		// run for. The tool returned no error, so the job reports it
+		// beside whatever the script did produce.
+		outcome = OutcomeError
+		if failureDetail.Text != "" {
+			text = result.Text + "\n" + failureDetail.Text
+		}
 	case err == nil:
 	case errors.Is(err, context.Canceled):
 		outcome = OutcomeCancelled
@@ -737,22 +749,44 @@ func stoppedText(partial string, err error, reason string) string {
 //
 // The environment names the job, so a tool can tell a job from a call in
 // the turn.
-// ownerFatal reports whether a call the job's tool made was fatal.
+// ownerFailure returns the worst settle candidate a job's tool calls
+// raised, if any.
 //
 // The tool's own error says nothing about the calls it made on the
-// session's behalf, so the owner's settle candidates are read at the
-// job's end. A tool_fatal candidate is the environment unusable: the job's
-// result carries the fatal flag, and the run that receives it settles
-// tool_fatal the way a synchronous call does.
-func (s *Session) ownerFatal(owner *runState) bool {
+// session's behalf. In a turn the finalization reads these candidates and
+// settles the run; a job's owner is never finalized, so the job's end
+// record reports them instead. A tool_fatal candidate makes the job
+// fatal, which settles the run that receives the result the way a
+// synchronous call does; a store or hook failure makes the job an error
+// and carries its detail into the result text.
+func (s *Session) ownerFailure(owner *runState) (Reason, SettleDetail, bool) {
+	if owner == nil {
+		return "", SettleDetail{}, false
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	worst, detail := Reason(""), SettleDetail{}
+	rank := func(r Reason) int {
+		switch r {
+		case ReasonToolFatal:
+			return 3
+		case ReasonStoreError:
+			return 2
+		case ReasonHookError:
+			return 1
+		}
+		return 0
+	}
 	for _, c := range owner.candidates {
-		if c.reason == ReasonToolFatal {
-			return true
+		if rank(c.reason) > rank(worst) {
+			worst, detail = c.reason, c.detail
+			continue
+		}
+		if worst == "" && rank(c.reason) == 0 {
+			worst, detail = c.reason, c.detail
 		}
 	}
-	return false
+	return worst, detail, worst != ""
 }
 
 func (s *Session) jobToolEnv(job *jobState) ToolEnv {

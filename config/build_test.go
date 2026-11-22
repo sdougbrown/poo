@@ -2003,6 +2003,33 @@ func TestADisablingABackgroundToolTakesTheJobToolsWithIt(t *testing.T) {
 	}
 }
 
+// TestOneBackgroundToolLeftKeepsTheJobTools covers the boundary the
+// drop rule turns on: the job tools go only when no tool that may run in
+// the background remains. The code profile has two, so disabling one
+// keeps the job tools for the other.
+func TestOneBackgroundToolLeftKeepsTheJobTools(t *testing.T) {
+	for _, test := range []struct{ disabled, gone string }{
+		{"bash", "bash"},
+		{"codemode", "codemode"},
+	} {
+		t.Run(test.disabled, func(t *testing.T) {
+			settings, err := config.Parse([]byte(theModelSettings+"tools:\n  disabled: ["+test.disabled+"]\n"), config.FormatYAML)
+			if err != nil {
+				t.Fatalf("decoding the settings: %v", err)
+			}
+			runtime := build(t, settings, config.Overrides{})
+			if slices.Contains(runtime.Options.ToolOrder, test.gone) {
+				t.Errorf("the disabled tool %q is still offered", test.gone)
+			}
+			for _, name := range []string{profile.JobsToolName, profile.CancelJobToolName} {
+				if !slices.ContainsFunc(runtime.Profile.Tools, func(tool poo.ToolInfo) bool { return tool.Name == name }) {
+					t.Errorf("the profile does not offer %q with a background tool left", name)
+				}
+			}
+		})
+	}
+}
+
 // TestADisabledToolTheProfileDoesNotOfferChangesNothing covers the other
 // side of the lever: the list is the operator's, so a name the profile
 // running does not offer builds, and that profile keeps every tool it has.

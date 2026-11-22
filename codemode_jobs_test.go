@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -60,18 +61,6 @@ func waitUntil(t *testing.T, budget time.Duration, what string, cond func() bool
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatalf("timed out after %s waiting for %s", budget, what)
-}
-
-// jobEnded returns the job.ended record the log holds.
-func jobEnded(t *testing.T, sink *recordingSink) *poo.JobEndedRecord {
-	t.Helper()
-	for _, rec := range sink.allRecords() {
-		if ended, ok := rec.(*poo.JobEndedRecord); ok {
-			return ended
-		}
-	}
-	t.Fatal("the log holds no job.ended record")
-	return nil
 }
 
 // TestABackgroundScriptCallsToolsAfterItsRunEnds covers the mode: a
@@ -130,7 +119,7 @@ return [r.tool, r.is_error, r.text.includes("the reader's text")];
 	if got := len(reader.Calls()); got != 1 {
 		t.Fatalf("the session's reader ran %d times, want 1", got)
 	}
-	ended := jobEnded(t, sink)
+	ended := jobEndedRecord(t, sink)
 	if ended.Outcome != poo.OutcomeOK {
 		t.Fatalf("the job ended %q: %s", ended.Outcome, ended.Text)
 	}
@@ -182,7 +171,7 @@ return [r.outcome, r.is_error, strip(r)];
 	if got := len(reader.Calls()); got != 0 {
 		t.Errorf("the refused tool ran %d times, want 0", got)
 	}
-	ended := jobEnded(t, sink)
+	ended := jobEndedRecord(t, sink)
 	if !strings.Contains(ended.Text, `["denied",true,"the reader call was refused by the test policy"]`) {
 		t.Errorf("the job's result is %s, want the refusal as data", ended.Text)
 	}
@@ -237,7 +226,7 @@ return [r.outcome, r.is_error];
 	if got := sink.count("permission.asked"); got != 0 {
 		t.Errorf("the log holds %d permission.asked records for a background script, want 0", got)
 	}
-	ended := jobEnded(t, sink)
+	ended := jobEndedRecord(t, sink)
 	if !strings.Contains(ended.Text, `["denied",true]`) {
 		t.Errorf("the job's result is %s, want the refusal as data", ended.Text)
 	}
@@ -263,7 +252,7 @@ return r.is_error;
 		}
 		return false
 	})
-	if ended := jobEnded(t, sink); !ended.Fatal {
+	if ended := jobEndedRecord(t, sink); !ended.Fatal {
 		t.Errorf("the job ended without the fatal flag: outcome %q, text %s", ended.Outcome, ended.Text)
 	}
 }
@@ -273,14 +262,16 @@ return r.is_error;
 // is never finalized, so it must not disable the script's remaining
 // calls. The failure is still recorded on the call that hit it.
 func TestAHookFailureDoesNotStopABackgroundScript(t *testing.T) {
-	first := &namedTool{echoTool: echoTool{result: "one"}, name: "first"}
-	second := &namedTool{echoTool: echoTool{result: "two"}, name: "second"}
+	// Both are side-effecting, so the batch runs in submission order and
+	// the stop check is consulted between the two calls.
+	first := &namedTool{echoTool: echoTool{result: "one", class: poo.ClassSideEffecting}, name: "first"}
+	second := &namedTool{echoTool: echoTool{result: "two", class: poo.ClassSideEffecting}, name: "second"}
 	sink := &recordingSink{}
+	hook := &failingScriptHook{}
 	s := codemodeJobSession(t, `
-const a = await tools.first({text: "one"});
-const b = await tools.second({text: "two"});
+const [a, b] = await Promise.all([tools.first({text: "one"}), tools.second({text: "two"})]);
 return [a.is_error, b.is_error];
-`, map[string]poo.Tool{"first": first, "second": second}, sink, poo.WithBeforeTool(&failingScriptHook{}))
+`, map[string]poo.Tool{"first": first, "second": second}, sink, poo.WithBeforeTool(hook))
 	runSession(t, s, "start")
 
 	waitUntil(t, 10*time.Second, "the job to end", func() bool {
@@ -291,14 +282,16 @@ return [a.is_error, b.is_error];
 		}
 		return false
 	})
-	var calls int
-	for _, rec := range sink.allRecords() {
-		if call, ok := rec.(*poo.ToolCallRecord); ok && (call.Tool == "first" || call.Tool == "second") {
-			calls++
+	// A stopped batch skips the second call before its hooks run, so the
+	// hook's own record is what proves the batch kept going.
+	var judged []string
+	for _, name := range hook.judged() {
+		if name == "first" || name == "second" {
+			judged = append(judged, name)
 		}
 	}
-	if calls != 2 {
-		t.Errorf("the log holds %d of the script's 2 calls after a hook failure, want both", calls)
+	if len(judged) != 2 || judged[0] != "first" || judged[1] != "second" {
+		t.Errorf("the hook judged %v, want both of the script's calls in order", judged)
 	}
 	if got := len(first.Calls()) + len(second.Calls()); got != 0 {
 		t.Errorf("the hook failed, so %d calls ran, want 0", got)
@@ -307,12 +300,65 @@ return [a.is_error, b.is_error];
 
 // failingScriptHook fails the calls a script makes, and lets the model's
 // own calls through so the script starts at all.
-type failingScriptHook struct{}
+//
+// It records every tool it judged: a batch that stopped early skips the
+// call before its hooks run, so the record shows whether the script's
+// remaining calls were authorized.
+type failingScriptHook struct {
+	mu   sync.Mutex
+	seen []string
+}
 
-func (*failingScriptHook) BeforeTool(ctx poo.HookContext, info poo.ToolCallInfo) (poo.ToolDecision, error) {
+func (h *failingScriptHook) BeforeTool(ctx poo.HookContext, info poo.ToolCallInfo) (poo.ToolDecision, error) {
+	h.mu.Lock()
+	h.seen = append(h.seen, info.Spec.Name)
+	h.mu.Unlock()
 	switch info.Spec.Name {
 	case "first", "second":
 		return poo.ToolDecision{}, errors.New("the hook could not decide")
 	}
 	return poo.Allow(), nil
+}
+
+// judged returns the tools the hook was asked about, in order.
+func (h *failingScriptHook) judged() []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]string(nil), h.seen...)
+}
+
+// TestABackgroundScriptWritesNoPermissionRecordForADoomLoop covers the
+// other permission writer: a policy whose doom loop answers
+// deterministically reports an answer without an ask id, and a job's
+// owner must write neither record.
+func TestABackgroundScriptWritesNoPermissionRecordForADoomLoop(t *testing.T) {
+	policy, err := perm.New(perm.Options{
+		Rules:    []perm.Rule{{Tool: "codemode", Action: perm.ActionAllow}},
+		DoomLoop: perm.DoomLoop{Threshold: 2, NearThreshold: 2, Action: perm.ActionDeny},
+	})
+	if err != nil {
+		t.Fatalf("building the policy: %v", err)
+	}
+	reader := &namedTool{echoTool: echoTool{result: "the reader's text", class: poo.ClassSideEffecting}, name: "reader"}
+	sink := &recordingSink{}
+	s := codemodeJobSession(t, `
+const rs = [];
+for (const _ of [1, 2, 3]) rs.push((await tools.reader({text: "same"})).outcome);
+return rs;
+`, map[string]poo.Tool{"reader": reader}, sink, poo.WithPolicy(policy))
+	runSession(t, s, "start")
+
+	waitUntil(t, 10*time.Second, "the job to end", func() bool {
+		for _, rec := range sink.allRecords() {
+			if _, ok := rec.(*poo.JobEndedRecord); ok {
+				return true
+			}
+		}
+		return false
+	})
+	for _, kind := range []string{"permission.asked", "permission.answered"} {
+		if got := sink.count(kind); got != 0 {
+			t.Errorf("the log holds %d %s records for a background script, want 0", got, kind)
+		}
+	}
 }
