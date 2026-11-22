@@ -7,26 +7,34 @@ import (
 
 // The nested tool-call seam.
 //
-// A tool that runs in the turn may make calls of its own: the script
-// engines (and any tool that orchestrates others) get the session's
-// tools through the NestedCaller on their ToolEnv. A nested call is a
-// call of the turn, so it goes through the same path as a call the model
+// A tool may make calls of its own: the script engines (and any tool that
+// orchestrates others) get the session's tools through the NestedCaller
+// on their ToolEnv. A call goes through the same path as a call the model
 // makes: the same validation, the permission engine, the before-tool
 // hooks, the doom loop, the after-tool chain, the same claim machinery
 // and the same default scheduling. CallParallel also allows a nested
 // caller to request overlap for side-effecting tools.
 //
-// The difference is where the result goes. A nested call's record is
-// written, but nothing is appended to the model's history and no message
-// record is written: the model never saw the call, and the log's
-// contract — the messages in the log are the same list the model sees —
-// stays intact. The result waits for the tool that made the call to read
-// it back. A refusal is data to that tool, not an error.
+// Where a call's records and claims belong depends on the mode.
 //
-// A nested call is tracked by the run's claim machinery like a
-// model-made call is: the finalization waits for its record writes, and
-// it owns the result of a nested call that is still outstanding when the
-// run settles.
+// A call a tool makes in the turn is a call of the turn: its claims live
+// on the run, so the finalization waits for its record writes and owns
+// the result of a nested call that is still outstanding when the run
+// settles.
+//
+// A call a tool makes from a background job belongs to the job. Its owner
+// is the job's own state, which no finalization sees, so nothing seals its
+// claims and it raises no permission ask. Its records carry the run that
+// started the job and the turn the job's call came from, and they are
+// written even after that run settled: the job's own end record is what
+// reports the outcome.
+//
+// The difference in both modes is where the result goes. A nested call's
+// record is written, but nothing is appended to the model's history and
+// no message record is written: the model never saw the call, and the
+// log's contract — the messages in the log are the same list the model
+// sees — stays intact. The result waits for the tool that made the call
+// to read it back. A refusal is data to that tool, not an error.
 
 // NestedOutputCapChars is the cap on a nested call's output, in
 // characters, as its tool reads it from ToolSettings.

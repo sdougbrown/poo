@@ -150,8 +150,8 @@ return [r.tool, r.is_error, r.text.includes("the reader's text")];
 	if nested == nil {
 		t.Fatal("the log holds no call for the script's reader")
 	}
-	if nested.Parent == "" || nested.Mode != poo.CallModeNested {
-		t.Errorf("the script's call is parent %q mode %q, want a nested call under the job", nested.Parent, nested.Mode)
+	if nested.Parent != "r1" || nested.Mode != poo.CallModeNested {
+		t.Errorf("the script's call is parent %q mode %q, want a nested call under the model's call", nested.Parent, nested.Mode)
 	}
 	if nested.Turn != 1 {
 		t.Errorf("the script's call is recorded under turn %d, want the turn that started the job", nested.Turn)
