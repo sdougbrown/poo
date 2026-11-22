@@ -25,8 +25,9 @@ permission:
     near_threshold: 5
     action: ask
   # The rules, in order. The first match wins. A rule matches on the
-  # tool's name or on the tool's class, never on both; a bash rule may
-  # match on the command's prefix or on the substrings the command
+  # tool's name or on the tool's class, never on both; a rule that
+  # names a tool with a primary argument (bash's command, fetch's URL)
+  # may match on that argument's prefix or on the substrings it
   # carries.
   rules:
     - tool: bash
