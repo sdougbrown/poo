@@ -96,6 +96,7 @@ func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, n
 		finalizeStarted: make(chan struct{}),
 		wake:            make(chan struct{}, 1),
 	}
+	run.callOwner.run = run
 	s.run = run
 	// The turn summaries and the results belong to the session, not to
 	// the run: a turn keeps its number across the runs, and a handle
@@ -165,7 +166,7 @@ func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, n
 	for _, result := range jobs {
 		s.deliverJobResult(run, result)
 	}
-	if s.runWindingDown(run) {
+	if s.runWindingDown(&run.callOwner) {
 		return runID, nil
 	}
 
@@ -187,7 +188,7 @@ func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, n
 	}
 	// The finalization owns the run: the startup writes nothing more
 	// for it.
-	if s.runWindingDown(run) {
+	if s.runWindingDown(&run.callOwner) {
 		return runID, nil
 	}
 
@@ -197,7 +198,7 @@ func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, n
 	// first run recorded.
 	promptText, promptVariant := s.runSystemPrompt(decisions.edits)
 	if promptText != "" {
-		if s.runWindingDown(run) {
+		if s.runWindingDown(&run.callOwner) {
 			return runID, nil
 		}
 		// A prompt that differs from the last one is recorded whole,
@@ -210,7 +211,7 @@ func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, n
 				Text:       promptText,
 				Hash:       hashText(promptText),
 			}); err != nil {
-				if s.runWindingDown(run) {
+				if s.runWindingDown(&run.callOwner) {
 					return runID, nil
 				}
 				s.finalize(run, newCandidate(ReasonStoreError, SettleDetail{
@@ -234,7 +235,7 @@ func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, n
 				Role:       msg.Role,
 				Content:    msg.Content,
 			}); err != nil {
-				if s.runWindingDown(run) {
+				if s.runWindingDown(&run.callOwner) {
 					return runID, nil
 				}
 				s.finalize(run, newCandidate(ReasonStoreError, SettleDetail{
@@ -253,7 +254,7 @@ func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, n
 	// The messages the before-run hooks appended follow the system
 	// prompt.
 	s.appendStartMessages(run, decisions)
-	if s.runWindingDown(run) {
+	if s.runWindingDown(&run.callOwner) {
 		return runID, nil
 	}
 
@@ -268,7 +269,7 @@ func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, n
 		Content:      user.Content,
 		DeliveryNote: note,
 	}); err != nil {
-		if s.runWindingDown(run) {
+		if s.runWindingDown(&run.callOwner) {
 			return runID, nil
 		}
 		// The store refused a record. The run settles store_error, and
@@ -280,7 +281,7 @@ func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, n
 		return runID, nil
 	}
 	s.appendMessages(user)
-	if s.runWindingDown(run) {
+	if s.runWindingDown(&run.callOwner) {
 		return runID, nil
 	}
 
@@ -513,7 +514,7 @@ func (s *Session) loop(run *runState) []candidate {
 		// never mutates the history, the records or the events. The
 		// response is dropped and logged once; its deltas are not
 		// logged one by one.
-		if s.runWindingDown(run) {
+		if s.runWindingDown(&run.callOwner) {
 			s.logLateProviderResponse(run.id, turn)
 			return nil
 		}
@@ -527,7 +528,7 @@ func (s *Session) loop(run *runState) []candidate {
 			// An interrupt during the request aborts the attempt
 			// and turns it into an interrupted turn. The attempt
 			// does not count against the retry budget.
-			if s.interruptPending(run) {
+			if s.interruptPending(&run.callOwner) {
 				// An interrupted request is not a request that went out, so
 				// the refusal the run was compacting for is over. A later
 				// refusal gets its own compaction.
@@ -625,7 +626,7 @@ func (s *Session) loop(run *runState) []candidate {
 			s.growSpan(run.globalTurn)
 			// An interrupt during the batch cut the turn short. The
 			// unstarted calls are skipped, and the run continues.
-			if s.interruptPending(run) {
+			if s.interruptPending(&run.callOwner) {
 				s.interruptedActivityTurn(run, turn, resp, true)
 				continue
 			}
@@ -713,7 +714,7 @@ func (s *Session) turnEndSteps(run *runState, turn int, note turnNote) (appended
 	// their decisions are discarded: that is not a hook error. The
 	// turn's end has already been emitted, so the remaining turn-end
 	// steps are skipped.
-	if s.interruptPending(run) {
+	if s.interruptPending(&run.callOwner) {
 		s.interruptedTurnEnd(run, turn)
 		return appended, nil, true
 	}
@@ -780,7 +781,7 @@ func (s *Session) turnEnd(run *runState, turn int, processed bool, resp *respons
 	}
 
 	decision, continued, err := s.runBeforeSettle(run, turn, natural)
-	if s.interruptPending(run) {
+	if s.interruptPending(&run.callOwner) {
 		// An interrupt that arrived during the settle hooks discards
 		// their decisions, and that is not a hook error. There is no
 		// second turn end.
@@ -1012,7 +1013,7 @@ func (s *Session) deliverMessageRecords(run *runState, msg Message, inputID stri
 		// The message landed, so the input is delivered: the refusal is
 		// the store's failure, not the input's. The candidate is added
 		// before the claim is released, so the finalization sees it.
-		s.noteStoreError(run, err)
+		s.noteStoreError(&run.callOwner, err)
 	}
 	if !finish(msg) {
 		return true
@@ -1053,7 +1054,7 @@ func (s *Session) deliverInput(run *runState, input queuedInput) bool {
 	fail := func(err error) {
 		s.abandonDelivery(run, input)
 		if !errors.Is(err, errDeliveryAbandoned) {
-			s.noteStoreError(run, err)
+			s.noteStoreError(&run.callOwner, err)
 		}
 	}
 	return s.deliverMessageRecords(run, msg, input.id, input.mode, note, fail, func(msg Message) bool {
@@ -1207,7 +1208,7 @@ func (s *Session) finishDelivery(run *runState, input queuedInput, msg Message) 
 		}
 		s.appendMessagesLocked(msg)
 		run.delivering = append(run.delivering[:i], run.delivering[i+1:]...)
-		s.signalWorkLocked(run)
+		s.signalWorkLocked(&run.callOwner)
 		return true
 	}
 	return false
@@ -1230,7 +1231,7 @@ func (s *Session) abandonDeliveryLocked(run *runState, input queuedInput) {
 		if run.delivering[i].id == input.id {
 			run.delivering = append(run.delivering[:i], run.delivering[i+1:]...)
 			run.abandonedInputs = append(run.abandonedInputs, input)
-			s.signalWorkLocked(run)
+			s.signalWorkLocked(&run.callOwner)
 			return
 		}
 	}
@@ -1240,12 +1241,12 @@ func (s *Session) abandonDeliveryLocked(run *runState, input queuedInput) {
 // work.
 //
 // The caller holds the session's lock.
-func (s *Session) signalWorkLocked(run *runState) {
-	if run.workDone == nil {
+func (s *Session) signalWorkLocked(owner *callOwner) {
+	if owner.workDone == nil {
 		return
 	}
 	select {
-	case run.workDone <- struct{}{}:
+	case owner.workDone <- struct{}{}:
 	default:
 	}
 }
@@ -1261,11 +1262,11 @@ func storeErrorCandidate(err error) candidate {
 // A write the run's finalization sealed is not a failure: the
 // finalization owns the record, and the store refusing it means the
 // record is no longer wanted.
-func (s *Session) noteStoreError(run *runState, err error) {
+func (s *Session) noteStoreError(owner *callOwner, err error) {
 	if err == nil || errors.Is(err, errCallRecordSealed) {
 		return
 	}
-	s.addCandidate(run, storeErrorCandidate(err))
+	s.addCandidate(owner, storeErrorCandidate(err))
 }
 
 // originForMode returns the origin an input's message carries.
@@ -1344,7 +1345,7 @@ func (s *Session) compactForRefusal(run *runState, err error, resp *response, re
 	if resp != nil && (len(resp.content) > 0 || len(resp.calls) > 0) {
 		return false
 	}
-	if s.opts.Compactor == nil || s.interruptPending(run) || s.runWindingDown(run) {
+	if s.opts.Compactor == nil || s.interruptPending(&run.callOwner) || s.runWindingDown(&run.callOwner) {
 		return false
 	}
 	s.mu.Lock()
@@ -1415,7 +1416,7 @@ func (s *Session) resendLimit(run *runState, turn int, res requestResult) (int, 
 	if res.resp != nil && (len(res.resp.content) > 0 || len(res.resp.calls) > 0) {
 		return 0, false
 	}
-	if s.interruptPending(run) || s.runWindingDown(run) {
+	if s.interruptPending(&run.callOwner) || s.runWindingDown(&run.callOwner) {
 		return 0, false
 	}
 	switch perr.Kind {
@@ -1586,7 +1587,7 @@ func (s *Session) requestOnce(run *runState, turn int, attemptBase, maxTokens in
 		// A stream that outlives the run is a late completion: what it
 		// carries never reaches the history, the records or the
 		// events.
-		if s.runWindingDown(run) {
+		if s.runWindingDown(&run.callOwner) {
 			return
 		}
 		s.events.emit(name, payload)
@@ -1987,7 +1988,7 @@ func (s *Session) recordUsage(run *runState, meta RecordMeta, turn, request int,
 		CacheReadTokens: usage.CacheReadTokens,
 		TTFTMS:          usage.TTFTMS,
 	}); err != nil {
-		s.noteStoreError(run, err)
+		s.noteStoreError(&run.callOwner, err)
 		return false
 	}
 	payload := map[string]any{
@@ -2085,10 +2086,10 @@ var errRunWindingDown = errors.New("poo: the run is winding down")
 
 // runWindingDown reports that the run has started or finished
 // finalizing, so nothing else may mutate it.
-func (s *Session) runWindingDown(run *runState) bool {
+func (s *Session) runWindingDown(owner *callOwner) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return run.committed || run.finalizing
+	return owner.committed || owner.finalizing
 }
 
 // cancelledByFinalize reports that the run's context ended because the

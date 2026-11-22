@@ -260,6 +260,10 @@ type Session struct {
 // to the job: that owner is never finalized, raises no permission ask and
 // writes its records even after the run that started the job settled.
 type callOwner struct {
+	// run is the run this owner's calls belong to, for the work only a
+	// turn does: starting a job from a call, and the finalization's
+	// view. A background job's owner has none.
+	run *runState
 	// id is the run id the owner's records carry.
 	id string
 	// ctx bounds the owner's writes.
@@ -1513,7 +1517,7 @@ func (s *Session) beginRunWriteLocked(run *runState) (context.Context, func(), b
 			}
 		}
 		run.runWrites--
-		s.signalWorkLocked(run)
+		s.signalWorkLocked(&run.callOwner)
 		s.mu.Unlock()
 	}
 	return ctx, release, true
@@ -1600,17 +1604,17 @@ var errCallRecordSealed = errors.New("poo: the finalization sealed the call reco
 // budget, because no claim is waiting for it any more. Either way, a
 // record the store does not take after the seal is abandoned rather than
 // a store failure: the run's outcome is already fixed.
-func (s *Session) writeCallRecord(run *runState, call *issuedCall, rec Record) error {
+func (s *Session) writeCallRecord(owner *callOwner, call *issuedCall, rec Record) error {
 	if call.recordCtx != nil {
-		return s.appendRecord(call.recordCtx, rec, run, nil)
+		return s.appendRecord(call.recordCtx, rec, owner.run, nil)
 	}
-	base := run.ctx
+	base := owner.ctx
 	if base == nil {
 		base = context.Background()
 	}
 	wctx, cancel := context.WithTimeout(context.WithoutCancel(base), s.recordBudget())
 	defer cancel()
-	return s.appendRecord(wctx, rec, run, nil)
+	return s.appendRecord(wctx, rec, owner.run, nil)
 }
 
 // defaultRecordWriteBudget bounds one record write or flush.

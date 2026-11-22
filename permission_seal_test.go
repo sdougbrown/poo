@@ -48,7 +48,7 @@ func permissionHandoffSession(t *testing.T, storeFirst bool) (*Session, *runStat
 	run := &runState{callOwner: callOwner{id: "run", ctx: ctx, pendingCalls: map[string]*issuedCall{}, workDone: make(chan struct{}, 1)}, cancel: cancel}
 	s := &Session{opts: Options{Sink: sink}, run: run, events: newEventBus(nil), recordWriteBudget: time.Second}
 	t.Cleanup(s.events.stop)
-	s.reportPermissionAsked(run, PermissionAsk{AskID: "a1", Tool: "bash", Reason: AskReasonPolicy})
+	s.reportPermissionAsked(&run.callOwner, PermissionAsk{AskID: "a1", Tool: "bash", Reason: AskReasonPolicy})
 	return s, run, sink
 }
 
@@ -88,7 +88,7 @@ func testPermissionSealHandoff(t *testing.T, storeFirst bool) {
 	s, run, sink := permissionHandoffSession(t, storeFirst)
 	done := make(chan struct{})
 	go func() {
-		s.reportPermissionAnswered(run, PermissionAnswer{AskID: "a1", Decision: "allow", AnsweredBy: "policy", Provenance: ProvenanceAnswered})
+		s.reportPermissionAnswered(&run.callOwner, PermissionAnswer{AskID: "a1", Decision: "allow", AnsweredBy: "policy", Provenance: ProvenanceAnswered})
 		close(done)
 	}()
 	<-sink.entered
@@ -105,11 +105,13 @@ func testPermissionSealHandoff(t *testing.T, storeFirst bool) {
 
 func TestPermissionSealedReporterCannotResetNextRun(t *testing.T) {
 	oldRun := &runState{callOwner: callOwner{id: "old", sealed: true, committed: true, repeats: newRepeatCounter()}}
+	oldRun.callOwner.run = oldRun
 	newRun := &runState{callOwner: callOwner{id: "new", repeats: newRepeatCounter(), permissionHandle: "r2", permissionTool: "read"}}
+	newRun.callOwner.run = newRun
 	s := &Session{run: newRun}
 	newRun.repeats.count("read", "read:a", "read:a")
 	newRun.repeats.count("read", "read:a", "read:a")
-	reporter := &permissionReporter{session: s, run: oldRun}
+	reporter := &permissionReporter{session: s, owner: &oldRun.callOwner}
 	reporter.ResetRepeats("r1")
 	got := newRun.repeats.count("read", "read:a", "read:a")
 	if got.exact != 3 {

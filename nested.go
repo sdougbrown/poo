@@ -135,7 +135,7 @@ func (n *nestedCaller) call(ctx context.Context, calls []NestedCall, parallel bo
 	}
 	// A run that is winding down starts no new effect, and a batch whose
 	// context is already gone does not start.
-	if s.runWindingDown(run) {
+	if s.runWindingDown(&run.callOwner) {
 		return nil, fmt.Errorf("%w: the nested call did not start", errRunWindingDown)
 	}
 	if err := ctx.Err(); err != nil {
@@ -163,7 +163,7 @@ func (n *nestedCaller) call(ctx context.Context, calls []NestedCall, parallel bo
 	// so an ask is bounded by the policy's own timeout and not by the
 	// script's deadline.
 	callCtx, cancel := context.WithCancel(ctx)
-	stop := context.AfterFunc(s.activityContext(run), cancel)
+	stop := context.AfterFunc(s.activityContext(&run.callOwner), cancel)
 	defer func() {
 		stop()
 		cancel()
@@ -179,14 +179,14 @@ func (n *nestedCaller) call(ctx context.Context, calls []NestedCall, parallel bo
 	// The batch is registered before it runs, so every call in it has an
 	// owner: its own dispatch, the skip path, or the seal — exactly like
 	// a batch the model made.
-	s.claimBatch(run, n.turn, plans)
-	if s.runWindingDown(run) {
+	s.claimBatch(&run.callOwner, n.turn, plans)
+	if s.runWindingDown(&run.callOwner) {
 		return nil, fmt.Errorf("%w: the nested call did not start", errRunWindingDown)
 	}
 	// No beginTurn and no startActivity: the parent call already runs
 	// inside the turn's activity, and the turn's summary stays the
 	// model's.
-	s.runBatch(run, n.turn, plans, parallel)
+	s.runBatch(&run.callOwner, n.turn, plans, parallel)
 
 	results := make([]NestedResult, len(plans))
 	for i, p := range plans {

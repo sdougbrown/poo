@@ -108,6 +108,6 @@ func TestPermissionSealResolvesPendingBeforeSettlement(t *testing.T) {
 			}
 		}
 	}
-	s.reportPermissionAnswered(run, PermissionAnswer{AskID: "a1", Decision: "allow", AnsweredBy: "policy"})
+	s.reportPermissionAnswered(&run.callOwner, PermissionAnswer{AskID: "a1", Decision: "allow", AnsweredBy: "policy"})
 	checkPermissionHandoff(t, s, sink)
 }

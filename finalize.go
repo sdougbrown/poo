@@ -636,7 +636,7 @@ func (s *Session) settleIssuedCalls(run *runState, issued []*issuedCall) {
 			// The call was claimed before its record was written, so the
 			// finalization writes it. The call never fixed a mode: it
 			// never ran. Its parent says whether it was nested.
-			if err := s.writeCallRecord(run, call, &ToolCallRecord{
+			if err := s.writeCallRecord(&run.callOwner, call, &ToolCallRecord{
 				RecordMeta: NewRecordMetaFrom("tool.call", OriginModel),
 				RunID:      run.id,
 				Turn:       call.turn,
@@ -647,7 +647,7 @@ func (s *Session) settleIssuedCalls(run *runState, issued []*issuedCall) {
 				Arguments:  recordArgs(call.arguments),
 				Parent:     call.parent,
 			}); err != nil && !errors.Is(err, errCallRecordSealed) {
-				s.noteStoreError(run, err)
+				s.noteStoreError(&run.callOwner, err)
 			}
 		}
 		outcome := OutcomeSkipped
@@ -658,7 +658,7 @@ func (s *Session) settleIssuedCalls(run *runState, issued []*issuedCall) {
 		}
 		// The call is already marked as settled, so the record is
 		// written directly.
-		s.writeResult(run, call.turn, call.handle, call.tool, call.id, ToolResult{
+		s.writeResult(&run.callOwner, call.turn, call.handle, call.tool, call.id, ToolResult{
 			Text:    text,
 			IsError: true,
 		}, outcome, afterToolOutcome{result: ToolResult{
@@ -885,7 +885,7 @@ func (s *Session) Send(text string, mode InputMode, opts ...InputOption) (string
 	// is delivered at the gate. An interrupt has therefore exactly one
 	// effect, whichever side of the acceptance the run is on.
 	if mode == Interrupt && !late && !waiting {
-		s.raiseInterruptLocked(run, id)
+		s.raiseInterruptLocked(&run.callOwner, id)
 	}
 	// The acceptance claim is released here, and it reports whether the
 	// claim was still ours. A finalization that sealed the run took it,
@@ -974,7 +974,7 @@ func (s *Session) finishInputAcceptanceLocked(run *runState, input queuedInput) 
 			break
 		}
 	}
-	s.signalWorkLocked(run)
+	s.signalWorkLocked(&run.callOwner)
 	return owned
 }
 

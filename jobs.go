@@ -491,14 +491,14 @@ func (s *Session) startJob(run *runState, turn int, handle, tool string, prepare
 	if err != nil {
 		s.mu.Lock()
 		run.jobStarts--
-		s.signalWorkLocked(run)
+		s.signalWorkLocked(&run.callOwner)
 		s.mu.Unlock()
 		s.removeJob(jobID)
 		cancel(errFinalizing)
 		if errors.Is(err, errDeliveryAbandoned) || winding {
 			return "", false, true
 		}
-		s.noteStoreError(run, err)
+		s.noteStoreError(&run.callOwner, err)
 		return "", false, false
 	}
 	if winding {
@@ -516,14 +516,14 @@ func (s *Session) startJob(run *runState, turn int, handle, tool string, prepare
 		s.mu.Lock()
 		run.jobStarts--
 		s.mu.Unlock()
-		s.signalWorkLocked(run)
+		s.signalWorkLocked(&run.callOwner)
 		cancel(errFinalizing)
 		return jobID, false, true
 	}
 	s.mu.Lock()
 	run.jobStarts--
 	s.mu.Unlock()
-	s.signalWorkLocked(run)
+	s.signalWorkLocked(&run.callOwner)
 
 	go s.runJob(job, prepared)
 	return jobID, true, false
@@ -1434,7 +1434,7 @@ func (s *Session) deliverTrackedJobResult(run *runState, item jobQueueItem) bool
 		return false
 	}
 	if result.fatal {
-		s.addCandidate(run, newCandidate(ReasonToolFatal, SettleDetail{
+		s.addCandidate(&run.callOwner, newCandidate(ReasonToolFatal, SettleDetail{
 			Source: "tool:" + result.tool,
 			Text:   result.text,
 		}))
@@ -1456,7 +1456,7 @@ func (s *Session) failJobDelivery(run *runState, item jobQueueItem, err error) {
 	sealed := runSettledLocked(run)
 	s.mu.Unlock()
 	if !errors.Is(err, errDeliveryAbandoned) {
-		s.noteStoreError(run, err)
+		s.noteStoreError(&run.callOwner, err)
 	}
 	if sealed {
 		s.actOnQueuedJobResults()
@@ -1483,7 +1483,7 @@ func (s *Session) finishJobDelivery(run *runState, item jobQueueItem, msg Messag
 		return false
 	}
 	s.appendMessagesLocked(msg)
-	s.signalWorkLocked(run)
+	s.signalWorkLocked(&run.callOwner)
 	return true
 }
 
@@ -1494,7 +1494,7 @@ func (s *Session) finishJobDelivery(run *runState, item jobQueueItem, msg Messag
 func (s *Session) abandonJobDeliveryLocked(run *runState, item jobQueueItem) {
 	s.removeJobDeliveryLocked(run, item)
 	s.jobQueue = append([]jobQueueItem{item}, s.jobQueue...)
-	s.signalWorkLocked(run)
+	s.signalWorkLocked(&run.callOwner)
 }
 
 // removeJobDeliveryLocked drops a result's in-flight claim and reports

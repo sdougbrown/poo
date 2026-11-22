@@ -68,7 +68,7 @@ requestGateLoop:
 			// The run may have settled while the compactor was running.
 			// Nothing the request gate does after that may move the state, open a
 			// request, or record anything.
-			if errors.Is(err, errRunWindingDown) || s.runWindingDown(run) {
+			if errors.Is(err, errRunWindingDown) || s.runWindingDown(&run.callOwner) {
 				return requestGateResult{held: true}
 			}
 			if errors.Is(err, errCompactionInterrupted) {
@@ -169,7 +169,7 @@ func (s *Session) compact(run *runState) (compactionOutcome, error) {
 		return compactionOutcome{}, errRunWindingDown
 	}
 	defer release()
-	if s.runWindingDown(run) {
+	if s.runWindingDown(&run.callOwner) {
 		return compactionOutcome{}, errRunWindingDown
 	}
 
@@ -189,10 +189,10 @@ func (s *Session) compact(run *runState) (compactionOutcome, error) {
 	defer s.endActivity(run)
 
 	compaction, err := s.opts.Compactor.Compact(actCtx, env)
-	if s.interruptPending(run) || errors.Is(context.Cause(actCtx), errInterrupted) {
+	if s.interruptPending(&run.callOwner) || errors.Is(context.Cause(actCtx), errInterrupted) {
 		// A cooperative compactor may return a value while it unwinds.
 		// The activity was interrupted, so the value is discarded.
-		if !s.runWindingDown(run) {
+		if !s.runWindingDown(&run.callOwner) {
 			s.events.emit(EventCompactionEnded, map[string]any{"run_id": run.id, "error": errCompactionInterrupted.Error()})
 		}
 		return compactionOutcome{}, errCompactionInterrupted
@@ -200,7 +200,7 @@ func (s *Session) compact(run *runState) (compactionOutcome, error) {
 	// The run may have settled while the compactor was running. The
 	// compaction's own record is not written, and the ended event is
 	// not emitted, for a run that has already settled.
-	if s.runWindingDown(run) {
+	if s.runWindingDown(&run.callOwner) {
 		return compactionOutcome{}, errRunWindingDown
 	}
 	if err != nil {
@@ -220,8 +220,8 @@ func (s *Session) compact(run *runState) (compactionOutcome, error) {
 		// spent the tokens it spent. An answer that carried no window was
 		// billed all the same for what it did carry.
 		s.accountNativeCompaction(run, result, requestChars)
-		if s.interruptPending(run) || errors.Is(context.Cause(actCtx), errInterrupted) {
-			if !s.runWindingDown(run) {
+		if s.interruptPending(&run.callOwner) || errors.Is(context.Cause(actCtx), errInterrupted) {
+			if !s.runWindingDown(&run.callOwner) {
 				s.events.emit(EventCompactionEnded, map[string]any{"run_id": run.id, "error": errCompactionInterrupted.Error()})
 			}
 			return compactionOutcome{}, errCompactionInterrupted
@@ -270,10 +270,10 @@ func (s *Session) compact(run *runState) (compactionOutcome, error) {
 		rec.Replacement = compaction.Replace.Messages
 	}
 	if err := s.appendRecord(claimCtx, rec, run, nil); err != nil {
-		if errors.Is(err, errCallRecordSealed) || s.runWindingDown(run) {
+		if errors.Is(err, errCallRecordSealed) || s.runWindingDown(&run.callOwner) {
 			return compactionOutcome{}, errRunWindingDown
 		}
-		s.noteStoreError(run, err)
+		s.noteStoreError(&run.callOwner, err)
 		return compactionOutcome{}, errCompactionStore
 	}
 	if change != nil && !s.commitCompactionView(run, *change) {
@@ -290,10 +290,10 @@ func (s *Session) compact(run *runState) (compactionOutcome, error) {
 			Handoff:    compaction.End.Handoff,
 			CreatedAt:  nowRFC3339(),
 		}, run, nil); err != nil {
-			if errors.Is(err, errCallRecordSealed) || s.runWindingDown(run) {
+			if errors.Is(err, errCallRecordSealed) || s.runWindingDown(&run.callOwner) {
 				return compactionOutcome{}, errRunWindingDown
 			}
-			s.noteStoreError(run, err)
+			s.noteStoreError(&run.callOwner, err)
 			return compactionOutcome{}, errCompactionStore
 		}
 		outcome.candidate = &candidate{
@@ -309,7 +309,7 @@ func (s *Session) compact(run *runState) (compactionOutcome, error) {
 	// The run may have started finalizing while the record was written.
 	// The record is its own now, and its ended event is not emitted for
 	// a run that is going down.
-	if s.runWindingDown(run) {
+	if s.runWindingDown(&run.callOwner) {
 		return compactionOutcome{}, errRunWindingDown
 	}
 	s.events.emit(EventCompactionEnded, map[string]any{

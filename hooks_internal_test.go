@@ -19,10 +19,10 @@ func TestTheActivityContextEndsWithErrInterrupted(t *testing.T) {
 	run := &runState{callOwner: callOwner{ctx: context.Background()}}
 	s.startActivity(run)
 	s.mu.Lock()
-	s.raiseInterruptLocked(run, "i1")
+	s.raiseInterruptLocked(&run.callOwner, "i1")
 	s.mu.Unlock()
 
-	cause := context.Cause(s.activityContext(run))
+	cause := context.Cause(s.activityContext(&run.callOwner))
 	if !errors.Is(cause, errInterrupted) {
 		t.Errorf("the activity's context ended with %v, want errInterrupted", cause)
 	}

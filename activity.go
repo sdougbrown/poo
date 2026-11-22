@@ -44,13 +44,13 @@ func (s *Session) endActivity(run *runState) {
 //
 // An activity that has not started yet runs under the run's own
 // context.
-func (s *Session) activityContext(run *runState) context.Context {
+func (s *Session) activityContext(owner *callOwner) context.Context {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if run.activityCtx != nil {
-		return run.activityCtx
+	if owner.activityCtx != nil {
+		return owner.activityCtx
 	}
-	return run.ctx
+	return owner.ctx
 }
 
 // raiseInterruptLocked records that an interrupt arrived and ends the
@@ -67,10 +67,10 @@ func (s *Session) activityContext(run *runState) context.Context {
 //
 // The activity is cancelled under the same lock, so no other goroutine
 // can replace it with an activity the abort does not mean.
-func (s *Session) raiseInterruptLocked(run *runState, inputID string) {
-	run.interruptPending = true
-	run.pendingInterruptIDs = append(run.pendingInterruptIDs, inputID)
-	if cancel := run.activityCancel; cancel != nil {
+func (s *Session) raiseInterruptLocked(owner *callOwner, inputID string) {
+	owner.interruptPending = true
+	owner.pendingInterruptIDs = append(owner.pendingInterruptIDs, inputID)
+	if cancel := owner.activityCancel; cancel != nil {
 		cancel(errInterrupted)
 	}
 }
@@ -88,10 +88,10 @@ func (s *Session) takeInterrupt(run *runState) []string {
 }
 
 // interruptPending reports that an interrupt is waiting to be acted on.
-func (s *Session) interruptPending(run *runState) bool {
+func (s *Session) interruptPending(owner *callOwner) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return run.interruptPending
+	return owner.interruptPending
 }
 
 // clearInterrupt forgets the pending interrupt.

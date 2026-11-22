@@ -24,8 +24,8 @@ import (
 // The second result reports that an interrupt ended the chain. The call
 // must not start then, and the first result collected before the
 // interrupt still becomes the call's result.
-func (s *Session) runBeforeTool(run *runState, turn int, handle, tool string, prepared Prepared, plan callPlan) (ToolDecision, bool, error) {
-	ctx := s.activityContext(run)
+func (s *Session) runBeforeTool(owner *callOwner, turn int, handle, tool string, prepared Prepared, plan callPlan) (ToolDecision, bool, error) {
+	ctx := s.activityContext(owner)
 	info := s.toolCallInfo(turn, handle, tool, prepared, plan)
 
 	if plan.policyErr != nil {
@@ -80,12 +80,12 @@ func (s *Session) runBeforeTool(run *runState, turn int, handle, tool string, pr
 // always returns a decision. A run's cancellation still cancels the
 // slot's context, and a decision that arrives after the cancellation is
 // discarded: the call is refused rather than allowed.
-func (s *Session) callPolicy(ctx context.Context, run *runState, h PolicyHook, turn int, info ToolCallInfo) (ToolDecision, error) {
+func (s *Session) callPolicy(ctx context.Context, owner *callOwner, h PolicyHook, turn int, info ToolCallInfo) (ToolDecision, error) {
 	// The slot gets the permission seam, so it can report the asks it
 	// made and clear the counters of a loop it allowed. An interrupt is
 	// its own provenance, so the slot can tell it from a cancelled run.
 	hctx := s.hookContext(ctx, turn, false)
-	hctx.Permissions = &permissionReporter{session: s, run: run}
+	hctx.Permissions = &permissionReporter{session: s, owner: owner}
 	hctx.Interrupted = errors.Is(context.Cause(ctx), errInterrupted)
 	decision, err := h.BeforeTool(hctx, info)
 	if ctx.Err() != nil {
@@ -140,13 +140,13 @@ func (s *Session) repeatCountFor(handle string) repeatCounts {
 // The policy slot calls this when it allows a doom loop: the loop starts
 // over. Model-ordered policy dispatch ensures that the next call is
 // counted from the reset rather than a precomputed snapshot.
-func (s *Session) resetRepeats(run *runState, handle string) {
+func (s *Session) resetRepeats(owner *callOwner, handle string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if run == nil || s.run != run || run.sealed || run.committed || run.permissionHandle != handle || run.repeats == nil {
+	if owner == nil || owner.run == nil || s.run != owner.run || owner.sealed || owner.committed || owner.permissionHandle != handle || owner.repeats == nil {
 		return
 	}
-	run.repeats.reset(run.permissionTool)
+	owner.repeats.reset(owner.permissionTool)
 }
 
 // cloneArguments returns a copy of a call's arguments.

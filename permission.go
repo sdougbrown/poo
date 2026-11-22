@@ -99,90 +99,90 @@ type PermissionReporter interface {
 // permissionReporter is the core's side of the policy slot's seam.
 type permissionReporter struct {
 	session *Session
-	run     *runState
+	owner   *callOwner
 }
 
 func (r *permissionReporter) Asked(ask PermissionAsk) {
-	r.session.reportPermissionAsked(r.run, ask)
+	r.session.reportPermissionAsked(r.owner, ask)
 }
 
 func (r *permissionReporter) Answered(answer PermissionAnswer) {
-	r.session.reportPermissionAnswered(r.run, answer)
+	r.session.reportPermissionAnswered(r.owner, answer)
 }
 
 func (r *permissionReporter) ResetRepeats(handle string) {
-	r.session.resetRepeats(r.run, handle)
+	r.session.resetRepeats(r.owner, handle)
 }
 
 func (r *permissionReporter) BeginPermission(ask PermissionAsk, opts PermissionRequestOptions) *PermissionRequest {
-	return r.session.beginPermission(r.run, ask, opts)
+	return r.session.beginPermission(r.owner, ask, opts)
 }
 
 // beginPermission registers a request with the run and writes its ask
 // record. The request is registered under the session's lock, so the
 // seal either sees it or refuses it, and a request that arrives after
 // the seal resolves as cancelled without writing anything.
-func (s *Session) beginPermission(run *runState, ask PermissionAsk, opts PermissionRequestOptions) *PermissionRequest {
+func (s *Session) beginPermission(owner *callOwner, ask PermissionAsk, opts PermissionRequestOptions) *PermissionRequest {
 	p := NewPermissionRequest(ask, opts)
 	p.logDrop = func(in PermissionTransition) {
-		s.logWarn("stale permission input dropped", slog.String("run_id", run.id), slog.String("ask_id", ask.AskID), slog.Uint64("attempt", in.Attempt))
+		s.logWarn("stale permission input dropped", slog.String("run_id", owner.id), slog.String("ask_id", ask.AskID), slog.Uint64("attempt", in.Attempt))
 	}
 	s.mu.Lock()
-	if run.sealed || run.committed || run.finalizing || run.jobOwned {
+	if owner.sealed || owner.committed || owner.finalizing || owner.jobOwned {
 		p.Send(PermissionTransition{Kind: PermissionSeal})
 		s.mu.Unlock()
 		return p
 	}
-	if run.asks == nil {
-		run.asks = map[string]*PermissionRequest{}
+	if owner.asks == nil {
+		owner.asks = map[string]*PermissionRequest{}
 	}
-	if held := run.asks[ask.AskID]; held != nil {
+	if held := owner.asks[ask.AskID]; held != nil {
 		s.mu.Unlock()
 		return held
 	}
-	run.asks[ask.AskID] = p
+	owner.asks[ask.AskID] = p
 	s.mu.Unlock()
-	s.persistPermission(run, p)
+	s.persistPermission(owner, p)
 	return p
 }
 
 // reportPermissionAsked registers an ask with the run and records it.
-func (s *Session) reportPermissionAsked(run *runState, ask PermissionAsk) {
-	if run != nil {
-		s.beginPermission(run, ask, PermissionRequestOptions{Context: run.ctx})
+func (s *Session) reportPermissionAsked(owner *callOwner, ask PermissionAsk) {
+	if owner != nil {
+		s.beginPermission(owner, ask, PermissionRequestOptions{Context: owner.ctx})
 	}
 }
 
 // reportPermissionAnswered resolves the ask's request and records its
 // answer. An answer for an ask that already resolved is dropped, and one
 // that arrives after the seal is inert.
-func (s *Session) reportPermissionAnswered(run *runState, answer PermissionAnswer) {
-	if run == nil {
+func (s *Session) reportPermissionAnswered(owner *callOwner, answer PermissionAnswer) {
+	if owner == nil {
 		return
 	}
 	s.mu.Lock()
 	// A job's owner writes no permission record at all: its ask was
 	// already sealed, and its run may be long settled.
-	if run.sealed || run.committed || run.jobOwned {
+	if owner.sealed || owner.committed || owner.jobOwned {
 		s.mu.Unlock()
-		if !run.jobOwned {
-			s.logWarn("permission answer after seal", slog.String("run_id", run.id), slog.String("ask_id", answer.AskID))
+		if !owner.jobOwned {
+			s.logWarn("permission answer after seal", slog.String("run_id", owner.id), slog.String("ask_id", answer.AskID))
 		}
 		return
 	}
-	p := run.asks[answer.AskID]
+	p := owner.asks[answer.AskID]
 	if answer.AskID == "" {
 		// Deterministic outcomes have no public ask id, but still have
 		// a run-owned record claim and one resolution.
-		key := "policy:" + run.permissionHandle
-		p = run.asks[key]
+		key := "policy:" + owner.permissionHandle
+		p = owner.asks[key]
 		if p == nil {
-			p = NewPermissionRequest(PermissionAsk{Reason: answer.Reason}, PermissionRequestOptions{Context: run.ctx})
+			p = NewPermissionRequest(PermissionAsk{Reason: answer.Reason}, PermissionRequestOptions{Context: owner.ctx})
 			p.askedWritten = true
-			if run.asks == nil {
-				run.asks = map[string]*PermissionRequest{}
+			if owner.asks == nil {
+				owner.asks = map[string]*PermissionRequest{}
 			}
-			run.asks[key] = p
+			owner.asks[key] = p
 		}
 	}
 	if p != nil {
@@ -196,7 +196,7 @@ func (s *Session) reportPermissionAnswered(run *runState, answer PermissionAnswe
 	}
 	s.mu.Unlock()
 	if p != nil {
-		s.persistPermission(run, p)
+		s.persistPermission(owner, p)
 	}
 }
 
@@ -204,7 +204,7 @@ func (s *Session) reportPermissionAnswered(run *runState, answer PermissionAnswe
 // seal joins this writer instead of cancelling an ambiguous append and
 // issuing a conflicting second answer. Each append has its own cleanup
 // budget, independent of run cancellation and the seal's wait budget.
-func (s *Session) persistPermission(run *runState, p *PermissionRequest) {
+func (s *Session) persistPermission(owner *callOwner, p *PermissionRequest) {
 	p.io.Lock()
 	defer p.io.Unlock()
 	p.mu.Lock()
@@ -215,7 +215,7 @@ func (s *Session) persistPermission(run *runState, p *PermissionRequest) {
 		p.writing = false
 		p.mu.Unlock()
 		s.mu.Lock()
-		s.signalWorkLocked(run)
+		s.signalWorkLocked(owner)
 		s.mu.Unlock()
 	}()
 	if !p.askedWritten {
@@ -230,11 +230,11 @@ func (s *Session) persistPermission(run *runState, p *PermissionRequest) {
 		}
 		p.askedWritten = true
 		ask := p.ask
-		rec := &PermissionAskedRecord{RecordMeta: NewRecordMeta("permission.asked"), RunID: run.id, AskID: ask.AskID, Tool: ask.Tool, Summary: ask.Summary, Class: ask.Class, Reason: ask.Reason, RepeatCount: ask.RepeatCount}
+		rec := &PermissionAskedRecord{RecordMeta: NewRecordMeta("permission.asked"), RunID: owner.id, AskID: ask.AskID, Tool: ask.Tool, Summary: ask.Summary, Class: ask.Class, Reason: ask.Reason, RepeatCount: ask.RepeatCount}
 		if err := s.writeClaimed(context.Background(), rec, gate); err != nil {
-			s.noteStoreError(run, err)
+			s.noteStoreError(owner, err)
 		}
-		payload := map[string]any{"run_id": run.id, "ask_id": ask.AskID, "tool": ask.Tool, "summary": ask.Summary, "class": string(ask.Class), "reason": ask.Reason}
+		payload := map[string]any{"run_id": owner.id, "ask_id": ask.AskID, "tool": ask.Tool, "summary": ask.Summary, "class": string(ask.Class), "reason": ask.Reason}
 		if ask.RepeatCount != nil {
 			payload["repeat_count"] = map[string]any{"exact": ask.RepeatCount.Exact, "near": ask.RepeatCount.Near}
 		}
@@ -250,11 +250,11 @@ func (s *Session) persistPermission(run *runState, p *PermissionRequest) {
 		return
 	}
 	p.answerWritten = true
-	rec := &PermissionAnsweredRecord{RecordMeta: NewRecordMeta("permission.answered"), RunID: run.id, AskID: answer.AskID, Decision: answer.Decision, AnsweredBy: answer.AnsweredBy, Provenance: answer.Provenance, Reason: answer.Reason, Message: answer.Message}
+	rec := &PermissionAnsweredRecord{RecordMeta: NewRecordMeta("permission.answered"), RunID: owner.id, AskID: answer.AskID, Decision: answer.Decision, AnsweredBy: answer.AnsweredBy, Provenance: answer.Provenance, Reason: answer.Reason, Message: answer.Message}
 	if err := s.writeClaimed(context.Background(), rec, gate); err != nil {
-		s.noteStoreError(run, err)
+		s.noteStoreError(owner, err)
 	}
-	payload := map[string]any{"run_id": run.id, "ask_id": answer.AskID, "decision": answer.Decision, "answered_by": answer.AnsweredBy, "provenance": answer.Provenance, "reason": answer.Reason}
+	payload := map[string]any{"run_id": owner.id, "ask_id": answer.AskID, "decision": answer.Decision, "answered_by": answer.AnsweredBy, "provenance": answer.Provenance, "reason": answer.Reason}
 	if answer.Message != "" {
 		payload["message"] = answer.Message
 	}
@@ -276,6 +276,6 @@ func (s *Session) settlePendingAsks(run *runState) {
 	}
 	s.mu.Unlock()
 	for _, p := range pending {
-		s.persistPermission(run, p)
+		s.persistPermission(&run.callOwner, p)
 	}
 }
