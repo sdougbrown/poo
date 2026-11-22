@@ -79,8 +79,10 @@ return files.map(r => r.is_error ? r.text : r.text.split("\n")[0]);
 ```
 
 - `await tools.<name>(args)` returns an object with `handle`, `tool`,
-  `outcome`, `text`, `is_error`, and `structured` (a JSON string or
-  `null`). A refused or failed tool call comes back as data in `outcome`.
+  `outcome`, `text`, `is_error`, and `structured`. The `structured`
+  payload is a native JSON value, or `null` when absent. Invalid JSON
+  stays a string. A refused or failed tool call comes back as data in
+  `outcome`.
 - Named calls submitted together form a batch. A batch runs at the
   same time only when every call in it is read-only; otherwise the
   calls run in input order. `await parallel` is the one way to overlap

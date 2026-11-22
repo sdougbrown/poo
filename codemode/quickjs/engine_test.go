@@ -29,7 +29,7 @@ func TestQuickJSReportsOnlyWhatTheScriptKeeps(t *testing.T) {
 	res, err := quickjs.New().Run(t.Context(), codemode.RunOptions{
 		Script: `
 const r = await tools.read({path: "input.txt"});
-const [matches, denied] = await Promise.all([tools.grep({pattern: JSON.parse(r.structured).word}), tools.blocked({})]);
+const [matches, denied] = await Promise.all([tools.grep({pattern: r.structured.word}), tools.blocked({})]);
 print("日本語日本語");
 return {matches: matches.text.split("\n").length, denied: denied.is_error};
 `,
@@ -65,7 +65,7 @@ func TestTheAwaitedCallsNameTheTools(t *testing.T) {
 	res, err := quickjs.New().Run(t.Context(), codemode.RunOptions{
 		Script: `
 const first = await tools.read({});
-const second = await tools[first.is_error ? "blocked" : "grep"]({word: JSON.parse(first.structured).k});
+const second = await tools[first.is_error ? "blocked" : "grep"]({word: first.structured.k});
 return [first.tool, second.tool, second.text];
 `,
 		Tools: []poo.ToolInfo{{Name: "read"}, {Name: "grep"}, {Name: "blocked"}},
@@ -83,6 +83,64 @@ return [first.tool, second.tool, second.text];
 	if len(batches) != 2 || batches[0][0].Tool != "read" || batches[1][0].Tool != "grep" ||
 		string(batches[1][0].Arguments) != `{"word":1}` {
 		t.Fatalf("nested batches = %+v", batches)
+	}
+}
+
+func TestAResultWithoutAPayloadIsNull(t *testing.T) {
+	res, err := quickjs.New().Run(t.Context(), codemode.RunOptions{
+		Script: `const r = await tools.read({path: "input.txt"}); return r.structured === null;`,
+		Tools:  []poo.ToolInfo{{Name: "read"}},
+		Nested: nested(func(_ context.Context, calls []poo.NestedCall) ([]poo.NestedResult, error) {
+			return []poo.NestedResult{{Text: "no payload"}}, nil
+		}),
+	})
+	if err != nil || string(res.Value) != "true" {
+		t.Fatalf("run = %+v, %v; want the script to see a null payload", res, err)
+	}
+}
+
+func TestAnArrayPayloadArrivesAsAJSArray(t *testing.T) {
+	res, err := quickjs.New().Run(t.Context(), codemode.RunOptions{
+		Script: `const r = await tools.read({path: "input.txt"}); return [Array.isArray(r.structured), r.structured[0], r.structured[1]];`,
+		Tools:  []poo.ToolInfo{{Name: "read"}},
+		Nested: nested(func(_ context.Context, calls []poo.NestedCall) ([]poo.NestedResult, error) {
+			return []poo.NestedResult{{Structured: json.RawMessage(`[1,2]`)}}, nil
+		}),
+	})
+	if err != nil || string(res.Value) != `[true,1,2]` {
+		t.Fatalf("run = %+v, %v; want the payload as a native JS array", res, err)
+	}
+}
+
+// TestInvalidStructuredBytesStayAString covers the payload's
+// fallback: bytes that are not valid JSON stay a string, and they do
+// not fail the batch: the batch's other results come back as they
+// were.
+func TestInvalidStructuredBytesStayAString(t *testing.T) {
+	res, err := quickjs.New().Run(t.Context(), codemode.RunOptions{
+		Script: `
+const [a, b] = await Promise.all([tools.read({path: "a"}), tools.read({path: "b"})]);
+return [typeof a.structured, a.structured, b.structured.k];
+`,
+		Tools: []poo.ToolInfo{{Name: "read"}},
+		Nested: nested(func(_ context.Context, calls []poo.NestedCall) ([]poo.NestedResult, error) {
+			var results []poo.NestedResult
+			for _, call := range calls {
+				var args struct{ Path string }
+				if err := json.Unmarshal(call.Arguments, &args); err != nil {
+					return nil, err
+				}
+				if args.Path == "a" {
+					results = append(results, poo.NestedResult{Structured: json.RawMessage(`{not json`)})
+				} else {
+					results = append(results, poo.NestedResult{Structured: json.RawMessage(`{"k":1}`)})
+				}
+			}
+			return results, nil
+		}),
+	})
+	if err != nil || string(res.Value) != `["string","{not json",1]` {
+		t.Fatalf("run = %+v, %v; want the invalid bytes as a string and the batch's other result intact", res, err)
 	}
 }
 

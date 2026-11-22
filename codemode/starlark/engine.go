@@ -9,6 +9,7 @@
 package starlark
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -159,7 +160,7 @@ func (st *state) call(thread *starlark.Thread, name string, value starlark.Value
 		return nil, fmt.Errorf("the %s call came back with %d results", name, len(results))
 	}
 	st.calls++
-	return nestedToStarlark(results[0]), nil
+	return nestedToStarlark(thread, results[0]), nil
 }
 
 // gatherBuiltin fans out: `gather([("read", {...}), ("grep", {...})])`.
@@ -208,7 +209,7 @@ func (st *state) gatherBuiltin(thread *starlark.Thread, b *starlark.Builtin, arg
 	st.calls += len(results)
 	values := make([]starlark.Value, len(results))
 	for i, res := range results {
-		values[i] = nestedToStarlark(res)
+		values[i] = nestedToStarlark(thread, res)
 	}
 	return starlark.NewList(values), nil
 }
@@ -246,9 +247,11 @@ func marshal(thread *starlark.Thread, value starlark.Value) (json.RawMessage, er
 
 // nestedToStarlark shapes a nested result for the script.
 //
-// The structured payload stays a JSON string: the script reads it with
-// json.decode, and the engine does not make a second schema round trip.
-func nestedToStarlark(res poo.NestedResult) starlark.Value {
+// The structured payload becomes a dict when it is a JSON object and a
+// string otherwise, so a script reads fields directly and falls back to
+// json.decode for arrays and scalars. The engine does not make a second
+// schema round trip.
+func nestedToStarlark(thread *starlark.Thread, res poo.NestedResult) starlark.Value {
 	dict := starlark.NewDict(6)
 	_ = dict.SetKey(starlark.String("handle"), starlark.String(res.Handle))
 	_ = dict.SetKey(starlark.String("tool"), starlark.String(res.Tool))
@@ -257,8 +260,15 @@ func nestedToStarlark(res poo.NestedResult) starlark.Value {
 	_ = dict.SetKey(starlark.String("is_error"), starlark.Bool(res.IsError))
 	if res.Structured == nil {
 		_ = dict.SetKey(starlark.String("structured"), starlark.None)
-	} else {
-		_ = dict.SetKey(starlark.String("structured"), starlark.String(res.Structured))
+		return dict
 	}
+	if trimmed := bytes.TrimLeft(res.Structured, " \t\n\r"); len(trimmed) > 0 && trimmed[0] == '{' {
+		decoded, err := starlark.Call(thread, jsonmod.Module.Members["decode"], starlark.Tuple{starlark.String(trimmed)}, nil)
+		if err == nil {
+			_ = dict.SetKey(starlark.String("structured"), decoded)
+			return dict
+		}
+	}
+	_ = dict.SetKey(starlark.String("structured"), starlark.String(res.Structured))
 	return dict
 }
