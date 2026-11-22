@@ -66,7 +66,7 @@ const (
 	// settings do not say. A run that hits the window summarizes the
 	// oldest turns and carries on; a consumer that wants the run to stop
 	// instead names handoff.
-	DefaultContextStrategy = "summary"
+	DefaultContextStrategy = "pointer"
 	// DefaultExecutor is the executor the commands run through when
 	// the settings do not say.
 	DefaultExecutor = "local"

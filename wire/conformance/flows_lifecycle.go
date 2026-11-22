@@ -66,29 +66,31 @@ func (s *suite) handoff() {
 	}
 }
 
-// summary covers the flow of a run that runs out of context under the
-// binary's default strategy: the oldest turns become a summary, and the
-// run carries on instead of settling. The flow names no strategy, so it
-// is the default that this proves.
-func (s *suite) summary() {
+// pointer covers the flow of a run that runs out of context under the
+// binary's default strategy: the fork names queries, the retained
+// history answers them, and the reconstruction carries the run forward
+// instead of it settling. The flow names no strategy, so it is the
+// default that this proves.
+func (s *suite) pointer() {
 	s.t.Helper()
 	if s.skipWithoutTool("bash") {
 		return
 	}
 	// Two turns run before the gate can compact, and the third answer
 	// is what the run finally says. Each turn's answer is large, so a
-	// summary of the oldest turn gives the next answer its room back. A
-	// compaction cuts turns, never the prompt.
-	filler := strings.Repeat(handoffFiller, 40000/len(handoffFiller))
+	// reconstruction from the queries gives the next answer its room
+	// back. A compaction cuts turns, never the prompt.
+	filler := strings.Repeat(handoffFiller, 60000/len(handoffFiller))
 	turns := []ScriptedAnswer{
 		{Text: filler, ToolCalls: []ToolCall{{Name: "bash", Arguments: map[string]any{"command": "echo hello"}}}},
 		{Text: filler, ToolCalls: []ToolCall{{Name: "bash", Arguments: map[string]any{"command": "echo again"}}}},
+		{Text: `{"queries": ["the task is long"], "notes": "the deploy is pending"}`},
 		{Text: "## Goal\nfinish the task"},
 		{Text: "done"},
 	}
 	endpoint := newEndpoint(s.t, turns)
 	settings := s.settings(endpoint, summaryWindow, map[string]any{
-		"context": map[string]any{"summary": map[string]any{"keep_recent_tokens": 1}},
+		"context": map[string]any{"pointer": map[string]any{"ratio": 0.6, "keep_recent_tokens": 1}},
 	})
 	c := s.start(settings, endpoint)
 	s.handshake(c)
@@ -101,20 +103,26 @@ func (s *suite) summary() {
 	}
 
 	requests := c.requests()
-	asked, carried := false, false
+	asked, matched, carried := false, false, false
 	for _, request := range requests {
-		if requestHolds(request, "<conversation>") {
+		if requestHolds(request, "queries") && requestHolds(request, "reconstructed working context") {
 			asked = true
+		}
+		if requestHolds(request, "<matches>") && requestHolds(request, "the task is long") {
+			matched = true
 		}
 		if requestHolds(request, "[Context compacted:") {
 			carried = true
 		}
 	}
 	if !asked {
-		s.t.Errorf("the endpoint got no summarization request: %+v", requests)
+		s.t.Errorf("the endpoint got no pointer request: %+v", requests)
+	}
+	if !matched {
+		s.t.Errorf("no request carries the matches the queries hit: %+v", requests)
 	}
 	if !carried {
-		s.t.Errorf("no request carries the summary the compaction wrote")
+		s.t.Errorf("no request carries the reconstruction the compaction wrote")
 	}
 }
 

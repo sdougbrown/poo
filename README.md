@@ -366,8 +366,8 @@ catalog and transport machinery the other roles use.
 
 **Native compaction.** `context.strategy: native` asks the provider to compact
 its own conversation and gives the model the provider's compacted state back.
-It is opt-in: the default stays `summary`, which writes its own summary of the
-oldest turns.
+It is opt-in: the default stays `pointer`, which reconstructs the working context
+from what the queries select.
 
 A model must declare the `compact` operation, and its provider must have a
 transport that can ask for the state. Neither is an assumption about a built-in
@@ -418,7 +418,7 @@ context:
 ```
 
 The strategy's own requests run inside the run that is compaction, so a model
-that cannot answer two side requests cannot mine; the default stays `summary`.
+that cannot answer two side requests cannot mine; the default stays `pointer`.
 
 **The repl.** `poo repl [flags]` takes the serve flags, starts a `poo
 serve` with them, and renders the session in the terminal: replies as

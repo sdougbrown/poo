@@ -15,6 +15,7 @@ import (
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/codemode"
 	"github.com/sdougbrown/poo/compact/mine"
+	"github.com/sdougbrown/poo/compact/pointer"
 	"github.com/sdougbrown/poo/compact/summary"
 	"github.com/sdougbrown/poo/config"
 	"github.com/sdougbrown/poo/exec"
@@ -2557,17 +2558,17 @@ context:
 	}
 }
 
-// TestTheDefaultStrategyIsSummary covers the default: a session built
-// without a strategy in its settings summarizes the oldest turns and
-// carries on, and handoff is opt-in.
-func TestTheDefaultStrategyIsSummary(t *testing.T) {
+// TestTheDefaultStrategyIsPointer covers the default: a session built
+// without a strategy in its settings reconstructs the working context
+// from what the queries select, and the full-read strategies are opt-in.
+func TestTheDefaultStrategyIsPointer(t *testing.T) {
 	settings, err := config.Parse([]byte(theModelSettings), config.FormatYAML)
 	if err != nil {
 		t.Fatalf("decoding the settings: %v", err)
 	}
 	runtime := build(t, settings, config.Overrides{})
-	if _, ok := runtime.Options.Compactor.(*summary.Compactor); !ok {
-		t.Fatalf("the session's compactor is %T, want the summary strategy", runtime.Options.Compactor)
+	if _, ok := runtime.Options.Compactor.(*pointer.Compactor); !ok {
+		t.Fatalf("the session's compactor is %T, want the pointer strategy", runtime.Options.Compactor)
 	}
 }
 

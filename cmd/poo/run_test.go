@@ -627,17 +627,18 @@ func TestTheRunSettlesEndTurnWithZero(t *testing.T) {
 	}
 }
 
-// TestTheCommandDefaultsToSummary covers the rule: cmd/poo gives a
-// session the summary strategy when the settings name none, so a run that
-// fills the window summarizes the oldest turns and carries on.
-func TestTheCommandDefaultsToSummary(t *testing.T) {
+// TestTheCommandDefaultsToPointer covers the rule: cmd/poo gives a
+// session the pointer strategy when the settings name none, so a run that
+// fills the window reconstructs the working context and carries on.
+func TestTheCommandDefaultsToPointer(t *testing.T) {
 	// Each turn carries enough text that the trigger is reached by the
 	// second gate, and its own text is more than the tail keeps.
 	call := "data: " + `{"choices":[{"index":0,"delta":{"role":"assistant","content":"` + strings.Repeat("y", 7000) + `","tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"bash","arguments":"{\"command\":\"echo hi\"}"}}]},"finish_reason":"tool_calls"}]}` + "\n\ndata: [DONE]\n\n"
 	secondCall := "data: " + `{"choices":[{"index":0,"delta":{"role":"assistant","content":"` + strings.Repeat("y", 7000) + `","tool_calls":[{"index":0,"id":"call_2","type":"function","function":{"name":"bash","arguments":"{\"command\":\"echo ho\"}"}}]},"finish_reason":"tool_calls"}]}` + "\n\ndata: [DONE]\n\n"
-	summary := "data: " + `{"choices":[{"index":0,"delta":{"role":"assistant","content":"## Goal\nfinish the task"},"finish_reason":"stop"}]}` + "\n\ndata: [DONE]\n\n"
+	fork := "data: " + `{"choices":[{"index":0,"delta":{"role":"assistant","content":"{\"queries\":[\"y\"],\"notes\":\"\"}"},"finish_reason":"stop"}]}` + "\n\ndata: [DONE]\n\n"
+	compose := "data: " + `{"choices":[{"index":0,"delta":{"role":"assistant","content":"## Goal\nfinish the task"},"finish_reason":"stop"}]}` + "\n\ndata: [DONE]\n\n"
 	answer := "data: " + `{"choices":[{"index":0,"delta":{"role":"assistant","content":"done"},"finish_reason":"stop"}]}` + "\n\ndata: [DONE]\n\n"
-	endpoint := newFakeEndpointSequence(t, []string{call, secondCall, summary, answer})
+	endpoint := newFakeEndpointSequence(t, []string{call, secondCall, fork, compose, answer})
 
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "run.jsonl")
@@ -645,7 +646,7 @@ func TestTheCommandDefaultsToSummary(t *testing.T) {
 	// The trigger and the tail are small, so the first two turns are
 	// enough to reach a compaction.
 	settingsPath := filepath.Join(dir, "settings.yaml")
-	settings := "version: 1\ncontext:\n  summary:\n    ratio: 0.1\n    keep_recent_tokens: 1\n"
+	settings := "version: 1\ncontext:\n  pointer:\n    ratio: 0.1\n    keep_recent_tokens: 1\n"
 	if err := os.WriteFile(settingsPath, []byte(settings), 0o600); err != nil {
 		t.Fatalf("writing the settings: %v", err)
 	}
@@ -677,8 +678,8 @@ func TestTheCommandDefaultsToSummary(t *testing.T) {
 	if compaction == nil {
 		t.Fatalf("the log holds no compaction record: %v", names(recs))
 	}
-	if compaction["strategy"] != "summary" {
-		t.Errorf("the compaction's strategy is %v, want summary", compaction["strategy"])
+	if compaction["strategy"] != "pointer" {
+		t.Errorf("the compaction's strategy is %v, want pointer", compaction["strategy"])
 	}
 	if compaction["form"] != "replace" {
 		t.Errorf("the compaction's form is %v, want replace", compaction["form"])
@@ -694,8 +695,8 @@ func TestTheCommandDefaultsToSummary(t *testing.T) {
 	}
 	block, _ := content[0].(map[string]any)
 	text, _ := block["text"].(string)
-	if !strings.Contains(text, "[Context compacted: turns 1-1 summarized below]") || !strings.Contains(text, "finish the task") {
-		t.Errorf("the replacement is %q, want the marker and the summary", text)
+	if !strings.Contains(text, "[Context compacted: turns 1-1 reconstructed below]") || !strings.Contains(text, "finish the task") {
+		t.Errorf("the replacement is %q, want the marker and the reconstruction", text)
 	}
 
 	// The run carried on: it settled on the model's own last word, and

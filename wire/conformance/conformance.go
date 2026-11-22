@@ -257,7 +257,7 @@ func Run(t *testing.T, target Target) Report {
 	s.flow("typed result", s.typedResult)
 	s.flow("heard and said", s.heardAndSaid)
 	s.flow("handoff", s.handoff)
-	s.flow("summary", s.summary)
+	s.flow("pointer", s.pointer)
 	s.flow("kill", s.kill)
 	s.flow("jobs", s.jobs)
 	s.flow("feeds", s.feeds)
