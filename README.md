@@ -217,6 +217,22 @@ entry has no account and no expiry, and poo sends it as it is. The report
 prints no secret and trades none, so it leaves the credential as it found
 it. `--json` prints the same report for a script.
 
+`poo auth refresh` checks the same credential file that model requests use.
+It refreshes the `openai-codex` credential when the access token has five minutes
+or less left. Use `--leeway 30m` to check for refresh earlier, or `--force` to
+refresh regardless of expiry. The command prints nothing on success and exits
+nonzero on failure. It does not start an agent or make a model request.
+
+For idle agents, run the command from a `systemd` user timer or `launchd` job.
+Pass the same settings file that the agents use, with an absolute path. For example:
+
+```sh
+poo auth refresh --settings /path/to/settings.yaml --leeway 30m
+```
+
+Schedule checks more often than the leeway and leave `--force` off the timer.
+If OpenAI revokes the refresh grant, the timer cannot sign in again for you.
+
 No provider in `models.json` is needed for this. When a credential file
 is there, the built-in provider adds the Codex models the built-in record
 declares; a

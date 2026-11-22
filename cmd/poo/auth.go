@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -56,17 +57,11 @@ type authStatus struct {
 func handleAuthStatus(inv clicontract.Invocation, stdout, stderr io.Writer) exit {
 	var o authOptions
 	o.bind(inv)
-	settings, err := o.settings("")
+	credentials, err := authCredentials(o.sharedFlags)
 	if err != nil {
 		fmt.Fprintf(stderr, "poo auth status: %v\n", err)
 		return exit{usageExitCode}
 	}
-	path := settings.CredentialFile()
-	if path == "" {
-		fmt.Fprintln(stderr, "poo auth status: the credential file cannot be resolved: set auth_file")
-		return exit{usageExitCode}
-	}
-	credentials := auth.Credentials{Path: path}
 	status, err := credentials.Status(auth.Codex)
 	if err != nil {
 		// The file's entry may be a provider's key instead of Codex's token pair, which has no
@@ -105,6 +100,44 @@ func handleAuthStatus(inv clicontract.Invocation, stdout, stderr io.Writer) exit
 	}
 	printAuthStatus(report, status, stdout)
 	return exit{}
+}
+
+func handleAuthRefresh(ctx context.Context, inv clicontract.Invocation, stderr io.Writer) exit {
+	leeway := inv.Durations["leeway"]
+	if inv.Supplied["leeway"] && leeway <= 0 {
+		fmt.Fprintln(stderr, "poo auth refresh: --leeway must be positive")
+		return exit{usageExitCode}
+	}
+	var flags sharedFlags
+	flags.bind(inv)
+	credentials, err := authCredentials(flags)
+	if err != nil {
+		fmt.Fprintf(stderr, "poo auth refresh: %v\n", err)
+		return exit{usageExitCode}
+	}
+	credentials.Leeway = leeway
+	if inv.Bools["force"] {
+		_, err = credentials.Refresh(ctx, auth.Codex)
+	} else {
+		_, err = credentials.Access(ctx, auth.Codex)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "poo auth refresh: %v\n", err)
+		return exit{operationalExitCode}
+	}
+	return exit{}
+}
+
+func authCredentials(flags sharedFlags) (auth.Credentials, error) {
+	settings, err := flags.settings("")
+	if err != nil {
+		return auth.Credentials{}, err
+	}
+	path := settings.CredentialFile()
+	if path == "" {
+		return auth.Credentials{}, fmt.Errorf("the credential file cannot be resolved: set auth_file")
+	}
+	return auth.Credentials{Path: path}, nil
 }
 
 // printAuthStatus prints the report as the fields an operator reads.

@@ -128,11 +128,10 @@ of them.
 An existing credential is not replaced without an explicit action: --force
 replaces it, and a terminal is asked first. Nothing pi's file holds is changed.`
 
-// authLong is the help body of `poo auth`.
-const authLong = `The credential poo reads, reported rather than traded. The commands here look at
-the file the settings resolve and report what it holds, and copy a credential
-another tool holds into it. No token value is printed, and nothing is refreshed,
-so a command here leaves the credential as it found it.`
+const authRefreshLong = `Refresh the OpenAI Codex credential in the same file model requests use.
+By default, trade the refresh token only when the access token has five minutes
+or less left. Set --leeway to change that window, or --force to refresh now.
+Success is silent, including when no refresh is due. A failure exits nonzero.`
 
 // sessionsLong is the help body of `poo sessions`.
 const sessionsLong = `The sessions the store holds. list reads the store, and prune trims it by
@@ -242,9 +241,8 @@ func pooApp(stdout io.Writer) *clicontract.App {
 			},
 			{
 				Name:        "auth",
-				Short:       "Report the credential the settings' credential file holds",
-				Long:        authLong,
-				Subcommands: []*clicontract.Command{authStatusCommand(stdout), authImportCommand(stdout)},
+				Short:       "Report, refresh or import stored credentials",
+				Subcommands: []*clicontract.Command{authStatusCommand(stdout), authRefreshCommand(), authImportCommand(stdout)},
 			},
 			{
 				Name:        "sessions",
@@ -283,6 +281,21 @@ func authStatusCommand(stdout io.Writer) *clicontract.Command {
 		},
 		Handle: func(_ context.Context, inv clicontract.Invocation, cmdStderr io.Writer) (any, error) {
 			return handleAuthStatus(inv, stdout, cmdStderr), nil
+		},
+	}
+}
+
+func authRefreshCommand() *clicontract.Command {
+	return &clicontract.Command{
+		Name:  "refresh",
+		Short: "Refresh the OpenAI Codex credential when due",
+		Long:  authRefreshLong,
+		Flags: []clicontract.Flag{
+			{Name: "leeway", Kind: clicontract.Duration, Usage: "Refresh when this much time or less remains (default: 5m)"},
+			{Name: "force", Kind: clicontract.Bool, Usage: "Refresh even when the access token is still fresh"},
+		},
+		Handle: func(ctx context.Context, inv clicontract.Invocation, stderr io.Writer) (any, error) {
+			return handleAuthRefresh(ctx, inv, stderr), nil
 		},
 	}
 }
