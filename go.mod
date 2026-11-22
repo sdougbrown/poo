@@ -52,4 +52,4 @@ require (
 	golang.org/x/text v0.37.0 // indirect
 )
 
-replace github.com/reeflective/readline => github.com/sdougbrown/readline v1.3.0-poo.6
+replace github.com/reeflective/readline => github.com/sdougbrown/readline v1.3.1-0.20261122225819-72927df9bfd2
