@@ -59,20 +59,6 @@ func TestARestoredSessionOverItsWindowCompactsFirst(t *testing.T) {
 	t.Cleanup(func() { restored.Close() })
 
 	res := runSession(t, restored, "carry on")
-	var view []poo.Message
-	origKinds := map[string]int{}
-	for _, rec := range records {
-		origKinds[rec.Meta().Record]++
-		if m, ok := rec.(*poo.MessageRecord); ok {
-			view = append(view, poo.Message{Role: m.Role, Content: m.Content})
-			var text string
-			for _, c := range m.Content {
-				text += c.Text
-			}
-			t.Logf("view message: role %s, chars %d", m.Role, len(text))
-		}
-	}
-	t.Logf("original sink records: %v", origKinds)
 	kinds := map[string]int{}
 	for _, rec := range restoredSink.allRecords() {
 		kinds[rec.Meta().Record]++
