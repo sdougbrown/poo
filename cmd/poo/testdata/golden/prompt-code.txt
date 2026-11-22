@@ -65,8 +65,10 @@ no network or timers. The guest mounts no host directory, so a file
 operation in the script fails. Use the session's tools for files,
 commands, and network access.
 
-Use `Promise.all` for independent reads. Use separate `await`s when one
-call depends on another:
+Use `Promise.all` for independent reads. A batch overlaps only when
+every call in it is read-only; to overlap calls that write, use
+`await parallel` (below). Use separate `await`s when one call depends
+on another:
 
 ```js
 const files = await Promise.all([
@@ -79,9 +81,10 @@ return files.map(r => r.is_error ? r.text : r.text.split("\n")[0]);
 - `await tools.<name>(args)` returns an object with `handle`, `tool`,
   `outcome`, `text`, `is_error`, and `structured` (a JSON string or
   `null`). A refused or failed tool call comes back as data in `outcome`.
-- Named calls submitted together form a batch. Calls overlap only if
-  every tool in the batch is declared read-only. Otherwise they run in
-  input order.
+- Named calls submitted together form a batch. A batch runs at the
+  same time only when every call in it is read-only; otherwise the
+  calls run in input order. `await parallel` is the one way to overlap
+  calls that write.
 - Use `await parallel(() => [...])` to overlap independent calls,
   including writes. Create the tool promises in the synchronous
   callback and return each one exactly once:
