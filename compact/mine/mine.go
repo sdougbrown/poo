@@ -155,14 +155,16 @@ func (c *Compactor) PointerMaxTokens() int { return c.pointerMaxTokens }
 // The strategy acts when the window is nearly full and the view holds a
 // turn older than the newest one, and before the ratio when the room
 // left in the window is under the output limit and a compaction would
-// give the room back. The guard is the summary strategy's: a window
-// whose tail fills everything has nothing older to reconstruct, and
-// starting a compaction would only fail.
+// give the room back. It also acts when the conversation alone exceeds
+// the window: a run that starts over the window cannot wait for a turn,
+// because the ratio trigger needs a request behind it. The guard is the
+// summary strategy's: a window whose tail fills everything has nothing
+// older to reconstruct, and starting a compaction would only fail.
 func (c *Compactor) ShouldCompact(view poo.View, budget poo.ContextBudget) bool {
 	if len(cut.LiveTurns(view.Turns())) < 2 {
 		return false
 	}
-	return budget.Reached(c.ratio) || c.restoresOutputRoom(view, budget)
+	return budget.OverWindow() || budget.Reached(c.ratio) || c.restoresOutputRoom(view, budget)
 }
 
 // restoresOutputRoom reports that the output room is short and a

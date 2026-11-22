@@ -145,6 +145,16 @@ func (b ContextBudget) RoomShort(need int) bool {
 	return b.InputLimit > 0 && b.EstimatedInput+OutputReserve > b.InputLimit
 }
 
+// OverWindow reports that the conversation alone exceeds the window: the
+// view cannot be requested as it stands, whatever the output need.
+//
+// The estimate is the one the request gate reads, and a run that starts
+// here cannot wait for a turn: the ratio trigger needs a request behind
+// it, so a strategy is asked to make room before anything else.
+func (b ContextBudget) OverWindow() bool {
+	return b.ContextLimit > 0 && b.EstimatedInput+OutputReserve > b.ContextLimit
+}
+
 // RequestBlocked reports that the next request cannot go out. Either the
 // room the window leaves is under MinOutputTokens, or the prompt is over the
 // endpoint's input cap. It names the settle detail's source and text.
