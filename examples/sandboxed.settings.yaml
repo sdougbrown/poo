@@ -26,7 +26,8 @@ permission:
     action: ask
   # The rules, in order. The first match wins. A rule matches on the
   # tool's name or on the tool's class, never on both; a bash rule may
-  # match on the command's prefix.
+  # match on the command's prefix or on the substrings the command
+  # carries.
   rules:
     - tool: bash
       command_prefix: "git status"
