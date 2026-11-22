@@ -122,7 +122,7 @@ func TestInvalidStructuredBytesStayAString(t *testing.T) {
 const [a, b] = await Promise.all([tools.read({path: "a"}), tools.read({path: "b"})]);
 return [typeof a.structured, a.structured, b.structured.k];
 `,
-		Tools:  []poo.ToolInfo{{Name: "read"}},
+		Tools: []poo.ToolInfo{{Name: "read"}},
 		Nested: nested(func(_ context.Context, calls []poo.NestedCall) ([]poo.NestedResult, error) {
 			var results []poo.NestedResult
 			for _, call := range calls {
