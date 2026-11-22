@@ -370,20 +370,16 @@ func decodeBatch(raw string) ([]poo.NestedCall, error) {
 
 func encodeResults(results []poo.NestedResult) ([]byte, error) {
 	type toolResult struct {
-		Handle     string  `json:"handle"`
-		Tool       string  `json:"tool"`
-		Outcome    string  `json:"outcome"`
-		Text       string  `json:"text"`
-		IsError    bool    `json:"is_error"`
-		Structured *string `json:"structured"`
+		Handle     string          `json:"handle"`
+		Tool       string          `json:"tool"`
+		Outcome    string          `json:"outcome"`
+		Text       string          `json:"text"`
+		IsError    bool            `json:"is_error"`
+		Structured json.RawMessage `json:"structured,omitempty"`
 	}
 	values := make([]toolResult, len(results))
 	for i, r := range results {
-		values[i] = toolResult{Handle: r.Handle, Tool: r.Tool, Outcome: string(r.Outcome), Text: r.Text, IsError: r.IsError}
-		if r.Structured != nil {
-			s := string(r.Structured)
-			values[i].Structured = &s
-		}
+		values[i] = toolResult{Handle: r.Handle, Tool: r.Tool, Outcome: string(r.Outcome), Text: r.Text, IsError: r.IsError, Structured: r.Structured}
 	}
 	return json.Marshal(values)
 }

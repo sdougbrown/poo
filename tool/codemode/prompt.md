@@ -20,14 +20,16 @@ For a file, a URL or a command, call the tool that reaches it, such as
 - `call(name, args)` runs one tool call and returns a dict with
   `handle`, `tool`, `outcome`, `text`, `is_error` and `structured`.
   `text` starts with the handle line, `[r1 · read]`, followed by the
-  tool's own text. `structured` is the call's JSON payload as a string,
-  or `None`.
+  tool's own text. `structured` holds the call's JSON payload: a dict
+  when the payload is a JSON object, its text when it is not, or
+  `None`.
 - `gather([("read", {...}), ("grep", {...})])` makes the calls in one
   batch and returns their results in list order. When every call in
   the batch only reads, the calls run at the same time; otherwise they
   run in order.
 - `json.decode(text)` and `json.encode(value)` convert between JSON
-  text and values, so `json.decode(r["structured"])` reads a payload.
+  text and values; `json.decode` reads a `structured` payload that is
+  not an object.
 - `print(x)` keeps a line for the result you will see.
 - `exit(value)` ends the script with a value; the value comes back as
   JSON. A script without `exit` returns nothing but its printed lines.

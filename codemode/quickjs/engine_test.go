@@ -29,7 +29,7 @@ func TestQuickJSReportsOnlyWhatTheScriptKeeps(t *testing.T) {
 	res, err := quickjs.New().Run(t.Context(), codemode.RunOptions{
 		Script: `
 const r = await tools.read({path: "input.txt"});
-const [matches, denied] = await Promise.all([tools.grep({pattern: JSON.parse(r.structured).word}), tools.blocked({})]);
+const [matches, denied] = await Promise.all([tools.grep({pattern: r.structured.word}), tools.blocked({})]);
 print("日本語日本語");
 return {matches: matches.text.split("\n").length, denied: denied.is_error};
 `,
@@ -65,7 +65,7 @@ func TestTheAwaitedCallsNameTheTools(t *testing.T) {
 	res, err := quickjs.New().Run(t.Context(), codemode.RunOptions{
 		Script: `
 const first = await tools.read({});
-const second = await tools[first.is_error ? "blocked" : "grep"]({word: JSON.parse(first.structured).k});
+const second = await tools[first.is_error ? "blocked" : "grep"]({word: first.structured.k});
 return [first.tool, second.tool, second.text];
 `,
 		Tools: []poo.ToolInfo{{Name: "read"}, {Name: "grep"}, {Name: "blocked"}},

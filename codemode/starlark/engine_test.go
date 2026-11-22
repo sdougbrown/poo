@@ -130,9 +130,9 @@ exit({"saw": r["text"], "outcome": r["outcome"], "ok": not r["is_error"]})
 	}
 }
 
-// TestAScriptSeesTheStructuredPayload covers the payload's shape: the
-// structured result is the JSON text as a string, so the script reads it
-// with json.decode and the engine makes no second schema round trip.
+// TestAScriptSeesTheStructuredPayload covers the payload's shape: a
+// JSON object becomes a dict the script reads directly; the engine
+// makes no second schema round trip.
 func TestAScriptSeesTheStructuredPayload(t *testing.T) {
 	res, err := run(t, `
 r = call("read", {"path": "x"})
@@ -141,28 +141,46 @@ exit(r["structured"])
 	if err != nil {
 		t.Fatalf("the run failed: %v", err)
 	}
-	var value string
+	var value map[string]any
 	if err := json.Unmarshal(res.Value, &value); err != nil {
-		t.Fatalf("the exit value is not a JSON string: %s: %v", res.Value, err)
+		t.Fatalf("the exit value is not a JSON object: %s: %v", res.Value, err)
 	}
-	if value != `{"k":1}` {
-		t.Errorf("the script saw structured %q, want the payload's JSON text", value)
+	if value["k"] != float64(1) {
+		t.Errorf("the script saw structured %v, want the payload's fields", value)
 	}
 }
 
-// TestAScriptDecodesTheStructuredPayload covers the decoder: the script
-// turns a result's payload into a value it can read.
+// TestAScriptDecodesTheStructuredPayload covers the fallback: a payload
+// that is not a JSON object stays a string, so the script can still
+// decode arrays and scalars with json.decode.
 func TestAScriptDecodesTheStructuredPayload(t *testing.T) {
 	res, err := run(t, `
 r = call("read", {"path": "x"})
-exit(json.decode(r["structured"])["k"])
-`, &fakeNested{}, codemode.Limits{})
+exit(json.decode(r["structured"])[0])
+`, &structuredList{}, codemode.Limits{})
 	if err != nil {
 		t.Fatalf("the run failed: %v", err)
 	}
 	if string(res.Value) != "1" {
-		t.Errorf("the script returned %s, want the decoded k", res.Value)
+		t.Errorf("the script returned %s, want the decoded first element", res.Value)
 	}
+}
+
+// structuredList answers every call with a payload that is a JSON
+// array, not an object.
+type structuredList struct {
+	fakeNested
+}
+
+func (f *structuredList) Call(ctx context.Context, calls []poo.NestedCall) ([]poo.NestedResult, error) {
+	results, err := f.fakeNested.Call(ctx, calls)
+	if err != nil {
+		return nil, err
+	}
+	for i := range results {
+		results[i].Structured = json.RawMessage(`[1,2]`)
+	}
+	return results, nil
 }
 
 // TestAScriptSeesADenialAsData covers refusals: the script gets the
