@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/codemode/quickjs"
@@ -39,6 +40,24 @@ func codemodeJobSession(t *testing.T, script string, extra map[string]poo.Tool, 
 		SystemPrompt: "the system prompt",
 		WorkingDir:   t.TempDir(),
 	}, fns...)
+}
+
+// waitUntil waits for a condition with a budget of its own.
+//
+// The shared waitFor's five seconds is enough for a call the session makes
+// itself. A job's script first pays for the QuickJS runtime, and a cold
+// CI runner under -race takes longer than that, so a step that waits on a
+// script gets its own budget and reports what the job was doing.
+func waitUntil(t *testing.T, budget time.Duration, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(budget)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("timed out after %s waiting for %s", budget, what)
 }
 
 // jobEnded returns the job.ended record the log holds.
@@ -82,7 +101,7 @@ return [r.tool, r.is_error, r.text.includes("the reader's text")];
 	if _, err := s.Prompt(context.Background(), "start"); err != nil {
 		t.Fatalf("starting the run: %v", err)
 	}
-	waitFor(t, "the script to make its nested call", func() bool {
+	waitUntil(t, 30*time.Second, "the script to make its nested call", func() bool {
 		select {
 		case <-started:
 			return true
@@ -98,7 +117,7 @@ return [r.tool, r.is_error, r.text.includes("the reader's text")];
 	}
 	close(release)
 
-	waitFor(t, "the job to end", func() bool {
+	waitUntil(t, 10*time.Second, "the job to end", func() bool {
 		for _, rec := range sink.allRecords() {
 			if _, ok := rec.(*poo.JobEndedRecord); ok {
 				return true
@@ -147,7 +166,7 @@ return [r.outcome, r.is_error, strip(r)];
 `, map[string]poo.Tool{"reader": reader}, sink, poo.WithPolicy(&nestPolicy{deny: "reader"}))
 	runSession(t, s, "start")
 
-	waitFor(t, "the job to end", func() bool {
+	waitUntil(t, 10*time.Second, "the job to end", func() bool {
 		for _, rec := range sink.allRecords() {
 			if _, ok := rec.(*poo.JobEndedRecord); ok {
 				return true
