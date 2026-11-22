@@ -236,7 +236,7 @@ type jobState struct {
 	// owner holds the calls the job's tool makes, so a script keeps
 	// calling tools after the run that started the job has settled. The
 	// finalization never sees this owner, so it never seals it.
-	owner *runState
+	owner *callOwner
 	// summary describes the call, for the jobs tool.
 	summary string
 	// startedAt is when the job started.
@@ -440,7 +440,7 @@ func (s *Session) startJob(run *runState, turn int, handle, tool string, prepare
 	// The owner carries the run's id, because its records belong to that
 	// run, and the job's own context, because a settle of the run must
 	// not stop the calls the job's tool makes.
-	owner := &runState{callOwner: callOwner{
+	owner := &callOwner{
 		id:           run.id,
 		ctx:          ctx,
 		turn:         turn,
@@ -449,7 +449,7 @@ func (s *Session) startJob(run *runState, turn int, handle, tool string, prepare
 		pendingCalls: map[string]*issuedCall{},
 		workDone:     make(chan struct{}, 1),
 		repeats:      newRepeatCounter(),
-	}}
+	}
 	job := &jobState{
 		id:        jobID,
 		handle:    handle,
@@ -757,7 +757,7 @@ func (s *Session) jobToolEnv(job *jobState) ToolEnv {
 	// A tool that orchestrates others gets a seam of its own, owned by
 	// the job: the calls it makes are recorded against the job's handle,
 	// and they keep running after the run that started the job settled.
-	env.Nested = &nestedCaller{session: s, run: job.owner, turn: job.turn, parent: job.handle}
+	env.Nested = &nestedCaller{session: s, owner: job.owner, turn: job.turn, parent: job.handle}
 	return env
 }
 
@@ -771,7 +771,7 @@ func (s *Session) jobToolEnv(job *jobState) ToolEnv {
 // fatal, which settles the run that receives the result the way a
 // synchronous call does; a store or hook failure makes the job an error
 // and carries its detail into the result text.
-func (s *Session) ownerFailure(owner *runState) (Reason, SettleDetail, bool) {
+func (s *Session) ownerFailure(owner *callOwner) (Reason, SettleDetail, bool) {
 	if owner == nil {
 		return "", SettleDetail{}, false
 	}

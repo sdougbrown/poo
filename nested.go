@@ -104,7 +104,7 @@ func (s *Session) nestedRecordText(text string) (string, int) {
 // is under the session's lock or in the record sink.
 type nestedCaller struct {
 	session *Session
-	run     *runState
+	owner   *callOwner
 	turn    int
 	// parent is the handle of the call that is running.
 	parent string
@@ -128,14 +128,14 @@ func (n *nestedCaller) CallParallel(ctx context.Context, calls []NestedCall) ([]
 
 func (n *nestedCaller) call(ctx context.Context, calls []NestedCall, parallel bool) ([]NestedResult, error) {
 	s := n.session
-	run := n.run
+	owner := n.owner
 
 	if len(calls) == 0 {
 		return nil, nil
 	}
 	// A run that is winding down starts no new effect, and a batch whose
 	// context is already gone does not start.
-	if s.runWindingDown(&run.callOwner) {
+	if s.runWindingDown(owner) {
 		return nil, fmt.Errorf("%w: the nested call did not start", errRunWindingDown)
 	}
 	if err := ctx.Err(); err != nil {
@@ -152,7 +152,7 @@ func (n *nestedCaller) call(ctx context.Context, calls []NestedCall, parallel bo
 		}
 		toolCalls[i] = ToolCall{Name: call.Tool, Arguments: call.Arguments}
 	}
-	plans := s.planCalls(run, n.turn, toolCalls, false)
+	plans := s.planCalls(owner, n.turn, toolCalls, false)
 	if err := s.validateNestedPlans(plans); err != nil {
 		return nil, err
 	}
@@ -163,7 +163,7 @@ func (n *nestedCaller) call(ctx context.Context, calls []NestedCall, parallel bo
 	// so an ask is bounded by the policy's own timeout and not by the
 	// script's deadline.
 	callCtx, cancel := context.WithCancel(ctx)
-	stop := context.AfterFunc(s.activityContext(&run.callOwner), cancel)
+	stop := context.AfterFunc(s.activityContext(owner), cancel)
 	defer func() {
 		stop()
 		cancel()
@@ -179,18 +179,18 @@ func (n *nestedCaller) call(ctx context.Context, calls []NestedCall, parallel bo
 	// The batch is registered before it runs, so every call in it has an
 	// owner: its own dispatch, the skip path, or the seal — exactly like
 	// a batch the model made.
-	s.claimBatch(&run.callOwner, n.turn, plans)
-	if s.runWindingDown(&run.callOwner) {
+	s.claimBatch(owner, n.turn, plans)
+	if s.runWindingDown(owner) {
 		return nil, fmt.Errorf("%w: the nested call did not start", errRunWindingDown)
 	}
 	// No beginTurn and no startActivity: the parent call already runs
 	// inside the turn's activity, and the turn's summary stays the
 	// model's.
-	s.runBatch(&run.callOwner, n.turn, plans, parallel)
+	s.runBatch(owner, n.turn, plans, parallel)
 
 	results := make([]NestedResult, len(plans))
 	for i, p := range plans {
-		results[i] = s.takeNestedResult(run, p)
+		results[i] = s.takeNestedResult(owner, p)
 	}
 	return results, nil
 }
@@ -235,11 +235,11 @@ func (s *Session) validateNestedPlans(plans []callPlan) error {
 // The result is written before the batch reads it, so a missing one is a
 // call the finalization settled: the run ended while the batch was
 // working, and the caller is told the call did not run.
-func (s *Session) takeNestedResult(run *runState, p callPlan) NestedResult {
+func (s *Session) takeNestedResult(owner *callOwner, p callPlan) NestedResult {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if result, ok := run.nestedResults[p.handle]; ok {
-		delete(run.nestedResults, p.handle)
+	if result, ok := owner.nestedResults[p.handle]; ok {
+		delete(owner.nestedResults, p.handle)
 		return result
 	}
 	return NestedResult{

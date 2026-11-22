@@ -76,7 +76,7 @@ type callPlan struct {
 // It reports whether any call was processed: a call that got a result
 // other than skipped: truncated.
 func (s *Session) executeBatch(run *runState, turn int, calls []ToolCall, truncated bool) bool {
-	plans := s.planCalls(run, turn, calls, truncated)
+	plans := s.planCalls(&run.callOwner, turn, calls, truncated)
 	if len(plans) == 0 {
 		return false
 	}
@@ -267,7 +267,7 @@ func (s *Session) nextHandle() string {
 // The plan validates every call, so a call that failed its validation
 // is known before its repeat counts are taken, and is counted toward
 // the near key.
-func (s *Session) planCalls(run *runState, turn int, calls []ToolCall, truncated bool) []callPlan {
+func (s *Session) planCalls(owner *callOwner, turn int, calls []ToolCall, truncated bool) []callPlan {
 	var plans []callPlan
 	for i, call := range calls {
 		handle := s.nextHandle()
@@ -627,7 +627,9 @@ func (s *Session) executeOne(owner *callOwner, turn int, plan callPlan) {
 	// arrives later as an input. An interrupt that arrived after the
 	// authorization refuses the admission. A nested call never becomes
 	// a job: it runs in the turn its parent runs in.
-	if plan.parent == "" && s.callBecomesJob(call.Name, plan.background) {
+	// A job's owner has no run, so a call it makes can never start a job:
+	// the job's script runs inside the job it already has.
+	if plan.parent == "" && owner.run != nil && s.callBecomesJob(call.Name, plan.background) {
 		if !record(CallModeJob) {
 			return
 		}
@@ -803,7 +805,7 @@ func (s *Session) prepareEnv() PrepareEnv {
 func (s *Session) toolEnv(owner *callOwner, turn int, handle string, plan callPlan) ToolEnv {
 	env := s.toolEnvFor(owner.id, handle)
 	if plan.parent == "" {
-		env.Nested = &nestedCaller{session: s, run: owner.run, turn: turn, parent: handle}
+		env.Nested = &nestedCaller{session: s, owner: owner, turn: turn, parent: handle}
 	} else {
 		env.Settings.ObservationCapChars = NestedOutputCapChars
 		env.Settings.ReadOutputCapChars = NestedOutputCapChars
