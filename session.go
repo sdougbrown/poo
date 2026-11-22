@@ -268,7 +268,8 @@ type callOwner struct {
 	id string
 	// ctx bounds the owner's writes.
 	ctx context.Context
-	// turn is the run-relative turn the calls belong to.
+	// turn is the run-relative turn the calls belong to, and the run's
+	// request count: a run's calls belong to the turn it is in.
 	turn int
 	// globalTurn is the session's number for that turn.
 	globalTurn int
