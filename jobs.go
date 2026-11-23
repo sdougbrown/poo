@@ -2300,7 +2300,7 @@ func withBackgroundSchema(schema json.RawMessage) json.RawMessage {
 	}
 	props[BackgroundArgName] = map[string]any{
 		"type":        "boolean",
-		"description": "Run the call in the background; its result arrives later as a message.",
+		"description": "Run the call asynchronously in the background: it returns at once, you keep working, and its result arrives later as a message.",
 	}
 	parsed["properties"] = props
 	out, err := json.Marshal(parsed)

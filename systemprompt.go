@@ -114,6 +114,10 @@ func buildPrompt(opts *Options) *prompt.Builder {
 			}
 		}
 	}
+	// The family section holds a text per model family, keyed by the
+	// prompt variant the model names. It has no default text, so it
+	// renders nothing until the variant names one.
+	setPromptVariants(b, prompt.FamilySection, prompt.FamilyVariants())
 	for _, edit := range opts.Prompt {
 		if edit != nil {
 			edit(b)

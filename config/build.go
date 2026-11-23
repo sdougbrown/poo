@@ -1391,6 +1391,7 @@ func (s *Settings) CatalogSettings() catalog.Settings {
 			MaxOutput:       model.MaxOutput,
 			Reasoning:       model.Reasoning,
 			ReasoningLevels: model.ReasoningLevels,
+			PromptVariant:   model.PromptVariant,
 			Quirks:          model.Quirks,
 			Sampling:        sampling(s.Sampling[name]),
 		}
@@ -2002,6 +2003,10 @@ func (r *Runtime) resolveSession(opts BuildOptions, workingDir string) error {
 		}
 	} else {
 		r.Options.Model = model
+		// The prompt renders in the chat model's own variant: the model
+		// family's section among them. A switch to another model
+		// re-renders with that model's variant.
+		r.Options.PromptVariant = model.PromptVariant
 		// The session talks to the chat model, so the transport is
 		// part of the runtime's options. A consumer that changes the
 		// model builds its own transport for it.
@@ -2215,6 +2220,15 @@ func (r *Runtime) resolvePrompt(opts BuildOptions, workingDir string) error {
 			}
 		})
 	}
+	// The family section follows the model's prompt variant, and a
+	// profile that has not turned it on runs without it, whatever its
+	// own prompt directory carried. Unlike the manifest defaults, absent
+	// means off: the family guidance is an opt-in.
+	if family := r.chosenProfile(opts).ModelFamily; family == nil || !*family {
+		r.Prompt = append(r.Prompt, func(b *prompt.Builder) {
+			b.Remove(prompt.FamilySection)
+		})
+	}
 	if baseFile != "" {
 		text, err := os.ReadFile(baseFile)
 		if err != nil {
@@ -2296,6 +2310,7 @@ func promptSources(opts BuildOptions, r *Runtime) prompt.Sources {
 		"persona":      nil,
 		"base":         nil,
 		"profile":      nil,
+		"family":       nil,
 		"environment":  nil,
 		"skills":       nil,
 		UserSection:    nil,

@@ -155,9 +155,6 @@ func (s *Settings) resolveNamedFiles(dir string) error {
 		*named.path = resolved
 	}
 	for name, profile := range s.Profiles {
-		if profile.PromptFile == "" {
-			continue
-		}
 		// A profile a profiles file declared answers to that file's own
 		// directory, which the import recorded; the settings' own answer
 		// to the settings file's directory. One pass resolves both, so a
@@ -166,11 +163,22 @@ func (s *Settings) resolveNamedFiles(dir string) error {
 		if fileDir, fromFile := s.profilesFileDirs[name]; fromFile {
 			base = fileDir
 		}
-		resolved, err := resolveBeside(profile.PromptFile, base)
-		if err != nil {
-			return &Error{Code: CodeInvalid, Field: "profiles." + name + ".prompt_file", Err: err}
+		for _, named := range []struct {
+			field string
+			path  *string
+		}{
+			{"prompt_file", &profile.PromptFile},
+			{"prompt_append_file", &profile.PromptAppendFile},
+		} {
+			if *named.path == "" {
+				continue
+			}
+			resolved, err := resolveBeside(*named.path, base)
+			if err != nil {
+				return &Error{Code: CodeInvalid, Field: "profiles." + name + "." + named.field, Err: err}
+			}
+			*named.path = resolved
 		}
-		profile.PromptFile = resolved
 		s.Profiles[name] = profile
 	}
 	return nil

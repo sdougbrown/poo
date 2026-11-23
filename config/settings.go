@@ -187,6 +187,9 @@ type Model struct {
 	// order they apply, e.g. "audio_url" for a server that takes an audio part
 	// as a URL. A name the transport does not ship is skipped with a warning.
 	Quirks []string `json:"quirks,omitempty"`
+	// PromptVariant selects the prompt sections' variant text the model
+	// renders in, the model family's among them.
+	PromptVariant string `json:"prompt_variant,omitempty"`
 }
 
 // Decider are the decider's settings.
@@ -296,13 +299,23 @@ type ProfileSettings struct {
 	// RegistryDefaults says the same of the default cli-registry
 	// directory, against the settings' cli_registry.defaults.
 	RegistryDefaults *bool `json:"cli_registry_defaults,omitempty"`
+	// PromptAppendFile is the file whose text the profile appends to the
+	// profile section, in place of the inline prompt_append. The two are
+	// mutually exclusive, and the path answers to the same directory the
+	// prompt file does.
+	PromptAppendFile string `json:"prompt_append_file,omitempty"`
 	// PromptAppend is the text the profile appends to the profile
 	// section, after the prose already there: the linked base's own, or
 	// the file's when the profile also names a prompt file. The section
 	// an explicit system_prompt setting owns is left alone, the way the
 	// prompt file is.
-	PromptAppend string       `json:"prompt_append,omitempty"`
-	Tools        ProfileTools `json:"tools,omitempty"`
+	PromptAppend string `json:"prompt_append,omitempty"`
+	// ModelFamily says whether the session's prompt carries the model
+	// family's guidance: a text per family, keyed by the model's prompt
+	// variant. It is off unless the profile names true, and a family the
+	// prompt does not know leaves the prompt unchanged.
+	ModelFamily *bool        `json:"model_family,omitempty"`
+	Tools       ProfileTools `json:"tools,omitempty"`
 }
 
 type ProfileTools struct {
