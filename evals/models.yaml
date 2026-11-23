@@ -42,7 +42,7 @@
 - name: qwen
   endpoint: http://localhost:4000/v1
   model_id: qwen
-  context_limit: 262144
+  context_limit: 196608
   notes: >-
     Streams reasoning_content. The provider keeps it separate from the
     answer, so the transcript shows the model's thinking.
@@ -82,3 +82,12 @@
     gemma4 capped to 16384: the window where the long-read task's
     compaction fires mid-run, whatever the model does. The keep-recent
     tail the runs pin keeps the cut meaningful at this size.
+
+- name: qwen-32k
+  endpoint: http://localhost:4000/v1
+  model_id: qwen
+  context_limit: 32768
+  notes: >-
+    The same weights as the qwen row at the gemma row's window: the
+    same task set at a size where the window bites, so the strategies
+    are compared at a size that asks something of them.
