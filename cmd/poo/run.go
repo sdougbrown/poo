@@ -518,24 +518,20 @@ func (s *sink) sessionDir() string { return s.recordDir }
 
 // Append writes one record.
 func (s *sink) Append(ctx context.Context, rec poo.Record) error {
-	err := func() error {
-		switch {
-		case s.log != nil:
-			return s.log.Append(ctx, rec)
-		case s.store != nil:
-			return s.store.Append(ctx, rec)
-		default:
-			return nil
-		}
-	}()
-	// The reader's promise is the records the store has written: a
-	// record the write refused is not one.
-	if err == nil {
+	// A log or a readable store owns the records: the write is the only
+	// copy. The fallback owns them itself, so it buffers — and the
+	// buffer is the read side's whole supply.
+	switch {
+	case s.log != nil:
+		return s.log.Append(ctx, rec)
+	case s.store != nil:
+		return s.store.Append(ctx, rec)
+	default:
 		s.mu.Lock()
 		s.records = append(s.records, rec)
 		s.mu.Unlock()
+		return nil
 	}
-	return err
 }
 
 // Flush pushes the buffered records out.
@@ -550,25 +546,30 @@ func (s *sink) Flush(ctx context.Context) error {
 	}
 }
 
+// readableStore reports that the store serves the read itself: it
+// holds the whole retained chain, restored sessions included.
+func (s *sink) readableStore() bool {
+	_, ok := s.store.(poo.RecordReader)
+	return ok
+}
+
 // Records reads the session's records back, oldest first.
 //
 // It is the read side poo.RecordReader asks for: with it, the session's
 // history tool reads what the store retained. The log path reads its
-// file; the store path loads the session by the id the header names.
+// file; the store path reads through the store's open session.
 func (s *sink) ReadRecords(ctx context.Context) ([]poo.Record, error) {
 	switch {
 	case s.log != nil:
 		return s.log.ReadRecords(ctx)
-	case s.store != nil:
+	case s.readableStore():
 		// The store is open under this process's authority and holds the
 		// whole retained chain, restored sessions included: the read goes
 		// through it, so the retention pointer's numbering is the one
 		// the session was built with.
-		if reader, ok := s.store.(poo.RecordReader); ok {
-			return reader.ReadRecords(ctx)
-		}
-		return s.recordsSnapshot(), nil
+		return s.store.(poo.RecordReader).ReadRecords(ctx)
 	default:
+		// Nothing owns the records: the buffer is what there is.
 		return s.recordsSnapshot(), nil
 	}
 }

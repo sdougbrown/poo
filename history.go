@@ -300,16 +300,24 @@ type runScan struct {
 	started map[string]bool
 }
 
-func NewHistory(records []Record) History {
-	scan := scanRunsOf(records)
-	offset := 0
+// sessionTurns numbers the runs' turns the way the session does: each
+// run's turns continue the one before it, so the numbering the
+// retained history reads is the numbering the session view was
+// restored with.
+func (scan runScan) sessionTurns() map[string]int {
 	sessionTurn := map[string]int{}
+	offset := 0
 	for _, id := range scan.order {
 		for t := 1; t <= scan.turns[id]; t++ {
 			sessionTurn[fmt.Sprintf("%s/%d", id, t)] = offset + t
 		}
 		offset += scan.turns[id]
 	}
+	return sessionTurn
+}
+
+func NewHistory(records []Record) History {
+	sessionTurn := scanRunsOf(records).sessionTurns()
 	// The items are the projection's, with the turns renamed to the
 	// session's numbering.
 	items := historyItems(records)
