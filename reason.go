@@ -57,6 +57,11 @@ const (
 	// It is never produced live. It is written on load, for a run that
 	// has no settle record, and it has no exit code of its own.
 	ReasonInterrupted Reason = "interrupted"
+	// ReasonBacklog means an input was dropped because the feed's
+	// undelivered backlog was full. It is a record-only reason: no run
+	// settles for it, so it has no row in the precedence or exit-code
+	// tables.
+	ReasonBacklog Reason = "backlog"
 )
 
 // reasonPrecedence is the arbitration order.

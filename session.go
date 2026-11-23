@@ -147,6 +147,9 @@ type Session struct {
 	jobCompletionsDone chan struct{}
 	// jobQueue holds the finished job results, in completion order.
 	jobQueue []jobQueueItem
+	// feedDrops counts a feed's dropped inputs that no later input of
+	// the same feed has named yet.
+	feedDrops map[Origin]int
 	// pendingHeld is the held record that is waiting to be written, with
 	// the write registration its decision was taken under.
 	//

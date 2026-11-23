@@ -49,9 +49,12 @@ const (
 // Defaults the plan fixes for jobs.
 const (
 	// DefaultMaxRunning is how many jobs may run at once, per session.
-	DefaultMaxRunning = 4
+	DefaultMaxRunning = 64
 	// DefaultJobTimeout bounds one job.
 	DefaultJobTimeout = 1800 * time.Second
+	// DefaultFeedBacklog is how many undelivered inputs a feed may hold
+	// when its spec sets no cap of its own.
+	DefaultFeedBacklog = 16
 )
 
 // The texts the plan fixes.
@@ -61,6 +64,9 @@ const (
 	// TooManyJobsText is the model-facing text of a call that found no
 	// free job slot.
 	TooManyJobsText = "too many jobs running; wait or cancel one"
+	// DuplicateJobText is the model-facing text of a call whose tool and
+	// arguments match a job that is already running.
+	DuplicateJobText = "the same %s call is already running as job %s; wait for it or cancel it"
 )
 
 // BackgroundArgName is the reserved argument that asks for a background
@@ -416,7 +422,12 @@ func WithJobs(o JobOptions) Option {
 // so two calls that race for the last slot admit exactly one of them.
 // The job.started record is written before the goroutine starts, so a
 // log shows the job was accepted even when it never ran.
-func (s *Session) startJob(run *runState, turn int, handle, tool string, prepared Prepared, summary string, arguments json.RawMessage) (string, bool, bool) {
+//
+// The refusal result carries the model-facing text of a call the
+// admission refuses as a duplicate of a running job. An empty refusal
+// with a false ok is the slot exhaustion (or a session that is closed
+// or broken), and the caller renders its own text for that.
+func (s *Session) startJob(run *runState, turn int, handle, tool string, prepared Prepared, summary string, arguments json.RawMessage) (jobID string, ok bool, winding bool, refusal string) {
 	// The slot is reserved under the lock, and the job is registered
 	// there too, so a job that is admitted is a job the session knows
 	// about. A run that is winding down admits nothing: no new effect
@@ -424,18 +435,22 @@ func (s *Session) startJob(run *runState, turn int, handle, tool string, prepare
 	s.mu.Lock()
 	if run.committed || run.finalizing || run.interruptPending {
 		s.mu.Unlock()
-		return "", false, true
+		return "", false, true, ""
 	}
 	if s.closed || s.broken {
 		s.mu.Unlock()
-		return "", false, false
+		return "", false, false, ""
 	}
 	if s.runningJobCountLocked() >= s.jobLimit() {
 		s.mu.Unlock()
-		return "", false, false
+		return "", false, false, ""
+	}
+	if dup := s.duplicateJobLocked(tool, arguments); dup != "" {
+		s.mu.Unlock()
+		return "", false, false, fmt.Sprintf(DuplicateJobText, tool, dup)
 	}
 	s.jobSeq++
-	jobID := fmt.Sprintf("j%d", s.jobSeq)
+	jobID = fmt.Sprintf("j%d", s.jobSeq)
 	ctx, cancel := context.WithCancelCause(s.jobCtx)
 	// The owner carries the run's id, because its records belong to that
 	// run, and the job's own context, because a settle of the run must
@@ -486,7 +501,7 @@ func (s *Session) startJob(run *runState, turn int, handle, tool string, prepare
 		StartedAt:  nowRFC3339(),
 	})
 	s.mu.Lock()
-	winding := run.committed || run.finalizing
+	winding = run.committed || run.finalizing
 	s.mu.Unlock()
 	if err != nil {
 		s.mu.Lock()
@@ -496,10 +511,10 @@ func (s *Session) startJob(run *runState, turn int, handle, tool string, prepare
 		s.removeJob(jobID)
 		cancel(errFinalizing)
 		if errors.Is(err, errDeliveryAbandoned) || winding {
-			return "", false, true
+			return "", false, true, ""
 		}
 		s.noteStoreError(&run.callOwner, err)
-		return "", false, false
+		return "", false, false, ""
 	}
 	if winding {
 		// The run went down while the acceptance was being recorded, so
@@ -518,7 +533,7 @@ func (s *Session) startJob(run *runState, turn int, handle, tool string, prepare
 		s.mu.Unlock()
 		s.signalWorkLocked(&run.callOwner)
 		cancel(errFinalizing)
-		return jobID, false, true
+		return jobID, false, true, ""
 	}
 	s.mu.Lock()
 	run.jobStarts--
@@ -526,7 +541,44 @@ func (s *Session) startJob(run *runState, turn int, handle, tool string, prepare
 	s.signalWorkLocked(&run.callOwner)
 
 	go s.runJob(job, prepared)
-	return jobID, true, false
+	return jobID, true, false, ""
+}
+
+// duplicateJobLocked names the running job whose tool and arguments
+// match the call, or "" when no running job does. The match compares
+// the tool's name and the arguments' canonical JSON, so the same data
+// in a different key order still matches, and data that differs still
+// differs. The caller holds the session's lock.
+func (s *Session) duplicateJobLocked(tool string, arguments json.RawMessage) string {
+	canonical := canonicalArguments(arguments)
+	for _, id := range s.jobOrder {
+		job, ok := s.jobs[id]
+		if !ok || job.ended || job.tool != tool {
+			continue
+		}
+		if canonicalArguments(job.arguments) == canonical {
+			return id
+		}
+	}
+	return ""
+}
+
+// canonicalArguments renders the arguments' canonical JSON, so two
+// calls that carry the same data compare equal whatever spacing or key
+// order they use. Arguments that do not parse compare as their bytes.
+func canonicalArguments(arguments json.RawMessage) string {
+	if len(arguments) == 0 {
+		return ""
+	}
+	var v any
+	if err := json.Unmarshal(arguments, &v); err != nil {
+		return string(arguments)
+	}
+	canonical, err := json.Marshal(v)
+	if err != nil {
+		return string(arguments)
+	}
+	return string(canonical)
 }
 
 // removeJob forgets a job that never ran.
@@ -1025,6 +1077,20 @@ func (s *Session) queueFeedInput(feed, from, text string, attachments []Attachme
 		s.mu.Unlock()
 		return ErrSessionClosed
 	}
+	// The backlog cap: an accepted input that arrives at the cap makes
+	// room by dropping the feed's oldest undelivered input. The drop is
+	// decided here, with the acceptance, so the two cannot interleave.
+	droppedID := ""
+	if cap := s.feedBacklogLocked(origin); cap > 0 && s.pendingFeedInputsLocked(origin) >= cap {
+		droppedID = s.dropOldestFeedInputLocked(origin)
+	}
+	drops := s.feedDrops[origin]
+	if droppedID != "" {
+		drops++
+	}
+	if s.feedDrops != nil {
+		s.feedDrops[origin] = 0
+	}
 	s.inputSeq++
 	inputID := jobInputID(s.opts.SessionID, s.inputSeq)
 	s.jobCompletions++
@@ -1036,6 +1102,29 @@ func (s *Session) queueFeedInput(feed, from, text string, attachments []Attachme
 	}()
 
 	rendered := feedInputText(feed, from, text)
+	if drops > 0 {
+		// The note rides the input's stored text, so a restored session
+		// delivers the same words.
+		rendered += "\n" + feedDropNote(drops)
+	}
+	// The dropped input's fate is recorded before the acceptance, so a
+	// store that refuses the acceptance still leaves the dropped input
+	// fated: a restore reads the fate and skips it.
+	if droppedID != "" {
+		_ = s.write(context.Background(), &InputDroppedRecord{
+			RecordMeta: NewRecordMeta("input.dropped"),
+			SessionID:  s.opts.SessionID,
+			InputID:    droppedID,
+			Mode:       InputModeFeed,
+			Reason:     ReasonBacklog,
+			DroppedAt:  nowRFC3339(),
+		})
+		s.events.emit(EventInputDropped, map[string]any{
+			"input_id": droppedID,
+			"mode":     string(InputModeFeed),
+			"reason":   string(ReasonBacklog),
+		})
+	}
 	if err := s.writeClaimed(context.Background(), &InputQueuedRecord{
 		RecordMeta: NewRecordMetaFrom("input.queued", origin),
 		SessionID:  s.opts.SessionID,
@@ -1126,6 +1215,56 @@ var attributeEscaper = strings.NewReplacer(
 	"\n", `&#10;`,
 	"\r", `&#13;`,
 )
+
+// feedDropNote renders the note a feed's input carries when earlier
+// inputs of the same feed were dropped unread.
+func feedDropNote(n int) string {
+	if n == 1 {
+		return "[poo: 1 earlier input from this feed was dropped unread]"
+	}
+	return fmt.Sprintf("[poo: %d earlier inputs from this feed were dropped unread]", n)
+}
+
+// feedBacklogLocked returns how many undelivered inputs the feed may
+// hold in the queue. The cap is the feed's own, and a feed that sets
+// none takes the default. The caller holds the session's lock.
+func (s *Session) feedBacklogLocked(origin Origin) int {
+	for _, spec := range s.opts.Feeds {
+		if FeedOrigin(spec.Name) == origin {
+			if spec.MaxPending > 0 {
+				return spec.MaxPending
+			}
+			break
+		}
+	}
+	return DefaultFeedBacklog
+}
+
+// pendingFeedInputsLocked counts the feed's undelivered inputs on the
+// queue, held or waiting. The caller holds the session's lock.
+func (s *Session) pendingFeedInputsLocked(origin Origin) int {
+	n := 0
+	for _, item := range s.jobQueue {
+		if item.result.origin == origin {
+			n++
+		}
+	}
+	return n
+}
+
+// dropOldestFeedInputLocked removes the feed's oldest undelivered input
+// from the queue and returns its input id, or "" when the feed has
+// none. The caller holds the session's lock.
+func (s *Session) dropOldestFeedInputLocked(origin Origin) string {
+	for i, item := range s.jobQueue {
+		if item.result.origin != origin {
+			continue
+		}
+		s.jobQueue = append(s.jobQueue[:i], s.jobQueue[i+1:]...)
+		return item.result.id
+	}
+	return ""
+}
 
 // queueJobResult puts a finished result on the session's job queue and
 // acts on it.

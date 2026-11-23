@@ -90,6 +90,11 @@ type FeedSpec struct {
 	// OnIdle says whether an input the feed emits may start a run while
 	// the session is idle. Empty inherits the session's jobs.on_idle.
 	OnIdle OnIdle
+	// MaxPending caps the feed's undelivered inputs. When an accepted
+	// input arrives at the cap, the feed's oldest undelivered input is
+	// dropped with an input.dropped record, and the next input names
+	// the drops. Zero means DefaultFeedBacklog.
+	MaxPending int
 }
 
 // WithFeeds gives the session the feeds it runs.
@@ -236,6 +241,9 @@ func checkFeeds(specs []FeedSpec) error {
 		case "", OnIdleWake, OnIdleHold:
 		default:
 			return fmt.Errorf("poo: the feed %q has an unknown idle policy %q", spec.Name, spec.OnIdle)
+		}
+		if spec.MaxPending < 0 {
+			return fmt.Errorf("poo: the feed %q has a negative input cap %d", spec.Name, spec.MaxPending)
 		}
 	}
 	return nil

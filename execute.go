@@ -755,17 +755,22 @@ func (s *Session) executeOne(owner *callOwner, turn int, plan callPlan) {
 // starts. The call's own result is the "started" one, and the batch
 // carries on.
 func (s *Session) startJobCall(owner *callOwner, turn int, handle string, call ToolCall, plan callPlan) {
-	jobID, ok, winding := s.startJob(owner.run, turn, handle, call.Name, plan.prepared, plan.summary, call.Arguments)
+	jobID, ok, winding, refusal := s.startJob(owner.run, turn, handle, call.Name, plan.prepared, plan.summary, call.Arguments)
 	if winding {
 		// The run settled while the job was being accepted; nothing
 		// else starts, and the finalization owns the run.
 		return
 	}
 	if !ok {
-		// There was no free slot. The failure is recoverable: the
-		// model sees the message and may wait or cancel one.
+		// The admission refused the call: no free slot, or a duplicate
+		// of a running job. The failure is recoverable: the model sees
+		// the message and may wait or cancel one.
+		text := TooManyJobsText
+		if refusal != "" {
+			text = refusal
+		}
 		s.recordResult(owner, turn, handle, call.Name, call.CallID, ToolResult{
-			Text:    TooManyJobsText,
+			Text:    text,
 			IsError: true,
 		}, OutcomeError)
 		return
