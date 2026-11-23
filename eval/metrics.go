@@ -39,8 +39,9 @@ type Metrics struct {
 	// Compactions is the number of compactions the run applied.
 	Compactions int `json:"compactions"`
 	// CompactionStrategies are the strategies those compactions ran
-	// under, in order. A fallback inside one compaction shows up as a
-	// second entry.
+	// under, in order. A fallback replaces the whole compaction - the
+	// fallback's strategy is the entry, and the selective pass that
+	// asked for it is not on the record.
 	CompactionStrategies []string `json:"compaction_strategies,omitempty"`
 	// HistoryCallsAfterCompaction is the number of history tool calls
 	// the run made after its first compaction: the recovery path the
