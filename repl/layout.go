@@ -43,6 +43,9 @@ type layout struct {
 	out io.Writer
 	fd  int
 
+	// transcript records committed text in screen order, including stderr.
+	transcript bytes.Buffer
+
 	// width and height are the terminal's size in cells.
 	width, height int
 	// footer is the rows reserved at the screen's bottom: the editor's
@@ -171,6 +174,7 @@ func (l *layout) emit(s string) {
 func (l *layout) write(s string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	l.transcript.WriteString(s)
 	if !l.active {
 		l.emit(terminalLF(s))
 		return
@@ -259,6 +263,7 @@ func (l *layout) scrollSeq(n int) string {
 func (l *layout) paintStream(committed string, preview []string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	l.transcript.WriteString(committed)
 	var b strings.Builder
 	if rows := textRows(committed, l.width); len(rows) > 0 {
 		l.clearPreviewLocked(&b)
@@ -382,6 +387,7 @@ func (l *layout) sealPreviewLocked() {
 func (l *layout) commitPreview(body string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	l.transcript.WriteString(body)
 	rows := textRows(body, l.width)
 	if len(rows) > l.preview {
 		var b strings.Builder
@@ -462,18 +468,17 @@ func (l *layout) ensure(footer int) bool {
 	return l.ensureLocked(footer)
 }
 
+// clampFooter leaves at least one row for the transcript.
+func (l *layout) clampFooter(rows int) int {
+	return min(l.height-1, max(1, rows)+footerChrome)
+}
+
 // ensureLocked is the sizing half of a frame's preparation. It never
 // moves the cursor by a delta: the frame's anchor decides where the
 // cursor reads from, and a delta computed from the engine's row model
 // is the arithmetic that stranded it.
 func (l *layout) ensureLocked(footer int) bool {
-	if footer < 1 {
-		footer = 1
-	}
-	if room := l.height - 1 - footerChrome; footer > room {
-		footer = room
-	}
-	total := footer + footerChrome
+	total := l.clampFooter(footer)
 	if total == l.footer && !l.chromeStale {
 		// The editor's accepted-line handling erases below its input,
 		// and that wipe takes the chrome rows with it. Every
@@ -569,30 +574,37 @@ func (l *layout) regionTop() int { return 1 }
 // resize rebuilds the visible tail: the terminal can move or reflow its
 // old rows before notifying us. Paint in place rather than scrolling the
 // replay into native history. The editor redraws at the new footer.
-func (l *layout) resize(width, height, footer int, transcript []byte, preview []string) {
+func (l *layout) resize(width, height, footer int, committed string, preview []string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	l.transcript.WriteString(committed)
 	l.width, l.height = width, height
 	if footer == 0 {
 		footer = l.footer - footerChrome
 	}
-	l.footer = min(height-1, max(1, footer)+footerChrome)
+	l.footer = l.clampFooter(footer)
 	l.preview, l.previewRows = 0, nil
 	bottom := l.regionBottom()
-	committed := transcriptTail(transcript, width, bottom-len(preview))
-	l.last = bottom - min(len(preview), bottom) - len(committed)
+	rows := transcriptTail(l.transcript.Bytes(), width, bottom-len(preview))
+	l.last = bottom - min(len(preview), bottom) - len(rows)
 	if !l.active {
 		return
 	}
 	var b strings.Builder
 	b.WriteString(l.regionSeq())
 	b.WriteString("\x1b[H" + seqEraseBelow)
-	b.WriteString(l.rowsSeq(committed))
+	b.WriteString(l.rowsSeq(rows))
 	l.paintPreviewLocked(&b, preview)
 	l.paintChromeLocked(&b)
 	l.chromeStale = false
 	b.WriteString(fmt.Sprintf("\x1b[%d;1H", l.footerTop()))
 	l.emit(b.String())
+}
+
+func (l *layout) transcriptText() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.transcript.String()
 }
 
 // Walk back only as far as needed to fill the viewport, not all the way

@@ -66,6 +66,31 @@ func TestAServerStderrHoldsAPartialLine(t *testing.T) {
 	}
 }
 
+func TestResizeKeepsServerDiagnosticsInTranscriptOrder(t *testing.T) {
+	scr, r := aScreen(t, 40)
+	r.notice("before the diagnostic")
+	r.streamDelta("m1", "text", "pending reply")
+	stderr := &layoutStderr{l: scr.layout}
+	_, _ = stderr.Write([]byte("server diagnostic"))
+	stderr.flush()
+	r.finish()
+	r.notice("after the reply")
+
+	scr.vt.Resize(36, 16)
+	r.resize(36, 16, 1)
+	scr.paint()
+	for name, text := range map[string]string{"screen": scr.text(), "transcript": plain(r.transcriptText())} {
+		last := -1
+		for _, want := range []string{"before the diagnostic", "server diagnostic", "pending reply", "after the reply"} {
+			i := strings.Index(text, want)
+			if i <= last || strings.Count(text, want) != 1 {
+				t.Fatalf("%s lost, duplicated, or moved %q:\n%s", name, want, text)
+			}
+			last = i
+		}
+	}
+}
+
 // TestServerStderrRidesTheLayout covers the diagnostics the default
 // server writes while a footer layout owns the terminal: they land
 // above the footer through the layout's locked writer, and the footer

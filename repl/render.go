@@ -63,11 +63,7 @@ type renderer struct {
 	// newTR builds the markdown renderer at a width, so a terminal that
 	// changes size renders the next message at the new one.
 	newTR func(wrap int) (*glamour.TermRenderer, error)
-	// transcript mirrors the writes that went through write and the
-	// rendered chunks a stream commits as they finish. It is the
-	// conversation as the pager shows it again. The cursor-control
-	// sequences the streaming writes — the erases, the repaints of the
-	// preview — go to the terminal directly, and are not part of it.
+	// transcript records the conversation when no terminal layout owns it.
 	transcript bytes.Buffer
 	// pending holds the tail of a streamed delta that may be an escape
 	// sequence still arriving: a sequence split across deltas is
@@ -224,11 +220,11 @@ func (r *renderer) write(s string) {
 // emit writes s without touching the stream: the stream's own flushes
 // use it, so a write never re-enters the boundary that called it.
 func (r *renderer) emit(s string) {
-	r.transcript.WriteString(s)
 	if r.layout != nil {
 		r.layout.write(s)
 		return
 	}
+	r.transcript.WriteString(s)
 	if r.term {
 		// A terminal whose footer could not be built still reads rows:
 		// every bare line feed gains its carriage return, and each row
@@ -432,8 +428,9 @@ func (r *renderer) contentWidth() int {
 // replayed rows never have to scroll to make room for the preview.
 func (r *renderer) resize(width, height, footer int) {
 	r.rewrap(width)
+	var committed strings.Builder
 	for _, seg := range r.live.parked {
-		r.transcript.WriteString(r.chunkBody(seg.kind, seg.source))
+		committed.WriteString(r.chunkBody(seg.kind, seg.source))
 	}
 	r.live.parked = nil
 	r.block.stalled = false
@@ -444,11 +441,11 @@ func (r *renderer) resize(width, height, footer int) {
 	case r.block.hint:
 		rows = []string{ansi.Truncate(r.writingHint(), width, "")}
 	case r.live.kind != "":
-		committed, preview := r.streamBodies()
-		r.transcript.WriteString(committed)
+		body, preview := r.streamBodies()
+		committed.WriteString(body)
 		rows = textRows(preview, width)
 	}
-	r.layout.resize(width, height, footer, r.transcript.Bytes(), rows)
+	r.layout.resize(width, height, footer, committed.String(), rows)
 }
 
 // stalledNow reports that the terminal's width has changed under a
@@ -492,7 +489,6 @@ func (r *renderer) switchKind(kind string) {
 	// The old segment's last tokens reach the screen before it seals.
 	r.paintPending()
 	if body := r.chunkBody(r.live.kind, r.live.source); body != "" {
-		r.transcript.WriteString(body)
 		r.layout.commitPreview(body)
 	} else {
 		r.layout.clearPreview()
@@ -511,7 +507,6 @@ func (r *renderer) paintStream() {
 		return
 	}
 	committed, preview := r.streamBodies()
-	r.transcript.WriteString(committed)
 	r.layout.paintStream(committed, textRows(preview, r.width))
 }
 
@@ -602,14 +597,12 @@ func (r *renderer) finish() {
 	if r.block.stalled {
 		if body := r.pendingBody(); body != "" {
 			r.layout.clearPreview()
-			r.transcript.WriteString(body)
 			r.layout.write(body)
 		}
 		r.resetStream()
 		return
 	}
 	body := r.chunkBody(r.live.kind, r.live.source)
-	r.transcript.WriteString(body)
 	r.layout.commitPreview(body)
 	r.resetStream()
 }
@@ -985,6 +978,9 @@ func (r *renderer) failure(text string) {
 
 // transcriptText returns the transcript so far.
 func (r *renderer) transcriptText() string {
+	if r.layout != nil {
+		return r.layout.transcriptText()
+	}
 	return r.transcript.String()
 }
 

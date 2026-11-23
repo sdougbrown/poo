@@ -754,7 +754,7 @@ func (w *layoutStderr) Write(p []byte) (int, error) {
 		if i < 0 {
 			break
 		}
-		w.l.write(w.held[:i+1])
+		w.l.write(filterRendered(w.held[:i+1]))
 		w.held = w.held[i+1:]
 	}
 	return len(p), nil
@@ -767,7 +767,7 @@ func (w *layoutStderr) flush() {
 	if w.held == "" {
 		return
 	}
-	w.l.write(w.held)
+	w.l.write(filterRendered(w.held) + "\n")
 	w.held = ""
 }
 
@@ -788,6 +788,7 @@ func (m *machine) newInput() input {
 			// transcript goes back to the plain stream, where a
 			// terminal without an editor reads from.
 			m.r.layout.leave()
+			m.r.transcript.WriteString(m.r.layout.transcriptText())
 			m.r.layout = nil
 		}
 	}
