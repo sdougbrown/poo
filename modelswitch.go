@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/sdougbrown/poo/decide"
+	"github.com/sdougbrown/poo/prompt"
 )
 
 // ModelSwitch is the outcome of a model switch.
@@ -100,11 +102,11 @@ func (s *Session) SetModel(info ModelInfo, transport ...ChatTransport) (ModelSwi
 			"the model %q declares no context limit, so the session keeps the %d-token window",
 			name, limit))
 	}
-	prompt := PromptLimitOf(limit, info.InputLimit)
+	promptLimit := PromptLimitOf(limit, info.InputLimit)
 	if exhausted, reason := s.contextExhaustedLocked(info, limit); exhausted {
 		warnings = append(warnings, fmt.Sprintf(
 			"the current view does not fit the %d-token prompt limit of %q: %s; the next run settles context_exhausted",
-			prompt, name, reason))
+			promptLimit, name, reason))
 	}
 
 	from := modelLabel(s.opts.Model)
@@ -118,6 +120,18 @@ func (s *Session) SetModel(info ModelInfo, transport ...ChatTransport) (ModelSwi
 	env := s.promptBuilder.Env()
 	env.Model = modelID
 	env.Variant = info.PromptVariant
+	// The family guidance is a profile's opt-in, and the section rides
+	// the variant: a model whose variant names no family the prompt
+	// ships renders none, and the switch says so instead of dropping
+	// the guidance silently. A prompt without the section — a raw one,
+	// or a profile that never opted in — stays unmentioned.
+	if slices.Contains(s.promptBuilder.Names(), prompt.FamilySection) && !slices.Contains(prompt.FamilyNames(), info.PromptVariant) {
+		if info.PromptVariant == "" {
+			outcome.Warnings = append(outcome.Warnings, "the model names no prompt variant, so the model family's guidance does not render")
+		} else {
+			outcome.Warnings = append(outcome.Warnings, fmt.Sprintf("the prompt variant %q names no family the prompt ships, so the model family's guidance does not render", info.PromptVariant))
+		}
+	}
 	promptText, promptSections, err := renderPrompt(s.promptBuilder.WithEnv(env), s.opts.SystemPrompt)
 	if err != nil {
 		s.mu.Unlock()

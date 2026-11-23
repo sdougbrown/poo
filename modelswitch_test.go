@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -700,5 +701,70 @@ func TestAModelSwitchKeepsTheCompactedInputItStillMeasures(t *testing.T) {
 				t.Errorf("the budget after the switch carries a compacted input of %d, want %d", got, c.want)
 			}
 		})
+	}
+}
+
+// TestASwitchWarnsWhenTheFamilyGuidanceCannotFollow covers the family
+// section's ride: a session whose prompt carries the section switches
+// to a model whose variant names no family the prompt ships, and the
+// switch warns instead of dropping the guidance silently. A model that
+// names no variant at all draws the same note.
+func TestASwitchWarnsWhenTheFamilyGuidanceCannotFollow(t *testing.T) {
+	oldServer := newBodyServer(t)
+	nextServer := newBodyServer(t)
+
+	first := poo.ModelInfo{
+		Name:          "old-model",
+		ModelID:       "old-model",
+		API:           poo.APIChatCompletions,
+		Ops:           []poo.Op{poo.OpChat},
+		ContextLimit:  32768,
+		MaxOutput:     4096,
+		PromptVariant: "gpt-6.2",
+		Tools:         poo.ToolCalling{Mode: poo.ToolsNative},
+	}
+	oldTransport := openai.New(openai.Options{Endpoint: oldServer.URL, Model: first.ModelID, ModelInfo: first})
+	s := newTestSession(t, poo.Options{
+		Transport:  oldTransport,
+		Tools:      map[string]poo.Tool{"echo": &echoTool{}},
+		ToolOrder:  []string{"echo"},
+		SessionID:  "s1",
+		Model:      first,
+		WorkingDir: t.TempDir(),
+	})
+
+	unknown := poo.ModelInfo{
+		Name:          "quiet-model",
+		ModelID:       "quiet-model",
+		API:           poo.APIChatCompletions,
+		Ops:           []poo.Op{poo.OpChat},
+		ContextLimit:  32768,
+		MaxOutput:     4096,
+		PromptVariant: "made-up-family",
+		Tools:         poo.ToolCalling{Mode: poo.ToolsNative},
+	}
+	outcome, err := s.SetModel(unknown, openai.New(openai.Options{Endpoint: nextServer.URL, Model: unknown.ModelID, ModelInfo: unknown}))
+	if err != nil {
+		t.Fatalf("switching the model: %v", err)
+	}
+	if !slices.Contains(outcome.Warnings, `the prompt variant "made-up-family" names no family the prompt ships, so the model family's guidance does not render`) {
+		t.Errorf("the switch's warnings are %v, want the family note", outcome.Warnings)
+	}
+
+	variantless := poo.ModelInfo{
+		Name:         "plain-model",
+		ModelID:      "plain-model",
+		API:          poo.APIChatCompletions,
+		Ops:          []poo.Op{poo.OpChat},
+		ContextLimit: 32768,
+		MaxOutput:    4096,
+		Tools:        poo.ToolCalling{Mode: poo.ToolsNative},
+	}
+	outcome, err = s.SetModel(variantless, openai.New(openai.Options{Endpoint: nextServer.URL, Model: variantless.ModelID, ModelInfo: variantless}))
+	if err != nil {
+		t.Fatalf("switching the model: %v", err)
+	}
+	if !slices.Contains(outcome.Warnings, "the model names no prompt variant, so the model family's guidance does not render") {
+		t.Errorf("the switch's warnings are %v, want the variantless note", outcome.Warnings)
 	}
 }

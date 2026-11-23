@@ -498,6 +498,9 @@ type modelsModel struct {
 	ReasoningLevels []string `json:"reasoning_levels,omitempty"`
 	// ToolsMode is how the run asks for tool calls.
 	ToolsMode poo.ToolsMode `json:"tools_mode,omitempty"`
+	// PromptVariant selects the prompt sections' variant text the model
+	// renders: the model family's section keys on it.
+	PromptVariant string `json:"prompt_variant,omitempty"`
 	// Quirks are the transport's named adaptations this model needs.
 	Quirks []string `json:"quirks,omitempty"`
 	// Sampling are the model's own sampling defaults.
@@ -582,6 +585,7 @@ func (f modelsFile) layer() (catalog.FileSettings, error) {
 				MaxOutput:       model.MaxOutput,
 				Reasoning:       model.Reasoning,
 				ReasoningLevels: model.ReasoningLevels,
+				PromptVariant:   model.PromptVariant,
 				Quirks:          model.Quirks,
 				Sampling:        model.Sampling,
 			}
