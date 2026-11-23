@@ -303,3 +303,50 @@ func TestAnEmptyDefaultManifestDirectoryIsNoRegistry(t *testing.T) {
 		t.Errorf("an empty default directory warned: %s", runtime.Warning)
 	}
 }
+
+// TestADefaultRegistryWithoutTheCallToolNamesTheSource covers the
+// diagnostic: a default registry naming a tool the binary does not link
+// fails with the default directory as the source, and the remedy named.
+func TestADefaultRegistryWithoutTheCallToolNamesTheSource(t *testing.T) {
+	pooDir := theDefaultsPooDir(t)
+	theDefaultRegistry(t, pooDir)
+	tools := theTools()
+	delete(tools, "call_tool")
+	settings, err := config.Parse([]byte(theModelSettings), config.FormatYAML)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = config.Build(config.BuildOptions{
+		Settings: settings, Overrides: config.Overrides{}, WorkingDir: t.TempDir(),
+		DefaultProfile: "code", Tools: tools, Profiles: theProfiles(), Executors: theExecutors(),
+	})
+	if err == nil {
+		t.Fatal("the binary links no call_tool, and the build loaded the default registry anyway")
+	}
+	if !strings.Contains(err.Error(), "the default cli-registry directory") ||
+		!strings.Contains(err.Error(), "cli_registry.defaults") {
+		t.Errorf("the failure does not name the default directory and the remedy: %v", err)
+	}
+}
+
+// TestADefaultFeedWithoutAnExecutorNamesTheSource covers the
+// diagnostic: a default feed with a binary that links no executor fails
+// with the default directory as the source.
+func TestADefaultFeedWithoutAnExecutorNamesTheSource(t *testing.T) {
+	pooDir := theDefaultsPooDir(t)
+	theDefaultFeedManifest(t, pooDir)
+	settings, err := config.Parse([]byte(theModelSettings), config.FormatYAML)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = config.Build(config.BuildOptions{
+		Settings: settings, Overrides: config.Overrides{}, WorkingDir: t.TempDir(),
+		DefaultProfile: "code", Tools: theTools(), Profiles: theProfiles(),
+	})
+	if err == nil {
+		t.Fatal("the binary links no executor, and the build loaded the default feed anyway")
+	}
+	if !strings.Contains(err.Error(), "the default feeds directory") {
+		t.Errorf("the failure does not name the default directory: %v", err)
+	}
+}

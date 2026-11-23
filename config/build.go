@@ -1048,9 +1048,10 @@ func (r *Runtime) requireRegistryTools(opts BuildOptions, names []string) error 
 		switch {
 		case r.registryFromDefaults:
 			return &Error{
-				Code:    CodeUnsupported,
-				Field:   "cli_registry.paths",
-				Message: fmt.Sprintf("the default cli-registry directory names a cli registry, and this binary does not link the %q tool", name),
+				Code:  CodeUnsupported,
+				Field: "cli_registry.paths",
+				Message: fmt.Sprintf("the default cli-registry directory names a cli registry, and this binary does not link the %q tool; "+
+					"set cli_registry.defaults to false, or name the registries you want under cli_registry.paths", name),
 			}
 		}
 		source := "the settings"
