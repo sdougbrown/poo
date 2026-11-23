@@ -531,3 +531,44 @@ func TestAListingFollowsTheProfileFeedsWord(t *testing.T) {
 		}
 	}
 }
+
+// TestAListingWarnsPastAVariantsBrokenManifest covers the listing's
+// warn-and-offer branch: a variant whose defaults word selects a
+// default manifest the load rejects is offered without it, and the
+// build under a profile whose word never reads the directory still
+// succeeds.
+func TestAListingWarnsPastAVariantsBrokenManifest(t *testing.T) {
+	pooDir := theDefaultsPooDir(t)
+	dir := filepath.Join(pooDir, "cli-registry")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("making the default registry directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "registry.json"), []byte("{ not json"), 0o600); err != nil {
+		t.Fatalf("writing the registry: %v", err)
+	}
+	document := theDumbProfileSettings("profiles:\n  dumb:\n    base: code\n    cli_registry_defaults: false\n  eager:\n    base: code\n    cli_registry_defaults: true\nprofile: dumb\n")
+	settings, err := config.Parse([]byte(document), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+	// The session's word turns the defaults off: the broken manifest
+	// is never read, and the build succeeds without a registry.
+	if runtime.Registry != nil {
+		t.Fatalf("the session's registry is %v, want none", runtime.Registry)
+	}
+	var eager *poo.Profile
+	for i := range runtime.Profiles {
+		if runtime.Profiles[i].Name == "eager" {
+			eager = &runtime.Profiles[i]
+		}
+	}
+	if eager == nil {
+		t.Fatal("the listing holds no eager profile")
+	}
+	for _, tool := range eager.Tools {
+		if tool.Name == "call_tool" || tool.Name == "find_tool" {
+			t.Errorf("the eager profile's listing offers %s, and the manifests its word selects do not load", tool.Name)
+		}
+	}
+}
