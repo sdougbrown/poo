@@ -431,9 +431,11 @@ change permission rules or sandbox the remaining tools.
 `prompt_file` accepts an absolute path or a path relative to the settings
 file. Poo reads it when opening a new session, not when listing profiles.
 It replaces the `profile` section without replacing the base or tool
-instructions. An explicit `system_prompt` replacement, or a setting that
-sets or removes the `profile` section, takes precedence. A resumed
-session uses its recorded prompt once it has run.
+instructions. `prompt_append` composes instead: its text rides after the
+prose already there — the linked base's own, or the file's when the
+profile names both. An explicit `system_prompt` replacement, or a
+setting that sets or removes the `profile` section, takes precedence
+over both. A resumed session uses its recorded prompt once it has run.
 
 `feeds` names the feeds the profile needs, by manifest name:
 

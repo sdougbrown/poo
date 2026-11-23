@@ -295,8 +295,14 @@ type ProfileSettings struct {
 	FeedsDefaults *bool `json:"feeds_defaults,omitempty"`
 	// RegistryDefaults says the same of the default cli-registry
 	// directory, against the settings' cli_registry.defaults.
-	RegistryDefaults *bool        `json:"cli_registry_defaults,omitempty"`
-	Tools            ProfileTools `json:"tools,omitempty"`
+	RegistryDefaults *bool `json:"cli_registry_defaults,omitempty"`
+	// PromptAppend is the text the profile appends to the profile
+	// section, after the prose already there: the linked base's own, or
+	// the file's when the profile also names a prompt file. The section
+	// an explicit system_prompt setting owns is left alone, the way the
+	// prompt file is.
+	PromptAppend string       `json:"prompt_append,omitempty"`
+	Tools        ProfileTools `json:"tools,omitempty"`
 }
 
 type ProfileTools struct {

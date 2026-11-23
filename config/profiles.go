@@ -65,29 +65,53 @@ func (r *Runtime) disabledTools(name string) []string {
 	return append(slices.Clone(r.Settings.Tools.Disabled), local...)
 }
 
-func (r *Runtime) profilePromptFile() string {
+// profileSectionOwned reports whether an explicit system_prompt setting
+// owns the profile section: a replacement, a section the settings set
+// themselves, or one they removed. A section the settings own is not
+// one a profile's file or append may touch.
+func (r *Runtime) profileSectionOwned() bool {
 	settings := r.Settings.SystemPrompt
 	if _, overridden := settings.Sections[prompt.ProfileSection]; overridden ||
 		settings.Replace != "" || slices.Contains(settings.Remove, prompt.ProfileSection) {
-		return ""
+		return true
 	}
+	return false
+}
+
+// profilePromptFile is the prompt file the session's profile names, or
+// empty when it names none. The ownership gate is profilePrompt's: the
+// file is one of the sources its early return governs.
+func (r *Runtime) profilePromptFile() string {
 	return r.Settings.Profiles[r.Profile.Name].PromptFile
 }
 
-func (r *Runtime) profilePrompt() (func(*prompt.Builder), error) {
-	path := r.profilePromptFile()
-	if path == "" {
+// profilePrompt returns the edits a new session's profile section
+// carries: the file's text in place of the section, and the append's
+// text after whatever the section holds. Both compose with the linked
+// base's own prose, which the build set earlier. A section an explicit
+// system_prompt setting owns is left alone: the gate's early return
+// governs both sources.
+func (r *Runtime) profilePrompt() ([]func(*prompt.Builder), error) {
+	if r.profileSectionOwned() {
 		return nil, nil
 	}
-	text, err := os.ReadFile(path)
-	if err != nil {
-		return nil, &Error{Code: CodeInvalid, Field: "profiles." + r.Profile.Name + ".prompt_file", Err: err}
+	var edits []func(*prompt.Builder)
+	if path := r.profilePromptFile(); path != "" {
+		text, err := os.ReadFile(path)
+		if err != nil {
+			return nil, &Error{Code: CodeInvalid, Field: "profiles." + r.Profile.Name + ".prompt_file", Err: err}
+		}
+		edits = append(edits, func(b *prompt.Builder) { b.Set(prompt.ProfileSection, string(text)) })
 	}
-	return func(b *prompt.Builder) { b.Set(prompt.ProfileSection, string(text)) }, nil
+	if text := r.Settings.Profiles[r.Profile.Name].PromptAppend; text != "" {
+		edits = append(edits, func(b *prompt.Builder) { b.Append(prompt.ProfileSection, text) })
+	}
+	return edits, nil
 }
 
 // SessionPrompt reads the prompt sections that belong to a new session rather
-// than to the shared runtime.
+// than to the shared runtime. The sources that hold nothing contribute no
+// edit: the composition appends each source's edits to one slice.
 func (r *Runtime) SessionPrompt(dir string) ([]func(*prompt.Builder), error) {
 	role, err := r.profilePrompt()
 	if err != nil {
@@ -97,11 +121,9 @@ func (r *Runtime) SessionPrompt(dir string) ([]func(*prompt.Builder), error) {
 	if err != nil {
 		return nil, err
 	}
-	var edits []func(*prompt.Builder)
-	for _, edit := range []func(*prompt.Builder){role, project} {
-		if edit != nil {
-			edits = append(edits, edit)
-		}
+	edits := append([]func(*prompt.Builder){}, role...)
+	if project != nil {
+		edits = append(edits, project)
 	}
 	return edits, nil
 }
