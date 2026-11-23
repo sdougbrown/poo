@@ -2137,7 +2137,7 @@ func TestADisabledRegistryToolIsNotOffered(t *testing.T) {
 }
 
 // TestADisabledSideEffectingToolEarnsNoRegistryTool covers the order the
-// registry joins in: a registered CLI can change anything, so it comes
+// registry joins in: a registered tool can change anything, so it comes
 // with a profile that already offers a side-effecting tool. A profile
 // whose only such tool the settings disable has none left, and earns no
 // call_tool.

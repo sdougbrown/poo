@@ -1,11 +1,10 @@
-// Package cliregistry offers the registered command-line tools to the
-// model.
+// Package cliregistry offers the registered tools to the model.
 //
 // The catalog itself lives in poo/cli: it loads the manifests, compiles
 // the argument schemas and renders the prompt's section. This package
 // holds the two tools over it:
 //
-//   - call_tool runs one registered CLI, naming it and passing its
+//   - call_tool runs one registered tool, naming it and passing its
 //     arguments. It is side-effecting, so it goes through the permission
 //     policy like any command.
 //   - find_tool searches a large catalog with a decision model, because a
@@ -13,14 +12,14 @@
 //
 // # Execution
 //
-// A registered CLI runs where bash runs. cli-registry's Plan validates an
+// A registered tool runs where bash runs. cli-registry's Plan validates an
 // argument object and builds the command without touching a process, and
 // poo runs the plan through the session's executor: the sandbox the
 // settings name, with the protected paths it masks, in the session's
 // working directory, with an environment resolved against the session's
 // scrubbed one — a manifest's session:id resolving to the session's own
 // ID — and under the run's context, so an interrupt, a cancel or a
-// close stops the CLI and everything it started.
+// close stops the tool and everything it started.
 //
 // The plan's own timeout is poo's to enforce, and the call shows the
 // model the same observation bash shows it: the two streams, the exit
@@ -32,7 +31,7 @@
 // # Validation
 //
 // What the arguments may be is the library's to decide, and poo adds no
-// rule of its own: Plan refuses a value that does not fit the CLI's
+// rule of its own: Plan refuses a value that does not fit the tool's
 // schema, and a dash-leading value a separate-value binding would put
 // where the command parses options. Both come back as a *ValidationError,
 // which poo reports as an invalid call before any process exists. A value
@@ -50,15 +49,15 @@ import (
 // without linking the tools over it, and the names below keep the
 // tools' API whole.
 type (
-	// Catalog is the set of registered CLIs a session offers.
+	// Catalog is the set of registered tools a session offers.
 	Catalog = cli.Catalog
-	// Entry is one registered CLI.
+	// Entry is one registered tool.
 	Entry = cli.Entry
 )
 
 // The names the catalog and its tools answer to.
 const (
-	// CallToolName is the name of the tool that runs a registered CLI.
+	// CallToolName is the name of the tool that runs a catalog entry.
 	CallToolName = cli.CallToolName
 	// FindToolName is the name of the tool that searches the catalog.
 	FindToolName = cli.FindToolName
@@ -74,9 +73,9 @@ const (
 // catalog.
 func Load(paths ...string) (*Catalog, error) { return cli.Load(paths...) }
 
-// GeneratedToolset is the seam for the deferred per-CLI tool shape.
+// GeneratedToolset is the seam for the deferred one-tool-per-entry shape.
 //
-// A later version may offer every registered CLI as a tool of its own,
+// A later version may offer every registered tool as a tool of its own,
 // generated from its manifest: the model would see each one in the tool
 // list, with its arguments as that tool's schema. It is deferred until an
 // eval shows the model ignoring the catalog.
@@ -84,6 +83,6 @@ func Load(paths ...string) (*Catalog, error) { return cli.Load(paths...) }
 // Nothing implements it. It is the boundary the shape plugs into, so the
 // catalog and the tools over it stay one adapter.
 type GeneratedToolset interface {
-	// Tools returns one tool per registered CLI, in name order.
+	// Tools returns one tool per catalog entry, in name order.
 	Tools() []poo.Tool
 }

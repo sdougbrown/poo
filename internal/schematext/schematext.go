@@ -1,7 +1,7 @@
 // Package schematext renders a tool's schema findings for the model.
 //
 // Two layers refuse a call that misses its schema: the session's own
-// check, and a registered CLI's check of its manifest. Both hand the
+// check, and a registered tool's check of its manifest. Both hand the
 // model the same kind of refusal, so both render through one renderer.
 // The vocabulary is the schema the call missed: the accepted argument
 // names, an enum's values, a bound's limit.

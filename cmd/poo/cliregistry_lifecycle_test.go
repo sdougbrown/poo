@@ -17,7 +17,7 @@ import (
 const prSetChildSubreaper = 36
 
 // TestARunReapsTheCLIsChildren covers the end-to-end lifetime: a
-// registered CLI that leaves a child in its own process group leaves
+// registered tool that leaves a child in its own process group leaves
 // nothing behind when the run returns, in either mode of the one-shot's
 // job handling.
 func TestARunReapsTheCLIsChildren(t *testing.T) {
@@ -31,7 +31,7 @@ func TestARunReapsTheCLIsChildren(t *testing.T) {
 			dir := t.TempDir()
 			pidPath := filepath.Join(dir, "pid")
 			manifest := map[string]any{"version": 1, "tools": map[string]any{"probe": map[string]any{
-				"description": "A CLI with a same-group child",
+				"description": "A tool with a same-group child",
 				"command": []string{"/bin/sh", "-c",
 					`sleep 30 </dev/null >/dev/null 2>&1 & echo $! > "$1"; printf parent-done`, "probe", pidPath},
 				"inputSchema": map[string]any{
@@ -79,7 +79,7 @@ func TestARunReapsTheCLIsChildren(t *testing.T) {
 
 			data, err := os.ReadFile(pidPath)
 			if err != nil {
-				t.Fatalf("the CLI's child recorded no pid: %v", err)
+				t.Fatalf("the tool's child recorded no pid: %v", err)
 			}
 			pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
 			if err != nil {
@@ -91,7 +91,7 @@ func TestARunReapsTheCLIsChildren(t *testing.T) {
 				_, _ = syscall.Wait4(pid, &status, 0, nil)
 			}()
 			if !reaped(pid, 5*time.Second) {
-				t.Fatalf("the run returned and left the CLI's child (pid %d) running", pid)
+				t.Fatalf("the run returned and left the tool's child (pid %d) running", pid)
 			}
 		})
 	}

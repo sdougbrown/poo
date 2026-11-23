@@ -49,7 +49,7 @@ roles:
   decider: test-model
 `
 
-// registryEntry is one registered CLI. The commands are the registry's own
+// registryEntry is one registered tool. The commands are the registry's own
 // business: no case calls one.
 func registryEntry(description string) map[string]any {
 	return map[string]any{
@@ -303,7 +303,7 @@ func TestAReadOnlyProfileStaysReadOnly(t *testing.T) {
 	if hasTool(offered["search"], "call_tool") {
 		t.Errorf("the search profile offers %v", offered["search"])
 	}
-	// A session that cannot call a registered CLI says nothing about the
+	// A session that cannot call a registered tool says nothing about the
 	// catalog.
 	if text := poo.PromptBuilder(runtime.Options).Render(); strings.Contains(text, "deploy: The deploy command") {
 		t.Errorf("the prompt lists a catalog the session cannot call: %q", text)
@@ -353,7 +353,7 @@ func TestAResumedSessionKeepsOneCatalog(t *testing.T) {
 		t.Fatalf("resuming the session: %v", err)
 	}
 	defer resumed.Session.Close()
-	if got := strings.Count(resumed.Session.PromptState().Text, "Registered CLIs:"); got != 1 {
+	if got := strings.Count(resumed.Session.PromptState().Text, "Registered tools:"); got != 1 {
 		t.Errorf("the resumed prompt carries the catalog %d times, want once", got)
 	}
 }
@@ -376,7 +376,7 @@ func TestTheOperatorsCatalogSectionWins(t *testing.T) {
 	if !strings.Contains(text, "the operator's own catalog") {
 		t.Error("the prompt does not carry the operator's catalog section")
 	}
-	if strings.Contains(text, "Registered CLIs:") {
+	if strings.Contains(text, "Registered tools:") {
 		t.Error("the prompt carries the automatic catalog too")
 	}
 }
@@ -410,7 +410,7 @@ func TestTheFindThresholdIsThirtyEntries(t *testing.T) {
 			if listed := strings.Contains(text, "entry-000:"); listed == tt.search {
 				t.Errorf("the prompt lists the catalog: %v, and the session searches it: %v", listed, tt.search)
 			}
-			if got := strings.Count(text, "Registered CLIs:"); got != 1 {
+			if got := strings.Count(text, "Registered tools:"); got != 1 {
 				t.Errorf("the prompt carries the catalog %d times, want once", got)
 			}
 		})
@@ -577,7 +577,7 @@ func TestARegistryWithoutCallCLIIsRefused(t *testing.T) {
 func TestAPromptDirectoriesCatalogFollowsTheSession(t *testing.T) {
 	dir := registry(t, "deploy")
 	prompts := fstest.MapFS{
-		"catalog.md": {Data: []byte("Call {{.Call}} with the registered CLIs.\n")},
+		"catalog.md": {Data: []byte("Call {{.Call}} with the registered tools.\n")},
 	}
 	buildPrompt := func(body string, readonly bool) *config.Runtime {
 		t.Helper()
@@ -605,7 +605,7 @@ func TestAPromptDirectoriesCatalogFollowsTheSession(t *testing.T) {
 	}
 
 	code := buildPrompt(registrySettings(dir), false)
-	if text := poo.PromptBuilder(code.Options).Render(); !strings.Contains(text, "Call call_tool with the registered CLIs.") {
+	if text := poo.PromptBuilder(code.Options).Render(); !strings.Contains(text, "Call call_tool with the registered tools.") {
 		t.Errorf("the code session's prompt does not carry the directory's catalog: %q", text)
 	}
 
@@ -614,7 +614,7 @@ func TestAPromptDirectoriesCatalogFollowsTheSession(t *testing.T) {
 	if strings.Contains(text, "Call call_tool") {
 		t.Errorf("the read-only session's prompt carries the directory's catalog: %q", text)
 	}
-	if strings.Contains(text, "Registered CLIs:") {
+	if strings.Contains(text, "Registered tools:") {
 		t.Errorf("the read-only session's prompt carries the embedded catalog: %q", text)
 	}
 }
@@ -626,7 +626,7 @@ func TestAPromptDirectoriesCatalogFollowsTheSession(t *testing.T) {
 // renders nothing.
 func TestAPromptDirectoriesCatalogLoadsWithoutARegistry(t *testing.T) {
 	prompts := fstest.MapFS{
-		"catalog.md": {Data: []byte("Call {{.Call}} with the registered CLIs.\n")},
+		"catalog.md": {Data: []byte("Call {{.Call}} with the registered tools.\n")},
 	}
 	buildPrompt := func(t *testing.T, tools map[string]config.ToolFactory, profileName string, profiles []profile.Profile) (*config.Runtime, error) {
 		t.Helper()
@@ -651,7 +651,7 @@ func TestAPromptDirectoriesCatalogLoadsWithoutARegistry(t *testing.T) {
 		t.Fatalf("a binary that links call_tool could not load catalog.md for a session naming no registry: %v", err)
 	}
 	text := poo.PromptBuilder(runtime.Options).Render()
-	if strings.Contains(text, "Call call_tool") || strings.Contains(text, "Registered CLIs:") {
+	if strings.Contains(text, "Call call_tool") || strings.Contains(text, "Registered tools:") {
 		t.Errorf("a session that offers no catalog renders one: %q", text)
 	}
 
@@ -968,7 +968,7 @@ func TestAReadOnlyProfileIsOfferedTheEntriesItsRulesLeave(t *testing.T) {
 }
 
 // TestARegistryThatGatesNothingStaysClosedToAReadOnlyProfile covers the
-// registry whose manifests declare no conditions: a registered CLI can change
+// registry whose manifests declare no conditions: a registered tool can change
 // anything, so a profile with no side-effecting tool is offered none of them.
 func TestARegistryThatGatesNothingStaysClosedToAReadOnlyProfile(t *testing.T) {
 	dir := registry(t, "deploy")
@@ -1104,7 +1104,7 @@ func TestARegistryThatWithholdsEveryEntryIsOfferedWhole(t *testing.T) {
 	if hasTool(runtime.Options.ToolOrder, cliregistry.CallToolName) {
 		t.Errorf("the session offers %v, and the rules leave no entry", runtime.Options.ToolOrder)
 	}
-	if text := poo.PromptBuilder(runtime.Options).Render(); strings.Contains(text, "Registered CLIs:") {
+	if text := poo.PromptBuilder(runtime.Options).Render(); strings.Contains(text, "Registered tools:") {
 		t.Errorf("the prompt carries a catalog the rules emptied: %q", text)
 	}
 	// The build still holds the catalog the settings named.
@@ -1193,13 +1193,13 @@ func TestARegistryThatDeclaresTheConditionAsAnotherTypeIsRefused(t *testing.T) {
 	}
 }
 
-// TestTheBuildRefusesAnUnknownSessionReference covers the CLI manifest's
+// TestTheBuildRefusesAnUnknownSessionReference covers the tool manifest's
 // load-time validation, the same one a feed's gets: a session reference
-// the session scope does not carry fails the build naming the CLI,
+// the session scope does not carry fails the build naming the tool,
 // instead of failing every call at the model.
 func TestTheBuildRefusesAnUnknownSessionReference(t *testing.T) {
 	for _, value := range []string{"session:run_id", "session:"} {
-		entry := registryEntry("A CLI with a bad session reference.")
+		entry := registryEntry("A tool with a bad session reference.")
 		entry["env"] = map[string]string{"SESSION": value}
 		dir := writeRegistryDoc(t, map[string]any{"version": 1, "tools": map[string]any{"probe": entry}})
 		settings, err := config.Parse([]byte(registrySettings(dir)), config.FormatYAML)
@@ -1219,7 +1219,7 @@ func TestTheBuildRefusesAnUnknownSessionReference(t *testing.T) {
 			continue
 		}
 		if !strings.Contains(err.Error(), `"probe"`) || !strings.Contains(err.Error(), value) {
-			t.Errorf("the failure %v does not name the CLI and the reference", err)
+			t.Errorf("the failure %v does not name the tool and the reference", err)
 		}
 	}
 }

@@ -37,7 +37,7 @@ func sandboxExecutors() *bash.Registry {
 	return registry
 }
 
-// registryFile writes a registry with one CLI and returns the directory
+// registryFile writes a registry with one tool and returns the directory
 // that holds it.
 func registryFile(t *testing.T, body map[string]any) string {
 	t.Helper()
@@ -76,14 +76,14 @@ func callCLI(t *testing.T, runtime *config.Runtime) poo.ToolResult {
 		Settings: runtime.Options.Settings,
 	})
 	if err != nil {
-		t.Fatalf("running the CLI: %v", err)
+		t.Fatalf("running the tool: %v", err)
 	}
 	return res
 }
 
 // TestTheSandboxProtectsALiteralFile covers the protection the settings
 // name as one file: the session's own matcher expands to it, and the
-// sandboxed CLI cannot read it. Protecting the directory it sits in is
+// sandboxed tool cannot read it. Protecting the directory it sits in is
 // not enough to cover the file.
 func TestTheSandboxProtectsALiteralFile(t *testing.T) {
 	dir := t.TempDir()
@@ -115,7 +115,7 @@ cli_registry:
 
 	res := callCLI(t, runtime)
 	if strings.Contains(res.Text, "synthetic-protected-file-content") {
-		t.Errorf("the sandboxed CLI read the protected file: %s", res.Text)
+		t.Errorf("the sandboxed tool read the protected file: %s", res.Text)
 	}
 }
 
@@ -155,10 +155,10 @@ cli_registry:
 
 	res := callCLI(t, runtime)
 	if !strings.Contains(res.Text, dir) {
-		t.Errorf("the CLI did not run in the session's directory: %s", res.Text)
+		t.Errorf("the tool did not run in the session's directory: %s", res.Text)
 	}
 	if strings.Contains(res.Text, "protected content") {
-		t.Errorf("the CLI read a protected path: %s", res.Text)
+		t.Errorf("the tool read a protected path: %s", res.Text)
 	}
 }
 
@@ -308,16 +308,16 @@ func TestTheStdinBindingFeedsTheCLIExactly(t *testing.T) {
 			t.Run(tt.name, func(t *testing.T) {
 				res, err := callProbe(t, runtime, probeArgs(t, messageArg(tt.message)))
 				if err != nil {
-					t.Fatalf("running the CLI: %v", err)
+					t.Fatalf("running the tool: %v", err)
 				}
 				if res.IsError {
-					t.Errorf("the CLI failed: %s", res.Text)
+					t.Errorf("the tool failed: %s", res.Text)
 				}
 				if got := probeOutput(t, res); got != tt.message {
-					t.Errorf("the CLI read %q, want %q", got, tt.message)
+					t.Errorf("the tool read %q, want %q", got, tt.message)
 				}
 				if code := probeObservation(t, res)[bash.EnvelopeReturncode]; code != float64(0) {
-					t.Errorf("the CLI exited with %v, want 0", code)
+					t.Errorf("the tool exited with %v, want 0", code)
 				}
 			})
 		}
@@ -330,18 +330,18 @@ func TestTheStdinFlagIsTheOnlyArgvElement(t *testing.T) {
 		runtime := stdinRuntime(t, executor, body)
 		res, err := callProbe(t, runtime, probeArgs(t, messageArg(stdinMessage)))
 		if err != nil {
-			t.Fatalf("running the CLI: %v", err)
+			t.Fatalf("running the tool: %v", err)
 		}
 		output := probeOutput(t, res)
 		argv, stdin, ok := strings.Cut(output, "\n")
 		if !ok {
-			t.Fatalf("the CLI wrote %q, want its arguments and then its stdin", output)
+			t.Fatalf("the tool wrote %q, want its arguments and then its stdin", output)
 		}
 		if argv != "argv[--message-stdin]" {
-			t.Errorf("the CLI's arguments are %q, want the flag alone", argv)
+			t.Errorf("the tool's arguments are %q, want the flag alone", argv)
 		}
 		if stdin != stdinMessage {
-			t.Errorf("the CLI read %q, want %q", stdin, stdinMessage)
+			t.Errorf("the tool read %q, want %q", stdin, stdinMessage)
 		}
 	})
 }
@@ -362,16 +362,16 @@ func TestAnAbsentMessageOmitsTheFlagAndAnEmptyOneKeepsIt(t *testing.T) {
 			t.Run(tt.name, func(t *testing.T) {
 				res, err := callProbe(t, runtime, tt.args)
 				if err != nil {
-					t.Fatalf("running the CLI: %v", err)
+					t.Fatalf("running the tool: %v", err)
 				}
 				if res.IsError {
-					t.Errorf("the CLI failed: %s", res.Text)
+					t.Errorf("the tool failed: %s", res.Text)
 				}
 				if got := probeOutput(t, res); got != tt.want {
-					t.Errorf("the CLI wrote %q, want %q", got, tt.want)
+					t.Errorf("the tool wrote %q, want %q", got, tt.want)
 				}
 				if timedOut := probeObservation(t, res)[bash.EnvelopeTimedOut]; timedOut != false {
-					t.Errorf("the CLI timed out waiting for input it should not have: %v", timedOut)
+					t.Errorf("the tool timed out waiting for input it should not have: %v", timedOut)
 				}
 			})
 		}
@@ -384,37 +384,37 @@ func TestTheCLIReadsTheMessageAndThenEOF(t *testing.T) {
 		runtime := stdinRuntime(t, executor, body)
 		res, err := callProbe(t, runtime, probeArgs(t, messageArg(stdinMessage)))
 		if err != nil {
-			t.Fatalf("running the CLI: %v", err)
+			t.Fatalf("running the tool: %v", err)
 		}
 		if got, want := probeOutput(t, res), stdinMessage+"<eof>"; got != want {
-			t.Errorf("the CLI read %q, want %q", got, want)
+			t.Errorf("the tool read %q, want %q", got, want)
 		}
 		if timedOut := probeObservation(t, res)[bash.EnvelopeTimedOut]; timedOut != false {
-			t.Errorf("the CLI timed out waiting for EOF: %v", timedOut)
+			t.Errorf("the tool timed out waiting for EOF: %v", timedOut)
 		}
 	})
 }
 
 func TestAStdinBoundCLIKeepsItsFailureObservation(t *testing.T) {
 	forEachExecutor(t, func(t *testing.T, executor string) {
-		body := stdinProbe([]string{"/bin/sh", "-c", `cat; printf 'the CLI failed' >&2; exit 3`}, nil)
+		body := stdinProbe([]string{"/bin/sh", "-c", `cat; printf 'the tool failed' >&2; exit 3`}, nil)
 		runtime := stdinRuntime(t, executor, body)
 		res, err := callProbe(t, runtime, probeArgs(t, messageArg(stdinMessage)))
 		if err != nil {
-			t.Fatalf("running the CLI: %v", err)
+			t.Fatalf("running the tool: %v", err)
 		}
 		if !res.IsError {
-			t.Errorf("a failed CLI was not reported as an error: %s", res.Text)
+			t.Errorf("a failed tool was not reported as an error: %s", res.Text)
 		}
 		obs := probeObservation(t, res)
 		if got, want := obs[bash.EnvelopeReturncode], float64(3); got != want {
-			t.Errorf("the CLI exited with %v, want %v", got, want)
+			t.Errorf("the tool exited with %v, want %v", got, want)
 		}
 		if got, want := obs[bash.EnvelopeOutput], stdinMessage; got != want {
-			t.Errorf("the CLI read %q, want %q", got, want)
+			t.Errorf("the tool read %q, want %q", got, want)
 		}
-		if got, want := obs[bash.EnvelopeStderr], "the CLI failed"; got != want {
-			t.Errorf("the CLI's stderr is %q, want %q", got, want)
+		if got, want := obs[bash.EnvelopeStderr], "the tool failed"; got != want {
+			t.Errorf("the tool's stderr is %q, want %q", got, want)
 		}
 	})
 }
@@ -425,17 +425,17 @@ func TestFailedCLIReportsItsExitWhenStdinIsIncomplete(t *testing.T) {
 		runtime := stdinRuntime(t, executor, body)
 		res, err := callProbe(t, runtime, probeArgs(t, messageArg(strings.Repeat("x", 1<<20))))
 		if err != nil {
-			t.Fatalf("running the CLI: %v", err)
+			t.Fatalf("running the tool: %v", err)
 		}
 		obs := probeObservation(t, res)
 		if !res.IsError {
-			t.Fatalf("a failed CLI was not reported as an error: %s", res.Text)
+			t.Fatalf("a failed tool was not reported as an error: %s", res.Text)
 		}
 		if got, want := obs[bash.EnvelopeReturncode], float64(3); got != want {
-			t.Fatalf("the CLI exited with %v, want %v", got, want)
+			t.Fatalf("the tool exited with %v, want %v", got, want)
 		}
 		if got, want := obs[bash.EnvelopeStderr], "failed"; got != want {
-			t.Fatalf("the CLI's stderr is %q, want %q", got, want)
+			t.Fatalf("the tool's stderr is %q, want %q", got, want)
 		}
 	})
 }
@@ -506,15 +506,15 @@ func TestACancelledRunStopsAStdinBoundCLI(t *testing.T) {
 				break
 			} else if !errors.Is(err, os.ErrNotExist) {
 				stop()
-				t.Fatalf("checking the CLI's readiness marker: %v", err)
+				t.Fatalf("checking the tool's readiness marker: %v", err)
 			}
 			if time.Now().After(deadline) {
 				stop()
-				t.Fatalf("the CLI did not signal that it was running within %v", readiness)
+				t.Fatalf("the tool did not signal that it was running within %v", readiness)
 			}
 			select {
 			case r := <-result:
-				t.Fatalf("the CLI returned before it signalled readiness: res=%v err=%v", r.res, r.err)
+				t.Fatalf("the tool returned before it signalled readiness: res=%v err=%v", r.res, r.err)
 			case <-time.After(10 * time.Millisecond):
 			}
 		}
@@ -522,7 +522,7 @@ func TestACancelledRunStopsAStdinBoundCLI(t *testing.T) {
 		cancelledAt := time.Now()
 		r := stop()
 		if r.err != nil {
-			t.Fatalf("running the CLI: %v", r.err)
+			t.Fatalf("running the tool: %v", r.err)
 		}
 		if elapsed := time.Since(cancelledAt); elapsed > 8*time.Second {
 			t.Errorf("the cancelled call took %v to return", elapsed)
@@ -532,7 +532,7 @@ func TestACancelledRunStopsAStdinBoundCLI(t *testing.T) {
 		}
 		obs := probeObservation(t, r.res)
 		if code := obs[bash.EnvelopeReturncode]; code != nil {
-			t.Errorf("a stopped CLI has exit status %v, want null", code)
+			t.Errorf("a stopped tool has exit status %v, want null", code)
 		}
 		if timedOut := obs[bash.EnvelopeTimedOut]; timedOut != false {
 			t.Errorf("a cancelled call was reported as a timeout: %v", timedOut)
@@ -546,7 +546,7 @@ func TestAManifestTimeoutStopsAStdinBoundCLI(t *testing.T) {
 		runtime := stdinRuntime(t, executor, body)
 		res, err := callProbe(t, runtime, probeArgs(t, messageArg(strings.Repeat("x", 1<<20))))
 		if err != nil {
-			t.Fatalf("running the CLI: %v", err)
+			t.Fatalf("running the tool: %v", err)
 		}
 		obs := probeObservation(t, res)
 		if !res.IsError || obs[bash.EnvelopeTimedOut] != true || obs[bash.EnvelopeReturncode] != nil {

@@ -61,7 +61,7 @@ func runServeWithPermission(t *testing.T, permission string) (int, string) {
 }
 
 // withEmptyStdin replaces the process stdin with the null device for
-// the test's duration, so a CLI that reads stdin reads nothing.
+// the test's duration, so a tool that reads stdin reads nothing.
 func withEmptyStdin(t *testing.T) {
 	t.Helper()
 	stdin := os.Stdin

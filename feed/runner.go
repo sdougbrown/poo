@@ -87,7 +87,7 @@ type Image struct {
 // The command's stderr is the runner's diagnostics: it goes to the
 // attempt's log, never to the model, and never into an input.
 //
-// The environment follows a registered CLI's rules: the benign names,
+// The environment follows a registered tool's rules: the benign names,
 // then the manifest's own entries, resolved through env. An `env:NAME`
 // reference resolves against the session's scrubbed environment, and a
 // `session:id` reference resolves through the session the caller hands

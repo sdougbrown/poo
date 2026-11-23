@@ -21,7 +21,7 @@ func TestTheCatalogHoldsBothCLIs(t *testing.T) {
 	}
 	entry, ok := catalog.Lookup("say")
 	if !ok {
-		t.Fatal("the catalog does not know the say CLI")
+		t.Fatal("the catalog does not know the say tool")
 	}
 	if entry.Description != "Say hello to a name" {
 		t.Errorf("the say entry says %q", entry.Description)
@@ -30,7 +30,7 @@ func TestTheCatalogHoldsBothCLIs(t *testing.T) {
 		t.Error("the say entry has no argument schema")
 	}
 	if _, ok := catalog.Lookup("nope"); ok {
-		t.Error("the catalog knows a CLI it was not given")
+		t.Error("the catalog knows a tool it was not given")
 	}
 }
 

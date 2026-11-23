@@ -75,7 +75,7 @@ func ScrubEnv(base []string, scrub Scrub) []string {
 
 // Lookup returns a lookup over an environment's NAME=value entries.
 //
-// A feed's or a CLI's environment references are resolved through it,
+// A feed's or a tool's environment references are resolved through it,
 // so a name the environment does not hold is one the reference cannot
 // have. A nil environment means the host's own, the way it does for a
 // child that inherits one.
@@ -115,7 +115,7 @@ func ValidSessionReference(scope, name string) error {
 // SessionScope returns the resolver for a command's session references.
 //
 // A manifest's `session:id` reference resolves through it at the feed's
-// launch or the CLI's call, never when the settings load. The value it
+// launch or the tool's call, never when the settings load. The value it
 // returns is the session's own ID, and a restored session answers with
 // the same one. The ID is the caller's, so nothing the command says or
 // does can change it. A reference to any other name fails: `id` is the

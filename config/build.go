@@ -363,7 +363,7 @@ type ToolFactory func(ToolOptions) poo.Tool
 // ToolOptions are the settings' options for the tools.
 type ToolOptions struct {
 	// Executor is the executor the tools that run a command use:
-	// bash, and the registered CLIs.
+	// bash, and the registered tools.
 	Executor exec.Executor
 	// Scrub is the rules for the child environment.
 	Scrub exec.Scrub
@@ -543,7 +543,7 @@ func (r *Runtime) resolveProfile(opts BuildOptions) error {
 		}
 	}
 	// The registry is the settings' opt-in: a session whose settings name
-	// a registry offers its CLIs as well.
+	// a registry offers its tools as well.
 	if err := r.addRegistryTools(opts); err != nil {
 		return err
 	}
@@ -728,7 +728,7 @@ func (r *Runtime) resolveRegistry(opts BuildOptions, workingDir string) error {
 				return &Error{
 					Code:    CodeInvalid,
 					Field:   "cli_registry.paths",
-					Message: fmt.Sprintf("the CLI %q declares an unknown session reference", entry.Name),
+					Message: fmt.Sprintf("the tool %q declares an unknown session reference", entry.Name),
 					Err:     err,
 				}
 			}
@@ -1289,7 +1289,7 @@ func modalities(names []string) []poo.Modality {
 // resolveTools builds the tools the session offers.
 //
 // The tools are the ones the profile names. The tools that run a command
-// — bash and the registered CLIs — run it through the executor the
+// — bash and the registered tools — run it through the executor the
 // settings name, with the sandbox's options and the protected paths the
 // settings name. The child environment is the session's own, less the
 // names the settings scrub, the names the endpoints' credentials are read

@@ -43,7 +43,7 @@ func observation(t *testing.T, res poo.ToolResult) map[string]any {
 	return out
 }
 
-// markerLines returns how many times the say CLI recorded that it ran.
+// markerLines returns how many times the say tool recorded that it ran.
 func markerLines(t *testing.T, path string) int {
 	t.Helper()
 	data, err := os.ReadFile(path)
@@ -86,7 +86,7 @@ func TestCallRunsTheCLI(t *testing.T) {
 		t.Errorf("the output is %q, want the two words", output)
 	}
 
-	// A CLI that takes no arguments is called without the args
+	// A tool that takes no arguments is called without the args
 	// property: an omitted args is an empty object.
 	res = call(t, tool, `{"name":"list"}`, poo.ToolEnv{})
 	if res.IsError {
@@ -102,7 +102,7 @@ func TestAKilledCLIReportsNoReturncode(t *testing.T) {
 
 	res := call(t, tool, `{"name":"suicide","args":{}}`, poo.ToolEnv{})
 	if !res.IsError {
-		t.Errorf("a CLI that died by a signal is not an error: %q", res.Text)
+		t.Errorf("a tool that died by a signal is not an error: %q", res.Text)
 	}
 	obs := observation(t, res)
 	code, ok := obs[bash.EnvelopeReturncode]
@@ -114,7 +114,7 @@ func TestAKilledCLIReportsNoReturncode(t *testing.T) {
 	}
 }
 
-// suicideManifest writes a registry with one CLI that dies by a signal.
+// suicideManifest writes a registry with one tool that dies by a signal.
 func suicideManifest(t *testing.T) string {
 	t.Helper()
 	return writeManifest(t, t.TempDir(), "suicide.json", map[string]any{
@@ -152,7 +152,7 @@ func TestCallReportsAFailedExit(t *testing.T) {
 
 // TestPrepareRefusesBadArgumentsBeforeAnyProcess covers decode before
 // exec: a name that is not in the catalog and arguments that do not fit
-// the CLI's schema are refused in Prepare, and the fixture's record shows
+// the tool's schema are refused in Prepare, and the fixture's record shows
 // that nothing ran.
 func TestPrepareRefusesBadArgumentsBeforeAnyProcess(t *testing.T) {
 	catalog := fixtureCatalog(t)
@@ -218,7 +218,7 @@ func TestTheObservationIsElided(t *testing.T) {
 	}
 }
 
-// floodManifest writes a registry with one CLI that prints a long output.
+// floodManifest writes a registry with one tool that prints a long output.
 func floodManifest(t *testing.T) string {
 	t.Helper()
 	return writeManifest(t, t.TempDir(), "flood.json", map[string]any{

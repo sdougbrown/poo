@@ -8,7 +8,7 @@ import (
 )
 
 // TestTheCallToolTakesBackgroundJobs pins the opt-in: call_tool is a
-// background-capable tool the way bash is, so a registered CLI the
+// background-capable tool the way bash is, so a registered tool the
 // model wants off the critical path becomes a job.
 func TestTheCallToolTakesBackgroundJobs(t *testing.T) {
 	catalog := fixtureCatalog(t)

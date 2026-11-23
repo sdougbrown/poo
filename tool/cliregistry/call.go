@@ -21,30 +21,30 @@ import (
 	"github.com/sdougbrown/poo/tool/bash"
 )
 
-// CallTool runs one registered CLI.
+// CallTool runs one registered tool.
 //
 // The call is side-effecting: an arbitrary command can change anything,
 // so the permission policy decides about it the way it decides about
 // bash.
 type CallTool struct {
-	// catalog is the set of CLIs the tool may call.
+	// catalog is the set of tools the call may run.
 	catalog *Catalog
 	// search reports that the session offers find_tool over the
 	// catalog, so an unknown name can point at the search.
 	search bool
-	// executor runs the CLI. Nil means the local executor, the way it
+	// executor runs the tool. Nil means the local executor, the way it
 	// does for bash.
 	executor exec.Executor
 }
 
-// NewCall returns the tool that runs a registered CLI.
+// NewCall returns the tool that runs a catalog entry.
 func NewCall(catalog *Catalog) *CallTool {
 	return &CallTool{catalog: catalog}
 }
 
 // WithExecutor gives the tool the executor its commands run through.
 //
-// It is the executor bash uses, so a registered CLI runs in the same
+// It is the executor bash uses, so a registered tool runs in the same
 // place and under the same process rules as a shell command.
 func (t *CallTool) WithExecutor(e exec.Executor) *CallTool {
 	t.executor = e
@@ -64,7 +64,7 @@ func (t *CallTool) WithSearch(search bool) *CallTool {
 func (t *CallTool) Spec() poo.ToolSpec {
 	return poo.ToolSpec{
 		Name:        CallToolName,
-		Description: "Run one of the registered command-line tools and return its output.",
+		Description: "Run one of the registered tools and return its output.",
 		Schema: json.RawMessage(`{
   "type": "object",
   "properties": {
@@ -75,7 +75,7 @@ func (t *CallTool) Spec() poo.ToolSpec {
 ,"additionalProperties":false}`),
 		Class:      poo.ClassSideEffecting,
 		PrimaryArg: "name",
-		// A registered CLI runs where bash runs, so it leaves the turn
+		// A registered tool runs where bash runs, so it leaves the turn
 		// the same way. Background true turns the call into a job, and
 		// the result arrives as a message.
 		Background: poo.BackgroundAllowed,
@@ -98,17 +98,17 @@ func (t *CallTool) PromptSection(env prompt.Env) string { return callSection.Ren
 
 // callArgs are the tool's arguments.
 type callArgs struct {
-	// Name is the registered CLI to run.
+	// Name is the registered tool to run.
 	Name string `json:"name"`
-	// Args are the CLI's arguments, as a JSON object.
+	// Args are the tool's arguments, as a JSON object.
 	Args json.RawMessage `json:"args,omitempty"`
 }
 
 // preparedCall is a validated call_tool call.
 type preparedCall struct {
-	// name is the registered CLI.
+	// name is the registered tool.
 	name string
-	// args are the CLI's arguments.
+	// args are the tool's arguments.
 	args map[string]any
 	// plan is the command the call runs.
 	plan *registry.Plan
@@ -130,7 +130,7 @@ func (p *preparedCall) EvidenceArguments() json.RawMessage { return p.key }
 // Prepare validates the arguments and plans the command.
 //
 // The name has to be in the catalog, and the arguments have to fit the
-// CLI's schema, including the library's rule about a value a
+// tool's schema, including the library's rule about a value a
 // separate-value binding would put where the command parses options.
 // Both are refused here, before a process exists, so a malformed call
 // never reaches a command and the model sees the reason instead of the
@@ -138,7 +138,7 @@ func (p *preparedCall) EvidenceArguments() json.RawMessage { return p.key }
 // environment is read and no process is started until Call.
 func (t *CallTool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, error) {
 	if t.catalog == nil {
-		return nil, poo.InvalidArgsf("%s: no CLI registry is configured", CallToolName)
+		return nil, poo.InvalidArgsf("%s: no cli registry is configured", CallToolName)
 	}
 	var a callArgs
 	if err := decodeStrict(raw, &a); err != nil {
@@ -147,14 +147,14 @@ func (t *CallTool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepare
 	entry, ok := t.catalog.Lookup(a.Name)
 	if !ok {
 		if t.catalog.Len() == 0 {
-			return nil, poo.InvalidArgsf("%s: no CLI is registered", CallToolName)
+			return nil, poo.InvalidArgsf("%s: no tool is registered", CallToolName)
 		}
-		return nil, poo.InvalidArgsf("%s: no CLI named %q; %s",
+		return nil, poo.InvalidArgsf("%s: no tool named %q; %s",
 			CallToolName, a.Name, t.catalog.NamesHint(t.search))
 	}
 	args := map[string]any{}
 	if len(a.Args) > 0 {
-		// An omitted args is an empty object, because a CLI that takes
+		// An omitted args is an empty object, because a tool that takes
 		// no arguments is called with the name alone. An explicit null
 		// is not the same thing: the property's type is an object.
 		if string(a.Args) == "null" {
@@ -175,7 +175,7 @@ func (t *CallTool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepare
 	return &preparedCall{name: a.Name, args: args, plan: plan, key: key}, nil
 }
 
-// planError reports a call the CLI's own definition refused.
+// planError reports a call the tool's own definition refused.
 //
 // A validation failure is the model's to correct, so it comes back as
 // an invalid call: the schema, and a value a separate-value binding
@@ -188,7 +188,7 @@ func planError(name string, schema map[string]any, err error) error {
 	if errors.As(err, &invalid) {
 		// The refusal is the model's to correct, so it renders in the
 		// schema's own vocabulary: the shared renderer, aimed at the
-		// CLI's schema.
+		// tool's schema.
 		return poo.InvalidArgsf("%s: %s: %s", CallToolName, name, schematext.IssuesText(name, schema, invalid.Issues))
 	}
 	return fmt.Errorf("%s: %s: %w", CallToolName, name, err)
@@ -201,10 +201,10 @@ func planError(name string, schema map[string]any, err error) error {
 // session's working directory unless the manifest fixes one, an
 // environment looked up in the session's scrubbed one with a manifest's
 // session:id resolving to the session's own ID, and the run's
-// context, so a cancelled run stops the CLI and everything it started.
+// context, so a cancelled run stops the tool and everything it started.
 //
-// The output is the CLI's stdout and stderr with its exit status, in the
-// envelope bash's observation uses. An exit outside the CLI's success
+// The output is the tool's stdout and stderr with its exit status, in the
+// envelope bash's observation uses. An exit outside the tool's success
 // codes and a timeout are recoverable failures: the model sees what the
 // command said and may try something else.
 func (t *CallTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.ToolResult, error) {
@@ -218,7 +218,7 @@ func (t *CallTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (
 
 	// A manifest's env:NAME is resolved against the session's scrubbed
 	// environment, never the host's: a name the scrub removed or the
-	// passthrough list left out is a reference the CLI cannot have. A
+	// passthrough list left out is a reference the tool cannot have. A
 	// manifest's session:id resolves to this call's session, at the
 	// call, never when the settings loaded.
 	environ, err := p.plan.ResolveEnvScoped(exec.Lookup(env.Env), exec.SessionScope(env.SessionID))
@@ -290,7 +290,7 @@ func (t *CallTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (
 		}
 	}
 
-	// A failed CLI's exit and diagnostics take precedence over an incomplete write.
+	// A failed tool's exit and diagnostics take precedence over an incomplete write.
 	res, err := p.plan.Finish(out)
 	if err != nil {
 		return failed(err, cap)
@@ -309,7 +309,7 @@ func (t *CallTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (
 	// the way the envelope does.
 	if res.Decoded != nil {
 		// The encoder keeps the bytes a Marshal would HTML-escape, so
-		// a value that holds & or < comes back as the CLI printed
+		// a value that holds & or < comes back as the tool printed
 		// it; it sorts map keys the way Marshal does.
 		var buf bytes.Buffer
 		enc := json.NewEncoder(&buf)
@@ -373,7 +373,7 @@ func stoppedResult(err error, out registry.Output, cap int) (poo.ToolResult, boo
 	return poo.ToolResult{}, false
 }
 
-// failed renders a completed run outside the CLI's success codes as an
+// failed renders a completed run outside the tool's success codes as an
 // observation.
 //
 // Such a run is recoverable: the model sees what the command said, on

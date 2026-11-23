@@ -25,7 +25,7 @@ import (
 	"github.com/sdougbrown/poo/tool/cliregistry"
 )
 
-// execTool loads a catalog with one CLI and returns the tool over it.
+// execTool loads a catalog with one tool and returns the tool over it.
 //
 // The manifest is the description, the command and the extra fields a
 // case names; the arguments are none, because these cases are about how a
@@ -33,7 +33,7 @@ import (
 func execTool(t *testing.T, command []string, extra map[string]any) *cliregistry.CallTool {
 	t.Helper()
 	body := map[string]any{
-		"description": "A fixture CLI",
+		"description": "A fixture tool",
 		"command":     command,
 		"inputSchema": map[string]any{
 			"type":                 "object",
@@ -93,7 +93,7 @@ func waitForPID(t *testing.T, path string) int {
 func gone(pid int) bool { return syscall.Kill(pid, 0) != nil }
 
 // TestTheCLIRunsInTheSessionDirectory covers the directory: a registered
-// CLI runs where every other tool runs, not wherever poo's own process
+// tool runs where every other tool runs, not wherever poo's own process
 // happens to be.
 func TestTheCLIRunsInTheSessionDirectory(t *testing.T) {
 	dir := t.TempDir()
@@ -101,11 +101,11 @@ func TestTheCLIRunsInTheSessionDirectory(t *testing.T) {
 
 	res, err := runCall(t, tool, poo.ToolEnv{PrepareEnv: poo.PrepareEnv{WorkingDir: dir}})
 	if err != nil {
-		t.Fatalf("running the CLI: %v", err)
+		t.Fatalf("running the tool: %v", err)
 	}
 	output, _ := observation(t, res)[bash.EnvelopeOutput].(string)
 	if output != dir+"\n" {
-		t.Errorf("the CLI ran in %q, want the session's %q", strings.TrimSpace(output), dir)
+		t.Errorf("the tool ran in %q, want the session's %q", strings.TrimSpace(output), dir)
 	}
 }
 
@@ -120,11 +120,11 @@ func TestTheManifestDirectoryWins(t *testing.T) {
 
 	res, err := runCall(t, tool, poo.ToolEnv{PrepareEnv: poo.PrepareEnv{WorkingDir: t.TempDir()}})
 	if err != nil {
-		t.Fatalf("running the CLI: %v", err)
+		t.Fatalf("running the tool: %v", err)
 	}
 	output, _ := observation(t, res)[bash.EnvelopeOutput].(string)
 	if output != dir+"\n" {
-		t.Errorf("the CLI ran in %q, want the manifest's %q", strings.TrimSpace(output), dir)
+		t.Errorf("the tool ran in %q, want the manifest's %q", strings.TrimSpace(output), dir)
 	}
 }
 
@@ -164,18 +164,18 @@ func TestAScrubbedVariableIsNotResolved(t *testing.T) {
 	t.Run("present", func(t *testing.T) {
 		res, err := runCall(t, tool, poo.ToolEnv{Env: os.Environ()})
 		if err != nil {
-			t.Fatalf("running the CLI: %v", err)
+			t.Fatalf("running the tool: %v", err)
 		}
 		output, _ := observation(t, res)[bash.EnvelopeOutput].(string)
 		if output != "not-a-secret\n" {
-			t.Errorf("the CLI printed %q, want the session's value", output)
+			t.Errorf("the tool printed %q, want the session's value", output)
 		}
 	})
 }
 
 // TestASessionReferenceResolvesAtTheCall covers a manifest's
 // `session:id`: each call resolves it to the session ID the call's
-// environment carries, so two sessions calling the same CLI read their
+// environment carries, so two sessions calling the same tool read their
 // own IDs, and a reference to a name the session scope does not carry
 // fails with the reference named.
 func TestASessionReferenceResolvesAtTheCall(t *testing.T) {
@@ -185,11 +185,11 @@ func TestASessionReferenceResolvesAtTheCall(t *testing.T) {
 	for _, sessionID := range []string{"sess-one", "sess-two"} {
 		res, err := runCall(t, tool, poo.ToolEnv{SessionID: sessionID, Env: bash.ScrubEnv(os.Environ(), bash.Scrub{Passthrough: []string{"PATH"}})})
 		if err != nil {
-			t.Fatalf("running the CLI for %q: %v", sessionID, err)
+			t.Fatalf("running the tool for %q: %v", sessionID, err)
 		}
 		output, _ := observation(t, res)[bash.EnvelopeOutput].(string)
 		if want := "sid=" + sessionID + "\n"; output != want {
-			t.Errorf("the CLI printed %q, want %q", output, want)
+			t.Errorf("the tool printed %q, want %q", output, want)
 		}
 	}
 
@@ -210,7 +210,7 @@ func TestASessionReferenceResolvesAtTheCall(t *testing.T) {
 	}
 }
 
-// TestTheCLIRunsUnderBothExecutors covers the two executors: a CLI runs
+// TestTheCLIRunsUnderBothExecutors covers the two executors: a tool runs
 // through whichever one the session was built with, with the session's
 // directory, and sees only the environment its manifest resolved.
 func TestTheCLIRunsUnderBothExecutors(t *testing.T) {
@@ -234,21 +234,21 @@ func TestTheCLIRunsUnderBothExecutors(t *testing.T) {
 				Env:        bash.ScrubEnv(os.Environ(), bash.Scrub{Names: []string{name}}),
 			})
 			if err != nil {
-				t.Fatalf("running the CLI: %v", err)
+				t.Fatalf("running the tool: %v", err)
 			}
 			output, _ := observation(t, res)[bash.EnvelopeOutput].(string)
 			if !strings.Contains(output, "cwd="+dir+"\n") {
-				t.Errorf("the CLI ran in the wrong directory: %q", output)
+				t.Errorf("the tool ran in the wrong directory: %q", output)
 			}
 			if !strings.Contains(output, "key=\n") {
-				t.Errorf("the CLI read a variable the scrub removed: %q", output)
+				t.Errorf("the tool read a variable the scrub removed: %q", output)
 			}
 		})
 	}
 }
 
 // TestALocalCLIReadsTheHostEnvironmentThroughProcfs records the local
-// executor's limit: the CLI's own environment is the resolved one, and
+// executor's limit: the tool's own environment is the resolved one, and
 // the environment of the process that started it is poo's, which /proc
 // still shows.
 func TestALocalCLIReadsTheHostEnvironmentThroughProcfs(t *testing.T) {
@@ -271,10 +271,10 @@ const (
 // procfsHelperEnv marks the re-executed test binary.
 const procfsHelperEnv = "POO_CLI_PROC_HELPER"
 
-// assertProcfsSecret runs the CLI that reads its parent's environment
+// assertProcfsSecret runs the tool that reads its parent's environment
 // through the executor and checks whether the secret is there.
 //
-// The CLI runs in a test binary of its own, because /proc holds the
+// The tool runs in a test binary of its own, because /proc holds the
 // environment a process was started with: a test's Setenv is not part of
 // it, so the secret has to be in the environment the parent was started
 // with.
@@ -289,7 +289,7 @@ func assertProcfsSecret(t *testing.T, executor exec.Executor, want bool) {
 			Env:        os.Environ(),
 		})
 		if err != nil {
-			t.Fatalf("running the CLI: %v", err)
+			t.Fatalf("running the tool: %v", err)
 		}
 		// The parent reads the observation either way: a grep that
 		// found nothing is a successful command with no output.
@@ -313,7 +313,7 @@ func assertProcfsSecret(t *testing.T, executor exec.Executor, want bool) {
 		t.Fatalf("the helper failed: %v: %s", err, out)
 	}
 	if got := strings.Contains(string(out), procKey+"="+procSecret); got != want {
-		t.Errorf("the CLI read the parent's environment through /proc: %v, want %v (%s)", got, want, out)
+		t.Errorf("the tool read the parent's environment through /proc: %v, want %v (%s)", got, want, out)
 	}
 }
 
@@ -325,7 +325,7 @@ func TestAFailedCLIReportsBothStreams(t *testing.T) {
 
 	res, err := runCall(t, tool, poo.ToolEnv{})
 	if err != nil {
-		t.Fatalf("running the CLI: %v", err)
+		t.Fatalf("running the tool: %v", err)
 	}
 	if !res.IsError {
 		t.Fatalf("an exit of 3 is not an error: %q", res.Text)
@@ -353,11 +353,11 @@ func TestATimedOutCLIReportsItsPartialOutput(t *testing.T) {
 	start := time.Now()
 	res, err := runCall(t, tool, poo.ToolEnv{})
 	if err != nil {
-		t.Fatalf("running the CLI: %v", err)
+		t.Fatalf("running the tool: %v", err)
 	}
 	took := time.Since(start)
 	if !res.IsError {
-		t.Fatalf("a timed-out CLI is not an error: %q", res.Text)
+		t.Fatalf("a timed-out tool is not an error: %q", res.Text)
 	}
 	obs := observation(t, res)
 	if timedOut, _ := obs[bash.EnvelopeTimedOut].(bool); !timedOut {
@@ -480,15 +480,15 @@ func TestACancelledCallStopsTheCLI(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
-		t.Fatalf("the cancelled call did not return; the CLI (pid %d) is still running", pid)
+		t.Fatalf("the cancelled call did not return; the tool (pid %d) is still running", pid)
 	}
 	if !gone(pid) {
-		t.Fatalf("the cancelled call left the CLI running (pid %d)", pid)
+		t.Fatalf("the cancelled call left the tool running (pid %d)", pid)
 	}
 }
 
 // TestAClosedSessionStopsTheCLI covers the session: closing it stops a
-// CLI a run started, the way it stops a shell command.
+// tool a run started, the way it stops a shell command.
 func TestAClosedSessionStopsTheCLI(t *testing.T) {
 	dir := t.TempDir()
 	pidPath := filepath.Join(dir, "pid")
@@ -522,7 +522,7 @@ func TestAClosedSessionStopsTheCLI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("building the session: %v", err)
 	}
-	if _, err := session.Prompt(context.Background(), "run the slow CLI"); err != nil {
+	if _, err := session.Prompt(context.Background(), "run the slow tool"); err != nil {
 		t.Fatalf("starting the run: %v", err)
 	}
 	pid := waitForPID(t, pidPath)
@@ -537,7 +537,7 @@ func TestAClosedSessionStopsTheCLI(t *testing.T) {
 	}
 	took := time.Since(start)
 	if !gone(pid) {
-		t.Fatalf("the close returned after %v and left the CLI running (pid %d)", took, pid)
+		t.Fatalf("the close returned after %v and left the tool running (pid %d)", took, pid)
 	}
 	if took > 5*time.Second {
 		t.Errorf("the close took %v", took)
@@ -545,7 +545,7 @@ func TestAClosedSessionStopsTheCLI(t *testing.T) {
 }
 
 // TestASameGroupChildDoesNotOutliveTheCall covers the ordinary
-// descendant: a CLI that leaves a child in its own process group returns
+// descendant: a tool that leaves a child in its own process group returns
 // at once, and the child is gone when the call is.
 func TestASameGroupChildDoesNotOutliveTheCall(t *testing.T) {
 	dir := t.TempDir()
@@ -557,20 +557,20 @@ func TestASameGroupChildDoesNotOutliveTheCall(t *testing.T) {
 	start := time.Now()
 	res, err := runCall(t, tool, poo.ToolEnv{})
 	if err != nil {
-		t.Fatalf("running the CLI: %v", err)
+		t.Fatalf("running the tool: %v", err)
 	}
 	took := time.Since(start)
 	pid := waitForPID(t, pidPath)
 	defer func() { _ = syscall.Kill(pid, syscall.SIGKILL) }()
 
 	if output, _ := observation(t, res)[bash.EnvelopeOutput].(string); output != "parent-done" {
-		t.Errorf("the observation lost the CLI's output: %q", output)
+		t.Errorf("the observation lost the tool's output: %q", output)
 	}
 	if timedOut, _ := observation(t, res)[bash.EnvelopeTimedOut].(bool); timedOut {
-		t.Errorf("a CLI whose child holds no pipe reported a timeout after %v", took)
+		t.Errorf("a tool whose child holds no pipe reported a timeout after %v", took)
 	}
 	if !gone(pid) {
-		t.Fatalf("the CLI's same-group child (pid %d) outlived the call", pid)
+		t.Fatalf("the tool's same-group child (pid %d) outlived the call", pid)
 	}
 }
 
@@ -587,7 +587,7 @@ func (s *startedExecutor) Start(ctx context.Context, c exec.Command, out io.Writ
 }
 
 // TestAnAlreadyCancelledCallStartsNothing covers the local executor: a
-// call whose context has already ended reaches no process, so a fast CLI
+// call whose context has already ended reaches no process, so a fast tool
 // cannot write its side effects first.
 func TestAnAlreadyCancelledCallStartsNothing(t *testing.T) {
 	dir := t.TempDir()
@@ -603,7 +603,7 @@ func TestAnAlreadyCancelledCallStartsNothing(t *testing.T) {
 	cancel()
 	res, err := tool.Call(ctx, prepared, poo.ToolEnv{PrepareEnv: poo.PrepareEnv{WorkingDir: dir}})
 	if err != nil {
-		t.Fatalf("running the CLI: %v", err)
+		t.Fatalf("running the tool: %v", err)
 	}
 	if got := executor.starts.Load(); got != 0 {
 		t.Errorf("the executor was asked to start %d commands for a cancelled call", got)
@@ -619,12 +619,12 @@ func TestAnAlreadyCancelledCallStartsNothing(t *testing.T) {
 		t.Errorf("returncode is %v, want null for a cancelled call", rc)
 	}
 	if _, err := os.Stat(marker); err == nil {
-		t.Errorf("the cancelled call ran the CLI")
+		t.Errorf("the cancelled call ran the tool")
 	}
 }
 
 // TestAnAlreadyCancelledSandboxDoesNotExecute covers the sandbox: the
-// call is the cancel observation and the CLI never ran, so the marker
+// call is the cancel observation and the tool never ran, so the marker
 // file it writes is not there.
 func TestAnAlreadyCancelledSandboxDoesNotExecute(t *testing.T) {
 	dir := t.TempDir()
@@ -641,7 +641,7 @@ func TestAnAlreadyCancelledSandboxDoesNotExecute(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		res, err := tool.Call(ctx, prepared, poo.ToolEnv{PrepareEnv: poo.PrepareEnv{WorkingDir: dir}})
 		if err != nil {
-			t.Fatalf("running the CLI: %v", err)
+			t.Fatalf("running the tool: %v", err)
 		}
 		if !res.IsError {
 			t.Errorf("a cancelled call is not an error: %q", res.Text)
@@ -656,13 +656,13 @@ func TestAnAlreadyCancelledSandboxDoesNotExecute(t *testing.T) {
 	}
 	raw, err := os.ReadFile(marker)
 	if err == nil {
-		t.Errorf("the already-cancelled sandbox calls ran the CLI: %q", raw)
+		t.Errorf("the already-cancelled sandbox calls ran the tool: %q", raw)
 	}
 }
 
 // TestACLIThatExitsBeforeTheDeadlineIsNotATimeout covers the outcome
-// against the teardown: the CLI exits 0 and leaves a child that ignores
-// SIGTERM, so stopping it takes past the manifest's timeout. The CLI
+// against the teardown: the tool exits 0 and leaves a child that ignores
+// SIGTERM, so stopping it takes past the manifest's timeout. The tool
 // exited on its own, and the call is its exit, not a timeout.
 func TestACLIThatExitsBeforeTheDeadlineIsNotATimeout(t *testing.T) {
 	dir := t.TempDir()
@@ -675,22 +675,22 @@ func TestACLIThatExitsBeforeTheDeadlineIsNotATimeout(t *testing.T) {
 	start := time.Now()
 	res, err := runCall(t, tool, poo.ToolEnv{PrepareEnv: poo.PrepareEnv{WorkingDir: dir}})
 	if err != nil {
-		t.Fatalf("running the CLI: %v", err)
+		t.Fatalf("running the tool: %v", err)
 	}
 	took := time.Since(start)
 
 	if res.IsError {
-		t.Errorf("a CLI that exited successfully is an error: %q", res.Text)
+		t.Errorf("a tool that exited successfully is an error: %q", res.Text)
 	}
 	obs := observation(t, res)
 	if timedOut, _ := obs[bash.EnvelopeTimedOut].(bool); timedOut {
-		t.Errorf("the call reported a timeout after %v, though the CLI exited: %q", took, res.Text)
+		t.Errorf("the call reported a timeout after %v, though the tool exited: %q", took, res.Text)
 	}
 	if code, ok := obs[bash.EnvelopeReturncode].(float64); !ok || code != 0 {
 		t.Errorf("returncode is %v, want 0", obs[bash.EnvelopeReturncode])
 	}
 	if output, _ := obs[bash.EnvelopeOutput].(string); output != "completed" {
-		t.Errorf("the observation lost the CLI's output: %q", output)
+		t.Errorf("the observation lost the tool's output: %q", output)
 	}
 }
 
@@ -714,7 +714,7 @@ func TestACutCaptureSaysSo(t *testing.T) {
 				Settings: poo.ToolSettings{ObservationCapChars: poo.NestedOutputCapChars},
 			})
 			if err != nil {
-				t.Fatalf("running the CLI: %v", err)
+				t.Fatalf("running the tool: %v", err)
 			}
 			obs := observation(t, res)
 			if truncated, _ := obs[bash.EnvelopeTruncated].(bool); !truncated {

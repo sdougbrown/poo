@@ -160,7 +160,7 @@ func TestTheReplaceSettingKeepsTheCatalog(t *testing.T) {
 		t.Fatalf("building the runtime: %v", err)
 	}
 	text := poo.PromptBuilder(runtime.Options).Render()
-	for _, want := range []string{"the operator's whole prompt", "Registered CLIs:", "deploy: The deploy command"} {
+	for _, want := range []string{"the operator's whole prompt", "Registered tools:", "deploy: The deploy command"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the prompt does not hold %q:\n%s", want, text)
 		}

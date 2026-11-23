@@ -74,7 +74,7 @@ func TestAValidatorOfNilValidatesNothing(t *testing.T) {
 
 // TestAValidatorNamesTheAcceptedArguments covers the outer layer: the
 // session's own schema check renders a refusal in the schema's
-// vocabulary, the way a registered CLI's refusal reads.
+// vocabulary, the way a registered tool's refusal reads.
 func TestAValidatorNamesTheAcceptedArguments(t *testing.T) {
 	tool := &schemaTool{}
 	compiled, err := compileArgSchemas(map[string]Tool{"probe": tool})

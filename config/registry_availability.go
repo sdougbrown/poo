@@ -38,7 +38,7 @@ func (r *Runtime) offeredCatalog() *cli.Catalog {
 // see, or nil when it may see none.
 //
 // A registry whose manifests declare no conditions is offered to a profile
-// that already offers a side-effecting tool, as it always was: a registered CLI
+// that already offers a side-effecting tool, as it always was: a registered tool
 // can change anything, so a registry that gates nothing offers everything. Once
 // the manifests declare conditions, the rules decide entry by entry, which is
 // how a read-only profile is offered the entries that only read.

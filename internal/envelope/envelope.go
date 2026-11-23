@@ -2,7 +2,7 @@
 // as the text the model reads and as the structured payload beside it.
 //
 // The tools that capture output share the one shape — the bash
-// observation, the registered CLI's result, the fetch's body — so an
+// observation, the registered tool's result, the fetch's body — so an
 // envelope-wide change lands once, and a capped body reads the same
 // way whatever tool reported it. The field vocabulary is each tool's
 // own; the machinery here is shared.
