@@ -1,0 +1,9 @@
+#!/bin/sh
+# A fixture filter: it passes the record it reads straight back, and keeps
+# a copy in the file the manifest's FIXTURE_FILTER_LOG names, so a test can
+# see what the filter was asked about.
+record=$(cat)
+if [ -n "$FIXTURE_FILTER_LOG" ]; then
+	printf '%s\n' "$record" >> "$FIXTURE_FILTER_LOG"
+fi
+printf '%s\n' "$record"

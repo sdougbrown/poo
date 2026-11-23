@@ -111,25 +111,44 @@ type Spec struct {
 	// empty for a feed that takes none.
 	Scope []ScopeField
 	// Filter is the manifest's optional delivery screen. The config
-	// layer applies it to the text of each emitted message; the
-	// runner ignores it.
+	// layer applies it to each emitted record; the runner ignores it.
 	Filter *Filter
 }
 
-// Filter is a feed's delivery screen. The config layer asks the
-// session's decision model the question about a message's text, and
-// drops the message when the answer is no with at least
-// MinNoProbability — a picture rides the answer of its own text, and
+// Filter is a feed's delivery screen: the one place a feed's records are
+// dropped or let through. A manifest names one of its two kinds.
+//
+// A command filter is one process per record. The record arrives on the
+// filter's standard input; the record it writes to its standard output is
+// the one delivered, and it may add a `data` object beside its text; an
+// empty standard output drops the record; and a nonzero exit, or output
+// that is not a record, fails the attempt. It fails closed: the feed
+// suspends rather than delivering what the filter did not pass.
+//
+// A question filter asks the session's decision model the question about
+// a message's text, and drops the message when the answer is no with at
+// least MinNoProbability — a picture rides the answer of its own text, and
 // a message whose text is empty is delivered unasked, for the decider
-// never sees a picture. A consumer that wires the runner itself
-// applies no filter.
+// never sees a picture. It fails open: a message it cannot decide is
+// delivered.
+//
+// A consumer that wires the runner itself applies no filter.
 type Filter struct {
+	// Command is the argv of the filter's own process, and is empty on a
+	// question filter.
+	Command []string `json:"command"`
 	// Question is asked about each message the filter sees. Phrase it
-	// so yes means deliver.
+	// so yes means deliver. It is empty on a command filter.
 	Question string `json:"question"`
 	// MinNoProbability is the probability of no at which the message is
-	// dropped. It is greater than 0.5 and at most 1.
+	// dropped. It is greater than 0.5 and at most 1, and it belongs to a
+	// question filter.
 	MinNoProbability float64 `json:"min_no_probability"`
+}
+
+// Script reports whether the filter is the command kind.
+func (f *Filter) Script() bool {
+	return f != nil && len(f.Command) > 0
 }
 
 // ResolveEnvScoped resolves the spec's env bindings into "NAME=value"
@@ -225,6 +244,7 @@ func (s *Set) Specs() []Spec {
 		spec.Scope = append([]ScopeField(nil), spec.Scope...)
 		if spec.Filter != nil {
 			filter := *spec.Filter
+			filter.Command = append([]string(nil), spec.Filter.Command...)
 			spec.Filter = &filter
 		}
 		out[i] = spec
@@ -320,14 +340,8 @@ func readFeed(path, name string, raw json.RawMessage) (Spec, error) {
 		}
 		maxPending = *b.MaxPending
 	}
-	if f := b.Filter; f != nil {
-		f.Question = strings.TrimSpace(f.Question)
-		if f.Question == "" {
-			return Spec{}, fmt.Errorf("feed manifest %s: feed %q needs a filter.question", path, name)
-		}
-		if !(f.MinNoProbability > 0.5 && f.MinNoProbability <= 1) {
-			return Spec{}, fmt.Errorf("feed manifest %s: feed %q needs a filter.min_no_probability greater than 0.5 and at most 1", path, name)
-		}
+	if err := readFilter(path, name, b.Filter); err != nil {
+		return Spec{}, err
 	}
 	scope, err := readScope(path, name, b)
 	if err != nil {
@@ -372,6 +386,38 @@ func readFeed(path, name string, raw json.RawMessage) (Spec, error) {
 		Scope:       scope,
 		Filter:      b.Filter,
 	}, nil
+}
+
+// readFilter validates a feed's filter.
+//
+// A feed's filter is one of the two kinds, so a manifest that names both a
+// command and a question fails the load: the record would either go to the
+// filter's process or be put to the decision model, and a feed that means
+// both means neither.
+func readFilter(path, name string, f *Filter) error {
+	if f == nil {
+		return nil
+	}
+	f.Question = strings.TrimSpace(f.Question)
+	if len(f.Command) > 0 {
+		if f.Question != "" {
+			return fmt.Errorf("feed manifest %s: feed %q names both a filter.command and a filter.question, and a filter is one of the two", path, name)
+		}
+		if f.MinNoProbability != 0 {
+			return fmt.Errorf("feed manifest %s: feed %q names a filter.min_no_probability, and that belongs to a filter.question", path, name)
+		}
+		if f.Command[0] == "" {
+			return fmt.Errorf("feed manifest %s: feed %q has an empty filter command", path, name)
+		}
+		return nil
+	}
+	if f.Question == "" {
+		return fmt.Errorf("feed manifest %s: feed %q needs a filter.command or a filter.question", path, name)
+	}
+	if !(f.MinNoProbability > 0.5 && f.MinNoProbability <= 1) {
+		return fmt.Errorf("feed manifest %s: feed %q needs a filter.min_no_probability greater than 0.5 and at most 1", path, name)
+	}
+	return nil
 }
 
 // readScope validates a feed's scope schema and returns its fields, in

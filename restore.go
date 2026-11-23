@@ -562,6 +562,7 @@ func pendingJobResults(records []Record) []jobResult {
 				tool:        FeedToolName,
 				outcome:     OutcomeOK,
 				text:        r.Text,
+				data:        cloneRaw(r.Data),
 				attachments: r.Attachments,
 				origin:      r.Origin,
 			})
@@ -641,6 +642,7 @@ func (s *Session) rebuild(records []Record, out *Restored) error {
 			msg := Message{
 				Role:         r.Role,
 				Content:      r.Content,
+				Data:         cloneRaw(r.Data),
 				ID:           r.MessageID,
 				Origin:       r.Origin,
 				DeliveryNote: r.DeliveryNote,

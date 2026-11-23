@@ -1,0 +1,6 @@
+#!/bin/sh
+# A fixture filter: it reads the record and answers with a structured one,
+# naming the sender it was given.
+read -r record
+from=$(printf '%s' "$record" | sed -n 's/.*"from":"\([^"]*\)".*/\1/p')
+printf '{"text": "a structured record", "from": "%s", "data": {"kind": "note", "n": 3}}\n' "$from"

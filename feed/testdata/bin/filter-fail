@@ -1,0 +1,5 @@
+#!/bin/sh
+# A fixture filter: it fails, and says why on stderr.
+cat >/dev/null
+printf 'the filter could not read the record\n' >&2
+exit 4

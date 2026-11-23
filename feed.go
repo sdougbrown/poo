@@ -2,9 +2,12 @@ package poo
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -57,11 +60,16 @@ type FeedIO struct {
 	// feed the session started itself, and a manifest's `scope:NAME`
 	// reference resolves through it.
 	Scope map[string]string
-	// Emit queues one input, which may carry an image. It returns the
-	// session's refusal (ErrSessionClosed, ErrSessionBroken, a store
-	// error) or the image's own failure. A model that reads no images
-	// or an image that does not read fails the attempt either way.
-	Emit func(from, text string, image *FeedImage) error
+	// Emit queues one input, which may carry an image and the structured
+	// data a filter produced. It returns the session's refusal
+	// (ErrSessionClosed, ErrSessionBroken, a store error) or the image's
+	// own failure. A model that reads no images or an image that does not
+	// read fails the attempt either way.
+	//
+	// data is the object a filter's record carried beside its text, and
+	// it is nil for a feed that runs no filter: a record's data is the
+	// filter's to produce.
+	Emit func(from, text string, image *FeedImage, data json.RawMessage) error
 	// Decider returns the session's recorded decision model, fetched
 	// for each decision because the session can switch models while the
 	// feed runs. The field is nil when the runner's builder passed no
@@ -71,6 +79,55 @@ type FeedIO struct {
 	// Log receives the runner's diagnostics, such as the child's stderr.
 	// It is never nil.
 	Log *slog.Logger
+}
+
+// FeedFault is a feed's filter failing closed: a record the filter would
+// not pass, and the attempt it failed.
+//
+// A runner returns one from an attempt, and the session does what a
+// filter's failure asks for: it suspends the feed, whatever the restart
+// policy says, and wakes the session with a report that names the feed,
+// the fault and the file holding the filter's own diagnostics. The fault
+// is an error, so a consumer that wires the runner itself sees an attempt
+// that failed.
+type FeedFault struct {
+	// Code is the fault's short name, one of the FeedFault* codes.
+	Code string
+	// Message is the short diagnosis the report shows.
+	Message string
+	// Stderr is the filter's own diagnostics for the attempt, which the
+	// session writes to a file the report names. It is never delivered:
+	// the report carries its path, and the agent reads the file on
+	// demand.
+	Stderr []byte
+}
+
+// Error implements error.
+func (f *FeedFault) Error() string {
+	return fmt.Sprintf("the feed's filter failed (%s): %s", f.Code, f.Message)
+}
+
+// The codes a feed's filter fault is reported with.
+const (
+	// FeedFaultExit means the filter's process exited with a nonzero
+	// status.
+	FeedFaultExit = "filter_exited"
+	// FeedFaultOutput means the filter exited cleanly and wrote something
+	// other than a record.
+	FeedFaultOutput = "filter_output"
+	// FeedFaultRecord means a record is past the byte cap one may hold:
+	// the record the filter would read, or the one it wrote.
+	FeedFaultRecord = "filter_record"
+)
+
+// feedFaultOf returns the fault an attempt ended with, if it ended with
+// one.
+func feedFaultOf(err error) *FeedFault {
+	var fault *FeedFault
+	if errors.As(err, &fault) {
+		return fault
+	}
+	return nil
 }
 
 // FeedRunner runs one attempt of a feed.
@@ -190,6 +247,11 @@ const (
 	FeedFailed FeedOutcome = "failed"
 	// FeedCancelled means cancel_job stopped the attempt.
 	FeedCancelled FeedOutcome = "cancelled"
+	// FeedSuspended means the feed's filter failed closed, so the attempt
+	// ended and the feed did not restart: the session woke with a fault
+	// report instead, and the feed stays down until something starts it
+	// again, which for a feed a subscription started is that call.
+	FeedSuspended FeedOutcome = "suspended"
 	// FeedSessionClosed means the session closed under the attempt, or
 	// its store broke.
 	FeedSessionClosed FeedOutcome = "session_closed"
@@ -204,6 +266,10 @@ const (
 	feedRunning = JobRunning
 	// feedRestarting means the feed waits for its next attempt.
 	feedRestarting = JobRestarting
+	// feedSuspended means the feed's filter failed closed, and the feed
+	// runs no attempt and no restart: it stays down until something
+	// starts it again.
+	feedSuspended = JobSuspended
 	// feedStopped means the feed has no attempt and no restart.
 	feedStopped = "stopped"
 )
@@ -361,8 +427,8 @@ type feedState struct {
 	// claims it, so an attempt has exactly one feed.ended whatever races
 	// the close has with the runner.
 	ended int
-	// status is what the feed is doing: feedRunning, feedRestarting or
-	// feedStopped.
+	// status is what the feed is doing: feedRunning, feedRestarting,
+	// feedSuspended or feedStopped.
 	status string
 	// startedAt is when the latest attempt started.
 	startedAt time.Time
@@ -370,7 +436,7 @@ type feedState struct {
 
 // listed reports that the feed is a job a list should carry.
 func (f *feedState) listed() bool {
-	return f.status == feedRunning || f.status == feedRestarting
+	return f.status == feedRunning || f.status == feedRestarting || f.status == feedSuspended
 }
 
 // indexOptionalFeeds records the feeds a subscription may start, by name.
@@ -485,7 +551,25 @@ func (s *Session) runFeed(f *feedState) {
 		if outcome == FeedExited || outcome == FeedFailed {
 			delay = s.feedDelay(time.Since(runAt), wait)
 		}
-		if !s.endFeedAttempt(f, outcome, err, delay) {
+		fault := feedFaultOf(err)
+		if fault != nil && outcome == FeedFailed {
+			// A filter that failed closed suspends the feed: the attempt
+			// ended, and no restart follows it, whatever the restart policy
+			// says. The report is the one thing that follows, and it wakes
+			// the session.
+			outcome = FeedSuspended
+			delay = 0
+		}
+		restart := s.endFeedAttempt(f, outcome, err, delay)
+		if outcome == FeedSuspended {
+			// A suspended feed runs no attempt and no restart: the report
+			// of the fault is the last thing its supervisor does.
+			if fault != nil {
+				s.reportFeedFault(f, attempt, fault)
+			}
+			return
+		}
+		if !restart {
 			return
 		}
 		wait = delay
@@ -564,8 +648,8 @@ func (s *Session) runFeedAttempt(f *feedState, attempt int) (err error) {
 		Dir:       s.opts.WorkingDir,
 		SessionID: s.opts.SessionID,
 		Scope:     cloneScope(f.scope),
-		Emit: func(from, text string, image *FeedImage) error {
-			return s.emitFeedInput(f, attempt, from, text, image)
+		Emit: func(from, text string, image *FeedImage, data json.RawMessage) error {
+			return s.emitFeedInput(f, attempt, from, text, image, data)
 		},
 		Decider: s.Decider,
 		Log:     s.feedLogger(f.instance),
@@ -602,13 +686,21 @@ func (s *Session) feedLogger(instance string) *slog.Logger {
 //
 // An input that names an image is admitted by feedImageAttachments, and
 // the image's own failures end the attempt here.
-func (s *Session) emitFeedInput(f *feedState, attempt int, from, text string, image *FeedImage) error {
+func (s *Session) emitFeedInput(f *feedState, attempt int, from, text string, image *FeedImage, data json.RawMessage) error {
 	attachments, err := s.feedImageAttachments(f.name, image)
 	if err != nil {
 		return err
 	}
-	return s.queueFeedInput(f.instance, from, text, attachments, f.spec.OnIdle, func() bool {
-		return f.ended < attempt
+	return s.queueFeedInput(feedInput{
+		instance:    f.instance,
+		from:        from,
+		text:        text,
+		data:        data,
+		attachments: attachments,
+		onIdle:      f.spec.OnIdle,
+		admit: func() bool {
+			return f.ended < attempt
+		},
 	})
 }
 
@@ -721,9 +813,17 @@ func (s *Session) endFeedAttempt(f *feedState, outcome FeedOutcome, err error, d
 	f.ended = f.attempt
 	attempt := f.attempt
 	restart := delay > 0 && f.spec.Restart && !s.closed && !s.broken && f.ctx.Err() == nil
-	if restart {
+	switch {
+	case outcome == FeedSuspended && !s.closed && !s.broken && f.ctx.Err() == nil:
+		// A filter that failed closed suspends the feed: the log says how
+		// the attempt ended, and the feed stays down with no restart
+		// scheduled.
+		f.status = feedSuspended
+		delay = 0
+		restart = false
+	case restart:
 		f.status = feedRestarting
-	} else {
+	default:
 		f.status = feedStopped
 		delay = 0
 	}
@@ -784,11 +884,200 @@ func (s *Session) setFeedStatus(f *feedState, status string) {
 	f.status = status
 }
 
+// feedFault is the report a suspended feed's filter leaves the model: what
+// failed, the file holding the filter's own diagnostics, and how the feed
+// starts again.
+type feedFault struct {
+	// name is the feed's name, and instance is the label its inputs
+	// carry.
+	name, instance string
+	// scope are the values the subscription named, so the remedy can
+	// name them.
+	scope map[string]string
+	// optional reports that a subscription starts the feed: it says
+	// which remedy the report offers.
+	optional bool
+	// code and message are the fault's short diagnosis.
+	code, message string
+	// logPath is the file the filter's stderr was written to.
+	logPath string
+	// more counts the faults that joined this report before it was
+	// delivered.
+	more int
+}
+
+// reportFeedFault writes one attempt's filter stderr beside the session's
+// files and wakes the session with the report that names it.
+//
+// The report rides the wake path a feed's input rides, with two switches
+// set differently: the idle policy is wake, because a suspension is the
+// session's to hear however the feed holds its inputs, and the report
+// never passes the feed's filter, because it is the session's own account
+// of the filter and not a record the filter let through. Everything else
+// is the wake path's: the queued input's record, the backlog accounting
+// and the restart-safe storage.
+//
+// A fault that arrives before the last report was delivered joins it
+// instead of waking the session again: one suspension is one wake, and the
+// report counts what joined.
+func (s *Session) reportFeedFault(f *feedState, attempt int, fault *FeedFault) {
+	report := &feedFault{
+		name:     f.name,
+		instance: f.instance,
+		scope:    f.scope,
+		optional: f.spec.Optional,
+		code:     fault.Code,
+		message:  fault.Message,
+		logPath:  s.writeFeedFaultLog(f, attempt, fault.Stderr),
+	}
+	// The fold check and the report's acceptance are one critical
+	// section: a fault that arrives in the gap folds into the report in
+	// flight rather than queueing one of its own, so one suspension is
+	// one report, whatever the gap between the faults.
+	s.mu.Lock()
+	if s.foldFeedFaultLocked(f) {
+		s.mu.Unlock()
+		return
+	}
+	s.pendingFaultReports[f.origin] = report
+	claim, err := s.queueFeedInputClaimLocked(feedInput{
+		instance: f.instance,
+		onIdle:   OnIdleWake,
+		fault:    report,
+	})
+	s.mu.Unlock()
+	if err != nil {
+		// The session refuses the report when it is closing or broken, and
+		// the feed's suspension is already in the log.
+		s.logger().Warn("the feed's fault report was refused",
+			slog.String("feed", f.instance), slog.String("error", err.Error()))
+		return
+	}
+	defer func() {
+		s.mu.Lock()
+		s.endJobCompletionLocked()
+		s.mu.Unlock()
+	}()
+	_ = s.queueFeedInputWrite(feedInput{
+		instance: f.instance,
+		onIdle:   OnIdleWake,
+		fault:    report,
+	}, claim)
+	// The report is queued (or the store refused it): retire the
+	// reservation so a fault that arrives after it queues its own report.
+	s.mu.Lock()
+	delete(s.pendingFaultReports, f.origin)
+	s.mu.Unlock()
+}
+
+// writeFeedFaultLog writes one attempt's filter stderr beside the
+// session's files and returns its path.
+//
+// The file is named for the instance, the attempt and the attempt's start
+// time, so the name is unique per attempt run: a restored session reuses
+// the session's directory and restarts its attempt numbering, and a report
+// must never point at a later run's diagnostics. A session that keeps no
+// files writes to the working directory. A write that fails is the log's
+// to report: the report still names the path it would have had.
+func (s *Session) writeFeedFaultLog(f *feedState, attempt int, stderr []byte) string {
+	dir := s.opts.SessionDir
+	if dir == "" {
+		dir = s.opts.WorkingDir
+	}
+	path := filepath.Join(dir, fmt.Sprintf("%s-fault-%d-%d.log", f.instance, attempt, f.startedAt.UnixNano()))
+	if err := os.WriteFile(path, stderr, 0o600); err != nil {
+		s.logger().Warn("the feed's fault log could not be written",
+			slog.String("feed", f.instance), slog.String("path", path), slog.String("error", err.Error()))
+	}
+	return path
+}
+
+// foldFeedFaultLocked joins a fault to the report that is queued or in
+// flight and not yet delivered, and reports whether it found one. The
+// caller holds the session's lock.
+//
+// The report the model reads is rendered again with the new count. The
+// queued input's record keeps the text the report was accepted with, so a
+// restored session delivers the count the acceptance knew: the count is a
+// courtesy, and the fault it reports is already in the log.
+//
+// The joining fault's own stderr is written under its own attempt's name
+// like any other, so what the later filter said is still on disk even
+// though the report names the attempt that suspended the feed.
+func (s *Session) foldFeedFaultLocked(f *feedState) bool {
+	for i := range s.jobQueue {
+		item := &s.jobQueue[i]
+		if item.result.origin != f.origin || item.result.fault == nil {
+			continue
+		}
+		item.result.fault.more++
+		item.result.text = item.result.fault.render()
+		return true
+	}
+	if pending, ok := s.pendingFaultReports[f.origin]; ok {
+		pending.more++
+		return true
+	}
+	return false
+}
+
+// render returns the model-facing text of the report: the element that
+// carries the feed, the fault's code and the log's path, around the
+// sentences that say what happened and what starts the feed again.
+func (r *feedFault) render() string {
+	return outsideElement("feed", [][2]string{
+		{"name", r.instance},
+		{"fault", r.code},
+		{"log", r.logPath},
+	}, r.text())
+}
+
+// text returns the body of the report: the diagnosis, the count of the
+// faults that joined it, and the remedy.
+func (r *feedFault) text() string {
+	var b strings.Builder
+	b.WriteString("The feed's filter failed: ")
+	b.WriteString(r.message)
+	b.WriteString(". The feed is suspended, and it does not restart.\n")
+	if r.more > 0 {
+		fmt.Fprintf(&b, "%d more arrived while suspended.\n", r.more)
+	}
+	b.WriteString(r.remedy())
+	return b.String()
+}
+
+// remedy returns the sentence that says how the feed starts again.
+//
+// An optional feed is started by a subscription, so the remedy is the call
+// that starts it, with the scope values the instance runs with. A feed the
+// session starts itself has no such call, and this stage offers no way to
+// start it again.
+func (r *feedFault) remedy() string {
+	if !r.optional {
+		return "This feed is one the session starts itself, so it stays suspended until the session closes.\n"
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "Resubscribe with %s, naming the feed %q", SubscribeFeedToolName, r.name)
+	if len(r.scope) > 0 {
+		fields := slices.Sorted(maps.Keys(r.scope))
+		b.WriteString(" and the scope ")
+		for i, field := range fields {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			fmt.Fprintf(&b, "%s=%q", field, r.scope[field])
+		}
+	}
+	b.WriteString(", to start it again.\n")
+	return b.String()
+}
+
 // cancelFeed stops one instance of a feed.
 //
 // The id is the instance's origin, which is how the job list names it. The
 // attempt's context ends, and a feed that waits for its next attempt waits
-// no more: the attempt's end record is already in the log.
+// no more: the attempt's end record is already in the log. A suspended feed
+// has no supervisor left to record the stop, so the cancel records it here.
 func (s *Session) cancelFeed(instanceID string) error {
 	s.mu.Lock()
 	f, ok := s.feeds[instanceID]
@@ -797,13 +1086,16 @@ func (s *Session) cancelFeed(instanceID string) error {
 		return ErrUnknownJob
 	}
 	cancel := f.cancel
+	if f.status == feedSuspended {
+		f.status = feedStopped
+	}
 	s.mu.Unlock()
 	cancel(ErrJobCancelled)
 	return nil
 }
 
 // listedFeedsLocked returns the feeds the job lists show, in start
-// order: the ones still running or waiting to restart.
+// order: the ones running, waiting to restart or suspended.
 //
 // The caller holds the session's lock.
 func (s *Session) listedFeedsLocked() []*feedState {
@@ -823,7 +1115,9 @@ func (s *Session) listedFeedsLocked() []*feedState {
 // the canonical form of the scope, so one feed may run twice beside a
 // session with different values and a repeated call reaches what it
 // started. An instance that is running or waiting for its next attempt is
-// left as it is; one that stopped is started again with a fresh context.
+// left as it is; one that stopped, or one whose filter suspended it, is
+// started again with a fresh context: a subscription is the only thing that
+// starts a suspended feed again.
 //
 // The scope is the only value the model supplies, so it is held to the
 // feed's declared schema before anything starts, and a refusal is the
@@ -854,12 +1148,13 @@ func (s *Session) subscribeFeed(name string, scope map[string]string) (string, b
 	}
 	f, ok := s.feeds[id]
 	if ok {
-		if f.status != feedStopped {
+		if f.status != feedStopped && f.status != feedSuspended {
 			s.mu.Unlock()
 			return id, false, nil
 		}
-		// The instance stopped: the supervisor is gone with its context,
-		// so a re-arm is a fresh context and a fresh supervisor.
+		// The instance stopped or is suspended: its supervisor is gone with
+		// its context, so a re-arm is a fresh context and a fresh
+		// supervisor.
 		f.ctx, f.cancel = context.WithCancelCause(s.jobCtx)
 		f.done = make(chan struct{})
 		f.startedAt = time.Now()

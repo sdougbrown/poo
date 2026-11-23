@@ -94,6 +94,7 @@ func CloneMessages(in []Message) []Message {
 			note := *m.DeliveryNote
 			out[i].DeliveryNote = &note
 		}
+		out[i].Data = cloneRaw(m.Data)
 	}
 	return out
 }

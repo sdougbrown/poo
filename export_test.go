@@ -74,7 +74,7 @@ func SessionChatModel(s *Session) ModelInfo { return s.opts.Model }
 // reaches the acceptance through this. The input belongs to no attempt,
 // so no attempt bounds it.
 func QueueFeedInput(s *Session, feed, from, text string) error {
-	return s.queueFeedInput(feed, from, text, nil, "", nil)
+	return s.queueFeedInput(feedInput{instance: feed, from: from, text: text})
 }
 
 // QueueFeedImageInput queues one feed's input that carries an image,
@@ -84,7 +84,7 @@ func QueueFeedImageInput(s *Session, feed, from, text string, image *FeedImage) 
 	if err != nil {
 		return err
 	}
-	return s.queueFeedInput(feed, from, text, attachments, "", nil)
+	return s.queueFeedInput(feedInput{instance: feed, from: from, text: text, attachments: attachments})
 }
 
 // SetFeedRestartDelay replaces how long the session's feeds wait before
@@ -113,4 +113,11 @@ func RequeueAtFront(s *Session, inputID string) {
 		s.jobQueue = append([]jobQueueItem{item}, s.jobQueue...)
 		return
 	}
+}
+
+// SubscribeFeed starts one instance of an optional feed, the way the
+// subscribe_feed tool does, and reports the instance and whether this call
+// started it.
+func SubscribeFeed(s *Session, feed string, scope map[string]string) (string, bool, error) {
+	return s.subscribeFeed(feed, scope)
 }

@@ -1,6 +1,9 @@
 package poo
 
-import "errors"
+import (
+	"encoding/json"
+	"errors"
+)
 
 // InputMode says how a message reaches the model.
 //
@@ -113,6 +116,10 @@ type InputQueuedRecord struct {
 	// Attachments are the files the input carries beside its text, so
 	// a held input is still one after a restart.
 	Attachments []Attachment `json:"attachments,omitempty"`
+	// Data is the object the feed's filter produced beside the text, so a
+	// held input is still a structured record after a restart. It is
+	// absent for a feed that runs no filter.
+	Data json.RawMessage `json:"data,omitempty"`
 	// QueuedAt is the RFC 3339 time the input was accepted, in UTC.
 	QueuedAt string `json:"queued_at"`
 }

@@ -205,6 +205,9 @@ type MessageRecord struct {
 	Role Role `json:"role"`
 	// Content is the message's content blocks.
 	Content []ContentBlock `json:"content"`
+	// Data is the object a feed's filter produced beside the message's
+	// text. Absent when the message has none.
+	Data json.RawMessage `json:"data,omitempty"`
 	// MessageID is the message's session-monotonic id, e.g. "m7". It is
 	// set on the messages the model produced.
 	MessageID string `json:"message_id,omitempty"`

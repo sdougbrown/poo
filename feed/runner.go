@@ -13,11 +13,12 @@ import (
 
 // The limits one attempt reads under.
 const (
-	// maxLineBytes is the longest line a feed's stdout may carry. A
-	// line is one message, so a longer one is a feed printing
+	// MaxLineBytes is the longest line a feed's stdout may carry, and
+	// the longest record a filter's stdout may carry. A line is one
+	// message, so a longer one is a feed or a filter printing
 	// something that is not a message: the attempt fails rather than
 	// the session holding it in memory.
-	maxLineBytes = 1 << 20
+	MaxLineBytes = 1 << 20
 	// maxStderrBytes is how much of a command's stderr one attempt
 	// logs. A feed that floods its diagnostics loses the rest: the log
 	// is not the feed's output.
@@ -199,8 +200,8 @@ func (r *lineReader) Write(p []byte) (int, error) {
 			return n, nil
 		}
 	}
-	if len(r.pending) > maxLineBytes {
-		r.fail(fmt.Errorf("a line is longer than %d bytes", maxLineBytes))
+	if len(r.pending) > MaxLineBytes {
+		r.fail(fmt.Errorf("a line is longer than %d bytes", MaxLineBytes))
 	}
 	return n, nil
 }
@@ -232,8 +233,8 @@ func (r *lineReader) failure() error {
 // the limit is the attempt's failure before anything decodes it, so a
 // complete line is held to the same limit as one still arriving.
 func (r *lineReader) accept(line string) error {
-	if len(line) > maxLineBytes {
-		return r.fail(fmt.Errorf("a line is longer than %d bytes", maxLineBytes))
+	if len(line) > MaxLineBytes {
+		return r.fail(fmt.Errorf("a line is longer than %d bytes", MaxLineBytes))
 	}
 	if strings.TrimSpace(line) == "" {
 		return nil

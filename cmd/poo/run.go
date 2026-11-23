@@ -213,6 +213,7 @@ func handleRun(parent context.Context, inv clicontract.Invocation, stdout, stder
 
 	runtime.Options.Transport = transport
 	runtime.Options.Sink = sink
+	runtime.Options.SessionDir = sink.sessionDir()
 	runtime.Options.SessionID = sessionID
 	runtime.Options.ReasoningEffort = o.reasoningEffort
 	runtime.Options.ToolsMode = string(model.Tools.Mode)
@@ -464,7 +465,7 @@ func openSink(ctx context.Context, runtime *config.Runtime, created *poo.Session
 			log.Close()
 			return nil, err
 		}
-		return &sink{log: log, path: logPath}, nil
+		return &sink{log: log, path: logPath, recordDir: filepath.Dir(logPath)}, nil
 	}
 	if runtime.Store == nil {
 		return &sink{}, nil
@@ -472,7 +473,7 @@ func openSink(ctx context.Context, runtime *config.Runtime, created *poo.Session
 	if _, err := runtime.Store.Create(ctx, created); err != nil {
 		return nil, err
 	}
-	return &sink{store: runtime.Store, path: runtime.Store.Dir()}, nil
+	return &sink{store: runtime.Store, path: runtime.Store.Dir(), recordDir: runtime.Store.Dir()}, nil
 }
 
 // sink is where a session's records go.
@@ -487,7 +488,14 @@ type sink struct {
 	// path is where the records go, for the message the command
 	// prints.
 	path string
+	// recordDir is the directory the records are in, which the session
+	// keeps its own files beside. It is empty for a sink that writes
+	// nothing.
+	recordDir string
 }
+
+// sessionDir returns the directory the session's files are in.
+func (s *sink) sessionDir() string { return s.recordDir }
 
 // Append writes one record.
 func (s *sink) Append(ctx context.Context, rec poo.Record) error {

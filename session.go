@@ -184,6 +184,13 @@ type Session struct {
 	// supervisor.
 	feedDelay func(ran, previous time.Duration) time.Duration
 
+	// pendingFaultReports holds the fault reports that are in flight —
+	// accepted but not yet queued — by origin, so a fault that arrives in
+	// the gap folds into the one in flight rather than queueing a second
+	// report. The fold and the reservation are one critical section, so
+	// two faults for one origin queue one report, whatever the gap.
+	pendingFaultReports map[Origin]*feedFault
+
 	// events is the session's event bus.
 	events *eventBus
 
@@ -576,6 +583,13 @@ type Options struct {
 	PromptVariant string
 	// WorkingDir is the directory the tools work in.
 	WorkingDir string
+	// SessionDir is the directory the session's own files are in: the
+	// log file's, or the store's.
+	//
+	// A feed's filter fault log is written here, so the report the agent
+	// reads names a file beside the session it belongs to. The empty
+	// directory means the working directory.
+	SessionDir string
 	// Env is the scrubbed child environment for the tools.
 	Env []string
 	// Settings holds the tools' tunable knobs.
@@ -758,21 +772,22 @@ func New(opts Options, fns ...Option) (*Session, error) {
 	opts.MessageIDs = ids
 
 	s := &Session{
-		opts:               opts,
-		recordWriteBudget:  defaultRecordWriteBudget,
-		state:              StateIdle,
-		results:            map[string]ToolResult{},
-		resultMeta:         map[string]resultMeta{},
-		recorded:           map[string]Message{},
-		messageIDs:         ids,
-		jobs:               map[string]*jobState{},
-		feeds:              map[string]*feedState{},
-		optionalFeeds:      map[string]FeedSpec{},
-		feedDelay:          feedRestartDelay,
-		jobQueued:          make(chan struct{}, 1),
-		jobCompletionsDone: make(chan struct{}, 1),
-		gatesDone:          make(chan struct{}, 1),
-		deciderModel:       opts.DeciderModel,
+		opts:                opts,
+		recordWriteBudget:   defaultRecordWriteBudget,
+		state:               StateIdle,
+		results:             map[string]ToolResult{},
+		resultMeta:          map[string]resultMeta{},
+		recorded:            map[string]Message{},
+		messageIDs:          ids,
+		jobs:                map[string]*jobState{},
+		feeds:               map[string]*feedState{},
+		pendingFaultReports: map[Origin]*feedFault{},
+		optionalFeeds:       map[string]FeedSpec{},
+		feedDelay:           feedRestartDelay,
+		jobQueued:           make(chan struct{}, 1),
+		jobCompletionsDone:  make(chan struct{}, 1),
+		gatesDone:           make(chan struct{}, 1),
+		deciderModel:        opts.DeciderModel,
 	}
 	// A construction that fails rolls back everything it started. The
 	// event bus's reporter is a goroutine, and no session is returned

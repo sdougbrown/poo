@@ -992,6 +992,7 @@ func (s *Session) deliverMessageRecords(run *runState, msg Message, inputID stri
 		RunID:        run.id,
 		Role:         msg.Role,
 		Content:      msg.Content,
+		Data:         cloneRaw(msg.Data),
 		InputID:      inputID,
 		DeliveryNote: note,
 	}); err != nil {

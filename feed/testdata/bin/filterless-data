@@ -1,0 +1,4 @@
+#!/bin/sh
+# A fixture feed: a record with a data field, and no filter to read it.
+printf '{"text": "the message", "from": "alice", "data": {"kind": "note"}}\n'
+sleep 60

@@ -215,6 +215,7 @@ list the model sees: nothing is trimmed, rewritten or summarised.
 | `partial` | boolean | `true` when the message was cut short. Absent when it was not. |
 | `cause` | string | Why the message was cut short: `"interrupt"` or `"provider_error"`. Absent unless the message is partial. |
 | `delivery_note` | object | How much of the previous reply the user had seen. Absent when the message carries none. |
+| `data` | object | The object a feed's filter wrote beside the message's text: the structured record. Absent unless a filter produced one. |
 
 A partial message is the text a cut-short response carried. The
 assistant's own tool calls in a partial response did not run, and the
@@ -381,6 +382,7 @@ fate is in the records.
 | `text` | string | The message text. |
 | `attachments` | array of objects | The files the input carries, each holding `modality`, `media_type` and `data` (base64), so a held input survives a restart with what it carried. Absent when the input carries none. A feed's input carries its image this way. |
 | `delivery_note` | object | How much of the previous reply the user had seen. Absent when the input carries none. Its `text` is empty when the reply was still streaming at acceptance; the delivered message carries the note rendered at delivery. |
+| `data` | object | The object a feed's filter wrote beside the text, kept so a held input is still a structured record after a restart. Absent unless a filter produced one. |
 | `queued_at` | string | RFC 3339, UTC. |
 
 ## `input.delivered`
@@ -495,7 +497,7 @@ start again on its own.
 | `session_id` | string | The session's identifier. |
 | `feed` | string | The feed's name. |
 | `attempt` | integer | The attempt's number within the session. |
-| `outcome` | string | How the attempt ended: `"exited"`, `"failed"`, `"cancelled"`, `"session_closed"` or `"interrupted"`. |
+| `outcome` | string | How the attempt ended: `"exited"`, `"failed"`, `"cancelled"`, `"suspended"`, `"session_closed"` or `"interrupted"`. |
 | `error` | string | The runner's error, when it returned one. Absent when it did not. |
 | `restart_in_ms` | integer | How long the session waits before the next attempt, in whole milliseconds, rounded up. Absent when no restart is scheduled. |
 | `ended_at` | string | RFC 3339, UTC. |
@@ -505,6 +507,19 @@ it returned an error or panicked. `cancelled` means `cancel_job` stopped
 the attempt, and `session_closed` means the session closed under it, or
 its store broke. `interrupted` is written by a load, never by a live
 session: the process stopped during the attempt.
+
+`suspended` means the feed's filter failed closed: the filter exited
+nonzero, or wrote something other than a record, so the attempt ended and
+the feed did not restart, whatever its restart policy says. The `error`
+names the fault.
+
+A suspension wakes the session with a `feed` input of its own, and that
+input is the report of how the feed went down. Its text is the feed's
+`<feed>` element with `fault` and `log` attributes beside `name`: the
+fault's code, and the path of a file beside the session's own that holds
+the filter's diagnostics for the attempt. Those diagnostics never ride the
+input. One suspension is one wake: a further fault that arrives before the
+report is delivered joins it, and the report counts it.
 
 ## `observer.dropped`
 

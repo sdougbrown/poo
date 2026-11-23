@@ -300,6 +300,11 @@ type Message struct {
 	// Cause says why the message was cut short: "interrupt" or
 	// "provider_error". It is set only on a partial message.
 	Cause Cause `json:"cause,omitempty"`
+	// Data is the object a feed's filter produced beside the message's
+	// text, and nil for a message that has none. It is the record's side
+	// channel, the way a tool result's structured payload is: the model
+	// reads the text, and a consumer of the message reads the object.
+	Data json.RawMessage `json:"data,omitempty"`
 }
 
 // Text returns the concatenated text blocks of the message.
@@ -451,6 +456,14 @@ func attachmentBlocks(attachments []Attachment) []ContentBlock {
 		})
 	}
 	return blocks
+}
+
+// cloneRaw returns a copy of a JSON payload that owns its bytes.
+func cloneRaw(raw json.RawMessage) json.RawMessage {
+	if raw == nil {
+		return nil
+	}
+	return append(json.RawMessage(nil), raw...)
 }
 
 // cloneAttachments returns a copy that owns its bytes.

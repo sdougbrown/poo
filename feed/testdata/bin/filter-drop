@@ -1,0 +1,7 @@
+#!/bin/sh
+# A fixture filter: it reads the record, keeps it in the file the
+# manifest's FIXTURE_FILTER_LOG names, and writes nothing, which drops it.
+record=$(cat)
+if [ -n "$FIXTURE_FILTER_LOG" ]; then
+	printf '%s\n' "$record" >> "$FIXTURE_FILTER_LOG"
+fi

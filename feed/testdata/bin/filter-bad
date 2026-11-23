@@ -1,0 +1,4 @@
+#!/bin/sh
+# A fixture filter: it answers with something that is not a record.
+cat >/dev/null
+printf 'not a record\n'

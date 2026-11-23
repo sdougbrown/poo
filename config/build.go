@@ -1747,27 +1747,25 @@ func (r *Runtime) resolveFeedRuns(opts BuildOptions) error {
 			// it calls, so a session created in another directory
 			// than the build's runs its feed there.
 			Run: func(ctx context.Context, io poo.FeedIO) error {
-				emit := io.Emit
-				if spec.Filter != nil {
-					emit = filterEmit(ctx, io, spec.Name, *spec.Filter)
-				}
+				// The scoped resolver carries the session's own values and
+				// the ones the subscription named, so a manifest's
+				// `session:id` and `scope:NAME` references both resolve
+				// beside the session the instance runs beside. A filter
+				// resolves the feed's own entries through it, so the
+				// filter reaches what the feed reaches.
+				session := exec.ScopedResolver(io.SessionID, io.Scope)
+				emit := filterEmitter(ctx, io, spec, r.executor, lookup, session)
 				// The feed package's image is the envelope's own shape;
 				// the session's is the seam's. The two differ in the
 				// JSON tags alone: a field added to one is added to the
 				// other, and copied here. A nil image is a text-only
 				// message — the conversion would name an image with no
 				// path — so it passes through as nil.
-				//
-				// The scoped resolver carries the session's own values and
-				// the ones the subscription named, so a manifest's
-				// `session:id` and `scope:NAME` references both resolve
-				// beside the session the instance runs beside.
-				session := exec.ScopedResolver(io.SessionID, io.Scope)
 				return run(ctx, io.Dir, session, func(from, text string, image *feed.Image) error {
 					if image == nil {
-						return emit(from, text, nil)
+						return emit(from, text, nil, nil)
 					}
-					return emit(from, text, &poo.FeedImage{Path: image.Path, MediaType: image.MediaType})
+					return emit(from, text, &poo.FeedImage{Path: image.Path, MediaType: image.MediaType}, nil)
 				}, io.Log)
 			},
 		})

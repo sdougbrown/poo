@@ -438,10 +438,14 @@ subscription that stopped starts again on the next call to it. The fields
 and their patterns are in the prompt, so the model knows what it may ask
 for.
 
-**Filter before delivery.** An optional `filter` applies to the text
-of every message, including messages emitted while a run is active. A
-message whose text is empty — an image alone — is delivered without the
-question. For example:
+**Filters before delivery.** An optional `filter` names one of two kinds:
+a `question`, put to the session's decision model, or a `command`, run as
+one process per record. A manifest that names both fails the load. A feed
+with no filter delivers what its command writes.
+
+**Question filter.** The question applies to the text of every message,
+including messages emitted while a run is active. A message whose text is
+empty — an image alone — is delivered without the question. For example:
 
 ```json
 "filter": {
@@ -472,6 +476,41 @@ undecidable. The feed waits for each answer before it reads the next message.
 A stopped feed cancels its pending decision and never delivers the message it
 was assessing.
 
+The question fails open: the only message it withholds is one it declined
+with enough confidence. That is why a missing or broken decider delivers.
+
+**Command filter.** The filter's argv runs once per record. The record
+the feed wrote arrives on the filter's standard input, and the record the
+filter writes to its standard output is the one delivered. For example:
+
+```json
+"filter": {
+  "command": ["/path/to/excerpt", "--max", "2000"]
+}
+```
+
+The output record names `text`, `from` and `image` the way a feed's own
+line does, and may add a `data` object beside its text: that object is the
+structured record, and the delivered message carries it. A feed that runs
+no filter has no `data`, and the field is ignored there.
+
+The filter runs the way the feed's own command runs: the same executor,
+the same directory, and the same environment, the manifest's `env`
+entries and the library's benign names. A record is at most 1 MiB on both
+sides of the filter.
+
+The command filter fails closed. An empty standard output drops the
+record, which is how a filter withholds one. A nonzero exit, or output
+that is not a record, fails the attempt, and the feed is suspended: it
+does not restart, whatever `restart` says. The session wakes with a
+report of its own, delivered as a feed input whose text is a `<feed>`
+element with `fault` and `log` attributes: the fault's code, and the path
+of a file beside the session's own that holds the filter's diagnostics
+for the attempt. Those diagnostics never ride the input. The report ends
+with how the feed starts again: `subscribe_feed` with the feed's name and
+scope, for a feed a subscription started. One suspension is one wake, and
+a further fault that lands before the report is delivered joins it.
+
 **The model reads a feed's input as outside input.** The message is one
 XML element: `<feed name="<name>" from="<from>">` around the text, with
 the `from` attribute left out when the input has no sender, and `name` is
@@ -488,7 +527,9 @@ lists them.
 **Jobs.** A running feed is listed by `jobs` and by `session/get` as
 `feed:<name>` with the tool `feed`, and an instance a subscription started
 as its origin, `feed:<name>[<field>=<value>]`. `cancel_job` takes either
-id and stops that feed until the session closes. A session that loads
+id and stops that feed until the session closes, and it stops a feed a
+filter suspended as it stops any other. A suspended feed is listed as
+`suspended`, and `subscribe_feed` starts it again. A session that loads
 again starts every configured feed that is not optional; a subscription is
 not resumed, and the model starts one again with `subscribe_feed`.
 

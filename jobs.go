@@ -305,6 +305,9 @@ type jobResult struct {
 	// text is the result the model reads. A feed's input carries the
 	// text rendered at acceptance, and the delivery uses it verbatim.
 	text string
+	// data is the object a filter's record carried beside its text, and
+	// nil for a result that has none.
+	data json.RawMessage
 	// attachments are the files the result carries, delivered beside the
 	// text.
 	attachments []Attachment
@@ -322,6 +325,11 @@ type jobResult struct {
 	// onIdle is the idle policy a feed asked for, and empty for a job's
 	// result: a result that carries none takes the session's.
 	onIdle OnIdle
+	// fault is the report a suspended feed's filter left, set when the
+	// result is that report rather than a feed's message. A later fault
+	// joins the report through it, so one suspension wakes the session
+	// once.
+	fault *feedFault
 }
 
 // jobQueueItem is a queued result, in completion order.
@@ -344,13 +352,13 @@ type JobInfo struct {
 	RunID string
 	// StartedAt is when the job started, in RFC 3339.
 	StartedAt string
-	// Status is "running", "restarting" or "held".
+	// Status is "running", "restarting", "suspended" or "held".
 	//
 	// A held job is a finished job whose result waits for the next
 	// run: the work is done, and the model has not read it yet. A feed
-	// is "running" while its attempt runs and "restarting" while it
-	// waits for the next attempt; a live feed's row replaces the held
-	// row of an input of it.
+	// is "running" while its attempt runs, "restarting" while it waits
+	// for the next attempt, and "suspended" while its filter has it
+	// stopped; a live feed's row replaces the held row of an input of it.
 	Status string
 }
 
@@ -362,6 +370,9 @@ const (
 	JobHeld = "held"
 	// JobRestarting means the feed is waiting for its next attempt.
 	JobRestarting = "restarting"
+	// JobSuspended means the feed's filter failed closed: the feed runs
+	// no attempt and no restart until something starts it again.
+	JobSuspended = "suspended"
 )
 
 // Jobs returns the session's jobs and feeds.
@@ -1033,15 +1044,44 @@ func (s *Session) QueueJobResult(result JobResult) {
 // FeedToolName is the tool name a feed's input is listed under.
 const FeedToolName = "feed"
 
+// feedInput is one input a feed queues: what it says, what it carries, and
+// how the acceptance treats it.
+type feedInput struct {
+	// instance is the label the feed's origin and its inputs carry: the
+	// feed's name alone, or the name and the canonical scope a
+	// subscription named.
+	instance string
+	// from is the sender the feed named, empty when it named none.
+	from string
+	// text is the message's text. It is empty on a fault report, which
+	// renders its own text from the fault.
+	text string
+	// data is the object a filter's record carried beside its text, and
+	// nil for a record no filter let through.
+	data json.RawMessage
+	// attachments are the files the input carries beside its text.
+	attachments []Attachment
+	// onIdle is the idle policy that rides the input; an empty policy is
+	// the session's.
+	onIdle OnIdle
+	// fault is set when the input is the session's own report of a feed
+	// filter's fault rather than a record the feed emitted.
+	fault *feedFault
+	// admit, when it is set, is asked whether the input may join the
+	// session in the same critical section that decides the acceptance,
+	// before the acceptance's write is registered: an emit that names the
+	// attempt it belongs to is admitted before that attempt's end is
+	// claimed, or refused after it, and never in between.
+	admit func() bool
+}
+
 // queueFeedInput queues one instance of a feed's input for the model.
 //
-// The instance is the label the feed's origin and its inputs carry: the
-// feed's name alone, or the name and the canonical scope a subscription
-// named. The model-facing text is rendered here, once, and the acceptance
-// record carries it with the input's attachments: the delivery uses
-// the stored text and the stored files, live and after a restore. A
-// feed's message never stands in for the user's turn, so the model
-// reads it as untrusted text.
+// The model-facing text is rendered here, once, and the acceptance record
+// carries it with the input's attachments and its structured data: the
+// delivery uses the stored text, the stored files and the stored object,
+// live and after a restore. A feed's message never stands in for the
+// user's turn, so the model reads it as untrusted text.
 //
 // The input joins the session's job queue, so the idle policy, the wake
 // limit and the close's held record act on it exactly as they do on a
@@ -1050,36 +1090,38 @@ const FeedToolName = "feed"
 // record returns the store's error: the input is then not queued.
 //
 // The instance's label is not validated here: a caller that takes a
-// feed's name validates it before it queues the input. The feed's idle
-// policy rides with the input; an empty policy is the session's.
-//
-// admit, when it is set, is asked whether the input may join the session
-// in the same critical section that decides the acceptance, before the
-// acceptance's write is registered: an emit that names the attempt it
-// belongs to is admitted before that attempt's end is claimed, or refused
-// after it, and never in between.
-func (s *Session) queueFeedInput(instance, from, text string, attachments []Attachment, onIdle OnIdle, admit func() bool) error {
-	origin := FeedOrigin(instance)
-	s.mu.Lock()
+// feed's name validates it before it queues the input.
+// feedInputClaim is the decision to accept one feed's input, taken under
+// the session's lock: the write registration, the input's number and the
+// input the backlog cap dropped to make room.
+type feedInputClaim struct {
+	gate      *writeGate
+	inputID   string
+	inputSeq  int
+	droppedID string
+}
+
+// queueFeedInputClaimLocked takes the decision to accept one feed's input
+// under the session's lock: the refusal checks, the write registration,
+// the backlog cap and the input's number. The caller holds the session's
+// lock.
+func (s *Session) queueFeedInputClaimLocked(in feedInput) (*feedInputClaim, error) {
+	origin := FeedOrigin(in.instance)
 	if s.broken {
-		s.mu.Unlock()
-		return ErrSessionBroken
+		return nil, ErrSessionBroken
 	}
 	if s.closed {
-		s.mu.Unlock()
-		return ErrSessionClosed
+		return nil, ErrSessionClosed
 	}
-	if admit != nil && !admit() {
-		s.mu.Unlock()
-		return ErrSessionClosed
+	if in.admit != nil && !in.admit() {
+		return nil, ErrSessionClosed
 	}
 	// The acceptance's write is registered in the critical section that
 	// decides the input, so a close that begins now waits for it, and
 	// the completion stays outstanding until the result is queued.
 	gate, ok := s.beginWriteLocked("input.queued")
 	if !ok {
-		s.mu.Unlock()
-		return ErrSessionClosed
+		return nil, ErrSessionClosed
 	}
 	// The backlog cap: an accepted input that arrives at the cap makes
 	// room by dropping the feed's oldest undelivered input. The drop is
@@ -1090,17 +1132,28 @@ func (s *Session) queueFeedInput(instance, from, text string, attachments []Atta
 	}
 	s.inputSeq++
 	inputID := jobInputID(s.opts.SessionID, s.inputSeq)
-	inputSeq := s.inputSeq
 	s.jobCompletions++
-	s.mu.Unlock()
-	defer func() {
-		s.mu.Lock()
-		s.endJobCompletionLocked()
-		s.mu.Unlock()
-	}()
+	return &feedInputClaim{
+		gate:      gate,
+		inputID:   inputID,
+		inputSeq:  s.inputSeq,
+		droppedID: droppedID,
+	}, nil
+}
 
-	rendered := feedInputText(instance, from, text)
-	if droppedID != "" {
+// queueFeedInputWrite writes the acceptance and queues the result for an
+// input whose claim was taken under the session's lock. The write
+// releases the lock, and the result is queued after it.
+func (s *Session) queueFeedInputWrite(in feedInput, claim *feedInputClaim) error {
+	origin := FeedOrigin(in.instance)
+	rendered := feedInputText(in.instance, in.from, in.text)
+	if in.fault != nil {
+		// The report is the session's account of the filter, not a record
+		// the filter let through, so it renders with the fault's own
+		// attributes.
+		rendered = in.fault.render()
+	}
+	if claim.droppedID != "" {
 		// The note rides the input's stored text, so a restored session
 		// delivers the same words.
 		rendered += "\n" + feedDropNote
@@ -1108,17 +1161,17 @@ func (s *Session) queueFeedInput(instance, from, text string, attachments []Atta
 	// The dropped input's fate is recorded before the acceptance. A
 	// store that refuses the acceptance then still leaves the dropped
 	// input fated, and a restore reads the fate and skips it.
-	if droppedID != "" {
+	if claim.droppedID != "" {
 		_ = s.write(context.Background(), &InputDroppedRecord{
 			RecordMeta: NewRecordMeta("input.dropped"),
 			SessionID:  s.opts.SessionID,
-			InputID:    droppedID,
+			InputID:    claim.droppedID,
 			Mode:       InputModeFeed,
 			Reason:     ReasonBacklog,
 			DroppedAt:  nowRFC3339(),
 		})
 		s.events.emit(EventInputDropped, map[string]any{
-			"input_id": droppedID,
+			"input_id": claim.droppedID,
 			"mode":     string(InputModeFeed),
 			"reason":   string(ReasonBacklog),
 		})
@@ -1126,14 +1179,16 @@ func (s *Session) queueFeedInput(instance, from, text string, attachments []Atta
 	if err := s.writeClaimed(context.Background(), &InputQueuedRecord{
 		RecordMeta: NewRecordMetaFrom("input.queued", origin),
 		SessionID:  s.opts.SessionID,
-		InputID:    inputID,
+		InputID:    claim.inputID,
 		Mode:       InputModeFeed,
 		Text:       rendered,
 		// The attachments are the files the input carries beside its
-		// text, so a held input is still one after a restart.
-		Attachments: cloneAttachments(attachments),
+		// text, and Data is the object a filter produced, so a held input
+		// is still one after a restart.
+		Attachments: cloneAttachments(in.attachments),
+		Data:        cloneRaw(in.data),
 		QueuedAt:    nowRFC3339(),
-	}, gate); err != nil {
+	}, claim.gate); err != nil {
 		// The store refused the input's acceptance. The session is broken
 		// at once: the wakes stop, and the run that is still open gets the
 		// store_error candidate.
@@ -1142,22 +1197,55 @@ func (s *Session) queueFeedInput(instance, from, text string, attachments []Atta
 		return err
 	}
 	s.events.emit(EventInputQueued, map[string]any{
-		"input_id": inputID,
+		"input_id": claim.inputID,
 		"mode":     string(InputModeFeed),
 		"origin":   string(origin),
 	})
 	s.queueJobResult(jobResult{
-		id:          inputID,
+		id:          claim.inputID,
 		job:         string(origin),
 		tool:        FeedToolName,
 		outcome:     OutcomeOK,
 		text:        rendered,
-		attachments: cloneAttachments(attachments),
+		data:        cloneRaw(in.data),
+		attachments: cloneAttachments(in.attachments),
 		origin:      origin,
-		seq:         inputSeq,
-		onIdle:      onIdle,
+		seq:         claim.inputSeq,
+		onIdle:      in.onIdle,
+		fault:       in.fault,
 	})
 	return nil
+}
+
+// queueFeedInput queues one instance of a feed's input for the model.
+//
+// The model-facing text is rendered here, once, and the acceptance record
+// carries it with the input's attachments and its structured data: the
+// delivery uses the stored text, the stored files and the stored object,
+// live and after a restore. A feed's message never stands in for the
+// user's turn, so the model reads it as untrusted text.
+//
+// The input joins the session's job queue, so the idle policy, the wake
+// limit and the close's held record act on it exactly as they do on a
+// job's result. An input the session cannot take returns
+// ErrSessionClosed or ErrSessionBroken, and a store that refuses its
+// record returns the store's error: the input is then not queued.
+//
+// The instance's label is not validated here: a caller that takes a
+// feed's name validates it before it queues the input.
+func (s *Session) queueFeedInput(in feedInput) error {
+	s.mu.Lock()
+	claim, err := s.queueFeedInputClaimLocked(in)
+	s.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		s.mu.Lock()
+		s.endJobCompletionLocked()
+		s.mu.Unlock()
+	}()
+	return s.queueFeedInputWrite(in, claim)
 }
 
 // feedInputText renders the model-facing text of one instance of a
@@ -1554,6 +1642,7 @@ func (s *Session) deliverTrackedJobResult(run *runState, item jobQueueItem) bool
 	s.mu.Unlock()
 
 	msg := NewTextMessage(RoleUser, jobResultText(result))
+	msg.Data = cloneRaw(result.data)
 	if len(result.attachments) > 0 {
 		msg.Content = append(msg.Content, attachmentBlocks(result.attachments)...)
 	}
@@ -2159,7 +2248,7 @@ type jobSummary struct {
 	Tool string `json:"tool"`
 	// Summary describes the call.
 	Summary string `json:"summary,omitempty"`
-	// Status is "running", "restarting" or "held". A feed is
+	// Status is "running", "restarting", "suspended" or "held". A feed is
 	// "restarting" while it waits for its next attempt, and a held row
 	// is a result or an input that waits for the next run.
 	Status string `json:"status"`

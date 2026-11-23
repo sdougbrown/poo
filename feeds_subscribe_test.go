@@ -170,7 +170,7 @@ func TestSubscribeFeedStartsTheFeedWithItsScope(t *testing.T) {
 		case <-ctx.Done():
 			return ctx.Err()
 		}
-		if err := io.Emit("", "watching "+io.Scope["url"], nil); err != nil {
+		if err := io.Emit("", "watching "+io.Scope["url"], nil, nil); err != nil {
 			return err
 		}
 		<-ctx.Done()
@@ -542,7 +542,7 @@ func TestAnOptionalFeedHoldsItsInputsUnlessItsManifestSaysWake(t *testing.T) {
 				case <-ctx.Done():
 					return ctx.Err()
 				}
-				if err := io.Emit("", "watching", nil); err != nil {
+				if err := io.Emit("", "watching", nil, nil); err != nil {
 					return err
 				}
 				<-ctx.Done()
@@ -631,7 +631,7 @@ func TestAnInstanceKeepsItsOwnBacklogCap(t *testing.T) {
 			return ctx.Err()
 		}
 		for _, text := range []string{"one", "two"} {
-			if err := io.Emit("", text, nil); err != nil {
+			if err := io.Emit("", text, nil, nil); err != nil {
 				return err
 			}
 		}
