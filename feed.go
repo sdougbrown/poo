@@ -76,9 +76,33 @@ type FeedIO struct {
 	// seam to one. The call returns nil when the session has no model,
 	// and a caller that needs one acts as though there were none.
 	Decider func() decide.Decider
+	// FilterPrompt returns the filter prompt the model set on this
+	// instance, and false when it set none. It is read for each record,
+	// so a prompt the model sets or clears reaches the running feed
+	// without restarting it. The field is nil when the runner's builder
+	// passed no seam to one.
+	FilterPrompt func() (FeedFilterPrompt, bool)
 	// Log receives the runner's diagnostics, such as the child's stderr.
 	// It is never nil.
 	Log *slog.Logger
+}
+
+// FeedFilterPrompt is the question the model set on one feed instance
+// beside the manifest's own.
+//
+// The prompt replaces the manifest's question while it is set, and
+// clearing it restores the manifest's. The model sets it with
+// subscribe_feed, and setting one is the model's judgment about what is
+// worth delivering, where the manifest's question is the operator's.
+type FeedFilterPrompt struct {
+	// Question is asked about each message the filter sees. Phrase it so
+	// yes means deliver.
+	Question string
+	// MinNoProbability is the probability of no at which the message is
+	// dropped. Zero means the call named none: the manifest's value
+	// applies, or the session's default when the manifest names none. A
+	// value that is set is greater than 0.5 and at most 1.
+	MinNoProbability float64
 }
 
 // FeedFault is a feed's filter failing closed: a record the filter would
@@ -168,6 +192,11 @@ type FeedSpec struct {
 	// Scope is the schema of the values a subscription supplies, in name
 	// order. A feed that declares none takes none.
 	Scope []FeedScopeField
+	// ScriptFilter reports that the feed runs a filter of its own
+	// process: its records are screened before delivery, so a filter
+	// prompt the model would set on the instance has no place. A feed
+	// has one filter kind, and the session refuses the other.
+	ScriptFilter bool
 }
 
 // FeedScopeField is one field of a feed's scope: a value a subscription
@@ -432,6 +461,11 @@ type feedState struct {
 	status string
 	// startedAt is when the latest attempt started.
 	startedAt time.Time
+	// filterPrompt is the question the model set on the instance, or the
+	// zero value when it set none. It belongs to the instance, so a
+	// re-arm after a stop or a suspension runs with the same prompt, and
+	// clearing it restores the manifest's question.
+	filterPrompt FeedFilterPrompt
 }
 
 // listed reports that the feed is a job a list should carry.
@@ -652,7 +686,18 @@ func (s *Session) runFeedAttempt(f *feedState, attempt int) (err error) {
 			return s.emitFeedInput(f, attempt, from, text, image, data)
 		},
 		Decider: s.Decider,
-		Log:     s.feedLogger(f.instance),
+		// The prompt is read for each record, so setting or clearing one on
+		// the running instance reaches the feed's next record: the change
+		// is the filter's, and the attempt is not restarted for it.
+		FilterPrompt: func() (FeedFilterPrompt, bool) {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			if f.filterPrompt.Question == "" {
+				return FeedFilterPrompt{}, false
+			}
+			return f.filterPrompt, true
+		},
+		Log: s.feedLogger(f.instance),
 	})
 }
 
@@ -1109,7 +1154,8 @@ func (s *Session) listedFeedsLocked() []*feedState {
 }
 
 // subscribeFeed starts one instance of an optional feed, or reaches the
-// instance the same feed and scope already named.
+// instance the same feed and scope already named, and applies the call's
+// filter prompt when it names one.
 //
 // The instance is keyed by its origin, which carries the feed's name and
 // the canonical form of the scope, so one feed may run twice beside a
@@ -1119,13 +1165,15 @@ func (s *Session) listedFeedsLocked() []*feedState {
 // started again with a fresh context: a subscription is the only thing that
 // starts a suspended feed again.
 //
-// The scope is the only value the model supplies, so it is held to the
-// feed's declared schema before anything starts, and a refusal is the
-// model's to correct.
+// The scope is held to the feed's declared schema before anything starts,
+// and a refusal is the model's to correct. A prompt is held over too: it is
+// the question the decision model is asked about each record, so it replaces
+// the manifest's while it is set, and a feed that cannot be asked the
+// question refuses it.
 //
 // The call reports the instance's origin and whether this call started
 // it.
-func (s *Session) subscribeFeed(name string, scope map[string]string) (string, bool, error) {
+func (s *Session) subscribeFeed(name string, scope map[string]string, prompt *FeedFilterPrompt, hasMinNoProbability bool) (string, bool, error) {
 	spec, ok := s.optionalFeeds[name]
 	if !ok {
 		return "", false, InvalidArgsf("%s: the feed %q is not one this session starts on demand", SubscribeFeedToolName, name)
@@ -1133,6 +1181,14 @@ func (s *Session) subscribeFeed(name string, scope map[string]string) (string, b
 	values, err := checkFeedScope(spec, scope)
 	if err != nil {
 		return "", false, InvalidArgsf("%s: %v", SubscribeFeedToolName, err)
+	}
+	var change *FeedFilterPrompt
+	if prompt != nil {
+		applied, err := checkFeedPrompt(spec, s.Decider() != nil, *prompt, hasMinNoProbability)
+		if err != nil {
+			return "", false, InvalidArgsf("%s: %v", SubscribeFeedToolName, err)
+		}
+		change = &applied
 	}
 	instance := feedInstanceLabel(spec.Name, values)
 	id := string(FeedOrigin(instance))
@@ -1147,27 +1203,73 @@ func (s *Session) subscribeFeed(name string, scope map[string]string) (string, b
 		return "", false, ErrSessionClosed
 	}
 	f, ok := s.feeds[id]
-	if ok {
-		if f.status != feedStopped && f.status != feedSuspended {
-			s.mu.Unlock()
-			return id, false, nil
-		}
+	started := true
+	switch {
+	case ok && f.status != feedStopped && f.status != feedSuspended:
+		// The instance is there and running: the call reaches it, and the
+		// prompt below is the whole of what it changes.
+		started = false
+	case ok:
 		// The instance stopped or is suspended: its supervisor is gone with
 		// its context, so a re-arm is a fresh context and a fresh
-		// supervisor.
+		// supervisor. The prompt is the instance's own, and stays with it.
 		f.ctx, f.cancel = context.WithCancelCause(s.jobCtx)
 		f.done = make(chan struct{})
 		f.startedAt = time.Now()
 		f.status = feedRunning
-	} else {
+	default:
 		f = s.newFeedState(spec, values)
 		s.feeds[id] = f
 		s.feedOrder = append(s.feedOrder, f)
 	}
+	if change != nil {
+		f.filterPrompt = *change
+	}
 	f.started = true
 	s.mu.Unlock()
-	go s.runFeed(f)
-	return id, true, nil
+	if started {
+		go s.runFeed(f)
+	}
+	return id, started, nil
+}
+
+// checkFeedPrompt returns the filter prompt one call sets on a feed
+// instance, and refuses the set the feed cannot take.
+//
+// A prompt is the question the decision model is asked about each record,
+// so the feed must be one the model may ask: a manifest that configures a
+// script filter refuses the prompt, because a feed screens its records one
+// way, and a session with no decision model refuses it too, because the
+// prompt would screen nothing. Both refusals name the reason, so the model
+// is not left with a filter it believes is working.
+//
+// An empty prompt clears what an earlier call set, and clearing is never
+// refused: it restores the manifest's question, whatever the feed is.
+//
+// hasMinNoProbability reports whether the call named a min_no_probability
+// at all: the value's zero is the "named none" convention, so an explicit
+// zero is out of range and is refused, not folded into the clear.
+func checkFeedPrompt(spec FeedSpec, hasDecider bool, prompt FeedFilterPrompt, hasMinNoProbability bool) (FeedFilterPrompt, error) {
+	question := strings.TrimSpace(prompt.Question)
+	if question == "" {
+		if prompt.Question != "" {
+			return FeedFilterPrompt{}, fmt.Errorf("the filter prompt is blank")
+		}
+		if hasMinNoProbability {
+			return FeedFilterPrompt{}, fmt.Errorf("the call names a min_no_probability, and a min_no_probability belongs to a filter prompt")
+		}
+		return FeedFilterPrompt{}, nil
+	}
+	if spec.ScriptFilter {
+		return FeedFilterPrompt{}, fmt.Errorf("the feed %q runs a filter of its own, and a feed screens its records one way", spec.Name)
+	}
+	if !hasDecider {
+		return FeedFilterPrompt{}, fmt.Errorf("the session has no decision model, so the filter prompt on the feed %q would screen nothing", spec.Name)
+	}
+	if hasMinNoProbability && !(prompt.MinNoProbability > 0.5 && prompt.MinNoProbability <= 1) {
+		return FeedFilterPrompt{}, fmt.Errorf("the min_no_probability %v is outside the range a filter prompt takes, which is greater than 0.5 and at most 1", prompt.MinNoProbability)
+	}
+	return FeedFilterPrompt{Question: question, MinNoProbability: prompt.MinNoProbability}, nil
 }
 
 // checkFeedScope validates a subscription's scope against the feed's

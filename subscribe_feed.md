@@ -4,6 +4,8 @@ Feeds you can start:
 - Subscribing the same feed and scope again reaches the instance that is already there.
 - A feed whose filter failed is suspended, and subscribing to it again starts it again.
 - A scope says what to watch. Each field takes one string. Where the feed gives a pattern, the whole value must match it.
+- A prompt is the question the decision model is asked about each message, and it replaces the feed's own question while it is set. An empty prompt clears it.
+- A feed whose manifest runs a filter command takes no prompt, and neither does a session with no decision model.
 {{range .OptionalFeeds}}- {{.Name}}{{with .Description}}: {{.}}{{end}}
 {{with .Scope}}  Its scope is {{range $i, $field := .}}{{if $i}}, {{end}}{{$field.Name}}{{with $field.Pattern}} ({{.}}){{end}}{{end}}.
 {{end}}{{end}}

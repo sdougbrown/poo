@@ -1743,6 +1743,10 @@ func (r *Runtime) resolveFeedRuns(opts BuildOptions) error {
 			MaxPending:  spec.MaxPending,
 			Optional:    spec.Optional,
 			Scope:       scopeFields(spec.Scope),
+			// A feed's filter is one of the two kinds, and the core
+			// refuses a filter prompt on a feed whose manifest runs the
+			// script kind.
+			ScriptFilter: spec.Filter.Script(),
 			// The session hands its own working directory to the run
 			// it calls, so a session created in another directory
 			// than the build's runs its feed there.

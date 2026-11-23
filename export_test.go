@@ -119,5 +119,12 @@ func RequeueAtFront(s *Session, inputID string) {
 // subscribe_feed tool does, and reports the instance and whether this call
 // started it.
 func SubscribeFeed(s *Session, feed string, scope map[string]string) (string, bool, error) {
-	return s.subscribeFeed(feed, scope)
+	return s.subscribeFeed(feed, scope, nil, false)
+}
+
+// SubscribeFeedWithPrompt starts one instance of an optional feed and sets
+// the filter prompt the call names, the way the subscribe_feed tool does.
+func SubscribeFeedWithPrompt(s *Session, feed string, scope map[string]string, prompt *FeedFilterPrompt) (string, bool, error) {
+	hasMinNoProbability := prompt != nil && prompt.MinNoProbability != 0
+	return s.subscribeFeed(feed, scope, prompt, hasMinNoProbability)
 }

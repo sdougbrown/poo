@@ -45,13 +45,14 @@ type SubscribeFeedTool struct {
 func (t *SubscribeFeedTool) Spec() ToolSpec {
 	return ToolSpec{
 		Name:        SubscribeFeedToolName,
-		Description: "Start one of the session's optional feeds, with the values it watches. It runs until cancel_job stops it.",
+		Description: "Start one of the session's optional feeds, with the values it watches. It runs until cancel_job stops it. A prompt screens the feed's messages through the session's decision model.",
 		Schema: json.RawMessage(`{
   "type": "object",
   "properties": {
     "feed": {"type": "string", "description": "The feed's name, as the section that lists the optional feeds spells it."},
     "scope": {"type": "object", "description": "The values the feed watches, keyed by the scope fields the feed declares.", "additionalProperties": true},
-    "prompt": {"type": "string", "description": "A note about what this instance watches for. Reserved: the session accepts it and does not read it."}
+    "prompt": {"type": "string", "description": "The question to ask the decision model about each message, replacing the feed's own question while it is set. Phrase it so yes means deliver. An empty string clears it, and the feed's own question applies again."},
+    "min_no_probability": {"type": "number", "exclusiveMinimum": 0.5, "maximum": 1, "description": "The probability of no at which a message is dropped, used with the prompt. The feed's own value applies when it names one, and 0.6 when it names none."}
   },
   "required": ["feed"]
 ,"additionalProperties":false}`),
@@ -64,10 +65,13 @@ func (t *SubscribeFeedTool) Prepare(raw json.RawMessage, env PrepareEnv) (Prepar
 	var a struct {
 		Feed  string            `json:"feed"`
 		Scope map[string]string `json:"scope"`
-		// Prompt is part of the call's shape and is not the instance's
-		// state: the feed starts from the manifest's command and the scope
-		// the call supplies.
-		Prompt string `json:"prompt"`
+		// Prompt is the question the call sets on the instance, and nil
+		// when the call names none: a plain subscription leaves the
+		// instance's own question alone.
+		Prompt *string `json:"prompt"`
+		// MinNoProbability is the drop threshold the call names beside
+		// the prompt, and nil when it names none.
+		MinNoProbability *float64 `json:"min_no_probability"`
 	}
 	if len(raw) > 0 {
 		if err := json.Unmarshal(raw, &a); err != nil {
@@ -77,7 +81,19 @@ func (t *SubscribeFeedTool) Prepare(raw json.RawMessage, env PrepareEnv) (Prepar
 	if a.Feed == "" {
 		return nil, InvalidArgsf("%s: the feed is required", SubscribeFeedToolName)
 	}
-	return &subscribeFeedPrepared{feed: a.Feed, scope: a.Scope}, nil
+	var prompt *FeedFilterPrompt
+	hasMinNoProbability := false
+	if a.Prompt != nil || a.MinNoProbability != nil {
+		prompt = &FeedFilterPrompt{}
+		if a.Prompt != nil {
+			prompt.Question = *a.Prompt
+		}
+		if a.MinNoProbability != nil {
+			prompt.MinNoProbability = *a.MinNoProbability
+			hasMinNoProbability = true
+		}
+	}
+	return &subscribeFeedPrepared{feed: a.Feed, scope: a.Scope, prompt: prompt, hasMinNoProbability: hasMinNoProbability}, nil
 }
 
 // Call starts the feed, and reports the instance the call reached.
@@ -89,7 +105,7 @@ func (t *SubscribeFeedTool) Call(ctx context.Context, in Prepared, env ToolEnv) 
 	if !ok {
 		return ToolResult{}, InvalidArgsf("%s: the call was not prepared", SubscribeFeedToolName)
 	}
-	instance, started, err := t.session.subscribeFeed(p.feed, p.scope)
+	instance, started, err := t.session.subscribeFeed(p.feed, p.scope, p.prompt, p.hasMinNoProbability)
 	if err != nil {
 		return ToolResult{}, err
 	}
@@ -98,7 +114,17 @@ func (t *SubscribeFeedTool) Call(ctx context.Context, in Prepared, env ToolEnv) 
 		state = "is already running"
 	}
 	label, _ := FeedInstance(Origin(instance))
-	return ToolResult{Text: fmt.Sprintf("The feed %s %s, and the jobs tool lists it as %s.", label, state, instance)}, nil
+	text := fmt.Sprintf("The feed %s %s, and the jobs tool lists it as %s.", label, state, instance)
+	// The call's result says what the prompt did, so a model that set one
+	// knows the filter is the one it wrote, and not the manifest's.
+	if p.prompt != nil {
+		if p.prompt.Question == "" {
+			text += " The filter prompt is cleared."
+		} else {
+			text += " The filter prompt is set, and each message is asked that question."
+		}
+	}
+	return ToolResult{Text: text}, nil
 }
 
 // PromptSection renders the section that lists the feeds the model may
@@ -113,6 +139,14 @@ type subscribeFeedPrepared struct {
 	feed string
 	// scope are the values the call supplies.
 	scope map[string]string
+	// prompt is the filter prompt the call sets, and nil when it names
+	// none.
+	prompt *FeedFilterPrompt
+	// hasMinNoProbability reports whether the call named a
+	// min_no_probability at all: the value's zero is the "named none"
+	// convention, so an explicit zero is out of range and is refused,
+	// not folded into the clear.
+	hasMinNoProbability bool
 }
 
 // Summary describes the call.

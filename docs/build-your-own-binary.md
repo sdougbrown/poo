@@ -416,13 +416,14 @@ subscription supplies, one field at a time, each with a `type` of
 
 The model starts one instance with
 `subscribe_feed {"feed": "git-feedback", "scope": {"url": "https://…"}}`.
-The call may carry the reserved `prompt` argument, which the session
-accepts and does not read this slice; what it cannot carry is a
-command, argv, URL or credential, and every value is held to the feed's
-schema. A
+What it cannot carry is a command, argv, URL or credential, and every value
+is held to the feed's schema. A
 field the feed does not declare, a declared field the call leaves out, and
 a value the pattern refuses are refusals the model sees and can correct; a
-feed that declares no scope takes none. A `scope:` reference in `env` must
+feed that declares no scope takes none. A call may also carry `prompt`, the
+question the model wants asked about each record, and `min_no_probability`
+beside it; the question filter section below covers what the pair does, and
+the feeds that refuse it. A `scope:` reference in `env` must
 name a field the feed declares, and a scope on a feed that is not optional
 fails the load, as do a field type other than `string`, a pattern that
 does not compile, and a field name outside `^[a-z][a-z0-9_]*$`.
@@ -478,6 +479,30 @@ was assessing.
 
 The question fails open: the only message it withholds is one it declined
 with enough confidence. That is why a missing or broken decider delivers.
+
+**The model's own question.** A session with a decision model may set the
+question at runtime: the `prompt` a call names is put to the decision model
+about each record of that instance, and it replaces the manifest's question
+while it is set. A plain subscription names no prompt and leaves the
+instance's question alone; an empty `prompt` clears the model's question, and
+the manifest's applies again. The prompt belongs to the instance, so it
+reaches the instance a call reaches — a running one changes the question its
+next record is asked, without a restart — and a feed re-armed by a later
+subscription keeps it while the session lasts. A resumed session does not
+carry it: an optional feed's subscription is not resumed. Everything above
+holds for a prompt too, including the fail-open answers and the messages
+delivered unasked.
+
+The threshold is the call's `min_no_probability` when it names one, else the
+manifest's value when the manifest asks a question, else 0.6. The call's
+value is greater than 0.5 and at most 1.
+
+A feed has one filter kind. A feed whose manifest runs a command filter
+refuses a prompt, and so does a session with no decision model: the set is a
+refusal the model reads and can correct, because a filter that cannot screen
+would leave the model believing it does. Clearing a prompt is never refused.
+A manifest question, by contrast, still delivers unfiltered and warns,
+because the operator chose it.
 
 **Command filter.** The filter's argv runs once per record. The record
 the feed wrote arrives on the filter's standard input, and the record the

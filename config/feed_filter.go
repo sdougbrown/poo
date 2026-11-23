@@ -23,39 +23,57 @@ const maxFeedFilterBytes = 8 << 10
 // delivered.
 const filterDecisionTimeout = 1500 * time.Millisecond
 
+// defaultPromptMinNoProbability is the probability of no at which a filter
+// prompt drops a message, when neither the call nor the manifest names one.
+//
+// A prompt is the model's judgment about what is worth delivering, and its
+// threshold is not expected to be a considered one: the default sits at the
+// low end of the confidence a manifest usually asks for.
+const defaultPromptMinNoProbability = 0.6
+
 // filterEmitter returns the delivery wrapper a feed's manifest asks for.
 //
 // A feed names one filter kind or none: the command filter screens each
 // record through its own process, the question filter puts each message's
 // text to the session's decision model, and a feed with no filter delivers
 // what its runner emits.
+//
+// The question is resolved for each record, not once per attempt: a feed
+// with a question the manifest wrote, or none, may be given one by the
+// model while it runs, so the wrapper reads the instance's prompt every
+// time it is asked.
 func filterEmitter(ctx context.Context, io poo.FeedIO, spec feed.Spec, ex exec.Executor, env func(string) (string, bool), session func(scope, name string) (string, error)) func(string, string, *poo.FeedImage, json.RawMessage) error {
 	switch {
 	case spec.Filter == nil:
-		return io.Emit
+		return filterEmit(ctx, io, spec.Name, nil)
 	case spec.Filter.Script():
 		return commandFilterEmit(ctx, io, spec, ex, env, session)
 	default:
-		return filterEmit(ctx, io, spec.Name, *spec.Filter)
+		return filterEmit(ctx, io, spec.Name, spec.Filter)
 	}
 }
 
-// filterEmit wraps delivery for a feed with a validated manifest question.
+// filterEmit wraps delivery for a feed whose records are put to a
+// question, whether the manifest wrote it or the model set a prompt.
 //
 // A question fails open, so the wrapper only ever answers whether the
 // message is delivered: the record's data is not the question's, and a
 // filtered feed's data comes from a command filter.
-func filterEmit(ctx context.Context, io poo.FeedIO, name string, filter feed.Filter) func(string, string, *poo.FeedImage, json.RawMessage) error {
-	questions := []decide.Question{{
-		ID:           "feed:" + name,
-		Instructions: filter.Question,
-		Kind:         decide.Bool{True: "deliver the message", False: "do not deliver the message"},
-	}}
+func filterEmit(ctx context.Context, io poo.FeedIO, name string, manifest *feed.Filter) func(string, string, *poo.FeedImage, json.RawMessage) error {
 	warned := false
 	return func(from, text string, image *poo.FeedImage, data json.RawMessage) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		filter, asked := questionOf(io, manifest)
+		if !asked {
+			return io.Emit(from, text, image, data)
+		}
+		questions := []decide.Question{{
+			ID:           "feed:" + name,
+			Instructions: filter.Question,
+			Kind:         decide.Bool{True: "deliver the message", False: "do not deliver the message"},
+		}}
 		// A message that carries an image is still asked about its
 		// text, and the picture rides the answer. A message whose
 		// text is empty — the image is the message — is delivered
@@ -97,6 +115,36 @@ func filterEmit(ctx context.Context, io poo.FeedIO, name string, filter feed.Fil
 		}
 		return io.Emit(from, text, image, data)
 	}
+}
+
+// questionOf returns the question one record is asked about: the prompt the
+// model set on the instance, which replaces the manifest's question while
+// it is set, and the manifest's question when it set none.
+//
+// A prompt's own threshold is the one the call named; when it named none,
+// the manifest's threshold applies, and the default when the manifest names
+// no question either. The second result is false when no question applies
+// to the record, and the message is delivered unasked.
+func questionOf(io poo.FeedIO, manifest *feed.Filter) (poo.FeedFilterPrompt, bool) {
+	var prompt poo.FeedFilterPrompt
+	set := false
+	if io.FilterPrompt != nil {
+		prompt, set = io.FilterPrompt()
+	}
+	if !set {
+		if manifest == nil {
+			return poo.FeedFilterPrompt{}, false
+		}
+		return poo.FeedFilterPrompt{Question: manifest.Question, MinNoProbability: manifest.MinNoProbability}, true
+	}
+	if prompt.MinNoProbability != 0 {
+		return prompt, true
+	}
+	prompt.MinNoProbability = defaultPromptMinNoProbability
+	if manifest != nil {
+		prompt.MinNoProbability = manifest.MinNoProbability
+	}
+	return prompt, true
 }
 
 // maxFilterStderrBytes is how much of one attempt's filter stderr the fault
