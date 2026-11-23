@@ -65,25 +65,53 @@ func (r *Runtime) disabledTools(name string) []string {
 	return append(slices.Clone(r.Settings.Tools.Disabled), local...)
 }
 
-func (r *Runtime) profilePromptFile() string {
+// profileSectionOwned reports whether an explicit system_prompt setting
+// owns the profile section: a replacement, a section the settings set
+// themselves, or one they removed. A section the settings own is not
+// one a profile's file or append may touch.
+func (r *Runtime) profileSectionOwned() bool {
 	settings := r.Settings.SystemPrompt
 	if _, overridden := settings.Sections[prompt.ProfileSection]; overridden ||
 		settings.Replace != "" || slices.Contains(settings.Remove, prompt.ProfileSection) {
+		return true
+	}
+	return false
+}
+
+func (r *Runtime) profilePromptFile() string {
+	if r.profileSectionOwned() {
 		return ""
 	}
 	return r.Settings.Profiles[r.Profile.Name].PromptFile
 }
 
+// profilePrompt returns the edits a new session's profile section
+// carries: the file's text in place of the section, and the append's
+// text after whatever the section holds. Both compose with the linked
+// base's own prose, which the build set earlier.
 func (r *Runtime) profilePrompt() (func(*prompt.Builder), error) {
-	path := r.profilePromptFile()
-	if path == "" {
+	if r.profileSectionOwned() {
 		return nil, nil
 	}
-	text, err := os.ReadFile(path)
-	if err != nil {
-		return nil, &Error{Code: CodeInvalid, Field: "profiles." + r.Profile.Name + ".prompt_file", Err: err}
+	var edits []func(*prompt.Builder)
+	if path := r.profilePromptFile(); path != "" {
+		text, err := os.ReadFile(path)
+		if err != nil {
+			return nil, &Error{Code: CodeInvalid, Field: "profiles." + r.Profile.Name + ".prompt_file", Err: err}
+		}
+		edits = append(edits, func(b *prompt.Builder) { b.Set(prompt.ProfileSection, string(text)) })
 	}
-	return func(b *prompt.Builder) { b.Set(prompt.ProfileSection, string(text)) }, nil
+	if text := r.Settings.Profiles[r.Profile.Name].PromptAppend; text != "" {
+		edits = append(edits, func(b *prompt.Builder) { b.Append(prompt.ProfileSection, text) })
+	}
+	if len(edits) == 0 {
+		return nil, nil
+	}
+	return func(b *prompt.Builder) {
+		for _, edit := range edits {
+			edit(b)
+		}
+	}, nil
 }
 
 // SessionPrompt reads the prompt sections that belong to a new session rather
