@@ -1484,6 +1484,7 @@ func (r *Runtime) resolveFeedRuns(opts BuildOptions) error {
 			Description: spec.Description,
 			Restart:     spec.Restart,
 			OnIdle:      onIdle,
+			MaxPending:  spec.MaxPending,
 			// The session hands its own working directory to the run
 			// it calls, so a session created in another directory
 			// than the build's runs its feed there.

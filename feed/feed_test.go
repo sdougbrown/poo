@@ -226,6 +226,18 @@ func TestASessionReferenceStaysUnresolvedUntilTheAttempt(t *testing.T) {
 		t.Errorf("the env is %v, want %v", env, want)
 	}
 
+	// A manifest's max_pending rides the spec, so the config layer can
+	// hand the core the feed's own cap.
+	set, err = feed.Load(writeManifest(t, map[string]any{
+		"broker": map[string]any{"command": []string{"true"}, "max_pending": 3},
+	}))
+	if err != nil {
+		t.Fatalf("loading the manifest: %v", err)
+	}
+	if got := set.Specs()[0].MaxPending; got != 3 {
+		t.Errorf("the spec's MaxPending is %d, want 3", got)
+	}
+
 	// A name the session scope does not carry fails the load: the feed
 	// would never resolve it, and a feed that starts and then fails
 	// every attempt is worse than a manifest that does not load.
@@ -252,6 +264,13 @@ func TestALoadRefusesBrokenManifests(t *testing.T) {
 				"broker": map[string]any{"command": []string{"true"}, "restart_at": 5},
 			},
 			want: []string{"broker", "unknown field", "restart_at"},
+		},
+		{
+			name: "negative max_pending",
+			feeds: map[string]any{
+				"broker": map[string]any{"command": []string{"true"}, "max_pending": -1},
+			},
+			want: []string{"broker", "max_pending"},
 		},
 		{
 			name: "invalid on_idle",
