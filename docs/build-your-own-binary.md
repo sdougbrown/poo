@@ -514,6 +514,35 @@ filter writes to its standard output is the one delivered. For example:
 }
 ```
 
+A reference filter script, the shape the git-feedback trial uses — it
+drops the events the operator's own login authored, bounds the excerpt it
+forwards, and formats the sender as `git-feedback/<repo>#<number>`. The
+feed's manifest sets `GIT_FEEDBACK_LOGIN` beside its other `env` entries,
+and the filter reads the login from its environment the way the feed's
+own command does:
+
+```sh
+#!/bin/sh
+# excerpt — one record in on standard input, one record out on standard
+# output. The feed's `from` is "git-feedback/<repo>#<number>:<author>";
+# the author is the part after the last colon.
+record=$(cat)
+author=$(printf '%s\n' "$record" | jq -r '(.from // "") | split(":")[-1]')
+if [ "$author" = "$GIT_FEEDBACK_LOGIN" ]; then
+  exit 0  # nothing on stdout drops the record
+fi
+printf '%s\n' "$record" | jq '
+  {
+    text: ((.text // "")[:2000]),
+    from: ((.from // "git-feedback/unknown#0") | split(":")[0])
+  }'
+```
+
+The empty standard output is the drop: a record the filter withholds is
+one the session never queues. The `text` it forwards is bounded at 2000
+characters, and the `from` it writes drops the author, so the model reads
+the sender the way the feed's design spells it.
+
 The output record names `text`, `from` and `image` the way a feed's own
 line does, and may add a `data` object beside its text: that object is the
 structured record, and the delivered message carries it. A feed that runs
