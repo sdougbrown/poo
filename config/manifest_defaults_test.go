@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sdougbrown/poo/cli"
 	"github.com/sdougbrown/poo/config"
 	"github.com/sdougbrown/poo/pootest"
 )
@@ -78,6 +79,11 @@ func TestTheDefaultManifestDirectoriesLoad(t *testing.T) {
 	}
 	if runtime.Registry == nil || runtime.Registry.Len() != 1 {
 		t.Errorf("the default registry directory loaded %v, want the one entry", runtime.Registry)
+	}
+	if runtime.Registry != nil {
+		if _, ok := runtime.Registry.Lookup("ticker"); !ok {
+			t.Errorf("the default registry directory loaded the entries %v, want ticker", registryNames(runtime.Registry))
+		}
 	}
 	if _, err := os.Stat(filepath.Join(feedsDir, "feeds.json")); err != nil {
 		t.Errorf("the default feed manifest is gone: %v", err)
@@ -199,6 +205,38 @@ func TestTheDefaultsJoinTheOverrides(t *testing.T) {
 	if runtime.Feeds == nil || runtime.Feeds.Len() != 2 {
 		t.Fatalf("the build loaded %v, want the default feed and the override's one", runtime.Feeds)
 	}
+}
+
+// TestTheRegistryDefaultsLoadBesideTheSettingsPaths covers the
+// registry's own coexistence: the default directory's commands join the
+// registry the settings name, and both stay loaded.
+func TestTheRegistryDefaultsLoadBesideTheSettingsPaths(t *testing.T) {
+	pooDir := theDefaultsPooDir(t)
+	theDefaultRegistry(t, pooDir)
+	second := registry(t, "override-cli")
+	settings, err := config.Parse([]byte(registrySettings(second)), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+	if runtime.Registry == nil || runtime.Registry.Len() != 2 {
+		t.Fatalf("the build loaded a registry %v, want the default entry and the settings' one", runtime.Registry)
+	}
+	if _, ok := runtime.Registry.Lookup("ticker"); !ok {
+		t.Errorf("the build loaded the entries %v, want ticker", registryNames(runtime.Registry))
+	}
+	if _, ok := runtime.Registry.Lookup("override-cli"); !ok {
+		t.Errorf("the build loaded the entries %v, want override-cli", registryNames(runtime.Registry))
+	}
+}
+
+// registryNames returns the loaded catalog's entry names, in name order.
+func registryNames(catalog *cli.Catalog) []string {
+	names := make([]string, 0, catalog.Len())
+	for _, entry := range catalog.Entries() {
+		names = append(names, entry.Name)
+	}
+	return names
 }
 
 // TestEveryDefaultManifestKindHasItsOffSwitch covers the kinds' list:

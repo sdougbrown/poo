@@ -1483,9 +1483,14 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 	if linksTool(opts, ToolBash) || r.needsExecutor() {
 		feedSource := ""
 		if r.hasFeeds() {
-			feedSource = "the settings name a feed, and "
-			if len(opts.Overrides.FeedsPaths) > 0 {
-				feedSource = "the settings or POO_FEEDS_PATH / --feeds-path name a feed, and "
+			switch {
+			case r.feedsFromDefaults:
+				feedSource = "the default feeds directory names a feed, and "
+			default:
+				feedSource = "the settings name a feed, and "
+				if len(opts.Overrides.FeedsPaths) > 0 {
+					feedSource = "the settings or POO_FEEDS_PATH / --feeds-path name a feed, and "
+				}
 			}
 		}
 		if opts.Executors == nil {
@@ -1567,24 +1572,10 @@ func (r *Runtime) resolveFeedRuns(opts BuildOptions) error {
 	if !r.hasFeeds() {
 		return nil
 	}
-	if r.executor == nil {
-		message := ""
-		switch {
-		case r.feedsFromDefaults:
-			message = "the default feeds directory names a feed, and this binary has no executor to run a feed's command"
-		default:
-			source := "the settings"
-			if len(opts.Overrides.FeedsPaths) > 0 {
-				source = "the settings or POO_FEEDS_PATH / --feeds-path"
-			}
-			message = source + " name a feed, and this binary has no executor to run a feed's command"
-		}
-		return &Error{
-			Code:    CodeUnsupported,
-			Field:   "feeds.paths",
-			Message: message,
-		}
-	}
+	// A feed is a command of the session's own, so the executor the
+	// session resolves above is the one the feed's command runs through:
+	// the binary that reaches here with no executor has already failed
+	// there.
 	lookup := exec.Lookup(r.Env)
 	specs := make([]poo.FeedSpec, 0, r.Feeds.Len())
 	for _, spec := range r.Feeds.Specs() {
