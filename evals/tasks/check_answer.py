@@ -151,7 +151,7 @@ def derive(workdir, task):
     with several accepted values has more than one right answer, and a
     fact whose values are empty cannot be derived, which is an error.
     """
-    if task == "long-read-recall":
+    if task in ("long-read-recall", "deep-read-recall"):
         # The one service whose retry budget is not a whole multiple
         # of 500, and the incident id its comment names. The
         # derivation is the same scan the task asks the model to do

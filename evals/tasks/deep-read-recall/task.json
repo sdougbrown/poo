@@ -1,0 +1,13 @@
+{
+  "repo": "fixture:deep-read-recall",
+  "prompt": "The file config/services.yaml is the deployment config for every service this team runs. Exactly one service in it has a retry_budget_ms that is not a whole multiple of 500. Read the file with the read tool — do not use grep and do not script over it, read it, and read it to its end before you answer, do not stop when you think you have it — and answer: which service is it, and which incident id does that service's comment name? Answer in one line as `<service> <incident id>`. Do not change any file: this is a question, not a task to fix.",
+  "timeout_s": 3600,
+  "tags": [
+    "readonly",
+    "explain",
+    "long",
+    "compact"
+  ],
+  "expected_paths": [],
+  "description": "A 1.2MB config read whole at a large window: the find lands early, the compactions cut it, and the answer has to survive them."
+}

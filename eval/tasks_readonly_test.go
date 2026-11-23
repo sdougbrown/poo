@@ -71,6 +71,7 @@ func TestTheReadOnlyPromptsDoNotNameTheAnswer(t *testing.T) {
 		"long-find-error-in-log":       {"req-8f2a41c9"},
 		"long-find-definition-in-tree": {"src/pipeline/ingest/handlers/loader.py"},
 		"long-read-recall":             {"archival", "INC-2214"},
+		"deep-read-recall":             {"archival", "INC-2214"},
 	}
 
 	for _, task := range tasks {
@@ -156,6 +157,7 @@ func TestTheReadOnlyChecksAcceptTheRightAnswer(t *testing.T) {
 		"long-find-error-in-log":       "The one ERROR line carries request id req-8f2a41c9.",
 		"long-find-definition-in-tree": "The definition is in src/pipeline/ingest/handlers/loader.py.",
 		"long-read-recall":             "archival INC-2214",
+		"deep-read-recall":             "archival INC-2214",
 	}
 
 	for _, task := range tasks {

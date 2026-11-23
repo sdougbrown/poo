@@ -441,3 +441,53 @@ func TestASessionThatKeepsCompactingEscalatesToTheFallback(t *testing.T) {
 		}
 	}
 }
+
+// TestTheEscalationStaysOffUntilTheSettingsNameIt covers the guard's
+// default: a session that keeps refilling its window keeps compacting
+// selectively for as long as it runs, because a run the settings
+// pointed at the pointer strategy must never silently spend its
+// compactions under another one.
+func TestTheEscalationStaysOffUntilTheSettingsNameIt(t *testing.T) {
+	big := strings.Repeat("x", 3500)
+	tr := pootest.NewTransport(
+		pootest.Turn{Text: big, Calls: []pootest.Call{{Name: "echo", Arguments: json.RawMessage(`{"text":"one"}`)}}},
+		pootest.Turn{Text: big, Calls: []pootest.Call{{Name: "echo", Arguments: json.RawMessage(`{"text":"two"}`)}}},
+		pootest.Turn{Text: big},
+		pootest.Turn{Text: big, Calls: []pootest.Call{{Name: "echo", Arguments: json.RawMessage(`{"text":"three"}`)}}},
+		pootest.Turn{Text: big},
+		pootest.Turn{Text: big, Calls: []pootest.Call{{Name: "echo", Arguments: json.RawMessage(`{"text":"four"}`)}}},
+		pootest.Turn{Text: big},
+		pootest.Turn{Text: "the final answer"},
+	)
+	tr.SetForkTurns(
+		pootest.Turn{Text: `{"queries": ["TURN-ONE"], "notes": ""}`},
+		pootest.Turn{Text: `{"queries": ["TURN-ONE"], "notes": ""}`},
+		pootest.Turn{Text: `{"queries": ["TURN-ONE"], "notes": ""}`},
+	)
+	s, sink := session(t, tr, pointer.Options{Ratio: 0.05, KeepRecentTokens: 1})
+
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	res, err := s.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	if res.Reason != poo.ReasonEndTurn {
+		t.Fatalf("the run settled %q (%s), want end_turn", res.Reason, res.Detail.Text)
+	}
+	var strategies []string
+	for _, rec := range sink.Records() {
+		if cr, ok := rec.(*poo.CompactionRecord); ok {
+			strategies = append(strategies, cr.Strategy)
+		}
+	}
+	for i, got := range strategies {
+		if got != "pointer" {
+			t.Errorf("compaction %d ran under %q, want pointer: the guard is opt-in and the settings named it not", i+1, got)
+		}
+	}
+	if len(strategies) < 3 {
+		t.Fatalf("the run compacted %d times, want the refilling run to compact repeatedly", len(strategies))
+	}
+}

@@ -60,15 +60,6 @@ const (
 	// DefaultSnippetBudget is the most text the queries may collect.
 	DefaultSnippetBudget = 32768
 
-	// DefaultEscalateAfter is the number of the strategy's own
-	// compactions a session runs before the rest are the full-span
-	// fallback's.
-	//
-	// A strategy whose reconstruction keeps losing the work's findings
-	// is not converging: the model reads, the window cuts, the model
-	// reads again. After this many rounds the cheap path has had its
-	// chance, and the fallback's whole-span read takes the work.
-	DefaultEscalateAfter = 5
 	// DefaultQueryCount is the most queries the pointer pass may name.
 	DefaultQueryCount = 8
 
@@ -98,8 +89,11 @@ type Options struct {
 	// defaults to DefaultQueryCount.
 	QueryCount int
 	// EscalateAfter is the number of the strategy's own compactions a
-	// session runs before the rest are the full-span fallback's. It
-	// defaults to DefaultEscalateAfter.
+	// session runs before the rest are the full-span fallback's. The
+	// guard is opt-in: when the settings do not name it, or name it
+	// zero or less, the strategy never escalates, and a session that
+	// keeps refilling its window keeps compacting selectively for as
+	// long as it runs.
 	EscalateAfter int
 	// Files reports the file a tool call names. It defaults to the two
 	// file tools poo ships, read and edit, with the path in a "path"
@@ -172,9 +166,7 @@ func New(opts Options) *Compactor {
 	if c.queryCount <= 0 {
 		c.queryCount = DefaultQueryCount
 	}
-	if c.escalateAfter <= 0 {
-		c.escalateAfter = DefaultEscalateAfter
-	}
+
 	if c.files == nil {
 		c.files = cut.DefaultFileOp
 	}
@@ -256,7 +248,7 @@ func (c *Compactor) Compact(ctx context.Context, in poo.CompactionEnv) (poo.Comp
 	if in.Ask == nil {
 		return poo.Compaction{}, errors.New("pointer: there is no request to make")
 	}
-	if c.compactions >= c.escalateAfter {
+	if c.escalateAfter > 0 && c.compactions >= c.escalateAfter {
 		// The cheap path has had its rounds: a session that keeps
 		// refilling the window is one the reconstruction is not
 		// converging on, so the rest are the fallback's.

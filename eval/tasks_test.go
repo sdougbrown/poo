@@ -52,15 +52,15 @@ func runCheck(t *testing.T, taskDir, workdir, sessionLog, changed string) int {
 }
 
 // The task set's shape: twelve coding fixes, five
-// find-and-explain questions, and four long tasks.
+// find-and-explain questions, and five long tasks.
 func TestTheTaskSetShape(t *testing.T) {
 	root := repoRoot(t)
 	tasks, err := LoadTasks(filepath.Join(root, "evals", "tasks"))
 	if err != nil {
 		t.Fatalf("loading the tasks: %v", err)
 	}
-	if len(tasks) != 21 {
-		t.Errorf("the task set holds %d tasks, want 21", len(tasks))
+	if len(tasks) != 22 {
+		t.Errorf("the task set holds %d tasks, want 22", len(tasks))
 	}
 
 	counts := map[string]int{}
@@ -69,8 +69,8 @@ func TestTheTaskSetShape(t *testing.T) {
 			counts[tag]++
 		}
 	}
-	if counts["long"] != 4 {
-		t.Errorf("the task set holds %d long tasks, want 4", counts["long"])
+	if counts["long"] != 5 {
+		t.Errorf("the task set holds %d long tasks, want 5", counts["long"])
 	}
 	// The coding tasks are the ones with a bug to fix.
 	coding := 0
