@@ -442,6 +442,42 @@ func TestAResizeMovesTheInputToTheNewBottomRow(t *testing.T) {
 	}
 }
 
+func TestResizingKeepsTheCommittedTranscript(t *testing.T) {
+	server := &fakeServer{t: t}
+	term, code := startTerminalRepl(t, server)
+	waitBottom(t, term)
+	term.press("/help\r")
+	waitScreen(t, term, "anything else")
+	term.press("draft")
+	waitScreen(t, term, promptMark+"draft")
+
+	for _, size := range [][2]int{{40, 8}, {60, 20}, {24, 9}, {40, 18}} {
+		cols, rows := size[0], size[1]
+		term.resize(cols, rows)
+		if err := syscall.Kill(os.Getpid(), syscall.SIGWINCH); err != nil {
+			t.Fatal(err)
+		}
+		waitBottomRows(t, term, rows)
+		waitScreen(t, term, "anything else")
+		waitScreen(t, term, promptMark+"draft")
+		if n := strings.Count(term.screen(), "anything else"); n != 1 {
+			t.Fatalf("resize to %dx%d left %d copies of committed text:\n%s", cols, rows, n, indexedRows(term))
+		}
+	}
+
+	term.press("\x03")
+	waitScreen(t, term, "^C")
+	term.press("\x03")
+	select {
+	case got := <-code:
+		if got != 130 {
+			t.Fatalf("Ctrl-C exited with %d, want 130", got)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the resized prompt did not respond to Ctrl-C")
+	}
+}
+
 // echoOnScreen says whether the transcript's echo of a submitted line
 // stands on the screen: the row reads "❯ work" and carries no prompt
 // mark, so the draft's own "💩❯ work" row does not count.

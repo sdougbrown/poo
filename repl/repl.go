@@ -299,15 +299,12 @@ func (m *machine) run() int {
 			m.r.paintHintFrame()
 			m.r.paintSpinner()
 		case <-resizes:
-			// The terminal changed size: reserve the footer again at
-			// the new geometry and redraw the prompt where it now
-			// belongs. The response brackets the frames: a frame that
-			// lands mid-response anchors only, since the region is
-			// cleared for its rebuild and the preview cache is empty.
-			if m.r.layout.resize() {
-				m.r.rewrap(m.r.layout.cols())
-				m.r.repaintPreview()
-				m.r.layout.endResize()
+			if width, height, ok := m.r.layout.size(); ok {
+				footer := 0
+				if editor, ok := input.(*editorInput); ok {
+					footer = editor.resizeRows(width)
+				}
+				m.r.resize(width, height, footer)
 				input.prompt(m.prompt())
 			}
 		case runID := <-m.esc:
@@ -757,7 +754,7 @@ func (w *layoutStderr) Write(p []byte) (int, error) {
 		if i < 0 {
 			break
 		}
-		w.l.write(w.held[:i+1])
+		w.l.write(filterRendered(w.held[:i+1]))
 		w.held = w.held[i+1:]
 	}
 	return len(p), nil
@@ -770,7 +767,7 @@ func (w *layoutStderr) flush() {
 	if w.held == "" {
 		return
 	}
-	w.l.write(w.held)
+	w.l.write(filterRendered(w.held) + "\n")
 	w.held = ""
 }
 
@@ -791,6 +788,7 @@ func (m *machine) newInput() input {
 			// transcript goes back to the plain stream, where a
 			// terminal without an editor reads from.
 			m.r.layout.leave()
+			m.r.transcript.WriteString(m.r.layout.transcriptText())
 			m.r.layout = nil
 		}
 	}

@@ -129,6 +129,19 @@ func TestTheStreamedBlockStaysAboveTheFooter(t *testing.T) {
 	}
 }
 
+func TestPreviewCanShrinkWhileTheLayoutIsSuspended(t *testing.T) {
+	vt := vt10x.New(vt10x.WithSize(40, 12))
+	l := aLayout(t, vt, 40, 12)
+	l.paintPreview([]string{"first preview row", "second preview row"})
+	l.suspend()
+	l.paintPreview([]string{"shorter preview"})
+	l.resume()
+	l.paintPreview([]string{"resumed preview"})
+	if lastRow(vt, "resumed preview") < 0 || lastRow(vt, "second preview row") >= 0 {
+		t.Fatalf("the resumed preview did not replace the old rows:\n%s", vt.String())
+	}
+}
+
 // TestAWriteUnderAStandingPreviewKeepsThePreview covers a write from
 // outside the run loop — a server's diagnostic — that lands while a
 // preview stands on the rows it would take: the new text is written and
@@ -390,13 +403,22 @@ type recordingScreen struct {
 	vt  vt10x.Terminal
 	mu  sync.Mutex
 	buf bytes.Buffer
+	// observe, when set, reads the screen after each write. A test
+	// arms it around one operation to check the frames that operation
+	// shows.
+	observe func()
 }
 
 func (r *recordingScreen) Write(p []byte) (int, error) {
 	r.mu.Lock()
 	r.buf.Write(p)
+	observe := r.observe
 	r.mu.Unlock()
-	return r.vt.Write(p)
+	n, err := r.vt.Write(p)
+	if observe != nil {
+		observe()
+	}
+	return n, err
 }
 
 // take returns the bytes written since the last call.
@@ -518,9 +540,25 @@ func TestFooterGrowthNeverScrollsPendingRows(t *testing.T) {
 	}
 	rec.take()
 
+	// The growth's frames must keep the standing preview on the screen:
+	// a frame that shows the preview erased is a flash the user would
+	// see. Arm the observer around the growth to check every frame.
+	var frames []string
+	rec.observe = func() { frames = append(frames, trimScreen(vt.String())) }
 	l.ensure(4)
+	rec.observe = nil
 	if got := scrollRows(rec.take()); got > left {
 		t.Fatalf("the footer's growth scrolled %d rows, more than the %d committed ones", got, left)
+	}
+	if len(frames) == 0 {
+		t.Fatalf("the growth wrote no frames to check")
+	}
+	for i, frame := range frames {
+		for _, want := range []string{"preview 00|", "preview 01|", "preview 02|"} {
+			if !strings.Contains(frame, want) {
+				t.Fatalf("frame %d of the growth lost %q:\n%s", i, want, frame)
+			}
+		}
 	}
 	// The preview is repainted after the growth, and still does not
 	// scroll pending rows.
