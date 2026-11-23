@@ -240,13 +240,17 @@ func argumentPath(raw json.RawMessage) string {
 // is not gone. The pointer names the turns and the session they belong
 // to, and the history tool that reads them, so a model that misses a
 // detail knows where to look.
-func Retention(turns poo.TurnRange, sessionID string) string {
+func Retention(turns poo.TurnRange, sessionID string, historyTool bool) string {
 	where := ""
 	if sessionID != "" {
 		where = " of session " + sessionID
 	}
+	recover := ""
+	if historyTool {
+		recover = " The history tool reads them: search the retained turns with a pattern, or read one whole with its turn number."
+	}
 	return "[The turns replaced above are retained in this session's store" + where +
-		" (turns " + strconv.Itoa(turns.First) + "-" + strconv.Itoa(turns.Last) + "): nothing was deleted. The history tool reads them: search the retained turns with a pattern, or read one whole with its turn number.]"
+		" (turns " + strconv.Itoa(turns.First) + "-" + strconv.Itoa(turns.Last) + "): nothing was deleted." + recover + "]"
 }
 
 // bullets renders paths as a list, one per line.

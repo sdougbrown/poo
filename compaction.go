@@ -33,6 +33,12 @@ type CompactionEnv struct {
 	// HistoryTool reports that the session's tools include the history
 	// tool the retention pointer points at.
 	HistoryTool bool
+	// Compactions is how many compactions this session has run before
+	// this one, however many strategies ran them. A strategy that
+	// tracks its own progress reads the count here: the strategy
+	// instance is shared by every session a runtime builds, so a count
+	// it holds is not one session's.
+	Compactions int
 	// History is the record of the session's turns its store retains,
 	// or nil when the store cannot be read back. It is how a strategy
 	// extracts what the view no longer holds without reading the whole

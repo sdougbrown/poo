@@ -187,12 +187,16 @@ func (s *Session) compact(run *runState) (compactionOutcome, error) {
 	s.events.emit(EventCompactionStarted, map[string]any{"run_id": run.id})
 
 	tokensBefore := s.estimatedInput()
+	s.mu.Lock()
+	compactions := s.compactions
+	s.mu.Unlock()
 	env := CompactionEnv{
 		View:        s.view(),
 		Budget:      s.budget(),
 		SessionID:   s.ID(),
 		HistoryTool: s.offersHistoryTool(),
 		History:     s.retainedHistory(),
+		Compactions: compactions,
 		Fork:        s.forkFunc(run),
 		Ask:         s.askFunc(run),
 	}
@@ -293,6 +297,12 @@ func (s *Session) compact(run *runState) (compactionOutcome, error) {
 	if change != nil && !s.commitCompactionView(run, *change) {
 		return compactionOutcome{}, errRunWindingDown
 	}
+	// The count is the session's own, so a strategy that paces itself
+	// against the threshold reads what this session did, not what every
+	// session of the runtime did.
+	s.mu.Lock()
+	s.compactions++
+	s.mu.Unlock()
 
 	// The handoff is recorded on its own, so a consumer that carries
 	// the work on can read the note without reading the compaction.

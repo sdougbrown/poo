@@ -35,6 +35,7 @@ import (
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/compact/internal/cut"
 	"github.com/sdougbrown/poo/compact/mine"
+	"github.com/sdougbrown/poo/internal/caps"
 )
 
 // The strategy's constants.
@@ -125,9 +126,6 @@ type Compactor struct {
 	// escalateAfter is the number of the strategy's own compactions
 	// before the rest are the fallback's.
 	escalateAfter int
-	// compactions is how many compactions this session has run under
-	// the strategy itself, the fallback's excluded.
-	compactions int
 	// files reports the file a tool call names.
 	files FileOp
 	// fallback is the full-span strategy the selective pass falls back
@@ -231,7 +229,7 @@ func covered(messages []poo.Message, r cut.Range) []poo.Message {
 // besides the reconstruction: the marker line, the retention pointer
 // and the file list.
 func (c *Compactor) replacementCarriageTokens(r cut.Range, covered []poo.Message, budget poo.ContextBudget) int {
-	text := cut.Marker(r, markerVerb) + "\n\n" + cut.Retention(r.Cut, "") +
+	text := cut.Marker(r, markerVerb) + "\n\n" + cut.Retention(r.Cut, "", true) +
 		"\n\n" + cut.FileList(c.files, covered)
 	return cut.TurnTokens([]poo.Message{poo.NewTextMessage(poo.RoleUser, text)}, budget)
 }
@@ -248,7 +246,7 @@ func (c *Compactor) Compact(ctx context.Context, in poo.CompactionEnv) (poo.Comp
 	if in.Ask == nil {
 		return poo.Compaction{}, errors.New("pointer: there is no request to make")
 	}
-	if c.escalateAfter > 0 && c.compactions >= c.escalateAfter {
+	if c.escalateAfter > 0 && in.Compactions >= c.escalateAfter {
 		// The cheap path has had its rounds: a session that keeps
 		// refilling the window is one the reconstruction is not
 		// converging on, so the rest are the fallback's.
@@ -306,8 +304,7 @@ func (c *Compactor) Compact(ctx context.Context, in poo.CompactionEnv) (poo.Comp
 	if files := cut.FileList(c.files, covered); files != "" {
 		replacement += "\n\n" + files
 	}
-	replacement += "\n\n" + cut.Retention(r.Cut, in.SessionID)
-	c.compactions++
+	replacement += "\n\n" + cut.Retention(r.Cut, in.SessionID, in.HistoryTool)
 	return poo.Compaction{
 		Strategy: Strategy,
 		Replace: &poo.RangeReplacement{
@@ -345,10 +342,10 @@ func (c *Compactor) extract(ctx context.Context, history poo.History, queries []
 			text := m.Text
 			if used+len(text) > c.snippetBudget {
 				// The budget is the whole digest's: a line that does
-				// not fit is cut to what remains, and the queries
-				// after it have nothing left to add.
+				// not fit is cut to what remains, on a rune boundary,
+				// and the queries after it have nothing left to add.
 				if remaining := c.snippetBudget - used; remaining > 0 {
-					text = text[:remaining]
+					text = caps.RunePrefix(text, remaining)
 				} else {
 					return out
 				}
