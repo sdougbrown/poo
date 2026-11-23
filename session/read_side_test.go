@@ -83,6 +83,38 @@ func TestTheStoreReaderRefusesAnEmptySessionFile(t *testing.T) {
 	}
 }
 
+// TestTheStoreReaderSurfacesADecodeFailure covers the read's error
+// contract: a chain the store cannot decode fails the read with the
+// decode's own error, rather than an empty history.
+func TestTheStoreReaderSurfacesADecodeFailure(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	if err != nil {
+		t.Fatalf("opening the store: %v", err)
+	}
+	t.Cleanup(func() { store.Close() })
+	if _, err := store.Create(context.Background(), &poo.SessionCreatedRecord{
+		RecordMeta:      poo.NewRecordMeta("session.created"),
+		SessionMetadata: poo.SessionMetadata{SessionID: "s1", Format: poo.FormatVersion, Mode: string(ModeLogged)},
+	}); err != nil {
+		t.Fatalf("creating the session: %v", err)
+	}
+	// Corrupt the chain after the header: a line the codec cannot
+	// decode is a read that fails with the decode's error.
+	store.mu.Lock()
+	f, err := os.OpenFile(store.open.path, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatalf("opening the chain: %v", err)
+	}
+	f.WriteString("this is not a record\n")
+	f.Close()
+	store.mu.Unlock()
+	_, err = store.ReadRecords(context.Background())
+	if err == nil {
+		t.Fatal("the read succeeded on an undecodable chain")
+	}
+}
+
 // TestTheStoreReaderRefusesAStoreWithNoOpenSession covers the guard: a
 // store with no open session has no chain to read, and the read says so
 // in the store's own error code.

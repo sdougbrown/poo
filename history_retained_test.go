@@ -3,12 +3,14 @@ package poo_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/pootest"
+	"github.com/sdougbrown/poo/tool/history"
 )
 
 // The retained history: the read side of the projection, which serves
@@ -96,6 +98,45 @@ func TestTheHistoryServesTheTurnsTheRecordsRetain(t *testing.T) {
 	// A turn the session never had is empty.
 	if text, _ := h.Turn(context.Background(), 9); text != "" {
 		t.Errorf("turn 9 is %q, want empty", text)
+	}
+}
+
+// TestAHistoryReaderFailureReachesTheTool covers the seam's failure
+// contract: a read that fails is the tool call's failure, not an empty
+// history the model would read as "nothing happened".
+func TestAHistoryReaderFailureReachesTheTool(t *testing.T) {
+	tr := pootest.NewTransport(
+		pootest.Turn{Text: "TURN-ONE", Calls: []pootest.Call{{Name: "history", Arguments: json.RawMessage(`{"pattern":"TURN"}`)}}},
+		pootest.Turn{Text: "the final answer"},
+	)
+	sink := pootest.NewSink()
+	s, err := poo.New(poo.Options{
+		Transport:    tr,
+		Tools:        map[string]poo.Tool{"history": history.New()},
+		ToolOrder:    []string{"history"},
+		Sink:         &failingSink{err: errors.New("the store is closed")},
+		SessionID:    "s1",
+		Model:        poo.ModelInfo{ModelID: "test-model", ContextLimit: 20000},
+		SystemPrompt: "the system prompt",
+	})
+	if err != nil {
+		t.Fatalf("building the session: %v", err)
+	}
+	t.Cleanup(func() { s.Close() })
+
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	if _, err := s.Wait(context.Background()); err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+
+	for _, rec := range sink.Records() {
+		if result, ok := rec.(*poo.ToolResultRecord); ok && result.Tool == "history" {
+			if !strings.Contains(result.Text, "the store is closed") {
+				t.Errorf("the tool result is %q, want the reader's failure in it", result.Text)
+			}
+		}
 	}
 }
 
