@@ -263,9 +263,10 @@ result, bypassing the bash exit-code envelope:
 The contract is one sentence: stdin JSON args in, stdout JSON result
 out, nonzero exit is an error with stderr as diagnostics.
 
-cli-registry ships `helpers/python/poo_fn.py`, a convenience that reads
-the JSON from stdin and writes the JSON to stdout; the contract itself
-needs nothing but a script that does the same. A runnable example is
+cli-registry (the github.com/sdougbrown/cli-registry repository) ships
+`helpers/python/poo_fn.py`, a convenience that reads the JSON from
+stdin and writes the JSON to stdout; the contract itself needs nothing
+but a script that does the same. Its tree carries the runnable example:
 `examples/fn.json` with `examples/fn_notes.py`.
 
 The tool gets the same machinery as any `call_cli` entry: the same
