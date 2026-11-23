@@ -186,7 +186,7 @@ func (c *Compactor) restoresOutputRoom(view poo.View, budget poo.ContextBudget) 
 // besides the reconstruction: the marker line, the retention pointer
 // and the file list.
 func (c *Compactor) replacementCarriageTokens(r cut.Range, covered []poo.Message, budget poo.ContextBudget) int {
-	text := cut.Marker(r, markerVerb) + "\n\n" + retention(r.Cut, "") +
+	text := cut.Marker(r, markerVerb) + "\n\n" + retention(r.Cut, "", true) +
 		"\n\n" + cut.FileList(c.files, covered)
 	return cut.TurnTokens([]poo.Message{poo.NewTextMessage(poo.RoleUser, text)}, budget)
 }
@@ -255,7 +255,7 @@ func (c *Compactor) Compact(ctx context.Context, in poo.CompactionEnv) (poo.Comp
 	if files := cut.FileList(c.files, covered); files != "" {
 		replacement += "\n\n" + files
 	}
-	replacement += "\n\n" + retention(r.Cut, in.SessionID)
+	replacement += "\n\n" + retention(r.Cut, in.SessionID, in.HistoryTool)
 	return poo.Compaction{
 		Strategy: Strategy,
 		Replace: &poo.RangeReplacement{
@@ -272,11 +272,19 @@ func (c *Compactor) Compact(ctx context.Context, in poo.CompactionEnv) (poo.Comp
 // is not gone. The pointer names the turns and the session they belong
 // to, so a consumer whose model can read the store knows what to
 // recover and from where.
-func retention(turns poo.TurnRange, sessionID string) string {
+// The recovery sentence names the history tool only when the session
+// offers it: a profile without the tool would send the model looking
+// for a call it cannot make, so the pointer then says the recovery is
+// the reader's own.
+func retention(turns poo.TurnRange, sessionID string, historyTool bool) string {
 	where := ""
 	if sessionID != "" {
 		where = " of session " + sessionID
 	}
+	recover := ""
+	if historyTool {
+		recover = " The history tool reads them: search the retained turns with a pattern, or read one whole with its turn number."
+	}
 	return "[The turns replaced above are retained in this session's store" + where +
-		" (turns " + strconv.Itoa(turns.First) + "-" + strconv.Itoa(turns.Last) + "): nothing was deleted. The history tool reads them: search the retained turns with a pattern, or read one whole with its turn number.]"
+		" (turns " + strconv.Itoa(turns.First) + "-" + strconv.Itoa(turns.Last) + "): nothing was deleted." + recover + "]"
 }

@@ -1046,7 +1046,6 @@ var errInjected = errors.New("session: the injected failure")
 // reads, so the records a caller sees are whole.
 func (s *FileStore) ReadRecords(ctx context.Context) ([]poo.Record, error) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.open == nil {
 		return nil, &Error{Code: CodeStoreError, Message: "the store has no open session"}
 	}
