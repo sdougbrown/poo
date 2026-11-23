@@ -240,6 +240,45 @@ To see what a binary actually links, ask the toolchain:
 mise exec -- go list -deps ./cmd/my-poo | grep 'poo/tool'
 ```
 
+## Non-CLI tools
+
+A registered tool need not be a CLI. The manifest's `bindings` accept a
+`json` style: an object- or array-valued property's value is serialized
+as JSON onto the script's stdin. The style requires the bound property
+to be a concrete object or array in the schema, and a tool takes at
+most one `stdin` or `json` binding. A `flag` is optional and is emitted
+only if the property is present. A manifest with `output.mode: json`
+makes `call_cli` hand the model the script's JSON result as the tool
+result, bypassing the bash exit-code envelope:
+
+```json
+{
+  "description": "Sum a pair",
+  "command": ["python3", "fn_notes.py"],
+  "bindings": [{"property": "data", "style": "json"}],
+  "output": {"mode": "json"}
+}
+```
+
+The contract is one sentence: stdin JSON args in, stdout JSON result
+out, nonzero exit is an error with stderr as diagnostics.
+
+cli-registry (the github.com/sdougbrown/cli-registry repository) ships
+`helpers/python/poo_fn.py`, a convenience that reads the JSON from
+stdin and writes the JSON to stdout; the contract itself needs nothing
+but a script that does the same. Its tree carries the runnable example:
+`examples/fn.json` with `examples/fn_notes.py`.
+
+The tool gets the same machinery as any `call_cli` entry: the same
+catalog and `find_tool` prompt section, the same permission and
+background treatment, and arguments validated against the schema before
+a process exists. It is statically side-effecting like any `call_cli`
+tool, because a script can do anything.
+
+One edge: an fn tool whose result is JSON `null` falls back to the
+exit-code envelope. A tool that can return null should return an object
+such as `{"result": null}` instead.
+
 ## Feeds
 
 A feed is a long-lived source beside a session: a process whose stdout is

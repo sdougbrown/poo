@@ -587,6 +587,13 @@ registry once the manifests declare conditions, and gets only the entries
 that remain available. A manifest that reads another condition fails the
 build naming it, because poo has no value for it.
 
+**Non-CLI tools.** A registered tool need not be a CLI: a manifest's
+`json` binding puts an object- or array-valued property's JSON on the
+script's stdin, and `output.mode: json` makes the script's JSON result
+the tool result. The tool joins the same catalog, permission and
+background machinery as any `call_cli` entry, and the script can be
+written in any language.
+
 **Codemode.** When the binary links the `codemode` tool and an engine,
 the profile offers it beside the others: the model writes one script,
 the script makes the tool calls, and only the script's output and
