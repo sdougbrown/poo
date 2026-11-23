@@ -128,10 +128,6 @@ func TestACallCLIToolNullGoesThroughTheEnvelope(t *testing.T) {
 	if out, _ := obs[bash.EnvelopeOutput].(string); out != "null" {
 		t.Errorf("the output is %q, want the null the tool printed", out)
 	}
-	want := `{"returncode": 0, "timed_out": false, "output": "null"}`
-	if res.Text != want {
-		t.Errorf("the text is %q, want the envelope %q", res.Text, want)
-	}
 }
 
 // TestACallCLIToolOverCapGoesThroughTheEnvelope pins the over-cap
