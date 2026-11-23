@@ -3,15 +3,18 @@ package poo
 import "fmt"
 
 // coreToolNames is the set of tool names the core owns: the job tools
-// it registers below, and the finish tool the consumer links.
+// it registers below, the subscribe tool it registers for an optional
+// feed, and the finish tool the consumer links.
 //
 // A nested call may not run any of them: the job tools are the run's own
-// way of reaching its jobs, and the finish tool would settle the run out
-// from under the script that called it.
+// way of reaching its jobs, the subscribe tool starts a feed that outlives
+// the call, and the finish tool would settle the run out from under the
+// script that called it.
 var coreToolNames = map[string]struct{}{
-	FinishToolName:    {},
-	JobsToolName:      {},
-	CancelJobToolName: {},
+	FinishToolName:        {},
+	JobsToolName:          {},
+	CancelJobToolName:     {},
+	SubscribeFeedToolName: {},
 }
 
 // nestedRefusal reports why a codemode script may not call a tool by
@@ -45,7 +48,9 @@ func nestedCallable(name string, spec ToolSpec) bool {
 // The job tools are registered whenever a tool declares that it may run
 // in the background, and whenever the session runs a feed: a model that
 // can start a job needs a way to see them and a way to stop them, and a
-// feed is listed and stopped through the same two tools.
+// feed is listed and stopped through the same two tools. The subscribe
+// tool is registered beside them when the session loads a feed only a
+// subscription starts.
 //
 // A tool whose own schema defines the reserved background argument
 // cannot be registered: the core would not know whether the model meant
@@ -87,6 +92,9 @@ func (s *Session) registerJobTools() error {
 	s.opts.Tools[JobsToolName] = &JobTool{session: s, name: JobsToolName}
 	s.opts.Tools[CancelJobToolName] = &JobTool{session: s, name: CancelJobToolName}
 	s.opts.ToolOrder = append(s.opts.ToolOrder, JobsToolName, CancelJobToolName)
+	if err := s.registerSubscribeTool(); err != nil {
+		return err
+	}
 
 	// The tool schemas compile once, at registration. A schema that
 	// does not compile is a tool bug, and the construction fails

@@ -283,7 +283,9 @@ such as `{"result": null}` instead.
 
 A feed is a long-lived source beside a session: a process whose stdout is
 messages. The session starts every feed its settings name, delivers what
-the feed prints as input, and stops it when the session closes.
+the feed prints as input, and stops it when the session closes. A feed the
+manifest marks `optional` waits instead, and the model starts it with the
+`subscribe_feed` tool.
 
 A manifest names the feeds, and it is JSON, YAML or TOML. `feeds.paths`
 lists the files and directories the session loads, and every feed under
@@ -341,11 +343,12 @@ runs.
 **Environment.** A feed's command gets the cli registry's benign names and
 the manifest's `env` entries, and nothing else: a name the session scrubs
 with `tools.env.scrub` never reaches it. An entry is a literal,
-`env:NAME`, which reads the session's scrubbed environment, or
-`session:id`, which resolves to the session's own ID when the feed
+`env:NAME`, which reads the session's scrubbed environment, `session:id`,
+which resolves to the session's own ID when the feed
 starts — the same ID after a restore, and nothing the command says or
-does can change it. A reference that does not resolve fails the attempt,
-and the command does not start.
+does can change it — or `scope:NAME`, which resolves to the value a
+subscription supplied for that scope field. A reference that does not
+resolve fails the attempt, and the command does not start.
 
 **Stdout.** One JSON object per line:
 
@@ -391,8 +394,49 @@ a close win over a pending restart.
 **The idle policy.** `on_idle` decides only whether a feed's input may
 start a run by itself. `wake` lets an idle session wake for it, `hold`
 queues it until a run is going, and a feed without `on_idle` inherits
-`jobs.on_idle`. A run that is woken or prompted takes every queued input,
-held ones included.
+`jobs.on_idle`. An optional feed without `on_idle` holds instead, because a
+feed the model chose to watch wakes an idle session only when the manifest
+says so. A run that is woken or prompted takes every queued input, held
+ones included.
+
+**Feeds a session starts on demand.** An entry marked `optional: true`
+never runs at a session's start. Its `scope` declares the values a
+subscription supplies, one field at a time, each with a `type` of
+`string` and an optional `pattern` the whole value must match:
+
+```json
+"git-feedback": {
+  "description": "Feedback on one repository's pull requests.",
+  "command": ["git-feedback", "--watch"],
+  "optional": true,
+  "scope": {"url": {"type": "string", "pattern": "^https://"}},
+  "env": {"GIT_FEEDBACK_URL": "scope:url"}
+}
+```
+
+The model starts one instance with
+`subscribe_feed {"feed": "git-feedback", "scope": {"url": "https://…"}}`.
+The call may carry the reserved `prompt` argument, which the session
+accepts and does not read this slice; what it cannot carry is a
+command, argv, URL or credential, and every value is held to the feed's
+schema. A
+field the feed does not declare, a declared field the call leaves out, and
+a value the pattern refuses are refusals the model sees and can correct; a
+feed that declares no scope takes none. A `scope:` reference in `env` must
+name a field the feed declares, and a scope on a feed that is not optional
+fails the load, as do a field type other than `string`, a pattern that
+does not compile, and a field name outside `^[a-z][a-z0-9_]*$`.
+
+An instance answers to the feed's name and the values it was started with:
+its origin is `feed:<name>[<field>=<value>]`, with the fields in name order
+and each value escaped as a query value — `https://github.com/o/r` becomes
+`https%3A%2F%2Fgithub.com%2Fo%2Fr` — and a feed with no scope keeps
+`feed:<name>`. A
+call for the same feed and the same values reaches the instance that
+already exists, so a repeated subscription never starts a second one, and a
+subscription that stopped starts again on the next call to it. The fields
+and their patterns are in the prompt, so the model knows what it may ask
+for.
 
 **Filter before delivery.** An optional `filter` applies to the text
 of every message, including messages emitted while a run is active. A
@@ -430,7 +474,10 @@ was assessing.
 
 **The model reads a feed's input as outside input.** The message is one
 XML element: `<feed name="<name>" from="<from>">` around the text, with
-the `from` attribute left out when the input has no sender. In the text,
+the `from` attribute left out when the input has no sender, and `name` is
+the instance's label — `git-feedback[url=https:%2F%2Fgithub.com%2Fo%2Fr]`
+for a subscription's instance, the feed's name alone otherwise. In the
+text,
 `&` becomes `&amp;` and `<` becomes `&lt;`, so the text cannot close the
 element; an attribute escapes those two as well as `"`, and a newline or
 a carriage return is written as a character reference. It is not the
@@ -439,9 +486,11 @@ user's turn, and it is untrusted like a tool result. The records are
 lists them.
 
 **Jobs.** A running feed is listed by `jobs` and by `session/get` as
-`feed:<name>` with the tool `feed`. `cancel_job feed:<name>` stops it until
-the session closes, and a session that loads again starts every configured
-feed.
+`feed:<name>` with the tool `feed`, and an instance a subscription started
+as its origin, `feed:<name>[<field>=<value>]`. `cancel_job` takes either
+id and stops that feed until the session closes. A session that loads
+again starts every configured feed that is not optional; a subscription is
+not resumed, and the model starts one again with `subscribe_feed`.
 
 ## The conformance recipe
 

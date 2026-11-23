@@ -5,7 +5,8 @@
 # The paths are where a session's markdown prompt text lives: the prompt
 # package's base and environment sections, each tool's own section, each
 # compaction strategy's request prompts, the catalog, the command's own
-# sections, the jobs section, and the read-only conformance fixture. A prompt file added under one of them
+# sections, the jobs and subscribe_feed sections, and the read-only
+# conformance fixture. A prompt file added under one of them
 # is linted without a workflow edit, and untracked files are linted
 # before their first commit. Agent-facing prose in Go source — a tool's
 # description, for example — is not in the lint's scope: the rules here
@@ -27,6 +28,7 @@ mapfile -t files < <(git ls-files --cached --others --exclude-standard -- \
   'cli/*.md' \
   'cmd/poo/*.md' \
   'jobs.md' \
+  'subscribe_feed.md' \
   'wire/conformance/testdata/readonly/prompts/*.md')
 
 if [ "${#files[@]}" -eq 0 ]; then

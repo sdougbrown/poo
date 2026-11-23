@@ -11,14 +11,22 @@
 // returns. The session owns the lifecycle that starts and stops attempts,
 // and the config layer wires the runner to the session.
 //
+// A feed is either one the session runs from its own start or one it
+// starts on demand. An `optional` feed declares the scope a subscription
+// supplies — the fields, and the shape each field's value takes — and
+// never runs until something subscribes to it.
+//
 // A feed's environment follows a registered tool's rules. An entry is a
 // literal, an `env:NAME` reference to the session's scrubbed
-// environment, or a `session:id` reference to the session's own ID,
-// resolved when the feed starts, not when the settings load. A session
-// reference to any other name fails the load: the feed would never
-// resolve it, and a feed that starts and fails every attempt is worse
-// than a manifest that does not load. The host resolves an environment
-// reference against its own scrubbed environment.
+// environment, a `session:id` reference to the session's own ID, or a
+// `scope:NAME` reference to a value the subscription named. The
+// references resolve when the feed starts, not when the settings load. A
+// reference to a name the feed cannot resolve fails the load: the feed
+// would never resolve it, and a feed that starts and fails every attempt
+// is worse than a manifest that does not load. The host resolves an
+// environment reference against its own scrubbed environment, the
+// session for the session's own values, and the subscription for the
+// scope's.
 package feed
 
 import (
@@ -53,6 +61,30 @@ const manifestVersion = 1
 // job ids and records, so it stays lowercase and short.
 var namePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 
+// scopeNamePattern is the shape of a scope field's name. The name is what
+// an `scope:NAME` binding and a subscription both spell, and the prompt
+// prints it, so it stays a word.
+var scopeNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+
+// scopeStringType is the only scope field type a manifest may declare.
+//
+// A scope value reaches the feed as an environment variable's value, so it
+// is a string: a field of another type would have no way to arrive.
+const scopeStringType = "string"
+
+// ScopeField is one field of a feed's scope: a value a subscription
+// supplies, and the shape the value takes.
+type ScopeField struct {
+	// Name is the field's name. A `scope:NAME` environment binding names
+	// it.
+	Name string
+	// Type is the field's type, which is "string".
+	Type string
+	// Pattern is the expression the whole value must match, or "" when
+	// any string is accepted.
+	Pattern string
+}
+
 // Spec is one validated feed manifest entry.
 type Spec struct {
 	// Name is the name the feed answers to.
@@ -72,6 +104,12 @@ type Spec struct {
 	// MaxPending caps the feed's undelivered inputs. Zero means the
 	// core's default backlog.
 	MaxPending int
+	// Optional says the feed never starts with the session: something
+	// subscribes to it, and the scope below is what it may supply.
+	Optional bool
+	// Scope is the fields a subscription must supply, in name order, and
+	// empty for a feed that takes none.
+	Scope []ScopeField
 	// Filter is the manifest's optional delivery screen. The config
 	// layer applies it to the text of each emitted message; the
 	// runner ignores it.
@@ -184,6 +222,7 @@ func (s *Set) Specs() []Spec {
 	for i, spec := range s.specs {
 		spec.Command = append([]string(nil), spec.Command...)
 		spec.Env = append([]cliregistry.EnvBinding(nil), spec.Env...)
+		spec.Scope = append([]ScopeField(nil), spec.Scope...)
 		if spec.Filter != nil {
 			filter := *spec.Filter
 			spec.Filter = &filter
@@ -203,13 +242,22 @@ type envelope struct {
 // body is one feed's manifest entry, decoded with unknown fields
 // rejected.
 type body struct {
-	Description string            `json:"description"`
-	Command     []string          `json:"command"`
-	Env         map[string]string `json:"env"`
-	Restart     bool              `json:"restart"`
-	OnIdle      string            `json:"on_idle"`
-	MaxPending  *int              `json:"max_pending"`
-	Filter      *Filter           `json:"filter"`
+	Description string                     `json:"description"`
+	Command     []string                   `json:"command"`
+	Env         map[string]string          `json:"env"`
+	Restart     bool                       `json:"restart"`
+	OnIdle      string                     `json:"on_idle"`
+	MaxPending  *int                       `json:"max_pending"`
+	Filter      *Filter                    `json:"filter"`
+	Optional    bool                       `json:"optional"`
+	Scope       map[string]scopeFieldEntry `json:"scope"`
+}
+
+// scopeFieldEntry is one field of a feed's scope schema, as the manifest
+// declares it.
+type scopeFieldEntry struct {
+	Type    string `json:"type"`
+	Pattern string `json:"pattern"`
 }
 
 // readFile reads one manifest and returns its validated specs, in name
@@ -281,6 +329,10 @@ func readFeed(path, name string, raw json.RawMessage) (Spec, error) {
 			return Spec{}, fmt.Errorf("feed manifest %s: feed %q needs a filter.min_no_probability greater than 0.5 and at most 1", path, name)
 		}
 	}
+	scope, err := readScope(path, name, b)
+	if err != nil {
+		return Spec{}, err
+	}
 	names := make([]string, 0, len(b.Env))
 	for entry := range b.Env {
 		names = append(names, entry)
@@ -292,6 +344,16 @@ func readFeed(path, name string, raw json.RawMessage) (Spec, error) {
 	}
 	for _, binding := range envs {
 		if !binding.Reference || binding.Scope == "" {
+			continue
+		}
+		if binding.Scope == cliregistry.ScopeScope {
+			// The feed's own schema is what a scope reference may name:
+			// the subscription supplies exactly the values the manifest
+			// declares, so a reference to any other name would fail
+			// every attempt.
+			if err := declaresScopeField(scope, binding.From); err != nil {
+				return Spec{}, fmt.Errorf("feed manifest %s: feed %q: the env %q names %v", path, name, binding.Name, err)
+			}
 			continue
 		}
 		if err := exec.ValidSessionReference(binding.Scope, binding.From); err != nil {
@@ -306,6 +368,57 @@ func readFeed(path, name string, raw json.RawMessage) (Spec, error) {
 		Restart:     b.Restart,
 		OnIdle:      b.OnIdle,
 		MaxPending:  maxPending,
+		Optional:    b.Optional,
+		Scope:       scope,
 		Filter:      b.Filter,
 	}, nil
+}
+
+// readScope validates a feed's scope schema and returns its fields, in
+// name order.
+//
+// A feed declares a scope because a subscription supplies the values it
+// watches, and only a feed that starts on demand has a subscription: a
+// scope on a feed the session starts itself is a manifest that would fail
+// every attempt, so it fails the load instead.
+func readScope(path, name string, b body) ([]ScopeField, error) {
+	if len(b.Scope) > 0 && !b.Optional {
+		return nil, fmt.Errorf("feed manifest %s: feed %q declares a scope and is not optional", path, name)
+	}
+	fieldNames := make([]string, 0, len(b.Scope))
+	for field := range b.Scope {
+		fieldNames = append(fieldNames, field)
+	}
+	sort.Strings(fieldNames)
+	fields := make([]ScopeField, 0, len(fieldNames))
+	for _, field := range fieldNames {
+		entry := b.Scope[field]
+		if !scopeNamePattern.MatchString(field) {
+			return nil, fmt.Errorf("feed manifest %s: feed %q: scope field %q is not a valid field name", path, name, field)
+		}
+		if entry.Type != scopeStringType {
+			return nil, fmt.Errorf("feed manifest %s: feed %q: scope field %q has the type %q, want %q", path, name, field, entry.Type, scopeStringType)
+		}
+		if entry.Pattern != "" {
+			if _, err := regexp.Compile(entry.Pattern); err != nil {
+				return nil, fmt.Errorf("feed manifest %s: feed %q: scope field %q has a pattern that does not compile: %v", path, name, field, err)
+			}
+		}
+		fields = append(fields, ScopeField{Name: field, Type: entry.Type, Pattern: entry.Pattern})
+	}
+	return fields, nil
+}
+
+// declaresScopeField reports whether the feed's scope declares the field,
+// naming the field it could not find.
+func declaresScopeField(scope []ScopeField, field string) error {
+	if field == "" {
+		return fmt.Errorf("no scope value")
+	}
+	for _, declared := range scope {
+		if declared.Name == field {
+			return nil
+		}
+	}
+	return fmt.Errorf("the scope value %q, and the feed declares no such field", cliregistry.ScopeScope+":"+field)
 }

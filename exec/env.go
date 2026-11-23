@@ -97,13 +97,25 @@ func Lookup(environ []string) func(string) (string, bool) {
 	}
 }
 
+// The reference scopes a manifest's value may name. The session's own
+// values are "session", and a feed instance's subscription values are
+// "scope": the two words are cli-registry's, spelled here because this
+// package resolves a reference without depending on the library's
+// manifest types.
+const (
+	// sessionReferenceScope names the session's own values.
+	sessionReferenceScope = "session"
+	// scopeReferenceScope names the values a feed's subscription supplied.
+	scopeReferenceScope = "scope"
+)
+
 // ValidSessionReference reports whether a session reference names a value
 // the session scope carries: nil when it does, and the unknown-reference
 // error when it does not. The manifest load's validation and the resolver
 // answer through it, so the accepted names live in one place — the scope
 // itself is spelled here alone.
 func ValidSessionReference(scope, name string) error {
-	if scope != "session" {
+	if scope != sessionReferenceScope {
 		return fmt.Errorf("unknown reference scope %q", scope)
 	}
 	if name != "id" {
@@ -121,7 +133,27 @@ func ValidSessionReference(scope, name string) error {
 // does can change it. A reference to any other name fails: `id` is the
 // only value the session scope carries.
 func SessionScope(sessionID string) func(scope, name string) (string, error) {
+	return ScopedResolver(sessionID, nil)
+}
+
+// ScopedResolver returns the resolver for a command's scoped references:
+// the session's own values, and the values a feed's subscription named.
+//
+// A `session:id` reference resolves to the session's own ID, the way
+// SessionScope resolves it. A `scope:NAME` reference resolves to the
+// value the subscription supplied for that field, which is the value the
+// feed's manifest declared and the model's call passed. A reference
+// either scope does not carry fails: a command that runs with a value it
+// was never given is worse than an attempt that does not start.
+func ScopedResolver(sessionID string, values map[string]string) func(scope, name string) (string, error) {
 	return func(scope, name string) (string, error) {
+		if scope == scopeReferenceScope {
+			value, ok := values[name]
+			if !ok {
+				return "", fmt.Errorf("unknown scope reference %q", scopeReferenceScope+":"+name)
+			}
+			return value, nil
+		}
 		if err := ValidSessionReference(scope, name); err != nil {
 			return "", err
 		}

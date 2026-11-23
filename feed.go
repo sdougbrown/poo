@@ -5,9 +5,12 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/sdougbrown/poo/decide"
@@ -49,6 +52,11 @@ type FeedIO struct {
 	// options name another, so a feed restarted beside a resumed session
 	// resolves to what it resolved to before.
 	SessionID string
+	// Scope are the values the subscription that started the feed named,
+	// keyed by the field names the manifest declares. It is empty for a
+	// feed the session started itself, and a manifest's `scope:NAME`
+	// reference resolves through it.
+	Scope map[string]string
 	// Emit queues one input, which may carry an image. It returns the
 	// session's refusal (ErrSessionClosed, ErrSessionBroken, a store
 	// error) or the image's own failure. A model that reads no images
@@ -88,21 +96,43 @@ type FeedSpec struct {
 	// attempt that exited or failed, once the backoff has passed.
 	Restart bool
 	// OnIdle says whether an input the feed emits may start a run while
-	// the session is idle. Empty inherits the session's jobs.on_idle.
+	// the session is idle. Empty inherits the session's jobs.on_idle,
+	// except on an optional feed, whose empty policy holds.
 	OnIdle OnIdle
 	// MaxPending caps the feed's undelivered inputs. When an accepted
 	// input arrives at the cap, the feed's oldest undelivered input is
 	// dropped with an input.dropped record. The input that made room
 	// names the drop. Zero means DefaultFeedBacklog.
 	MaxPending int
+	// Optional says the feed does not run at the session's start: the
+	// model starts it with the subscribe_feed tool, and Scope is what a
+	// subscription must supply.
+	Optional bool
+	// Scope is the schema of the values a subscription supplies, in name
+	// order. A feed that declares none takes none.
+	Scope []FeedScopeField
+}
+
+// FeedScopeField is one field of a feed's scope: a value a subscription
+// supplies, and the shape the value takes.
+type FeedScopeField struct {
+	// Name is the field's name, as a manifest's `scope:NAME` reference
+	// and the subscribe_feed call both spell it.
+	Name string
+	// Type is the field's type. Only "string" is accepted: a scope value
+	// reaches the feed as an environment variable's value.
+	Type string
+	// Pattern is the expression the whole value must match, or "" when
+	// any string is accepted.
+	Pattern string
 }
 
 // WithFeeds gives the session the feeds it runs.
 //
-// The session starts every feed when it is built, or, for a restored
-// session, once the results the restore queued are on the queue. A feed
-// runs until cancel_job stops it, the session closes, or the store
-// breaks.
+// The session starts the feeds that are not optional when it is built, or,
+// for a restored session, once the results the restore queued are on the
+// queue. An optional feed waits for the subscribe_feed tool. A feed runs
+// until cancel_job stops it, the session closes, or the store breaks.
 func WithFeeds(specs ...FeedSpec) Option {
 	return func(opts *Options) {
 		opts.Feeds = append(opts.Feeds, specs...)
@@ -111,15 +141,16 @@ func WithFeeds(specs ...FeedSpec) Option {
 
 // FeedStartedRecord records that one attempt of a feed started.
 //
-// The attempt's end is the next feed.ended record of the same feed: one
-// feed's attempts never overlap.
+// The attempt's end is the next feed.ended record of the same origin: one
+// instance of a feed's attempts never overlap, and the origin is what says
+// which instance the attempt ran beside.
 type FeedStartedRecord struct {
 	RecordMeta
 	// SessionID identifies the session.
 	SessionID string `json:"session_id"`
 	// Feed is the feed's name.
 	Feed string `json:"feed"`
-	// Attempt numbers the feed's attempts in this session, from 1.
+	// Attempt numbers the instance's attempts in this session, from 1.
 	Attempt int `json:"attempt"`
 	// StartedAt is the RFC 3339 start time in UTC.
 	StartedAt string `json:"started_at"`
@@ -136,7 +167,7 @@ type FeedEndedRecord struct {
 	SessionID string `json:"session_id"`
 	// Feed is the feed's name.
 	Feed string `json:"feed"`
-	// Attempt numbers the feed's attempts in this session, from 1.
+	// Attempt numbers the instance's attempts in this session, from 1.
 	Attempt int `json:"attempt"`
 	// Outcome says how the attempt ended.
 	Outcome FeedOutcome `json:"outcome"`
@@ -214,6 +245,17 @@ func feedRestartDelay(ran, previous time.Duration) time.Duration {
 // cannot be read back.
 var feedNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 
+// feedScopeNamePattern is the shape a scope field's name takes. The name
+// is what a manifest's `scope:NAME` reference and a subscription both
+// spell.
+var feedScopeNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+
+// feedScopeStringType is the only scope field type a feed may declare.
+//
+// A scope value reaches the feed as an environment variable's value, so a
+// field of another type has no way to arrive.
+const feedScopeStringType = "string"
+
 // MissingFeedWarning is what the build and the restore say when a
 // profile declares a feed the settings do not load.
 //
@@ -245,6 +287,40 @@ func checkFeeds(specs []FeedSpec) error {
 		if spec.MaxPending < 0 {
 			return fmt.Errorf("poo: the feed %q has a negative input cap %d", spec.Name, spec.MaxPending)
 		}
+		if len(spec.Scope) > 0 && !spec.Optional {
+			return fmt.Errorf("poo: the feed %q declares a scope and does not run on demand", spec.Name)
+		}
+		if err := checkFeedScopeFields(spec); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// checkFeedScopeFields validates a feed's scope schema.
+//
+// The schema is the whole of what a subscription may supply, so it is
+// checked when the session is built: a field name outside the pattern, a
+// type that is not a string, or a pattern that does not compile would
+// otherwise refuse every call the model makes.
+func checkFeedScopeFields(spec FeedSpec) error {
+	seen := make(map[string]bool, len(spec.Scope))
+	for _, field := range spec.Scope {
+		if !feedScopeNamePattern.MatchString(field.Name) {
+			return fmt.Errorf("poo: the feed %q has a scope field %q that is not a valid name", spec.Name, field.Name)
+		}
+		if seen[field.Name] {
+			return fmt.Errorf("poo: the feed %q declares the scope field %q twice", spec.Name, field.Name)
+		}
+		seen[field.Name] = true
+		if field.Type != feedScopeStringType {
+			return fmt.Errorf("poo: the feed %q has a scope field %q of the type %q, want %q", spec.Name, field.Name, field.Type, feedScopeStringType)
+		}
+		if field.Pattern != "" {
+			if _, err := regexp.Compile(field.Pattern); err != nil {
+				return fmt.Errorf("poo: the feed %q has a scope field %q whose pattern does not compile: %w", spec.Name, field.Name, err)
+			}
+		}
 	}
 	return nil
 }
@@ -258,10 +334,17 @@ func checkFeeds(specs []FeedSpec) error {
 type feedState struct {
 	// name is the feed's name.
 	name string
+	// instance is the label the feed's origin and its inputs carry: the
+	// name alone, or the name and the canonical scope a subscription
+	// named.
+	instance string
 	// origin is the origin the feed's records and messages carry.
 	origin Origin
 	// spec is the feed's declaration.
 	spec FeedSpec
+	// scope are the values the subscription named, and nil for a feed the
+	// session started itself.
+	scope map[string]string
 	// ctx is the feed's context. It comes from the session's job context,
 	// so an interrupt, a cancel of a run and a settle never stop the
 	// feed: only a cancel of the feed, a close and a broken store do.
@@ -290,23 +373,73 @@ func (f *feedState) listed() bool {
 	return f.status == feedRunning || f.status == feedRestarting
 }
 
-// buildFeeds creates the feeds' states and contexts.
+// indexOptionalFeeds records the feeds a subscription may start, by name.
+//
+// It runs before the tools are registered, so the session offers the
+// subscribe_feed tool exactly when it loads a feed the tool can start.
+func (s *Session) indexOptionalFeeds() {
+	for _, spec := range s.opts.Feeds {
+		spec = onDemandFeed(spec)
+		if spec.Optional {
+			s.optionalFeeds[spec.Name] = spec
+		}
+	}
+}
+
+// buildFeeds creates the states and contexts of the feeds the session
+// starts itself.
 //
 // The contexts come from the session's job context, so they are built
-// with it, after every fallible step of the construction.
+// with it, after every fallible step of the construction. An optional feed
+// gets no state here: it waits for the subscribe_feed tool.
 func (s *Session) buildFeeds() {
 	for _, spec := range s.opts.Feeds {
-		ctx, cancel := context.WithCancelCause(s.jobCtx)
-		f := &feedState{
-			name:   spec.Name,
-			origin: FeedOrigin(spec.Name),
-			spec:   spec,
-			ctx:    ctx,
-			cancel: cancel,
-			done:   make(chan struct{}),
+		if spec.Optional {
+			continue
 		}
-		s.feeds[f.name] = f
+		f := s.newFeedState(spec, nil)
+		s.feeds[string(f.origin)] = f
 		s.feedOrder = append(s.feedOrder, f)
+	}
+}
+
+// onDemandFeed returns the spec with the idle policy a feed it declares
+// means.
+//
+// An optional feed the manifest does not give a policy holds its inputs:
+// a feed the model started mid-session is the model's to watch, and waking
+// an idle session for one is the manifest's choice to make, not the
+// session default's.
+func onDemandFeed(spec FeedSpec) FeedSpec {
+	if spec.Optional && spec.OnIdle == "" {
+		spec.OnIdle = OnIdleHold
+	}
+	return spec
+}
+
+// newFeedState builds one instance's state with a context of its own.
+//
+// The context comes from the session's job context, so an interrupt, a
+// cancel of a run and a settle never stop the feed. The status starts at
+// running and the start time at now: the supervisor starts at once, and a
+// reader that looks before it does sees the instance it is about to get.
+//
+// The caller holds the session's lock when another goroutine may already
+// read the state.
+func (s *Session) newFeedState(spec FeedSpec, scope map[string]string) *feedState {
+	instance := feedInstanceLabel(spec.Name, scope)
+	ctx, cancel := context.WithCancelCause(s.jobCtx)
+	return &feedState{
+		name:      spec.Name,
+		instance:  instance,
+		origin:    FeedOrigin(instance),
+		spec:      spec,
+		scope:     scope,
+		ctx:       ctx,
+		cancel:    cancel,
+		done:      make(chan struct{}),
+		status:    feedRunning,
+		startedAt: time.Now(),
 	}
 }
 
@@ -336,7 +469,10 @@ func (s *Session) startFeeds() {
 // The supervisor is the feed's only owner, so a restart is a loop and not
 // a second registry the close would have to know about.
 func (s *Session) runFeed(f *feedState) {
-	defer close(f.done)
+	// The supervisor closes the channel it started with: a subscription
+	// that re-arms a stopped instance hands it a new one.
+	done := f.done
+	defer close(done)
 	var wait time.Duration
 	for {
 		runAt, attempt, ok := s.beginFeedAttempt(f)
@@ -427,17 +563,31 @@ func (s *Session) runFeedAttempt(f *feedState, attempt int) (err error) {
 	return f.spec.Run(f.ctx, FeedIO{
 		Dir:       s.opts.WorkingDir,
 		SessionID: s.opts.SessionID,
+		Scope:     cloneScope(f.scope),
 		Emit: func(from, text string, image *FeedImage) error {
 			return s.emitFeedInput(f, attempt, from, text, image)
 		},
 		Decider: s.Decider,
-		Log:     s.feedLogger(f.name),
+		Log:     s.feedLogger(f.instance),
 	})
 }
 
-// feedLogger returns the logger a feed's runner writes to.
-func (s *Session) feedLogger(name string) *slog.Logger {
-	return s.logger().With(slog.String("feed", name))
+// cloneScope copies a subscription's values, so a runner may not change
+// the instance's own.
+func cloneScope(scope map[string]string) map[string]string {
+	if len(scope) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(scope))
+	for field, value := range scope {
+		out[field] = value
+	}
+	return out
+}
+
+// feedLogger returns the logger one instance's runner writes to.
+func (s *Session) feedLogger(instance string) *slog.Logger {
+	return s.logger().With(slog.String("feed", instance))
 }
 
 // emitFeedInput queues one input on behalf of the attempt that emitted
@@ -457,7 +607,7 @@ func (s *Session) emitFeedInput(f *feedState, attempt int, from, text string, im
 	if err != nil {
 		return err
 	}
-	return s.queueFeedInput(f.name, from, text, attachments, f.spec.OnIdle, func() bool {
+	return s.queueFeedInput(f.instance, from, text, attachments, f.spec.OnIdle, func() bool {
 		return f.ended < attempt
 	})
 }
@@ -634,13 +784,14 @@ func (s *Session) setFeedStatus(f *feedState, status string) {
 	f.status = status
 }
 
-// cancelFeed stops one feed.
+// cancelFeed stops one instance of a feed.
 //
-// The attempt's context ends, and a feed that waits for its next attempt
-// waits no more: the attempt's end record is already in the log.
-func (s *Session) cancelFeed(name string) error {
+// The id is the instance's origin, which is how the job list names it. The
+// attempt's context ends, and a feed that waits for its next attempt waits
+// no more: the attempt's end record is already in the log.
+func (s *Session) cancelFeed(instanceID string) error {
 	s.mu.Lock()
-	f, ok := s.feeds[name]
+	f, ok := s.feeds[instanceID]
 	if !ok || f.status == feedStopped {
 		s.mu.Unlock()
 		return ErrUnknownJob
@@ -665,13 +816,171 @@ func (s *Session) listedFeedsLocked() []*feedState {
 	return out
 }
 
-// feedNameOf returns the feed a listed id names.
+// subscribeFeed starts one instance of an optional feed, or reaches the
+// instance the same feed and scope already named.
 //
-// A feed is listed under its origin, so a cancel names it the way the
-// list did.
-func feedNameOf(id string) (string, bool) {
-	name, ok := FeedName(Origin(id))
-	return name, ok && name != ""
+// The instance is keyed by its origin, which carries the feed's name and
+// the canonical form of the scope, so one feed may run twice beside a
+// session with different values and a repeated call reaches what it
+// started. An instance that is running or waiting for its next attempt is
+// left as it is; one that stopped is started again with a fresh context.
+//
+// The scope is the only value the model supplies, so it is held to the
+// feed's declared schema before anything starts, and a refusal is the
+// model's to correct.
+//
+// The call reports the instance's origin and whether this call started
+// it.
+func (s *Session) subscribeFeed(name string, scope map[string]string) (string, bool, error) {
+	spec, ok := s.optionalFeeds[name]
+	if !ok {
+		return "", false, InvalidArgsf("%s: the feed %q is not one this session starts on demand", SubscribeFeedToolName, name)
+	}
+	values, err := checkFeedScope(spec, scope)
+	if err != nil {
+		return "", false, InvalidArgsf("%s: %v", SubscribeFeedToolName, err)
+	}
+	instance := feedInstanceLabel(spec.Name, values)
+	id := string(FeedOrigin(instance))
+
+	s.mu.Lock()
+	if s.broken {
+		s.mu.Unlock()
+		return "", false, ErrSessionBroken
+	}
+	if s.closed {
+		s.mu.Unlock()
+		return "", false, ErrSessionClosed
+	}
+	f, ok := s.feeds[id]
+	if ok {
+		if f.status != feedStopped {
+			s.mu.Unlock()
+			return id, false, nil
+		}
+		// The instance stopped: the supervisor is gone with its context,
+		// so a re-arm is a fresh context and a fresh supervisor.
+		f.ctx, f.cancel = context.WithCancelCause(s.jobCtx)
+		f.done = make(chan struct{})
+		f.startedAt = time.Now()
+		f.status = feedRunning
+	} else {
+		f = s.newFeedState(spec, values)
+		s.feeds[id] = f
+		s.feedOrder = append(s.feedOrder, f)
+	}
+	f.started = true
+	s.mu.Unlock()
+	go s.runFeed(f)
+	return id, true, nil
+}
+
+// checkFeedScope validates a subscription's scope against the feed's
+// declared schema and returns the values the instance runs with.
+//
+// The schema is the whole of what the call may choose: a field the feed
+// did not declare, a declared field the call leaves out, and a value the
+// field's pattern refuses are all refusals. A feed that declares no scope
+// takes none, and a call that passes one is refused rather than ignored.
+func checkFeedScope(spec FeedSpec, scope map[string]string) (map[string]string, error) {
+	if len(spec.Scope) == 0 {
+		if len(scope) != 0 {
+			return nil, fmt.Errorf("the feed %q takes no scope", spec.Name)
+		}
+		return nil, nil
+	}
+	supplied := make([]string, 0, len(scope))
+	for field := range scope {
+		supplied = append(supplied, field)
+	}
+	slices.Sort(supplied)
+	for _, field := range supplied {
+		if !declaresFeedScope(spec, field) {
+			return nil, fmt.Errorf("the feed %q declares no scope field %q", spec.Name, field)
+		}
+	}
+	values := make(map[string]string, len(spec.Scope))
+	for _, field := range spec.Scope {
+		value, ok := scope[field.Name]
+		if !ok || value == "" {
+			return nil, fmt.Errorf("the feed %q needs a value for the scope field %q", spec.Name, field.Name)
+		}
+		if strings.ContainsRune(value, 0) {
+			// The value becomes an environment variable's value, and an
+			// entry that carries a NUL byte cannot be one: the attempt
+			// would fail before the command starts, every time.
+			return nil, fmt.Errorf("the value of the scope field %q carries a NUL byte", field.Name)
+		}
+		if len(value) > feedScopeValueMax {
+			// The value is retained in the feed's state and its origin
+			// label for the instance's lifetime, so an unbounded value
+			// would hold memory the instance's life is measured in.
+			return nil, fmt.Errorf("the value of the scope field %q is %d bytes, and a scope value is at most %d bytes", field.Name, len(value), feedScopeValueMax)
+		}
+		if field.Pattern != "" {
+			// The pattern was validated when the session was built, so a
+			// pattern that does not compile cannot reach this compile.
+			re, _ := regexp.Compile(field.Pattern)
+			// The contract is that the whole value matches: a value the
+			// pattern only finds inside is a refusal, not a match.
+			if idx := re.FindStringIndex(value); idx == nil || idx[0] != 0 || idx[1] != len(value) {
+				return nil, fmt.Errorf("the value of the scope field %q must match %q", field.Name, field.Pattern)
+			}
+		}
+		values[field.Name] = value
+	}
+	return values, nil
+}
+
+// declaresFeedScope reports whether the feed's schema declares the field.
+func declaresFeedScope(spec FeedSpec, field string) bool {
+	for _, declared := range spec.Scope {
+		if declared.Name == field {
+			return true
+		}
+	}
+	return false
+}
+
+// feedInstanceScope returns the canonical scope a subscription named: the
+// fields in name order, each value escaped so that no value can spell
+// another field or the label's own end.
+//
+// The escaping is a query value's, so a value that carries the label's
+// own "," or "=" is escaped and cannot spell a field boundary. Two
+// subscriptions of one feed are the same instance exactly when their
+// canonical scopes are equal.
+func feedInstanceScope(scope map[string]string) string {
+	fields := make([]string, 0, len(scope))
+	for field := range scope {
+		fields = append(fields, field)
+	}
+	slices.Sort(fields)
+	var b strings.Builder
+	for i, field := range fields {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteString(field)
+		b.WriteByte('=')
+		b.WriteString(url.QueryEscape(scope[field]))
+	}
+	return b.String()
+}
+
+// feedInstanceLabel returns the label one instance's origin and inputs
+// carry: the feed's name, and beside it the canonical scope a
+// subscription named.
+//
+// The label and the instance's origin share one spelling: both take the
+// feed's name and the canonical scope through feedInstanceName, so a
+// reader of an input, of a record or of a listing knows which instance
+// it came from.
+func feedInstanceLabel(name string, scope map[string]string) string {
+	if len(scope) == 0 {
+		return name
+	}
+	return feedInstanceName(name, feedInstanceScope(scope))
 }
 
 // closeFeeds stops every feed and waits for the teardown.
@@ -683,11 +992,16 @@ func feedNameOf(id string) (string, bool) {
 func (s *Session) closeFeeds() {
 	s.mu.Lock()
 	feeds := make([]*feedState, 0, len(s.feedOrder))
+	dones := make([]<-chan struct{}, 0, len(s.feedOrder))
 	for _, f := range s.feedOrder {
 		if !f.started || f.status == feedStopped {
 			continue
 		}
 		feeds = append(feeds, f)
+		// The done channel is the supervisor's of this attempt: a
+		// subscription may hand a stopped instance a new one, and the
+		// close waits for the supervisor it saw.
+		dones = append(dones, f.done)
 	}
 	s.mu.Unlock()
 	if len(feeds) == 0 {
@@ -700,9 +1014,9 @@ func (s *Session) closeFeeds() {
 	// ignores its context never holds the close up.
 	teardown, stopTeardown := context.WithTimeout(context.Background(), s.recordBudget())
 	defer stopTeardown()
-	for _, f := range feeds {
+	for _, done := range dones {
 		select {
-		case <-f.done:
+		case <-done:
 		case <-teardown.Done():
 		}
 	}

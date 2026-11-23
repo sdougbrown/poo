@@ -126,7 +126,10 @@ type PendingJob struct {
 type PendingFeed struct {
 	// Feed is the feed's name.
 	Feed string
-	// Attempt numbers the feed's attempts in this session, from 1.
+	// Origin is the origin the attempt's records carry, which names the
+	// instance of the feed the attempt ran beside.
+	Origin poo.Origin
+	// Attempt numbers the instance's attempts in this session, from 1.
 	Attempt int
 	// StartedAt is the recorded start time.
 	StartedAt string
@@ -276,7 +279,7 @@ func (p InterruptPolicy) Resolve(ctx context.Context, sink poo.RecordSink, pend 
 	}
 	for _, feed := range pend.Feeds {
 		rec := &poo.FeedEndedRecord{
-			RecordMeta: poo.NewRecordMetaFrom("feed.ended", poo.FeedOrigin(feed.Feed)),
+			RecordMeta: poo.NewRecordMetaFrom("feed.ended", feed.Origin),
 			SessionID:  pend.SessionID,
 			Feed:       feed.Feed,
 			Attempt:    feed.Attempt,
@@ -425,9 +428,10 @@ func pendingOf(id string, recs []poo.Record) *Pending {
 		case *poo.FeedStartedRecord:
 			state.feeds = append(state.feeds, *r)
 			state.feedEnded = append(state.feedEnded, false)
-			state.feedStarts[r.Feed] = append(state.feedStarts[r.Feed], len(state.feeds)-1)
+			origin := string(r.Meta().Origin)
+			state.feedStarts[origin] = append(state.feedStarts[origin], len(state.feeds)-1)
 		case *poo.FeedEndedRecord:
-			for _, i := range state.feedStarts[r.Feed] {
+			for _, i := range state.feedStarts[string(r.Meta().Origin)] {
 				if state.feedEnded[i] {
 					continue
 				}
@@ -528,6 +532,7 @@ func pendingOf(id string, recs []poo.Record) *Pending {
 		}
 		pend.Feeds = append(pend.Feeds, PendingFeed{
 			Feed:      feed.Feed,
+			Origin:    feed.Meta().Origin,
 			Attempt:   feed.Attempt,
 			StartedAt: feed.StartedAt,
 		})
@@ -601,9 +606,9 @@ type pendingState struct {
 	feeds []poo.FeedStartedRecord
 	// feedEnded reports which of the started attempts have ended.
 	feedEnded []bool
-	// feedStarts are the indexes of one feed's starts, by name. One
-	// feed's attempts never overlap, so the first start without an end
-	// is the one an end belongs to.
+	// feedStarts are the indexes of one instance's starts, by origin. An
+	// instance's attempts never overlap, so the first start without an
+	// end is the one an end belongs to.
 	feedStarts map[string][]int
 	// inputs are the inputs that were queued, by id.
 	inputs map[string]poo.InputQueuedRecord

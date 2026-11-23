@@ -67,6 +67,19 @@ func HookOrigin(name string) Origin {
 // feedOriginPrefix is the one spelling of a feed's origin.
 const feedOriginPrefix = "feed:"
 
+// The brackets an instance of a feed puts around the scope its
+// subscription named. A feed's name cannot carry either one, so the name
+// an origin begins with is unambiguous.
+const (
+	feedScopeOpen  = "["
+	feedScopeClose = "]"
+)
+
+// feedScopeValueMax is the most bytes a scope value may carry: the value
+// is retained in the feed's state and its origin label for the
+// instance's lifetime.
+const feedScopeValueMax = 4096
+
 // FeedOrigin returns the origin a feed's records and messages carry.
 //
 // The origin names the feed, so a reader of the record knows which feed
@@ -77,17 +90,57 @@ func FeedOrigin(name string) Origin {
 	return Origin(feedOriginPrefix + name)
 }
 
+// feedInstanceName returns the name an instance's origin carries: the
+// feed's name, and beside it the canonical scope a subscription named.
+//
+// The name is the one spelling the label and the origin share: a feed
+// with no scope answers to the name alone, and a scoped instance carries
+// the canonical scope in brackets beside it.
+func feedInstanceName(name, scope string) string {
+	if scope == "" {
+		return name
+	}
+	return name + feedScopeOpen + scope + feedScopeClose
+}
+
+// FeedInstanceOrigin returns the origin one instance of a feed carries.
+//
+// A feed the session starts itself, and an optional one a subscription
+// started without values, answer to FeedOrigin alone. An instance a
+// subscription started with a scope carries the canonical scope beside
+// the name, so a reader of an input, of a record or of a listing knows
+// which instance it came from, and one feed may run twice beside one
+// session without the two being confused.
+func FeedInstanceOrigin(name, scope string) Origin {
+	return FeedOrigin(feedInstanceName(name, scope))
+}
+
 // FeedName returns the feed an origin names, and reports whether the
 // origin is a feed's at all.
 //
 // A reader that takes a feed's name out of an origin uses this rather
-// than its own spelling of the prefix.
+// than its own spelling of the prefix. The name is the feed's, not its
+// instance's: a scoped instance's origin carries its scope after the
+// name.
 func FeedName(o Origin) (string, bool) {
-	name, ok := strings.CutPrefix(string(o), feedOriginPrefix)
+	label, ok := FeedInstance(o)
 	if !ok {
 		return "", false
 	}
+	name, _, _ := strings.Cut(label, feedScopeOpen)
 	return name, true
+}
+
+// FeedInstance returns the feed instance an origin names — the feed's
+// name, or the name and the canonical scope a subscription supplied — and
+// reports whether the origin is a feed's at all.
+//
+// A reader that names the instance a record, an input or a listing came
+// from uses this: one feed may run twice beside a session, and the two
+// instances are told apart by what this returns.
+func FeedInstance(o Origin) (string, bool) {
+	label, ok := strings.CutPrefix(string(o), feedOriginPrefix)
+	return label, ok
 }
 
 // IsCompactionRequest reports that a usage record's origin names a

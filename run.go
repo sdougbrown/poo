@@ -111,7 +111,7 @@ func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, n
 	// The run's own record of its beginning. The write is claimed
 	// against the seal, so a run that settles while it is in flight
 	// cannot get run.settled first.
-	feeds := feedNames(jobs)
+	feeds := feedInstances(jobs)
 	if err := s.writeRun(run, &RunStartedRecord{
 		RecordMeta: NewRecordMeta("run.started"),
 		RunID:      runID,

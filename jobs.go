@@ -1033,9 +1033,11 @@ func (s *Session) QueueJobResult(result JobResult) {
 // FeedToolName is the tool name a feed's input is listed under.
 const FeedToolName = "feed"
 
-// queueFeedInput queues one feed's input for the model.
+// queueFeedInput queues one instance of a feed's input for the model.
 //
-// The model-facing text is rendered here, once, and the acceptance
+// The instance is the label the feed's origin and its inputs carry: the
+// feed's name alone, or the name and the canonical scope a subscription
+// named. The model-facing text is rendered here, once, and the acceptance
 // record carries it with the input's attachments: the delivery uses
 // the stored text and the stored files, live and after a restore. A
 // feed's message never stands in for the user's turn, so the model
@@ -1047,17 +1049,17 @@ const FeedToolName = "feed"
 // ErrSessionClosed or ErrSessionBroken, and a store that refuses its
 // record returns the store's error: the input is then not queued.
 //
-// The feed's name is not validated here: a caller that takes a feed's
-// name validates it before it queues the input. The feed's idle policy
-// rides with the input; an empty policy is the session's.
+// The instance's label is not validated here: a caller that takes a
+// feed's name validates it before it queues the input. The feed's idle
+// policy rides with the input; an empty policy is the session's.
 //
 // admit, when it is set, is asked whether the input may join the session
 // in the same critical section that decides the acceptance, before the
 // acceptance's write is registered: an emit that names the attempt it
 // belongs to is admitted before that attempt's end is claimed, or refused
 // after it, and never in between.
-func (s *Session) queueFeedInput(feed, from, text string, attachments []Attachment, onIdle OnIdle, admit func() bool) error {
-	origin := FeedOrigin(feed)
+func (s *Session) queueFeedInput(instance, from, text string, attachments []Attachment, onIdle OnIdle, admit func() bool) error {
+	origin := FeedOrigin(instance)
 	s.mu.Lock()
 	if s.broken {
 		s.mu.Unlock()
@@ -1097,7 +1099,7 @@ func (s *Session) queueFeedInput(feed, from, text string, attachments []Attachme
 		s.mu.Unlock()
 	}()
 
-	rendered := feedInputText(feed, from, text)
+	rendered := feedInputText(instance, from, text)
 	if droppedID != "" {
 		// The note rides the input's stored text, so a restored session
 		// delivers the same words.
@@ -1158,14 +1160,15 @@ func (s *Session) queueFeedInput(feed, from, text string, attachments []Attachme
 	return nil
 }
 
-// feedInputText renders the model-facing text of a feed's input.
+// feedInputText renders the model-facing text of one instance of a
+// feed.
 //
 // The text is rendered once, when the input is accepted, and the record
 // carries it: a restore delivers the same bytes. The result is one
-// element, named for the feed and carrying the sender as an attribute
+// element, named for the instance and carrying the sender as an attribute
 // when the input has one.
-func feedInputText(feed, from, text string) string {
-	attrs := [][2]string{{"name", feed}}
+func feedInputText(instance, from, text string) string {
+	attrs := [][2]string{{"name", instance}}
 	if from != "" {
 		attrs = append(attrs, [2]string{"from", from})
 	}
@@ -1219,16 +1222,11 @@ var attributeEscaper = strings.NewReplacer(
 const feedDropNote = "[poo: 1 earlier input from this feed was dropped unread]"
 
 // feedBacklogLocked returns how many undelivered inputs the feed may
-// hold in the queue. The cap is the feed's own, and a feed that sets
-// none takes the default. The caller holds the session's lock.
+// hold in the queue. The cap is the instance's own spec's, and a feed that
+// sets none takes the default. The caller holds the session's lock.
 func (s *Session) feedBacklogLocked(origin Origin) int {
-	for _, spec := range s.opts.Feeds {
-		if FeedOrigin(spec.Name) == origin {
-			if spec.MaxPending > 0 {
-				return spec.MaxPending
-			}
-			break
-		}
+	if f, ok := s.feeds[string(origin)]; ok && f.spec.MaxPending > 0 {
+		return f.spec.MaxPending
 	}
 	return DefaultFeedBacklog
 }
@@ -1678,18 +1676,22 @@ func triggerFor(results []jobResult) TriggerKind {
 	return TriggerFeed
 }
 
-// feedNames returns the distinct feeds the results came from, in queue
-// order.
-func feedNames(results []jobResult) []string {
+// feedInstances returns the distinct feed instances the results came
+// from, in queue order.
+//
+// An instance answers to its label, which is the feed's name or the name
+// and the canonical scope a subscription supplied, so a run woken by two
+// instances of one feed names both.
+func feedInstances(results []jobResult) []string {
 	var out []string
 	seen := map[Origin]bool{}
 	for _, result := range results {
-		name, ok := FeedName(result.origin)
+		label, ok := FeedInstance(result.origin)
 		if !ok || seen[result.origin] {
 			continue
 		}
 		seen[result.origin] = true
-		out = append(out, name)
+		out = append(out, label)
 	}
 	return out
 }
@@ -1989,8 +1991,8 @@ func (s *Session) deliverWaitingInput(run *runState, input queuedInput) {
 // The job's partial output is delivered like any result. A job that is
 // already finished is not touched.
 func (s *Session) cancelJob(jobID string) error {
-	if name, ok := feedNameOf(jobID); ok {
-		return s.cancelFeed(name)
+	if IsFeedOrigin(Origin(jobID)) {
+		return s.cancelFeed(jobID)
 	}
 	s.mu.Lock()
 	job, ok := s.jobs[jobID]

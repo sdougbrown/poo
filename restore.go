@@ -769,7 +769,10 @@ func (s *Session) seedCounters(records []Record) {
 	s.jobSeq = jobs
 	s.messageIDs.Set(messages)
 	for name, attempt := range attempts {
-		if f, ok := s.feeds[name]; ok && attempt > f.attempt {
+		// A feed's records carry its name, and the state a restored
+		// session keeps is the instance's: a feed the session starts
+		// itself is the one that answers to FeedOrigin.
+		if f, ok := s.feeds[string(FeedOrigin(name))]; ok && attempt > f.attempt {
 			f.attempt = attempt
 		}
 	}

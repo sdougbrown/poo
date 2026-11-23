@@ -168,9 +168,13 @@ type Session struct {
 	// with no client input in between.
 	unattendedWakes int
 
-	// feeds holds the session's feeds, by name.
+	// feeds holds the session's feed instances, by origin: the feeds it
+	// started itself, and the optional ones a subscription started.
 	feeds map[string]*feedState
-	// feedOrder is the feeds in configuration order, so a list is
+	// optionalFeeds are the feeds a subscription may start, by name. The
+	// map is written once, before the session takes runs, and read after.
+	optionalFeeds map[string]FeedSpec
+	// feedOrder is the feed instances in start order, so a list is
 	// stable.
 	feedOrder []*feedState
 	// feedDelay is how long a feed waits before its next attempt.
@@ -763,6 +767,7 @@ func New(opts Options, fns ...Option) (*Session, error) {
 		messageIDs:         ids,
 		jobs:               map[string]*jobState{},
 		feeds:              map[string]*feedState{},
+		optionalFeeds:      map[string]FeedSpec{},
 		feedDelay:          feedRestartDelay,
 		jobQueued:          make(chan struct{}, 1),
 		jobCompletionsDone: make(chan struct{}, 1),
@@ -791,7 +796,10 @@ func New(opts Options, fns ...Option) (*Session, error) {
 	}
 
 	// The job tools are the core's own, and they are registered
-	// whenever a tool may run in the background.
+	// whenever a tool may run in the background. The feeds a subscription
+	// may start are indexed first, because whether the session loads one
+	// decides whether the tool that starts it is offered.
+	s.indexOptionalFeeds()
 	if err := s.registerJobTools(); err != nil {
 		return nil, &ErrSessionInit{Cause: err}
 	}
