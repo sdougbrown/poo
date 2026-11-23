@@ -78,17 +78,19 @@ func (r *Runtime) profileSectionOwned() bool {
 	return false
 }
 
+// profilePromptFile is the prompt file the session's profile names, or
+// empty when it names none. The ownership gate is profilePrompt's: the
+// file is one of the sources its early return governs.
 func (r *Runtime) profilePromptFile() string {
-	if r.profileSectionOwned() {
-		return ""
-	}
 	return r.Settings.Profiles[r.Profile.Name].PromptFile
 }
 
 // profilePrompt returns the edits a new session's profile section
 // carries: the file's text in place of the section, and the append's
 // text after whatever the section holds. Both compose with the linked
-// base's own prose, which the build set earlier.
+// base's own prose, which the build set earlier. A section an explicit
+// system_prompt setting owns is left alone: the gate's early return
+// governs both sources.
 func (r *Runtime) profilePrompt() ([]func(*prompt.Builder), error) {
 	if r.profileSectionOwned() {
 		return nil, nil
