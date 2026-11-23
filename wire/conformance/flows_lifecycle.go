@@ -66,12 +66,12 @@ func (s *suite) handoff() {
 	}
 }
 
-// pointer covers the flow of a run that runs out of context under the
+// mine covers the flow of a run that runs out of context under the
 // binary's default strategy: the fork names queries, the retained
 // history answers them, and the reconstruction carries the run forward
 // instead of it settling. The flow names no strategy, so it is the
 // default that this proves.
-func (s *suite) pointer() {
+func (s *suite) mine() {
 	s.t.Helper()
 	if s.skipWithoutTool("bash") {
 		return
@@ -84,13 +84,13 @@ func (s *suite) pointer() {
 	turns := []ScriptedAnswer{
 		{Text: filler, ToolCalls: []ToolCall{{Name: "bash", Arguments: map[string]any{"command": "echo hello"}}}},
 		{Text: filler, ToolCalls: []ToolCall{{Name: "bash", Arguments: map[string]any{"command": "echo again"}}}},
-		{Text: `{"queries": ["the task is long"], "notes": "the deploy is pending"}`},
+		{Text: "- config/services.yaml: the panic is fixed\n- the deploy is still pending"},
 		{Text: "## Goal\nfinish the task"},
 		{Text: "done"},
 	}
 	endpoint := newEndpoint(s.t, turns)
 	settings := s.settings(endpoint, summaryWindow, map[string]any{
-		"context": map[string]any{"pointer": map[string]any{"ratio": 0.6, "keep_recent_tokens": 1}},
+		"context": map[string]any{"mine": map[string]any{"ratio": 0.6, "keep_recent_tokens": 1}},
 	})
 	c := s.start(settings, endpoint)
 	s.handshake(c)
@@ -105,10 +105,10 @@ func (s *suite) pointer() {
 	requests := c.requests()
 	asked, matched, carried := false, false, false
 	for _, request := range requests {
-		if requestHolds(request, "queries") && requestHolds(request, "reconstructed working context") {
+		if requestHolds(request, "what the new context must preserve") {
 			asked = true
 		}
-		if requestHolds(request, "<matches>") && requestHolds(request, "the task is long") {
+		if requestHolds(request, "<transcript>") && requestHolds(request, "<pointers>") && requestHolds(request, "the panic is fixed") {
 			matched = true
 		}
 		if requestHolds(request, "[Context compacted:") {
@@ -116,10 +116,10 @@ func (s *suite) pointer() {
 		}
 	}
 	if !asked {
-		s.t.Errorf("the endpoint got no pointer request: %+v", requests)
+		s.t.Errorf("the endpoint got no fork request: %+v", requests)
 	}
 	if !matched {
-		s.t.Errorf("no request carries the matches the queries hit: %+v", requests)
+		s.t.Errorf("no request carries the transcript and the pointers: %+v", requests)
 	}
 	if !carried {
 		s.t.Errorf("no request carries the reconstruction the compaction wrote")

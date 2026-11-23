@@ -2558,17 +2558,18 @@ context:
 	}
 }
 
-// TestTheDefaultStrategyIsPointer covers the default: a session built
+// TestTheDefaultStrategyIsMine covers the default: a session built
 // without a strategy in its settings reconstructs the working context
-// from what the queries select, and the full-read strategies are opt-in.
-func TestTheDefaultStrategyIsPointer(t *testing.T) {
+// from the whole covered transcript, and the selective strategies are
+// opt-in.
+func TestTheDefaultStrategyIsMine(t *testing.T) {
 	settings, err := config.Parse([]byte(theModelSettings), config.FormatYAML)
 	if err != nil {
 		t.Fatalf("decoding the settings: %v", err)
 	}
 	runtime := build(t, settings, config.Overrides{})
-	if _, ok := runtime.Options.Compactor.(*pointer.Compactor); !ok {
-		t.Fatalf("the session's compactor is %T, want the pointer strategy", runtime.Options.Compactor)
+	if _, ok := runtime.Options.Compactor.(*mine.Compactor); !ok {
+		t.Fatalf("the session's compactor is %T, want the mine strategy", runtime.Options.Compactor)
 	}
 }
 
