@@ -9,5 +9,5 @@ Reply with ONE JSON object, and nothing else:
 {"queries": ["<exact strings to search the session's retained history for>"], "notes": "<what must be preserved that a search may not find>"}
 
 - "queries" are exact literal strings: file paths, commands, URLs, branch names, error messages, identifiers. Each one is searched for verbatim, so quote it exactly as it appeared.
-- "notes" are brief lines for anything a search cannot find: decisions and their reasons, promises, unfinished threads, preferences.
+- "notes" are brief lines for what the next instance must know that a search may not restore. Record the state of the work: what has been done, what it has learned, what is pending. Decisions and their reasons, promises, preferences belong here too.
 - Up to 8 queries. Keep "notes" brief. No markdown fences. The JSON object is the entire reply.
