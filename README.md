@@ -453,6 +453,23 @@ without its manifests runs the rest of the session unchanged. A resumed
 session runs without a declared feed the current settings no longer
 load, and says so with the same warning.
 
+A profile also carries a word on the manifest defaults. The keys are
+`feeds_defaults` and `cli_registry_defaults`, and the profile's word wins
+over the settings':
+
+```yaml
+profiles:
+  dumb:
+    base: code
+    feeds_defaults: false
+    cli_registry_defaults: false
+```
+
+A session under `dumb` then runs without the manifests in the person's
+own directories. A slim profile sheds the weight a heavily configured
+primary profile carries. A profile that names neither key keeps the
+settings' word.
+
 **Profiles files.** `profiles_files` names the files that hold profile
 definitions, so a settings file that has grown a long `profiles` map can
 hand them to files of their own:

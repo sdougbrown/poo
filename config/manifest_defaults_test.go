@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/cli"
 	"github.com/sdougbrown/poo/config"
 	"github.com/sdougbrown/poo/pootest"
@@ -348,5 +349,136 @@ func TestADefaultFeedWithoutAnExecutorNamesTheSource(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "the default feeds directory") {
 		t.Errorf("the failure does not name the default directory: %v", err)
+	}
+}
+
+// theDumbProfileSettings are the settings a slim profile runs under: the
+// profile the case names, over the linked code profile.
+func theDumbProfileSettings(body string) string {
+	return theModelSettings + body
+}
+
+// TestAProfileTurnsTheManifestDefaultsOff covers the profile's word: a
+// slim profile that turns both defaults off runs without the manifests
+// in the person's own directories, whatever they hold.
+func TestAProfileTurnsTheManifestDefaultsOff(t *testing.T) {
+	pooDir := theDefaultsPooDir(t)
+	theDefaultFeedManifest(t, pooDir)
+	theDefaultRegistry(t, pooDir)
+	document := theDumbProfileSettings("profiles:\n  dumb:\n    base: code\n    feeds_defaults: false\n    cli_registry_defaults: false\nprofile: dumb\n")
+	settings, err := config.Parse([]byte(document), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+	if runtime.Feeds != nil && runtime.Feeds.Len() != 0 {
+		t.Errorf("the profile turned the feed defaults off, and the build loaded %v", runtime.Feeds)
+	}
+	if runtime.Registry != nil && runtime.Registry.Len() != 0 {
+		t.Errorf("the profile turned the registry defaults off, and the build loaded %v", runtime.Registry)
+	}
+	if runtime.Profile.Name != "dumb" {
+		t.Errorf("the session runs under the profile %q, want dumb", runtime.Profile.Name)
+	}
+}
+
+// TestAProfileWordWinsOverTheSettings covers the precedence: the
+// profile's toggle speaks last, in both directions.
+func TestAProfileWordWinsOverTheSettings(t *testing.T) {
+	pooDir := theDefaultsPooDir(t)
+	theDefaultFeedManifest(t, pooDir)
+	theDefaultRegistry(t, pooDir)
+	// The settings turn the feed defaults off, and the profile turns
+	// them back on.
+	document := theDumbProfileSettings("feeds:\n  defaults: false\nprofiles:\n  dumb:\n    base: code\n    feeds_defaults: true\nprofile: dumb\n")
+	settings, err := config.Parse([]byte(document), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+	if runtime.Feeds == nil || runtime.Feeds.Len() != 1 || !runtime.Feeds.Has("broker") {
+		t.Errorf("the profile turned the feed defaults on, and the build loaded %v", runtime.Feeds)
+	}
+	// The settings leave the registry defaults on, and the profile turns
+	// them off.
+	document = theDumbProfileSettings("profiles:\n  dumb:\n    base: code\n    cli_registry_defaults: false\nprofile: dumb\n")
+	settings, err = config.Parse([]byte(document), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime = build(t, settings, config.Overrides{})
+	if runtime.Registry != nil && runtime.Registry.Len() != 0 {
+		t.Errorf("the profile turned the registry defaults off, and the build loaded %v", runtime.Registry)
+	}
+}
+
+// TestAProfileThatSaysNothingKeepsTheSettingsWord covers the quiet
+// profile: a variant that names no toggle inherits the settings' word.
+func TestAProfileThatSaysNothingKeepsTheSettingsWord(t *testing.T) {
+	pooDir := theDefaultsPooDir(t)
+	theDefaultFeedManifest(t, pooDir)
+	document := theDumbProfileSettings("feeds:\n  defaults: false\nprofiles:\n  dumb:\n    base: code\nprofile: dumb\n")
+	settings, err := config.Parse([]byte(document), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+	if runtime.Feeds != nil && runtime.Feeds.Len() != 0 {
+		t.Errorf("the settings turned the defaults off, and the profile kept them on: %v", runtime.Feeds)
+	}
+}
+
+// TestTheOverridesProfileCarriesTheWord covers the command line's word:
+// a profile the override selects runs under its own toggle, not the
+// settings' profile's.
+func TestTheOverridesProfileCarriesTheWord(t *testing.T) {
+	pooDir := theDefaultsPooDir(t)
+	theDefaultFeedManifest(t, pooDir)
+	document := theDumbProfileSettings("profiles:\n  dumb:\n    base: code\n    feeds_defaults: false\nprofile: dumb\n")
+	settings, err := config.Parse([]byte(document), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := build(t, settings, config.Overrides{Profile: "code"})
+	if runtime.Profile.Name != "code" {
+		t.Fatalf("the session runs under the profile %q, want code", runtime.Profile.Name)
+	}
+	if runtime.Feeds == nil || runtime.Feeds.Len() != 1 || !runtime.Feeds.Has("broker") {
+		t.Errorf("the linked profile names no toggle, and the build loaded %v, want the default feed", runtime.Feeds)
+	}
+}
+
+// TestAListingFollowsTheProfileWord covers the picker: the tools a
+// profile's listing offers follow the manifest set the profile's own
+// word resolves. A profile the defaults are off for lists no
+// registry tool its session would not have.
+func TestAListingFollowsTheProfileWord(t *testing.T) {
+	pooDir := theDefaultsPooDir(t)
+	theDefaultFeedManifest(t, pooDir)
+	theDefaultRegistry(t, pooDir)
+	document := theDumbProfileSettings("profiles:\n  dumb:\n    base: code\n    cli_registry_defaults: false\n")
+	settings, err := config.Parse([]byte(document), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+	// The session runs under the linked code profile, whose word keeps
+	// the defaults on: the registry loads for it.
+	if runtime.Registry == nil || runtime.Registry.Len() != 1 {
+		t.Fatalf("the session's registry is %v, want the default entry", runtime.Registry)
+	}
+	var dumb *poo.Profile
+	for i := range runtime.Profiles {
+		if runtime.Profiles[i].Name == "dumb" {
+			dumb = &runtime.Profiles[i]
+		}
+	}
+	if dumb == nil {
+		t.Fatal("the listing holds no dumb profile")
+	}
+	for _, tool := range dumb.Tools {
+		if tool.Name == "call_tool" || tool.Name == "find_tool" {
+			t.Errorf("the dumb profile's listing offers %s, and its word turns the registry defaults off", tool.Name)
+		}
 	}
 }
