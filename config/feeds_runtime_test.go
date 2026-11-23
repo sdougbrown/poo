@@ -659,7 +659,7 @@ func TestAFeedsOnlyBuildBuildsAnExecutor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decoding the settings: %v", err)
 	}
-	// readOnlyTools links neither bash nor call_cli, so the feed is the
+	// readOnlyTools links neither bash nor call_tool, so the feed is the
 	// only thing in the build that runs a command.
 	runtime, err := readOnlyBuild(t, settings, theExecutors())
 	if err != nil {

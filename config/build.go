@@ -374,7 +374,7 @@ type ToolOptions struct {
 	// earns none of the catalog the manifests loaded.
 	Registry *cli.Catalog
 	// Search reports that the session searches the catalog instead of
-	// listing it, so call_cli points an unknown name at the search.
+	// listing it, so call_tool points an unknown name at the search.
 	Search bool
 	// Inputs are the modalities the session's model reads, so a tool that can
 	// return one does, rather than refusing what the model cannot see.
@@ -925,7 +925,7 @@ func (r *Runtime) requireRegistryTools(opts BuildOptions, names []string) error 
 //
 // The catalog is searched when there is a decision model and enough
 // entries to need one; otherwise the whole catalog is listed, and
-// call_cli is all the model needs.
+// call_tool is all the model needs.
 func registryToolNames(find bool) []string {
 	if find {
 		return []string{cli.CallToolName, cli.FindToolName}
@@ -946,7 +946,7 @@ func offersSideEffects(tools []poo.ToolInfo) bool {
 // needsExecutor reports whether an offered tool or a configured feed
 // runs a command.
 //
-// bash and call_cli run a command through the executor, so a session that
+// bash and call_tool run a command through the executor, so a session that
 // offers either one builds it; a feed is a command of its own, so a
 // session that runs one builds it too. A read-only profile with no feeds
 // builds none, and a settings file naming an executor this binary lacks is

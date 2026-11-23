@@ -5,7 +5,7 @@
 // the argument schemas and renders the prompt's section. This package
 // holds the two tools over it:
 //
-//   - call_cli runs one registered CLI, naming it and passing its
+//   - call_tool runs one registered CLI, naming it and passing its
 //     arguments. It is side-effecting, so it goes through the permission
 //     policy like any command.
 //   - find_tool searches a large catalog with a decision model, because a

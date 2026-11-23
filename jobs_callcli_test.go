@@ -53,14 +53,14 @@ func sayManifest(t *testing.T, marker string) *cliregistry.Catalog {
 	return catalog
 }
 
-// callCliCall is a call of the say CLI through call_cli.
+// callCliCall is a call of the say CLI through call_tool.
 func callCliCall(background bool) poo.ToolCall {
 	args := map[string]any{"name": "say", "args": map[string]any{"name": "ada"}}
 	if background {
 		args["background"] = true
 	}
 	raw, _ := json.Marshal(args)
-	return poo.ToolCall{CallID: "call_say", Name: "call_cli", Arguments: raw}
+	return poo.ToolCall{CallID: "call_say", Name: "call_tool", Arguments: raw}
 }
 
 // TestACallCliBackgroundCallBecomesAJob covers the rule: the model asks
@@ -74,11 +74,11 @@ func TestACallCliBackgroundCallBecomesAJob(t *testing.T) {
 	})
 	sink := &recordingSink{}
 	catalog := sayManifest(t, marker)
-	tools := map[string]poo.Tool{"call_cli": cliregistry.NewCall(catalog)}
+	tools := map[string]poo.Tool{"call_tool": cliregistry.NewCall(catalog)}
 	opts := poo.Options{
 		Transport:  tr,
 		Tools:      tools,
-		ToolOrder:  []string{"call_cli"},
+		ToolOrder:  []string{"call_tool"},
 		Sink:       sink,
 		SessionID:  "s1",
 		Model:      poo.ModelInfo{ModelID: "test-model", ContextLimit: 32768},
@@ -101,7 +101,7 @@ func TestACallCliBackgroundCallBecomesAJob(t *testing.T) {
 	for _, rec := range sink.allRecords() {
 		if r, ok := rec.(*poo.ToolResultRecord); ok && r.Outcome == poo.OutcomeStarted {
 			found = true
-			if !strings.Contains(r.Text, "[started job j1 · call_cli;") {
+			if !strings.Contains(r.Text, "[started job j1 · call_tool;") {
 				t.Errorf("the started result is %q, want the started text", r.Text)
 			}
 		}

@@ -91,7 +91,7 @@ func (t *CallTool) Spec() poo.ToolSpec {
 //go:embed call.md
 var callSectionText string
 
-var callSection = prompt.MustCompile("call_cli", callSectionText, nil)
+var callSection = prompt.MustCompile("call_tool", callSectionText, nil)
 
 // PromptSection renders the tool's guidance.
 func (t *CallTool) PromptSection(env prompt.Env) string { return callSection.Render(env) }
@@ -104,7 +104,7 @@ type callArgs struct {
 	Args json.RawMessage `json:"args,omitempty"`
 }
 
-// preparedCall is a validated call_cli call.
+// preparedCall is a validated call_tool call.
 type preparedCall struct {
 	// name is the registered CLI.
 	name string

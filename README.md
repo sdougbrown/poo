@@ -575,7 +575,7 @@ embedded beside the package that owns it.
 - `poo prompt` prints the sections a session would send.
 
 **CLI registry.** When the settings list manifests in `cli_registry.paths`,
-a profile with a side-effecting tool also offers `call_cli`. It runs one
+a profile with a side-effecting tool also offers `call_tool`. It runs one
 registered command through the session's executor. Above 30 entries, with
 a decision model configured, the profile also offers `find_tool` to search
 the catalog. The code is in `poo/cli` and `poo/tool/cliregistry`.
@@ -591,7 +591,7 @@ build naming it, because poo has no value for it.
 `json` binding puts an object- or array-valued property's JSON on the
 script's stdin, and `output.mode: json` makes the script's JSON result
 the tool result. The tool joins the same catalog, permission and
-background machinery as any `call_cli` entry, and the script can be
+background machinery as any `call_tool` entry, and the script can be
 written in any language.
 
 **Codemode.** When the binary links the `codemode` tool and an engine,

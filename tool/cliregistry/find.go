@@ -23,7 +23,7 @@ const DefaultTopK = 8
 // hundreds of entries is what the search was there to avoid, and a model
 // told "here is everything" learns nothing about which entry fits. The
 // model is told the search failed and how to go on without it.
-const UnavailableText = "tool search unavailable; call_cli with a known name"
+const UnavailableText = "tool search unavailable; call_tool with a known name"
 
 // FindInstructions tell the decision model what the questions are.
 const FindInstructions = "Each question names one registered command-line tool and asks whether that tool fits the intent. " +

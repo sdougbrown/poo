@@ -53,7 +53,7 @@ func registryFile(t *testing.T, body map[string]any) string {
 	return dir
 }
 
-// callCLI runs the session's call_cli the way the core does.
+// callCLI runs the session's call_tool the way the core does.
 func callCLI(t *testing.T, runtime *config.Runtime) poo.ToolResult {
 	t.Helper()
 	tool, ok := runtime.Options.Tools[cliregistry.CallToolName]
@@ -120,7 +120,7 @@ cli_registry:
 }
 
 // TestTheSettingsExecutorRunsTheCLI covers the wiring: the executor the
-// settings name is the one call_cli runs through, with the sandbox's
+// settings name is the one call_tool runs through, with the sandbox's
 // options and the protected paths the settings name.
 func TestTheSettingsExecutorRunsTheCLI(t *testing.T) {
 	dir := t.TempDir()

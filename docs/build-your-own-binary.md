@@ -199,7 +199,7 @@ type ToolOptions struct {
 The map's key is the name the profile, the permission rules and the wire
 use. It must be the name the tool's `Spec` reports. A profile or a
 permission rule that names a tool the binary does not register is a typed
-error. So is a cli registry whose `call_cli` the binary does not link.
+error. So is a cli registry whose `call_tool` the binary does not link.
 
 Pass the engine the binary links to `tool/codemode`. This example pins
 Starlark and ignores `tools.codemode.engine`. The `poo` command links both
@@ -248,7 +248,7 @@ as JSON onto the script's stdin. The style requires the bound property
 to be a concrete object or array in the schema, and a tool takes at
 most one `stdin` or `json` binding. A `flag` is optional and is emitted
 only if the property is present. A manifest with `output.mode: json`
-makes `call_cli` hand the model the script's JSON result as the tool
+makes `call_tool` hand the model the script's JSON result as the tool
 result, bypassing the bash exit-code envelope:
 
 ```json
@@ -269,10 +269,10 @@ stdin and writes the JSON to stdout; the contract itself needs nothing
 but a script that does the same. Its tree carries the runnable example:
 `examples/fn.json` with `examples/fn_notes.py`.
 
-The tool gets the same machinery as any `call_cli` entry: the same
+The tool gets the same machinery as any `call_tool` entry: the same
 catalog and `find_tool` prompt section, the same permission and
 background treatment, and arguments validated against the schema before
-a process exists. It is statically side-effecting like any `call_cli`
+a process exists. It is statically side-effecting like any `call_tool`
 tool, because a script can do anything.
 
 One edge: an fn tool whose result is JSON `null` falls back to the

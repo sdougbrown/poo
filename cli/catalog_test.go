@@ -184,7 +184,7 @@ func TestANilCatalogRendersAnEmptySection(t *testing.T) {
 	// Rendering is the point: a nil catalog must not panic, and its section is
 	// the list form, not a search over entries it does not have.
 	text := catalog.Section(false)
-	for _, want := range []string{"Registered CLIs:", "Call one with call_cli"} {
+	for _, want := range []string{"Registered CLIs:", "Call one with call_tool"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("a nil catalog's section does not carry %q: %q", want, text)
 		}

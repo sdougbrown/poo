@@ -16,7 +16,7 @@ import (
 //
 // A refused call is the model's to correct, so the text has to name the
 // argument it got wrong and what would have been accepted. The old text
-// was an RFC 6901 pointer and an empty message ("call_cli: deploy:
+// was an RFC 6901 pointer and an empty message ("call_tool: deploy:
 // /mode: "), which told the model nothing.
 
 // deployTool is a manifest body with a schema whose constraints the
