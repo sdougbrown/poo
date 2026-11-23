@@ -693,10 +693,16 @@ func (r *Runtime) warn(text string) {
 // once: the commands a session may call are the ones its registry holds
 // when the session is built, and a session does not reload one.
 func (r *Runtime) resolveRegistry(opts BuildOptions, workingDir string) error {
-	if len(r.Settings.CLIRegistry.Paths) == 0 && len(opts.Overrides.CLIRegistryPaths) == 0 {
+	paths := append(append([]string{}, r.Settings.CLIRegistry.Paths...), opts.Overrides.CLIRegistryPaths...)
+	if defaultsOn(r.Settings.CLIRegistry.Defaults) {
+		if dir, ok := defaultManifestDir("cli-registry"); ok {
+			paths = append([]string{dir}, paths...)
+		}
+	}
+	if len(paths) == 0 {
 		return nil
 	}
-	paths, err := againstDir(append(append([]string{}, r.Settings.CLIRegistry.Paths...), opts.Overrides.CLIRegistryPaths...), workingDir)
+	paths, err := againstDir(paths, workingDir)
 	if err != nil {
 		return &Error{
 			Code:    CodeInvalid,
@@ -739,6 +745,29 @@ func (r *Runtime) resolveRegistry(opts BuildOptions, workingDir string) error {
 	return checkRegistryConditions(catalog.AvailabilityInputs())
 }
 
+// defaultsOn reports whether the default manifest directories load: the
+// key is absent or true, unless the settings turn them off.
+func defaultsOn(value *bool) bool {
+	return value == nil || *value
+}
+
+// defaultManifestDir returns poo's default directory for one manifest
+// kind under the user config directory, when the directory is there. A
+// missing directory is not an error: a person with no defaults sees no
+// change, the way the skills' default directory is a convention and not
+// a promise.
+func defaultManifestDir(kind string) (string, bool) {
+	dir, err := UserConfigDir()
+	if err != nil {
+		return "", false
+	}
+	path := filepath.Join(dir, kind)
+	if info, err := os.Stat(path); err != nil || !info.IsDir() {
+		return "", false
+	}
+	return path, true
+}
+
 // againstDir resolves each path. ~ and a path that starts with ~/ are
 // under the home directory. Any other relative path, ~user included, is
 // under dir. An absolute path is kept.
@@ -761,10 +790,16 @@ func againstDir(paths []string, dir string) ([]string, error) {
 // once, when the session is built; a session never reloads it. Nothing
 // starts a feed here.
 func (r *Runtime) resolveFeeds(opts BuildOptions, workingDir string) error {
-	if len(r.Settings.Feeds.Paths) == 0 && len(opts.Overrides.FeedsPaths) == 0 {
+	paths := append(append([]string{}, r.Settings.Feeds.Paths...), opts.Overrides.FeedsPaths...)
+	if defaultsOn(r.Settings.Feeds.Defaults) {
+		if dir, ok := defaultManifestDir("feeds"); ok {
+			paths = append([]string{dir}, paths...)
+		}
+	}
+	if len(paths) == 0 {
 		return nil
 	}
-	paths, err := againstDir(append(append([]string{}, r.Settings.Feeds.Paths...), opts.Overrides.FeedsPaths...), workingDir)
+	paths, err := againstDir(paths, workingDir)
 	if err != nil {
 		return &Error{
 			Code:    CodeInvalid,

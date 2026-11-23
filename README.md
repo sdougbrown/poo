@@ -145,6 +145,9 @@ settings, where a literal key lives, and the layer never carries one.
 relative paths against the settings file's directory. `cli_registry.paths`,
 `feeds.paths` and `skills.paths` answer to the working directory, and a
 path in them that starts with `~/` resolves under the home directory.
+The manifest defaults — `cli_registry.defaults` and `feeds.defaults` —
+say whether poo's own directories under the user config directory load
+beside the paths.
 
 `poo auth import pi` copies the Codex credential pi's `auth.json` holds into poo's
 file, once. It reads the file `--from` names, then the one `pi_auth_file` names,
@@ -580,6 +583,15 @@ registered command through the session's executor. Above 30 entries, with
 a decision model configured, the profile also offers `find_tool` to search
 the catalog. The code is in `poo/cli` and `poo/tool/cliregistry`.
 
+Both the registry and the feeds also load manifests from poo's own
+directories under the user config directory, before the settings' paths.
+The directories are `$XDG_CONFIG_HOME/poo/cli-registry/` and
+`$XDG_CONFIG_HOME/poo/feeds/`. A manifest a person wants in every session
+needs no settings entry. A missing directory is not an error.
+`cli_registry.defaults: false` and `feeds.defaults: false` turn the
+defaults off. A binary or a test then runs with exactly the manifests it
+names.
+
 A manifest can gate entries with an `availability` block. poo supplies the
 condition `profile_side_effecting`, and the entries the rules leave are the
 ones the profile offers: a profile with no side-effecting tool earns the
@@ -622,8 +634,9 @@ tools:
 ```
 
 **Feeds.** When the settings name feed manifests in `feeds.paths` (a
-path that starts with `~/` resolves under the home directory), the
-session runs a long-lived command beside itself and delivers the messages
+path that starts with `~/` resolves under the home directory), or the
+manifests sit in poo's default feeds directory, the session runs a
+long-lived command beside itself and delivers the messages
 it prints as input. A feed is listed as `feed:<name>` and stopped with
 `cancel_job`. Its manifest names the command, the environment, the restart
 policy and whether it may wake an idle session. The code is in `poo/feed`;

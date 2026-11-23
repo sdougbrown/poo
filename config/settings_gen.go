@@ -11,6 +11,7 @@ import (
 // SettingsFields holds the fields for Settings availability checks.
 type SettingsFields struct {
 	AuthFile                        *string  "json:\"auth_file,omitempty\""
+	CliRegistryDefaults             *bool    "json:\"cli_registry.defaults,omitempty\""
 	CliRegistryPaths                []string "json:\"cli_registry.paths,omitempty\""
 	ContextHandoffMaxTokens         *float64 "json:\"context.handoff.max_tokens,omitempty\""
 	ContextHandoffRatio             *float64 "json:\"context.handoff.ratio,omitempty\""
@@ -19,6 +20,7 @@ type SettingsFields struct {
 	ContextSummaryMaxTokens         *float64 "json:\"context.summary.max_tokens,omitempty\""
 	ContextSummaryRatio             *float64 "json:\"context.summary.ratio,omitempty\""
 	DeciderTimeoutMs                *float64 "json:\"decider.timeout_ms,omitempty\""
+	FeedsDefaults                   *bool    "json:\"feeds.defaults,omitempty\""
 	FeedsPaths                      []string "json:\"feeds.paths,omitempty\""
 	FinishSchemaFile                *string  "json:\"finish.schema_file,omitempty\""
 	JobsMaxRunning                  *float64 "json:\"jobs.max_running,omitempty\""
@@ -98,6 +100,7 @@ type SettingsConditions struct {
 // SettingsAvailability holds the availability status for each field.
 type SettingsAvailability struct {
 	AuthFile                        FieldStatus
+	CliRegistryDefaults             FieldStatus
 	CliRegistryPaths                FieldStatus
 	ContextHandoffMaxTokens         FieldStatus
 	ContextHandoffRatio             FieldStatus
@@ -106,6 +109,7 @@ type SettingsAvailability struct {
 	ContextSummaryMaxTokens         FieldStatus
 	ContextSummaryRatio             FieldStatus
 	DeciderTimeoutMs                FieldStatus
+	FeedsDefaults                   FieldStatus
 	FeedsPaths                      FieldStatus
 	FinishSchemaFile                FieldStatus
 	JobsMaxRunning                  FieldStatus
@@ -219,6 +223,8 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 	var _ = prev
 	AuthFileEnabled := true
 	AuthFileSatisfied := func() bool { v := f.AuthFile; return v != nil && *v != "" }()
+	CliRegistryDefaultsEnabled := true
+	CliRegistryDefaultsSatisfied := f.CliRegistryDefaults != nil
 	CliRegistryPathsEnabled := true
 	CliRegistryPathsSatisfied := len(f.CliRegistryPaths) > 0
 	ContextHandoffMaxTokensEnabled := true
@@ -235,6 +241,8 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 	ContextSummaryRatioSatisfied := f.ContextSummaryRatio != nil
 	DeciderTimeoutMsEnabled := true
 	DeciderTimeoutMsSatisfied := f.DeciderTimeoutMs != nil
+	FeedsDefaultsEnabled := true
+	FeedsDefaultsSatisfied := f.FeedsDefaults != nil
 	FeedsPathsEnabled := true
 	FeedsPathsSatisfied := len(f.FeedsPaths) > 0
 	FinishSchemaFileEnabled := true
@@ -375,6 +383,28 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 			Required:  AuthFileEnabled && false,
 			Enabled:   AuthFileEnabled,
 			Satisfied: AuthFileSatisfied,
+			Fair:      true,
+			Reason: func() *string {
+				var reasons []string
+				if len(reasons) == 0 {
+					return nil
+				}
+				return &reasons[0]
+			}(),
+			Reasons: func() []string {
+				var reasons []string
+				if reasons == nil {
+					reasons = []string{}
+				}
+				return reasons
+			}(),
+			Valid: nil,
+			Error: "",
+		},
+		CliRegistryDefaults: FieldStatus{
+			Required:  CliRegistryDefaultsEnabled && false,
+			Enabled:   CliRegistryDefaultsEnabled,
+			Satisfied: CliRegistryDefaultsSatisfied,
 			Fair:      true,
 			Reason: func() *string {
 				var reasons []string
@@ -603,6 +633,28 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 				if !(f.DeciderTimeoutMs != nil && *f.DeciderTimeoutMs >= 1) && "decider.timeout_ms must be at least a millisecond" != "" {
 					reasons = append(reasons, "decider.timeout_ms must be at least a millisecond")
 				}
+				if reasons == nil {
+					reasons = []string{}
+				}
+				return reasons
+			}(),
+			Valid: nil,
+			Error: "",
+		},
+		FeedsDefaults: FieldStatus{
+			Required:  FeedsDefaultsEnabled && false,
+			Enabled:   FeedsDefaultsEnabled,
+			Satisfied: FeedsDefaultsSatisfied,
+			Fair:      true,
+			Reason: func() *string {
+				var reasons []string
+				if len(reasons) == 0 {
+					return nil
+				}
+				return &reasons[0]
+			}(),
+			Reasons: func() []string {
+				var reasons []string
 				if reasons == nil {
 					reasons = []string{}
 				}
@@ -2292,6 +2344,8 @@ func depSatisfied(f SettingsFields, name string) bool {
 	case "AuthFile":
 		v := f.AuthFile
 		return v != nil && *v != ""
+	case "CliRegistryDefaults":
+		return f.CliRegistryDefaults != nil
 	case "CliRegistryPaths":
 		return len(f.CliRegistryPaths) > 0
 	case "ContextHandoffMaxTokens":
@@ -2309,6 +2363,8 @@ func depSatisfied(f SettingsFields, name string) bool {
 		return f.ContextSummaryRatio != nil
 	case "DeciderTimeoutMs":
 		return f.DeciderTimeoutMs != nil
+	case "FeedsDefaults":
+		return f.FeedsDefaults != nil
 	case "FeedsPaths":
 		return len(f.FeedsPaths) > 0
 	case "FinishSchemaFile":
@@ -2639,6 +2695,12 @@ func Challenge(fieldName string, f SettingsFields, c SettingsConditions, prev Se
 		if status.Reason != nil {
 			explanations = append(explanations, "* "+*status.Reason)
 		}
+	case "CliRegistryDefaults", "cli_registry.defaults":
+		found = true
+		status = avail.CliRegistryDefaults
+		if status.Reason != nil {
+			explanations = append(explanations, "* "+*status.Reason)
+		}
 	case "CliRegistryPaths", "cli_registry.paths":
 		found = true
 		status = avail.CliRegistryPaths
@@ -2694,6 +2756,12 @@ func Challenge(fieldName string, f SettingsFields, c SettingsConditions, prev Se
 			explanations = append(explanations, "* "+*status.Reason)
 		}
 		explanations = append(explanations, "* check: decider.timeout_ms must be at least a millisecond")
+	case "FeedsDefaults", "feeds.defaults":
+		found = true
+		status = avail.FeedsDefaults
+		if status.Reason != nil {
+			explanations = append(explanations, "* "+*status.Reason)
+		}
 	case "FeedsPaths", "feeds.paths":
 		found = true
 		status = avail.FeedsPaths

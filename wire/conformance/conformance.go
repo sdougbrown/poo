@@ -471,6 +471,16 @@ func (s *suite) settings(endpoint *FakeEndpoint, contextLimit int, extra map[str
 	for name, value := range extra {
 		document[name] = value
 	}
+	// A developer's own default manifests must not change what a flow
+	// sees, so every flow's settings turn the manifest defaults off.
+	for _, kind := range []string{"feeds", "cli_registry"} {
+		block, _ := document[kind].(map[string]any)
+		if block == nil {
+			block = map[string]any{}
+		}
+		block["defaults"] = false
+		document[kind] = block
+	}
 	// Every flow has a settings file of its own: a binary that starts
 	// late must not read the settings of the flow that came after it.
 	s.settingsCount++
