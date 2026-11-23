@@ -293,7 +293,7 @@ func (s *Session) SetPromptVariant(name string) ([]string, error) {
 	// none of it, and the change says so instead of dropping the
 	// guidance silently. A prompt without the section — a raw one, or a
 	// session that never opted in — stays unmentioned.
-	if slices.Contains(s.promptBuilder.Names(), prompt.FamilySection) && !slices.Contains(prompt.FamilyNames(), name) {
+	if prompt.FamilyHolds(s.promptBuilder) && !prompt.FamilyRenders(s.promptBuilder, name) {
 		if name == "" {
 			warnings = append(warnings, "the prompt renders with no variant, so the model family's guidance does not render")
 		} else {
@@ -356,6 +356,3 @@ func (s *Session) applyPromptEdit(edit SystemPromptEdit) error {
 	}
 	return s.SetPrompt(func(b *prompt.Builder) { edit(b) })
 }
-
-// PromptBuilderNames is a debug helper.
-func (s *Session) PromptBuilderNames() []string { return s.promptBuilder.Names() }

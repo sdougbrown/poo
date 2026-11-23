@@ -303,6 +303,9 @@ roles:
 	if strings.Contains(render, "the user's first look at your work") || strings.Contains(render, "You finish the work you start") {
 		t.Errorf("the rendered prompt carries family guidance no model asked for: %s", render)
 	}
+	if !strings.Contains(runtime.Warning, "names no family the prompt ships") {
+		t.Errorf("the build warned %q, want the note that names no family the prompt ships", runtime.Warning)
+	}
 }
 
 // TestAProfileAppendsItsPromptFile covers the file form: the append

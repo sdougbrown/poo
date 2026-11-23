@@ -2232,13 +2232,6 @@ func (r *Runtime) resolvePrompt(opts BuildOptions, workingDir string) error {
 	// an opt-in.
 	if family := r.chosenProfile(opts).ModelFamily; family != nil && *family {
 		r.Options.ModelFamily = true
-		// The profile opted in, but the guidance cannot render: the
-		// operator hears why instead of losing it silently.
-		if !r.chatModelResolved {
-			r.warn(fmt.Sprintf("profiles.%s: the build has no chat model, so the model family's guidance does not render", r.profileName(opts)))
-		} else if variant := r.Options.PromptVariant; !slices.Contains(prompt.FamilyNames(), variant) {
-			r.warn(fmt.Sprintf("profiles.%s: the prompt variant %q names no family the prompt ships, so the model family's guidance does not render", r.profileName(opts), variant))
-		}
 	}
 	if baseFile != "" {
 		text, err := os.ReadFile(baseFile)
@@ -2301,6 +2294,18 @@ func (r *Runtime) resolvePrompt(opts BuildOptions, workingDir string) error {
 	// changes are the session's own, and a command's own changes come
 	// after them.
 	r.Options.Prompt = append(r.Options.Prompt, r.Prompt...)
+
+	// The profile that opted in hears why when the guidance cannot
+	// render. The chat model's own variant picks the text, and a prompt
+	// directory that ships a family section renders its own; a session
+	// that renders in another variant decides at its own start.
+	if r.Options.ModelFamily {
+		if !r.chatModelResolved {
+			r.warn(fmt.Sprintf("profiles.%s: the build has no chat model, so the model family's guidance does not render", r.profileName(opts)))
+		} else if !prompt.FamilyRenders(poo.PromptBuilder(r.Options), r.Options.PromptVariant) {
+			r.warn(fmt.Sprintf("profiles.%s: the chat model's prompt variant %q names no family the prompt ships, so the model family's guidance does not render in a session that keeps it", r.profileName(opts), r.Options.PromptVariant))
+		}
+	}
 	return nil
 }
 

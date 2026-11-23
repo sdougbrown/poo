@@ -2,7 +2,9 @@ package prompt
 
 import (
 	_ "embed"
+	"slices"
 	"sort"
+	"strings"
 )
 
 // FamilySection is the name of the prompt's model-family section.
@@ -51,4 +53,24 @@ func FamilyNames() []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// FamilyHolds reports whether the builder holds the family section: a
+// prompt that never opted in — or a raw one — carries none, and the
+// warnings that explain an empty section stay quiet about it.
+func FamilyHolds(b *Builder) bool {
+	return slices.Contains(b.Names(), FamilySection)
+}
+
+// FamilyRenders reports whether the family section the builder holds
+// renders guidance for the variant named: the section's text for the
+// variant — the family's own, or a default the prompt directory
+// supplied — must not be empty.
+func FamilyRenders(b *Builder, variant string) bool {
+	for _, section := range b.WithVariant(variant).Sections() {
+		if section.Name == FamilySection {
+			return strings.TrimSpace(section.Text) != ""
+		}
+	}
+	return false
 }

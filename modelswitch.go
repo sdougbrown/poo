@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 
 	"github.com/sdougbrown/poo/decide"
@@ -116,7 +115,7 @@ func (s *Session) SetModel(info ModelInfo, transport ...ChatTransport) (ModelSwi
 	// or a profile that never opted in — stays unmentioned. The note
 	// joins the warnings before the outcome is built, so the result,
 	// the record, and the event carry the same list.
-	if slices.Contains(s.promptBuilder.Names(), prompt.FamilySection) && !slices.Contains(prompt.FamilyNames(), info.PromptVariant) {
+	if prompt.FamilyHolds(s.promptBuilder) && !prompt.FamilyRenders(s.promptBuilder, info.PromptVariant) {
 		if info.PromptVariant == "" {
 			warnings = append(warnings, "the model names no prompt variant, so the model family's guidance does not render")
 		} else {
