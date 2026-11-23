@@ -38,6 +38,7 @@ import (
 	"github.com/sdougbrown/poo/tool/edit"
 	"github.com/sdougbrown/poo/tool/fetch"
 	"github.com/sdougbrown/poo/tool/grep"
+	"github.com/sdougbrown/poo/tool/history"
 	"github.com/sdougbrown/poo/tool/read"
 )
 
@@ -112,6 +113,7 @@ func main() {
 		Tools: map[string]poo.Tool{
 			"read":     read.New(),
 			"grep":     grep.New(),
+			"history":  history.New(),
 			"edit":     edit.New(),
 			"bash":     bash.New(),
 			"fetch":    fetch.New(),
@@ -164,10 +166,6 @@ func main() {
 	fmt.Printf("settled %s in %s: source %q, text %q\n", res.Reason, time.Since(start).Round(time.Second), res.Detail.Source, res.Detail.Text)
 
 	newRecords := sink.Records()
-	if err != nil {
-		fmt.Println("reading the run's records:", err)
-		os.Exit(1)
-	}
 	kinds := map[string]int{}
 	for _, rec := range newRecords {
 		kinds[rec.Meta().Record]++
