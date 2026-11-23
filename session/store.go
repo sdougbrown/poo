@@ -1047,7 +1047,37 @@ var errInjected = errors.New("session: the injected failure")
 func (s *FileStore) ReadRecords(ctx context.Context) ([]poo.Record, error) {
 	s.mu.Lock()
 	if s.open == nil {
+		s.mu.Unlock()
 		return nil, &Error{Code: CodeStoreError, Message: "the store has no open session"}
 	}
-	return s.open.log.ReadRecords(ctx)
+	if err := ctx.Err(); err != nil {
+		s.mu.Unlock()
+		return nil, &Error{Code: CodeStoreError, Message: "reading the retained chain", Err: err}
+	}
+	if err := s.open.log.Sync(ctx); err != nil {
+		s.mu.Unlock()
+		return nil, &Error{Code: CodeStoreError, Message: "syncing the retained chain", Err: err}
+	}
+	// The decode is the load's: the store's codec, and the migration a
+	// log in an older format needs, so the history reads the chain the
+	// session was restored from. The lock covers the sync and the file
+	// read; the decode runs outside it, so a reader of a long session
+	// does not stall the appends for the whole parse.
+	lines, _, err := s.readLog(s.open.path, false)
+	s.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	format, err := logFormat(lines[0])
+	if err != nil {
+		return nil, err
+	}
+	if format != s.codec.Version() {
+		migrated, err := s.codec.Migrate(format, lines)
+		if err != nil {
+			return nil, err
+		}
+		lines = migrated
+	}
+	return s.decodeRecords(lines)
 }
