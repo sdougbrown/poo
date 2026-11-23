@@ -291,56 +291,24 @@ type HistoryMatch struct {
 // the turn numbers are the session's own. A compaction record is left
 // out rather than applied, so the turns the compaction removed are
 // still in what comes back.
+// runScan is the runs a record chain holds: the order they were first
+// seen in, each run's turn count, and which runs a started record
+// names.
+type runScan struct {
+	order   []string
+	turns   map[string]int
+	started map[string]bool
+}
+
 func NewHistory(records []Record) History {
-	// The runs in order, and each run's turn count.
-	var order []string
-	seen := map[string]bool{}
-	turns := map[string]int{}
-	note := func(id string) {
-		if id == "" || seen[id] {
-			return
-		}
-		seen[id] = true
-		order = append(order, id)
-	}
-	for _, rec := range records {
-		switch r := rec.(type) {
-		case *RunStartedRecord:
-			note(r.RunID)
-		case *RunSettledRecord:
-			note(r.RunID)
-			if r.Turns > turns[r.RunID] {
-				turns[r.RunID] = r.Turns
-			}
-		case *MessageRecord:
-			note(r.RunID)
-			if r.Turn > turns[r.RunID] {
-				turns[r.RunID] = r.Turn
-			}
-		case *ToolCallRecord:
-			note(r.RunID)
-			if r.Turn > turns[r.RunID] {
-				turns[r.RunID] = r.Turn
-			}
-		case *ToolResultRecord:
-			note(r.RunID)
-			if r.Turn > turns[r.RunID] {
-				turns[r.RunID] = r.Turn
-			}
-		case *UsageRecord:
-			note(r.RunID)
-			if r.Turn > turns[r.RunID] {
-				turns[r.RunID] = r.Turn
-			}
-		}
-	}
+	scan := scanRunsOf(records)
 	offset := 0
 	sessionTurn := map[string]int{}
-	for _, id := range order {
-		for t := 1; t <= turns[id]; t++ {
+	for _, id := range scan.order {
+		for t := 1; t <= scan.turns[id]; t++ {
 			sessionTurn[fmt.Sprintf("%s/%d", id, t)] = offset + t
 		}
-		offset += turns[id]
+		offset += scan.turns[id]
 	}
 	// The items are the projection's, with the turns renamed to the
 	// session's numbering.
