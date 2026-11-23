@@ -22,7 +22,7 @@ import (
 // reader sees the records the store has written; a sink that buffers
 // makes no promise about the tail.
 type RecordReader interface {
-	Records(ctx context.Context) ([]Record, error)
+	ReadRecords(ctx context.Context) ([]Record, error)
 }
 
 // The kinds of item a projection holds.
@@ -328,6 +328,9 @@ func NewHistory(records []Record) History {
 			}
 		case *UsageRecord:
 			note(r.RunID)
+			if r.Turn > turns[r.RunID] {
+				turns[r.RunID] = r.Turn
+			}
 		}
 	}
 	offset := 0
@@ -442,7 +445,7 @@ type lazyHistory struct {
 
 // Turns returns the turn numbers the reader's records retain.
 func (l lazyHistory) Turns() ([]int, error) {
-	records, err := l.reader.Records(context.Background())
+	records, err := l.reader.ReadRecords(context.Background())
 	if err != nil {
 		return nil, err
 	}
@@ -451,7 +454,7 @@ func (l lazyHistory) Turns() ([]int, error) {
 
 // Turn returns one turn's text from the reader's records.
 func (l lazyHistory) Turn(turn int) (string, error) {
-	records, err := l.reader.Records(context.Background())
+	records, err := l.reader.ReadRecords(context.Background())
 	if err != nil {
 		return "", err
 	}
@@ -461,7 +464,7 @@ func (l lazyHistory) Turn(turn int) (string, error) {
 // Search returns the retained lines that match, from the reader's
 // records.
 func (l lazyHistory) Search(pattern string) ([]HistoryMatch, error) {
-	records, err := l.reader.Records(context.Background())
+	records, err := l.reader.ReadRecords(context.Background())
 	if err != nil {
 		return nil, err
 	}

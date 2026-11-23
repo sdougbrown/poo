@@ -1032,3 +1032,18 @@ func scanSummary(path string) (*scanned, error) {
 
 // errInjected is the failure a test injects.
 var errInjected = errors.New("session: the injected failure")
+
+// ReadRecords reads the open session's records back, oldest first.
+//
+// It is the read side poo.RecordReader asks for: the session's history
+// tool and its strategies read what the store retains through it. The
+// read goes through the open session's log, which syncs before it
+// reads, so the records a caller sees are whole.
+func (s *FileStore) ReadRecords(ctx context.Context) ([]poo.Record, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.open == nil {
+		return nil, &Error{Code: CodeStoreError, Message: "the store has no open session"}
+	}
+	return s.open.log.ReadRecords(ctx)
+}

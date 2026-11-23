@@ -29,6 +29,9 @@ const (
 	// flood the context on a search; a turn read is where the full text
 	// goes.
 	MaxLineChars = 2000
+	// DefaultMaxChars is the most text the tool returns when the
+	// settings carry no observation cap.
+	DefaultMaxChars = 30000
 )
 
 //go:embed prompt.md
@@ -139,6 +142,11 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 		maxMatches = DefaultMaxMatches
 	}
 
+	cap := env.Settings.ObservationCapChars
+	if cap <= 0 {
+		cap = DefaultMaxChars
+	}
+
 	if p.turn != nil {
 		text, err := env.History.Turn(*p.turn)
 		if err != nil {
@@ -147,7 +155,7 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 		if text == "" {
 			return poo.ToolResult{Text: fmt.Sprintf("history: turn %d holds no message", *p.turn)}, nil
 		}
-		return poo.ToolResult{Text: fmt.Sprintf("turn %d\n%s", *p.turn, text)}, nil
+		return poo.ToolResult{Text: cut(fmt.Sprintf("turn %d\n%s", *p.turn, text), cap)}, nil
 	}
 
 	matches, err := env.History.Search(p.pattern)
@@ -165,7 +173,12 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 	}
 	var b strings.Builder
 	for _, m := range shown {
-		b.WriteString(fmt.Sprintf("turn %d: %s\n", m.Turn, cut(m.Text)))
+		line := fmt.Sprintf("turn %d: %s\n", m.Turn, cut(m.Text, MaxLineChars))
+		if b.Len()+len(line) > cap {
+			b.WriteString("(output truncated at the observation cap; narrow the pattern)")
+			return poo.ToolResult{Text: strings.TrimRight(b.String(), "\n")}, nil
+		}
+		b.WriteString(line)
 	}
 	if left > 0 {
 		b.WriteString(fmt.Sprintf("(%d more results not shown; narrow the pattern)", left))
@@ -174,11 +187,11 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 }
 
 // cut cuts a line at MaxLineChars.
-func cut(line string) string {
-	if len(line) <= MaxLineChars {
+func cut(line string, max int) string {
+	if max <= 0 || len(line) <= max {
 		return line
 	}
-	return line[:MaxLineChars] + "…"
+	return line[:max] + "…"
 }
 
 // compile compiles the pattern, so the error names the tool.

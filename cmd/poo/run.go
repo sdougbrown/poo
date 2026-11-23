@@ -548,10 +548,10 @@ func (s *sink) Flush(ctx context.Context) error {
 // It is the read side poo.RecordReader asks for: with it, the session's
 // history tool reads what the store retained. The log path reads its
 // file; the store path loads the session by the id the header names.
-func (s *sink) Records(ctx context.Context) ([]poo.Record, error) {
+func (s *sink) ReadRecords(ctx context.Context) ([]poo.Record, error) {
 	switch {
 	case s.log != nil:
-		return s.log.Records(ctx)
+		return s.log.ReadRecords(ctx)
 	case s.store != nil:
 		// The store's session is open under this process's authority, so
 		// the records come from memory rather than a load: a read of the

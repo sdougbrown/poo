@@ -20,7 +20,7 @@ type readSink struct {
 }
 
 // Records returns the sink's records.
-func (r readSink) Records(context.Context) ([]poo.Record, error) {
+func (r readSink) ReadRecords(context.Context) ([]poo.Record, error) {
 	return r.Sink.Records(), nil
 }
 

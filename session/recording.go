@@ -31,6 +31,25 @@ func (r *Recording) Append(ctx context.Context, rec poo.Record) error {
 	return r.Store.Append(ctx, rec)
 }
 
+// ReadRecords reads the session's records back, oldest first.
+//
+// It is the read side poo.RecordReader asks for. The recording writes
+// through its store, so the store's read is the session's: a session
+// restored from an earlier one reads what the store retained, not just
+// what this process wrote. Without a store the memory is all there is.
+func (r *Recording) ReadRecords(ctx context.Context) ([]poo.Record, error) {
+	if r.Store != nil {
+		if reader, ok := r.Store.(poo.RecordReader); ok {
+			return reader.ReadRecords(ctx)
+		}
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]poo.Record, len(r.records))
+	copy(out, r.records)
+	return out, nil
+}
+
 // Records returns the records that were written, oldest first.
 //
 // The copy is the caller's: a consumer that changes it does not change
