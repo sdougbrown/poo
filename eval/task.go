@@ -212,4 +212,3 @@ func (t Task) FixtureDir(fixtureRoot string) (string, error) {
 func DefaultFixtureRoot(taskRoot string) string {
 	return filepath.Join(taskRoot, "..", "fixtures")
 }
-
