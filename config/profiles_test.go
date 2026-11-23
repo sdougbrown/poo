@@ -242,6 +242,39 @@ roles:
 	}
 }
 
+// TestTheModelFamilyLeavesTheSwitchUnsetAlone covers the absent half
+// of the guard: a profile that never names model_family runs without
+// the family section, the same as an explicit false.
+func TestTheModelFamilyLeavesTheSwitchUnsetAlone(t *testing.T) {
+	settings, err := config.Parse([]byte(`
+version: 1
+endpoints:
+  test:
+    endpoint: http://localhost:4000/v1
+models:
+  gpt-model:
+    endpoint: test
+    model_id: gpt-6.2
+    prompt_variant: gpt-6.2
+    ops: [chat]
+    context_limit: 32768
+roles:
+  chat: gpt-model
+profiles:
+  codex:
+    base: code
+`), config.FormatYAML)
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings.Profile = "codex"
+	runtime := buildIn(t, settings, config.Overrides{}, t.TempDir(), theExecutors())
+	render := theSessionPrompt(t, runtime, t.TempDir())
+	if strings.Contains(render, "the user's first look at your work") {
+		t.Errorf("the family guidance rendered with the switch unset: %s", render)
+	}
+}
+
 // TestTheModelFamilyLeavesUnknownVariantsAlone covers the unknown
 // family: a model whose prompt variant names no family the prompt ships
 // renders nothing in the section.
@@ -307,5 +340,48 @@ func TestAProfileAppendsItsPromptFile(t *testing.T) {
 	}
 	if field, _ := config.FieldOf(err); field != "profiles.codex.prompt_append_file" {
 		t.Errorf("the failure names %v, want profiles.codex.prompt_append_file", err)
+	}
+}
+
+// TestAProfileAppendsAMissingFileFailsTheSession covers the read's
+// failure: a prompt_append_file that is not there fails the session's
+// creation, naming the field, instead of opening without the guidance
+// the profile asked for.
+func TestAProfileAppendsAMissingFileFailsTheSession(t *testing.T) {
+	settings, err := config.Parse([]byte(theModelSettings), config.FormatYAML)
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings.Profile = "codex"
+	settings.Profiles = map[string]config.ProfileSettings{
+		"codex": {Base: "code", PromptAppendFile: filepath.Join(t.TempDir(), "absent.md")},
+	}
+	runtime := buildIn(t, settings, config.Overrides{}, t.TempDir(), theExecutors())
+	if _, err = runtime.SessionPrompt(t.TempDir()); err == nil {
+		t.Fatal("the session opened without the append file's guidance")
+	}
+	if field, _ := config.FieldOf(err); field != "profiles.codex.prompt_append_file" {
+		t.Errorf("the failure names %v, want profiles.codex.prompt_append_file", err)
+	}
+}
+
+// TestAProfileAppendsItsFileBesideTheSettings covers the named file's
+// resolution: a prompt_append_file without a leading path answers to
+// the settings file's own directory, the way the prompt file does.
+func TestAProfileAppendsItsFileBesideTheSettings(t *testing.T) {
+	dir := t.TempDir()
+	writeProfilesFixture(t, filepath.Join(dir, "rails.md"), "The rails ride along.")
+	settings, err := loadSettingsWithExtra(t, dir, "profiles:\n  codex:\n    base: code\n    prompt_append_file: rails.md\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings.Profile = "codex"
+	runtime := buildIn(t, settings, config.Overrides{}, t.TempDir(), theExecutors())
+	got := theSessionPrompt(t, runtime, t.TempDir())
+	if !strings.Contains(got, "The rails ride along.") {
+		t.Errorf("the rendered prompt is missing the append file's text: %s", got)
+	}
+	if !strings.Contains(got, code.Profile().Prompt) {
+		t.Errorf("the append displaced the base's prose")
 	}
 }

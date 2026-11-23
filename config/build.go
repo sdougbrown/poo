@@ -2228,6 +2228,15 @@ func (r *Runtime) resolvePrompt(opts BuildOptions, workingDir string) error {
 		r.Prompt = append(r.Prompt, func(b *prompt.Builder) {
 			b.Remove(prompt.FamilySection)
 		})
+	} else if variant := r.Options.PromptVariant; !slices.Contains(prompt.FamilyNames(), variant) {
+		// The profile opted in, but the chat model's variant names no
+		// family the prompt ships: the guidance never renders, and the
+		// operator hears why instead of losing it silently.
+		if variant == "" {
+			r.warn(fmt.Sprintf("profiles.%s: the chat model names no prompt variant, so the model family's guidance does not render", r.profileName(opts)))
+		} else {
+			r.warn(fmt.Sprintf("profiles.%s: the prompt variant %q names no family the prompt ships, so the model family's guidance does not render", r.profileName(opts), variant))
+		}
 	}
 	if baseFile != "" {
 		text, err := os.ReadFile(baseFile)

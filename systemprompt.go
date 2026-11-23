@@ -86,8 +86,8 @@ var personaSection = prompt.Persona()
 // with it.
 //
 // A raw system prompt is the whole prompt: it is the builder's base
-// section, and neither the core's own section nor the tools' are added.
-// A later edit still has the base to change.
+// section, and neither the core's own section, the tools', nor the
+// model family's are added. A later edit still has the base to change.
 //
 // The consumer's own changes come last, so they win over the core's.
 func buildPrompt(opts *Options) *prompt.Builder {
@@ -113,11 +113,13 @@ func buildPrompt(opts *Options) *prompt.Builder {
 				setPromptVariants(b, prompt.ToolSection(name), variantContributor.PromptVariants(env))
 			}
 		}
+		// The family section holds a text per model family, keyed by
+		// the prompt variant the model names. It has no default text,
+		// so it renders nothing until the variant names one. A raw
+		// prompt carries none of it: the raw text comes back as
+		// supplied.
+		setPromptVariants(b, prompt.FamilySection, prompt.FamilyVariants())
 	}
-	// The family section holds a text per model family, keyed by the
-	// prompt variant the model names. It has no default text, so it
-	// renders nothing until the variant names one.
-	setPromptVariants(b, prompt.FamilySection, prompt.FamilyVariants())
 	for _, edit := range opts.Prompt {
 		if edit != nil {
 			edit(b)
