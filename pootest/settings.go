@@ -64,6 +64,32 @@ func IsolateStateRoot(dir string) error {
 // same directory isolates the config root on every one of them.
 var userConfigVars = []string{"XDG_CONFIG_HOME", "HOME", "APPDATA"}
 
+// IsolateUserConfigDirT is IsolateUserConfigDir for one test: the
+// variables restore when the test ends, and a platform drift fails the
+// test instead of leaking the developer's own manifests into it.
+func IsolateUserConfigDirT(t *testing.T, dir string) {
+	t.Helper()
+	before := make(map[string]*string, len(userConfigVars))
+	for _, name := range userConfigVars {
+		if value, set := os.LookupEnv(name); set {
+			copied := value
+			before[name] = &copied
+		}
+	}
+	t.Cleanup(func() {
+		for name, value := range before {
+			if value == nil {
+				os.Unsetenv(name)
+				continue
+			}
+			os.Setenv(name, *value)
+		}
+	})
+	if err := IsolateUserConfigDir(dir); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // IsolateUserConfigDir points the user config directory at dir.
 //
 // The manifest defaults resolve under the user config directory, and the

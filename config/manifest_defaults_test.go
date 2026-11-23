@@ -7,26 +7,18 @@ import (
 	"testing"
 
 	"github.com/sdougbrown/poo/config"
+	"github.com/sdougbrown/poo/pootest"
 )
 
 // theDefaultsPooDir isolates the user's config directory for a test and
 // returns poo's directory under it. Every default directory the test
-// writes goes below the one this returns.
+// writes goes below the one this returns. The isolation rule is
+// pootest's own: the platform variables and the drift check live there.
 func theDefaultsPooDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", dir)
-	t.Setenv("HOME", dir)
-	t.Setenv("APPDATA", dir)
-	t.Setenv(config.EnvSettings, "")
-	root, err := os.UserConfigDir()
-	if err != nil {
-		t.Skipf("the user config directory is not resolvable here: %v", err)
-	}
-	if !strings.HasPrefix(root, dir) {
-		t.Skipf("this platform's user config directory is outside the test's directory: %s", root)
-	}
-	return filepath.Join(root, "poo")
+	pootest.IsolateUserConfigDirT(t, dir)
+	return filepath.Join(dir, "poo")
 }
 
 // theDefaultFeedManifest writes one feed into the default feeds
@@ -206,10 +198,23 @@ func TestTheDefaultsJoinTheOverrides(t *testing.T) {
 // switch fails here.
 func TestEveryDefaultManifestKindHasItsOffSwitch(t *testing.T) {
 	for _, m := range config.DefaultManifests() {
+		pooDir := theDefaultsPooDir(t)
+		// The default directory holds a manifest for the kind under
+		// test, so the switch being ignored would leave it loaded and
+		// fail the build assertions below.
 		document := theModelSettings + m.SettingsKey + ":\n  defaults: false\n"
 		settings, err := config.Parse([]byte(document), config.FormatYAML)
 		if err != nil {
 			t.Errorf("the %q settings block does not parse: %v", m.SettingsKey, err)
+			continue
+		}
+		switch m.SettingsKey {
+		case "feeds":
+			theDefaultFeedManifest(t, pooDir)
+		case "cli_registry":
+			theDefaultRegistry(t, pooDir)
+		default:
+			t.Errorf("the kind %q names a settings block this test does not know", m.SettingsKey)
 			continue
 		}
 		off := build(t, settings, config.Overrides{})
@@ -222,8 +227,6 @@ func TestEveryDefaultManifestKindHasItsOffSwitch(t *testing.T) {
 			if off.Registry != nil && off.Registry.Len() != 0 {
 				t.Errorf("the %q switch left a registry loaded: %v", m.SettingsKey, off.Registry)
 			}
-		default:
-			t.Errorf("the kind %q names a settings block this test does not know", m.SettingsKey)
 		}
 	}
 }

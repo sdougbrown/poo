@@ -812,15 +812,22 @@ func defaultManifestDir(settingsKey string) (string, bool) {
 	if kind == "" {
 		return "", false
 	}
-	dir, err := UserConfigDir()
-	if err != nil {
-		return "", false
+	if dir, err := UserConfigDir(); err == nil {
+		path := filepath.Join(dir, kind)
+		if info, err := os.Stat(path); err == nil && info.IsDir() {
+			return path, true
+		}
 	}
-	path := filepath.Join(dir, kind)
-	if info, err := os.Stat(path); err != nil || !info.IsDir() {
-		return "", false
+	// The macOS fallback the settings and credentials read: a person
+	// whose poo lives under ~/.config keeps their manifests beside
+	// them, or the feature is dead for them with nothing said.
+	if fallback, ok := userConfigFallbackDir(); ok {
+		path := filepath.Join(fallback, kind)
+		if info, err := os.Stat(path); err == nil && info.IsDir() {
+			return path, true
+		}
 	}
-	return path, true
+	return "", false
 }
 
 // againstDir resolves each path. ~ and a path that starts with ~/ are
