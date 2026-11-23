@@ -1273,7 +1273,13 @@ func (r *Runtime) resolveProfiles(opts BuildOptions, definitions []profile.Profi
 			registry: defaultsOn(r.Settings.CLIRegistry.Defaults, variant.RegistryDefaults),
 		})
 		if err != nil {
-			return nil, err
+			// A variant whose manifests fail the load is offered
+			// without them: the build does not fail for manifests
+			// sessions under other profiles never run. The session's
+			// own pair is in the cache already, so the failure is
+			// always a variant's.
+			r.warn(fmt.Sprintf("profiles.%s: the manifests its defaults word selects do not load: %v", definition.Name, err))
+			pair = manifestPair{}
 		}
 		feeds := pair.feeds.Len() > 0
 		disabled := r.disabledTools(definition.Name)

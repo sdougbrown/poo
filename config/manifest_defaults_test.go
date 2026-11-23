@@ -482,3 +482,50 @@ func TestAListingFollowsTheProfileWord(t *testing.T) {
 		}
 	}
 }
+
+// TestAListingFollowsTheProfileFeedsWord covers the feeds side of the
+// picker: the job tools a profile's listing offers follow the manifest
+// set the profile's own word resolves. The quiet profile turns the feed
+// defaults off and runs nothing in the background, so its listing offers
+// no job tools, while the linked code profile's listing keeps them.
+func TestAListingFollowsTheProfileFeedsWord(t *testing.T) {
+	pooDir := theDefaultsPooDir(t)
+	theDefaultFeedManifest(t, pooDir)
+	document := theDumbProfileSettings("profiles:\n  quiet:\n    base: base\n    feeds_defaults: false\nprofile: quiet\n")
+	settings, err := config.Parse([]byte(document), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+	// The session runs under quiet, whose word turns the feed defaults
+	// off and whose own tools run nothing in the background: no feed
+	// loads for it, and its listing offers no job tools.
+	if runtime.Feeds != nil && runtime.Feeds.Len() != 0 {
+		t.Fatalf("the session's feeds are %v, want none", runtime.Feeds)
+	}
+	var quiet *poo.Profile
+	for i := range runtime.Profiles {
+		switch runtime.Profiles[i].Name {
+		case "quiet":
+			quiet = &runtime.Profiles[i]
+		case "code":
+			kept := false
+			for _, tool := range runtime.Profiles[i].Tools {
+				if tool.Name == "jobs" || tool.Name == "cancel_job" {
+					kept = true
+				}
+			}
+			if !kept {
+				t.Errorf("the code profile's listing offers no job tools, and its word keeps the feed defaults on")
+			}
+		}
+	}
+	if quiet == nil {
+		t.Fatal("the listing holds no quiet profile")
+	}
+	for _, tool := range quiet.Tools {
+		if tool.Name == "jobs" || tool.Name == "cancel_job" {
+			t.Errorf("the quiet profile's listing offers %s, and its word turns the feed defaults off", tool.Name)
+		}
+	}
+}
