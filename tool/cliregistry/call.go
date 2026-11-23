@@ -1,6 +1,7 @@
 package cliregistry
 
 import (
+	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
@@ -301,18 +302,31 @@ func (t *CallTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (
 	// result: the decoded value is the output, and the bash
 	// exit-code envelope is bypassed. Two edges fall through to the
 	// envelope (both pinned): a decoded null, and a decoded result
-	// whose marshalled form is longer than the observation cap. A
-	// successful call's stderr is diagnostics the model still needs, so
-	// it rides on the decoded text after a newline.
+	// whose marshalled form is longer than the observation cap,
+	// counted in characters the way the cap is sized. A successful
+	// call's stderr is diagnostics the model still needs, so it rides
+	// on the decoded text after a newline, and a cut capture says so
+	// the way the envelope does.
 	if res.Decoded != nil {
-		raw, err := json.Marshal(res.Decoded)
-		if err != nil {
+		// The encoder keeps the bytes a Marshal would HTML-escape, so
+		// a value that holds & or < comes back as the CLI printed
+		// it; it sorts map keys the way Marshal does.
+		var buf bytes.Buffer
+		enc := json.NewEncoder(&buf)
+		enc.SetEscapeHTML(false)
+		if err := enc.Encode(res.Decoded); err != nil {
 			return failed(err, cap)
 		}
-		if len(raw) <= cap {
+		// The encoder appends a newline; drop it.
+		buf.Truncate(buf.Len() - 1)
+		raw := buf.Bytes()
+		if caps.RuneCount(string(raw)) <= cap {
 			text := string(raw)
 			if len(res.Stderr) > 0 {
 				text += "\n" + string(res.Stderr)
+			}
+			if res.Truncated {
+				text += "\ntruncated: " + bash.TruncationHint
 			}
 			return poo.ToolResult{Text: text, Structured: raw}, nil
 		}

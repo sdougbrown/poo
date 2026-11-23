@@ -62,9 +62,10 @@ func TestACallCLIToolReturnsItsDecodedJSON(t *testing.T) {
 // TestACallCLIToolCarriesStderrOnTheDecodedPath covers a successful
 // call whose CLI wrote a warning to stderr before succeeding: the
 // warning rides on the decoded text after a newline, and the
-// structured result stays the byte-exact JSON.
+// structured result stays the byte-exact JSON, without the HTML
+// escaping a plain Marshal would add.
 func TestACallCLIToolCarriesStderrOnTheDecodedPath(t *testing.T) {
-	tool := cliregistry.NewCall(load(t, jsonTool(t, `printf 'warning: the cache is cold\n' >&2; printf '%s' '{"sum":3,"op":"add"}'; cat > /dev/null`)))
+	tool := cliregistry.NewCall(load(t, jsonTool(t, `printf 'warning: the cache is cold\n' >&2; printf '%s' '{"sum":3,"op":"add&<>"}'; cat > /dev/null`)))
 
 	res := call(t, tool, `{"name":"json","args":{"data":{"op":"add","a":1,"b":2}}}`, poo.ToolEnv{
 		Settings: poo.ToolSettings{ObservationCapChars: 10000},
@@ -72,9 +73,15 @@ func TestACallCLIToolCarriesStderrOnTheDecodedPath(t *testing.T) {
 	if res.IsError {
 		t.Fatalf("the call is an error: %q", res.Text)
 	}
-	want := `{"op":"add","sum":3}`
-	if got := string(res.Structured); got != want {
+	want := `{"op":"add&<>","sum":3}`
+	got := string(res.Structured)
+	if got != want {
 		t.Errorf("the structured result is %s, want the byte-exact JSON %s", got, want)
+	}
+	for _, escaped := range []string{`\u0026`, `\u003c`, `\u003e`} {
+		if strings.Contains(got, escaped) {
+			t.Errorf("the structured result %s HTML-escaped: %s", got, escaped)
+		}
 	}
 	if !strings.Contains(res.Text, want) {
 		t.Errorf("the text %q has no JSON", res.Text)
@@ -184,6 +191,53 @@ func TestACallCLIToolAtCapStaysDecoded(t *testing.T) {
 	}
 	if res.Text != want {
 		t.Errorf("the text is %q, want %q", res.Text, want)
+	}
+}
+
+// TestACallCLIToolCapIsCountedInRunes covers the cap's unit: a
+// decoded result whose marshalled form is longer than the cap in
+// bytes but fits in characters still returns as the JSON, not the
+// envelope.
+func TestACallCLIToolCapIsCountedInRunes(t *testing.T) {
+	// 雪 is three bytes. Thirteen of them make the marshalled form 50
+	// bytes and 24 characters, inside the 40-character cap.
+	val := strings.Repeat("雪", 13)
+	tool := cliregistry.NewCall(load(t, jsonTool(t, `printf '%s' '{"key":"`+val+`"}'; cat > /dev/null`)))
+
+	res := call(t, tool, `{"name":"json","args":{"data":{"op":"add"}}}`, poo.ToolEnv{
+		Settings: poo.ToolSettings{ObservationCapChars: 40},
+	})
+	if res.IsError {
+		t.Fatalf("the call is an error: %q", res.Text)
+	}
+	want := `{"key":"` + val + `"}`
+	if got := string(res.Structured); got != want {
+		t.Errorf("the structured result is %s, want %s", got, want)
+	}
+	if res.Text != want {
+		t.Errorf("the text is %q, want %q", res.Text, want)
+	}
+}
+
+// TestACallCLIToolSaysSoWhenTheCaptureIsCut covers a successful json
+// call whose stderr capture is cut: the decoded JSON comes back whole,
+// and the text says the capture is not whole, the way the envelope
+// does.
+func TestACallCLIToolSaysSoWhenTheCaptureIsCut(t *testing.T) {
+	tool := cliregistry.NewCall(load(t, jsonTool(t, `head -c 2000000 /dev/zero | tr '\0' a >&2; printf '%s' '{"ok":true}'; cat > /dev/null`)))
+
+	res := call(t, tool, `{"name":"json","args":{"data":{"op":"add"}}}`, poo.ToolEnv{
+		Settings: poo.ToolSettings{ObservationCapChars: poo.NestedOutputCapChars},
+	})
+	if res.IsError {
+		t.Fatalf("the call is an error: %q", res.Text)
+	}
+	want := `{"ok":true}`
+	if got := string(res.Structured); got != want {
+		t.Errorf("the structured result is %s, want the JSON the tool printed %s", got, want)
+	}
+	if !strings.Contains(res.Text, "truncat") {
+		t.Errorf("the text %q has no truncation signal", res.Text)
 	}
 }
 
