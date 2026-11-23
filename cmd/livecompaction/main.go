@@ -29,9 +29,6 @@ import (
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/codemode/quickjs"
 	codemodestarlark "github.com/sdougbrown/poo/codemode/starlark"
-	"github.com/sdougbrown/poo/compact/mine"
-	"github.com/sdougbrown/poo/compact/pointer"
-	"github.com/sdougbrown/poo/compact/summary"
 	"github.com/sdougbrown/poo/config"
 	"github.com/sdougbrown/poo/pootest"
 	"github.com/sdougbrown/poo/profile/code"
@@ -47,20 +44,33 @@ import (
 	"github.com/sdougbrown/poo/tool/read"
 )
 
-// compactor builds the strategy the caller named.
-func compactor(name string, ratio float64, maxTokens, keepRecent int) poo.Compactor {
+// strategySettings turns the flags into the settings the config's own
+// dispatch reads: the strategy is named, and the cross-strategy flags
+// land in that strategy's own fields. One dispatch table - config's -
+// builds the strategy, so a replay's options are the ones the shipped
+// binary would resolve.
+func strategySettings(name string, ratio float64, maxTokens, keepRecent int) *config.Settings {
+	settings := &config.Settings{Version: 1}
+	named := name
+	settings.Context.Strategy = &named
+	r := ratio
+	m := maxTokens
+	k := keepRecent
 	switch name {
 	case "mine":
-		return mine.New(mine.Options{Ratio: ratio, MaxTokens: maxTokens, KeepRecentTokens: keepRecent})
+		settings.Context.Mine = config.Mine{Ratio: &r, MaxTokens: &m, KeepRecentTokens: &k}
 	case "summary":
-		return summary.New(summary.Options{Ratio: ratio, MaxTokens: maxTokens, KeepRecentTokens: keepRecent})
+		settings.Context.Summary = config.Summary{Ratio: &r, MaxTokens: &m, KeepRecentTokens: &k}
 	case "pointer":
-		return pointer.New(pointer.Options{Ratio: ratio, MaxTokens: maxTokens, KeepRecentTokens: keepRecent})
+		settings.Context.Pointer = config.Pointer{Ratio: &r, MaxTokens: &m, KeepRecentTokens: &k}
+	case "native", "handoff", "none":
+		// The strategies without a compose ask: the ratio flags have
+		// nothing to land in, and the dispatch builds them bare.
 	default:
 		fmt.Println("unknown strategy:", name)
 		os.Exit(2)
-		return nil
 	}
+	return settings
 }
 
 // codemodeEngine builds the codemode tool under the named engine: the
@@ -194,7 +204,7 @@ func main() {
 			Tools:     infos,
 			Unmatched: code.Profile().Unmatched,
 		}},
-		Compactor: compactor(*strategy, *ratio, *maxTokens, *keepRecent),
+		Compactor: config.CompactorOf(strategySettings(*strategy, *ratio, *maxTokens, *keepRecent)),
 		Observers: []poo.Observer{events},
 		// Restore replaces this with the recorded prompt whenever the
 		// log holds one, so it applies only to a log without it.

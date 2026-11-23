@@ -2043,6 +2043,83 @@ func (r *Runtime) newDeciderAsker(model poo.ModelInfo) (perm.Asker, error) {
 //
 // The store is the session's home in the logged mode, and there is
 // none in the ephemeral mode: an ephemeral session writes nothing.
+
+// CompactorOf builds the strategy the settings name, with the settings
+// each strategy wires. It is the one dispatch table for strategy
+// construction: a strategy added here, or a setting one gains, is
+// built the same way everywhere a strategy is built.
+func CompactorOf(settings *Settings) poo.Compactor {
+	strategy := DefaultContextStrategy
+	if settings.Context.Strategy != nil {
+		strategy = *settings.Context.Strategy
+	}
+	switch strategy {
+	case "handoff":
+		handoffOptions := handoff.Options{}
+		if settings.Context.Handoff.Ratio != nil {
+			handoffOptions.Ratio = *settings.Context.Handoff.Ratio
+		}
+		if settings.Context.Handoff.MaxTokens != nil {
+			handoffOptions.MaxTokens = *settings.Context.Handoff.MaxTokens
+		}
+		return handoff.New(handoffOptions)
+	case "native":
+		return native.New(native.Options{})
+	case "summary":
+		summaryOptions := summary.Options{}
+		if settings.Context.Summary.Ratio != nil {
+			summaryOptions.Ratio = *settings.Context.Summary.Ratio
+		}
+		if settings.Context.Summary.KeepRecentTokens != nil {
+			summaryOptions.KeepRecentTokens = *settings.Context.Summary.KeepRecentTokens
+		}
+		if settings.Context.Summary.MaxTokens != nil {
+			summaryOptions.MaxTokens = *settings.Context.Summary.MaxTokens
+		}
+		return summary.New(summaryOptions)
+	case "pointer":
+		pointerOptions := pointerstrategy.Options{}
+		if settings.Context.Pointer.Ratio != nil {
+			pointerOptions.Ratio = *settings.Context.Pointer.Ratio
+		}
+		if settings.Context.Pointer.KeepRecentTokens != nil {
+			pointerOptions.KeepRecentTokens = *settings.Context.Pointer.KeepRecentTokens
+		}
+		if settings.Context.Pointer.MaxTokens != nil {
+			pointerOptions.MaxTokens = *settings.Context.Pointer.MaxTokens
+		}
+		if settings.Context.Pointer.PointerMaxTokens != nil {
+			pointerOptions.PointerMaxTokens = *settings.Context.Pointer.PointerMaxTokens
+		}
+		if settings.Context.Pointer.SnippetBudget != nil {
+			pointerOptions.SnippetBudget = *settings.Context.Pointer.SnippetBudget
+		}
+		if settings.Context.Pointer.EscalateAfter != nil {
+			pointerOptions.EscalateAfter = *settings.Context.Pointer.EscalateAfter
+		}
+		return pointerstrategy.New(pointerOptions)
+	case "mine":
+		mineOptions := mine.Options{}
+		if settings.Context.Mine.Ratio != nil {
+			mineOptions.Ratio = *settings.Context.Mine.Ratio
+		}
+		if settings.Context.Mine.KeepRecentTokens != nil {
+			mineOptions.KeepRecentTokens = *settings.Context.Mine.KeepRecentTokens
+		}
+		if settings.Context.Mine.MaxTokens != nil {
+			mineOptions.MaxTokens = *settings.Context.Mine.MaxTokens
+		}
+		if settings.Context.Mine.PointerMaxTokens != nil {
+			mineOptions.PointerMaxTokens = *settings.Context.Mine.PointerMaxTokens
+		}
+		return mine.New(mineOptions)
+	default:
+		// The strategy named none, or nothing: the view is never
+		// compacted.
+		return nil
+	}
+}
+
 func (r *Runtime) resolveSession(opts BuildOptions, workingDir string) error {
 	settings := r.Settings
 	mode := SessionMode(settings, opts.Overrides)
@@ -2163,67 +2240,7 @@ func (r *Runtime) resolveSession(opts BuildOptions, workingDir string) error {
 	if settings.Context.Strategy != nil {
 		strategy = *settings.Context.Strategy
 	}
-	switch strategy {
-	case "handoff":
-		handoffOptions := handoff.Options{}
-		if settings.Context.Handoff.Ratio != nil {
-			handoffOptions.Ratio = *settings.Context.Handoff.Ratio
-		}
-		if settings.Context.Handoff.MaxTokens != nil {
-			handoffOptions.MaxTokens = *settings.Context.Handoff.MaxTokens
-		}
-		r.Options.Compactor = handoff.New(handoffOptions)
-	case "native":
-		r.Options.Compactor = native.New(native.Options{})
-	case "summary":
-		summaryOptions := summary.Options{}
-		if settings.Context.Summary.Ratio != nil {
-			summaryOptions.Ratio = *settings.Context.Summary.Ratio
-		}
-		if settings.Context.Summary.KeepRecentTokens != nil {
-			summaryOptions.KeepRecentTokens = *settings.Context.Summary.KeepRecentTokens
-		}
-		if settings.Context.Summary.MaxTokens != nil {
-			summaryOptions.MaxTokens = *settings.Context.Summary.MaxTokens
-		}
-		r.Options.Compactor = summary.New(summaryOptions)
-	case "pointer":
-		pointerOptions := pointerstrategy.Options{}
-		if settings.Context.Pointer.Ratio != nil {
-			pointerOptions.Ratio = *settings.Context.Pointer.Ratio
-		}
-		if settings.Context.Pointer.KeepRecentTokens != nil {
-			pointerOptions.KeepRecentTokens = *settings.Context.Pointer.KeepRecentTokens
-		}
-		if settings.Context.Pointer.MaxTokens != nil {
-			pointerOptions.MaxTokens = *settings.Context.Pointer.MaxTokens
-		}
-		if settings.Context.Pointer.PointerMaxTokens != nil {
-			pointerOptions.PointerMaxTokens = *settings.Context.Pointer.PointerMaxTokens
-		}
-		if settings.Context.Pointer.SnippetBudget != nil {
-			pointerOptions.SnippetBudget = *settings.Context.Pointer.SnippetBudget
-		}
-		if settings.Context.Pointer.EscalateAfter != nil {
-			pointerOptions.EscalateAfter = *settings.Context.Pointer.EscalateAfter
-		}
-		r.Options.Compactor = pointerstrategy.New(pointerOptions)
-	case "mine":
-		mineOptions := mine.Options{}
-		if settings.Context.Mine.Ratio != nil {
-			mineOptions.Ratio = *settings.Context.Mine.Ratio
-		}
-		if settings.Context.Mine.KeepRecentTokens != nil {
-			mineOptions.KeepRecentTokens = *settings.Context.Mine.KeepRecentTokens
-		}
-		if settings.Context.Mine.MaxTokens != nil {
-			mineOptions.MaxTokens = *settings.Context.Mine.MaxTokens
-		}
-		if settings.Context.Mine.PointerMaxTokens != nil {
-			mineOptions.PointerMaxTokens = *settings.Context.Mine.PointerMaxTokens
-		}
-		r.Options.Compactor = mine.New(mineOptions)
-	}
+	r.Options.Compactor = CompactorOf(settings)
 	if strategy == native.Strategy {
 		return r.checkNativeCompaction()
 	}
