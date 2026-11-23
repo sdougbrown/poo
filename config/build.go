@@ -427,7 +427,7 @@ func Build(opts BuildOptions) (*Runtime, error) {
 		return nil, err
 	}
 	runtime.resolveDecider()
-	if err := runtime.resolveProfile(opts); err != nil {
+	if err := runtime.resolveProfile(opts, workingDir); err != nil {
 		return nil, err
 	}
 	if err := runtime.resolveTools(opts, workingDir); err != nil {
@@ -472,17 +472,10 @@ func PromptRenderError(err error) *Error {
 // The command line names the profile, and the settings do, and the
 // binary has a default. The profile names the tools the session
 // offers, and every tool it names must be one the binary links.
-func (r *Runtime) resolveProfile(opts BuildOptions) error {
-	name := opts.Overrides.Profile
-	if name == "" {
-		name = r.Settings.Profile
-	}
-	if name == "" {
-		name = opts.DefaultProfile
-	}
-	if name == "" && len(opts.Profiles) > 0 {
-		name = opts.Profiles[0].Name
-	}
+func (r *Runtime) resolveProfile(opts BuildOptions, workingDir string) error {
+	// The manifest resolvers read the same profile the session runs
+	// under: the name comes from the one resolution they share.
+	name := r.profileName(opts)
 	if name == "" {
 		return &Error{Code: CodeUnsupported, Message: "the build has no profile to run under"}
 	}
@@ -556,7 +549,7 @@ func (r *Runtime) resolveProfile(opts BuildOptions) error {
 	// run in the background or the session runs feeds, and the profile
 	// offers them with it.
 	r.Profile.Tools = withJobTools(r.Profile.Tools, r.hasFeeds())
-	profiles, err := r.resolveProfiles(opts, definitions)
+	profiles, err := r.resolveProfiles(opts, definitions, workingDir)
 	if err != nil {
 		return err
 	}
@@ -691,6 +684,63 @@ func (r *Runtime) warn(text string) {
 	r.Warning += "; " + text
 }
 
+// defaultsOn decides whether the default manifest directories load. The
+// settings' key speaks first: absent or true means they load. A profile
+// that names the toggle speaks last, and its word wins.
+func defaultsOn(settingsDefault, profileDefault *bool) bool {
+	if profileDefault != nil {
+		return *profileDefault
+	}
+	return settingsDefault == nil || *settingsDefault
+}
+
+// manifestWords holds the words the session's own profile resolves for
+// the manifest defaults.
+type manifestWords struct {
+	feeds    bool
+	registry bool
+}
+
+// chosenWords resolves the manifest defaults words the session's own
+// profile runs under: the settings' key speaks first, the chosen
+// profile's word wins. resolveRegistry, resolveFeeds, and the listing's
+// cache seed read this one resolution, so what the session loaded and
+// what the seed keys agree by construction.
+func (r *Runtime) chosenWords(opts BuildOptions) manifestWords {
+	chosen := r.chosenProfile(opts)
+	return manifestWords{
+		feeds:    defaultsOn(r.Settings.Feeds.Defaults, chosen.FeedsDefaults),
+		registry: defaultsOn(r.Settings.CLIRegistry.Defaults, chosen.RegistryDefaults),
+	}
+}
+
+// profileName returns the name of the profile the session runs under:
+// the command line's, the settings', the binary's default, or the first
+// linked profile's. The resolution is resolveProfile's own, so the
+// manifest resolvers read the same profile the session will run under.
+func (r *Runtime) profileName(opts BuildOptions) string {
+	if opts.Overrides.Profile != "" {
+		return opts.Overrides.Profile
+	}
+	if r.Settings.Profile != "" {
+		return r.Settings.Profile
+	}
+	if opts.DefaultProfile != "" {
+		return opts.DefaultProfile
+	}
+	if len(opts.Profiles) > 0 {
+		return opts.Profiles[0].Name
+	}
+	return ""
+}
+
+// chosenProfile returns the settings' definition of the profile the
+// session runs under, or the zero value when the name is a linked
+// profile alone.
+func (r *Runtime) chosenProfile(opts BuildOptions) ProfileSettings {
+	return r.Settings.Profiles[r.profileName(opts)]
+}
+
 // manifestPaths joins the paths one manifest kind loads with the kind's
 // default directory, when the kind's word turns the defaults on. It
 // reports whether the default directory was the only source: the empty
@@ -798,8 +848,7 @@ func (r *Runtime) loadRegistry(opts BuildOptions, workingDir string, on bool) (*
 // once: the commands a session may call are the ones its registry holds
 // when the session is built, and a session does not reload one.
 func (r *Runtime) resolveRegistry(opts BuildOptions, workingDir string) error {
-	catalog, fromDefaultsOnly, err := r.loadRegistry(opts, workingDir,
-		defaultsOn(r.Settings.CLIRegistry.Defaults))
+	catalog, fromDefaultsOnly, err := r.loadRegistry(opts, workingDir, r.chosenWords(opts).registry)
 	if err != nil {
 		return err
 	}
@@ -815,12 +864,6 @@ func (r *Runtime) resolveRegistry(opts BuildOptions, workingDir string) error {
 	r.Registry = catalog
 	r.loaded = catalog
 	return nil
-}
-
-// defaultsOn reports whether the default manifest directories load: the
-// key is absent or true, unless the settings turn them off.
-func defaultsOn(value *bool) bool {
-	return value == nil || *value
 }
 
 // DefaultManifest describes one manifest kind that loads from a default
@@ -908,8 +951,7 @@ func againstDir(paths []string, dir string) ([]string, error) {
 // once, when the session is built; a session never reloads it. Nothing
 // starts a feed here.
 func (r *Runtime) resolveFeeds(opts BuildOptions, workingDir string) error {
-	set, fromDefaultsOnly, err := r.loadFeeds(opts, workingDir,
-		defaultsOn(r.Settings.Feeds.Defaults))
+	set, fromDefaultsOnly, err := r.loadFeeds(opts, workingDir, r.chosenWords(opts).feeds)
 	if err != nil {
 		return err
 	}
@@ -1004,7 +1046,7 @@ func (r *Runtime) addRegistryTools(opts BuildOptions) error {
 	if err := r.requireRegistryTools(opts, registryToolNames(false)); err != nil {
 		return err
 	}
-	offered, err := r.offeredRegistry(r.Profile.Tools)
+	offered, err := offeredRegistry(r.loaded, r.Profile.Tools)
 	if err != nil {
 		return err
 	}
@@ -1211,10 +1253,49 @@ func withoutDisabled(tools []poo.ToolInfo, disabled []string) []poo.ToolInfo {
 // disabled tools come off a profile before it is judged runnable, a
 // profile the settings empty is not offered, and a profile earns the
 // registry tools its own entries leave for it.
-func (r *Runtime) resolveProfiles(opts BuildOptions, definitions []profile.Profile) ([]poo.Profile, error) {
-	feeds := r.hasFeeds()
+func (r *Runtime) resolveProfiles(opts BuildOptions, definitions []profile.Profile, workingDir string) ([]poo.Profile, error) {
+	type manifestKey struct{ feeds, registry bool }
+	type manifestPair struct {
+		feeds    *feed.Set
+		registry *cli.Catalog
+	}
+	chosenKey := manifestKey(r.chosenWords(opts))
+	sets := map[manifestKey]manifestPair{chosenKey: {feeds: r.Feeds, registry: r.loaded}}
+	pairFor := func(key manifestKey) (manifestPair, error) {
+		if pair, ok := sets[key]; ok {
+			return pair, nil
+		}
+		feeds, _, err := r.loadFeeds(opts, workingDir, key.feeds)
+		if err != nil {
+			return manifestPair{}, err
+		}
+		registry, _, err := r.loadRegistry(opts, workingDir, key.registry)
+		if err != nil {
+			return manifestPair{}, err
+		}
+		pair := manifestPair{feeds: feeds, registry: registry}
+		sets[key] = pair
+		return pair, nil
+	}
 	var out []poo.Profile
 	for _, definition := range definitions {
+		// A settings variant carries the toggle words; a linked profile's
+		// name is not in the map, so it follows the settings' word.
+		variant := r.Settings.Profiles[definition.Name]
+		pair, err := pairFor(manifestKey{
+			feeds:    defaultsOn(r.Settings.Feeds.Defaults, variant.FeedsDefaults),
+			registry: defaultsOn(r.Settings.CLIRegistry.Defaults, variant.RegistryDefaults),
+		})
+		if err != nil {
+			// A variant whose manifests fail the load is offered
+			// without them: the build does not fail for manifests
+			// sessions under other profiles never run. The session's
+			// own pair is in the cache already, so the failure is
+			// always a variant's.
+			r.warn(fmt.Sprintf("profiles.%s: the manifests its defaults word selects do not load: %v", definition.Name, err))
+			pair = manifestPair{}
+		}
+		feeds := pair.feeds.Len() > 0
 		disabled := r.disabledTools(definition.Name)
 		resolved := poo.Profile{Name: definition.Name, Unmatched: definition.Unmatched, Feeds: slices.Clone(definition.Feeds)}
 		for _, tool := range definition.Tools {
@@ -1227,7 +1308,7 @@ func (r *Runtime) resolveProfiles(opts BuildOptions, definitions []profile.Profi
 		if len(definition.Tools) > 0 && len(resolved.Tools) == 0 {
 			continue
 		}
-		offered, err := r.offeredRegistry(resolved.Tools)
+		offered, err := offeredRegistry(pair.registry, resolved.Tools)
 		if err != nil {
 			return nil, err
 		}

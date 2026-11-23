@@ -44,17 +44,17 @@ func (r *Runtime) offeredCatalog() *cli.Catalog {
 // how a read-only profile is offered the entries that only read.
 //
 // A profile that offers no tools earns none of it.
-func (r *Runtime) offeredRegistry(tools []poo.ToolInfo) (*cli.Catalog, error) {
-	if r.loaded == nil || len(tools) == 0 {
+func offeredRegistry(loaded *cli.Catalog, tools []poo.ToolInfo) (*cli.Catalog, error) {
+	if loaded == nil || len(tools) == 0 {
 		return nil, nil
 	}
-	declared := r.loaded.AvailabilityInputs()
+	declared := loaded.AvailabilityInputs()
 	sideEffecting := offersSideEffects(tools)
 	if !sideEffecting && len(declared) == 0 {
 		return nil, nil
 	}
 	inputs := map[string]any{ProfileSideEffectingCondition: sideEffecting}
-	offered, err := r.loaded.Filter(inputs)
+	offered, err := loaded.Filter(inputs)
 	if err != nil {
 		return nil, &Error{
 			Code:    CodeInvalid,

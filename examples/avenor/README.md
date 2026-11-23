@@ -20,7 +20,8 @@ Use these manifests to delegate to child agents and receive their questions in t
    `tools.json` under `$XDG_CONFIG_HOME/poo/cli-registry/`. Every session
    then starts with the delegation tools, and no settings file names them.
    A settings file that sets `feeds.defaults: false` and
-   `cli_registry.defaults: false` runs without them.
+   `cli_registry.defaults: false` runs without them. A profile that turns
+   the defaults off does the same.
 3. Run `poo` with a profile that offers `call_tool`. Ask it to delegate a task and have the child ask a question before finishing.
 
 The [feed manifest](feeds.json) starts `avenor-inbox`. The [tool manifest](tools.json) registers `avenor_spawn`, `avenor_status`, `avenor_result`, and `avenor_message` (reply only). Poo resolves `session:id` to the same native session ID for the feed and every tool. Avenor starts a separate supervisor for each poo session and stops it when the feed exits. You do not need to start a service or export broker credentials.
