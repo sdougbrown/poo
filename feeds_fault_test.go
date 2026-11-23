@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -122,6 +123,88 @@ func TestAFeedFaultSuspendsTheFeedAndWakesUnderHold(t *testing.T) {
 	}
 	if !suspended {
 		t.Errorf("the jobs listing does not show the feed suspended: %+v", s.Jobs())
+	}
+}
+
+// TestALongScopeStillWritesTheFaultLog covers a fault on an instance whose
+// label is far longer than a file name component may be: the log's name is
+// bounded, and the report names a file that is there to read.
+func TestALongScopeStillWritesTheFaultLog(t *testing.T) {
+	scope := map[string]string{"url": "https://example.test/" + strings.Repeat("a", 2100)}
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{subscribeCall("c1", "git-feedback", scope)}},
+		{text: "the answer"},
+	})
+	sink := &recordingSink{}
+	dir := t.TempDir()
+	opts := testOptions(t, tr, &echoTool{}, sink)
+	opts.SessionDir = dir
+	s := newTestSession(t, opts, poo.WithFeeds(theOptionalFeedSpec(faultedFeed, poo.OnIdleHold)))
+
+	runSession(t, s, "start the feed")
+	waitFor(t, "the fault report to reach the chat model", func() bool {
+		_, _, ok := deliveredMessage(sink)
+		return ok
+	})
+	text, _, _ := deliveredMessage(sink)
+	path := faultLogPath(t, text)
+	// The scope value is over two thousand bytes, and the label carries it
+	// in full: a name taken from the label would not fit a component.
+	if got := filepath.Base(path); len(got) >= 255 {
+		t.Errorf("the fault log's name is %d bytes, want under the filesystem's 255-byte limit", len(got))
+	}
+	if !strings.HasPrefix(path, dir) {
+		t.Errorf("the fault log is %q, want it beside the session's files in %q", path, dir)
+	}
+	stderr, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading the fault log the report names: %v", err)
+	}
+	if string(stderr) != "the filter could not read the record\n" {
+		t.Errorf("the fault log holds %q, want the filter's stderr", stderr)
+	}
+	// The report still names the whole label, so the remedy names the scope
+	// the instance runs with rather than the bounded file name.
+	if !strings.Contains(text, scope["url"]) {
+		t.Errorf("the report does not name the scope the instance runs with")
+	}
+	if _, err := s.Wait(context.Background()); err != nil {
+		t.Fatalf("waiting for the run the report landed in: %v", err)
+	}
+}
+
+// TestAFaultReportWithoutItsLogSaysSo covers a fault whose diagnostics
+// cannot be written: the report names no log file, because there is none to
+// name, and says the diagnostics are not on disk.
+func TestAFaultReportWithoutItsLogSaysSo(t *testing.T) {
+	sink := &recordingSink{}
+	opts := testOptions(t, scripted([]fakeResponse{{text: "the answer"}}), &echoTool{}, sink)
+	// A file where the directory should be: every name under it fails to
+	// open, whatever the name is.
+	file := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatalf("writing the file that stands where the directory should be: %v", err)
+	}
+	opts.SessionDir = filepath.Join(file, "logs")
+	s := newTestSession(t, opts, poo.WithFeeds(poo.FeedSpec{
+		Name:   "mail",
+		OnIdle: poo.OnIdleWake,
+		Run:    faultedFeed,
+	}))
+
+	waitFor(t, "the fault report to reach the chat model", func() bool {
+		_, _, ok := deliveredMessage(sink)
+		return ok
+	})
+	text, _, _ := deliveredMessage(sink)
+	if strings.Contains(text, ` log="`) {
+		t.Errorf("the report %q names a log file that was not written", text)
+	}
+	if !strings.Contains(text, "could not be written") {
+		t.Errorf("the report %q does not say the diagnostics are missing", text)
+	}
+	if _, err := s.Wait(context.Background()); err != nil {
+		t.Fatalf("waiting for the run the report landed in: %v", err)
 	}
 }
 

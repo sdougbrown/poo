@@ -2,6 +2,7 @@ package poo
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -945,7 +946,8 @@ type feedFault struct {
 	optional bool
 	// code and message are the fault's short diagnosis.
 	code, message string
-	// logPath is the file the filter's stderr was written to.
+	// logPath is the file the filter's stderr was written to, or empty
+	// when it could not be written.
 	logPath string
 	// more counts the faults that joined this report before it was
 	// delivered.
@@ -974,8 +976,11 @@ func (s *Session) reportFeedFault(f *feedState, attempt int, startedAt time.Time
 		optional: f.spec.Optional,
 		code:     fault.Code,
 		message:  fault.Message,
-		logPath:  s.writeFeedFaultLog(f, attempt, startedAt, fault.Stderr),
 	}
+	// The report names the diagnostics' file only when the file is there:
+	// a reader that follows the remedy must find what the report says it
+	// will.
+	report.logPath, _ = s.writeFeedFaultLog(f, attempt, startedAt, fault.Stderr)
 	// The fold check and the report's acceptance are one critical
 	// section: a fault that arrives in the gap folds into the report in
 	// flight rather than queueing one of its own, so one suspension is
@@ -1023,19 +1028,45 @@ func (s *Session) reportFeedFault(f *feedState, attempt int, startedAt time.Time
 // time, so the name is unique per attempt run: a restored session reuses
 // the session's directory and restarts its attempt numbering, and a report
 // must never point at a later run's diagnostics. A session that keeps no
-// files writes to the working directory. A write that fails is the log's
-// to report: the report still names the path it would have had.
-func (s *Session) writeFeedFaultLog(f *feedState, attempt int, startedAt time.Time, stderr []byte) string {
+// files writes to the working directory.
+//
+// A write that fails returns the empty path beside the error: the report
+// must never name a file the reader will not find.
+func (s *Session) writeFeedFaultLog(f *feedState, attempt int, startedAt time.Time, stderr []byte) (string, error) {
 	dir := s.opts.SessionDir
 	if dir == "" {
 		dir = s.opts.WorkingDir
 	}
-	path := filepath.Join(dir, fmt.Sprintf("%s-fault-%d-%d.log", f.instance, attempt, startedAt.UnixNano()))
+	path := filepath.Join(dir, feedFaultLogName(f.instance, attempt, startedAt))
 	if err := os.WriteFile(path, stderr, 0o600); err != nil {
 		s.logger().Warn("the feed's fault log could not be written",
 			slog.String("feed", f.instance), slog.String("path", path), slog.String("error", err.Error()))
+		return "", err
 	}
-	return path
+	return path, nil
+}
+
+// feedFaultLogStem is how many bytes of the instance's label the fault
+// log's name keeps. The label is ASCII, so a cut here never splits a
+// character.
+const feedFaultLogStem = 48
+
+// feedFaultLogName returns the name one attempt's diagnostics take in the
+// session's directory.
+//
+// The label carries the instance's canonical scope, and a scope value is
+// accepted up to feedScopeValueMax bytes, so the label can be many times
+// a file name component's limit. The name keeps a bounded leading part of
+// the label for a reader to recognise the feed by, and a hash of the whole
+// label so two instances never share a name: the component stays under a
+// hundred bytes whatever the scope.
+func feedFaultLogName(instance string, attempt int, startedAt time.Time) string {
+	sum := sha256.Sum256([]byte(instance))
+	stem := instance
+	if len(stem) > feedFaultLogStem {
+		stem = stem[:feedFaultLogStem]
+	}
+	return fmt.Sprintf("%s-%x-fault-%d-%d.log", stem, sum[:4], attempt, startedAt.UnixNano())
 }
 
 // foldFeedFaultLocked joins a fault to the report that is queued or in
@@ -1071,11 +1102,14 @@ func (s *Session) foldFeedFaultLocked(f *feedState) bool {
 // carries the feed, the fault's code and the log's path, around the
 // sentences that say what happened and what starts the feed again.
 func (r *feedFault) render() string {
-	return outsideElement("feed", [][2]string{
+	attrs := [][2]string{
 		{"name", r.instance},
 		{"fault", r.code},
-		{"log", r.logPath},
-	}, r.text())
+	}
+	if r.logPath != "" {
+		attrs = append(attrs, [2]string{"log", r.logPath})
+	}
+	return outsideElement("feed", attrs, r.text())
 }
 
 // text returns the body of the report: the diagnosis, the count of the
@@ -1085,6 +1119,9 @@ func (r *feedFault) text() string {
 	b.WriteString("The feed's filter failed: ")
 	b.WriteString(r.message)
 	b.WriteString(". The feed is suspended, and it does not restart.\n")
+	if r.logPath == "" {
+		b.WriteString("The filter's own diagnostics could not be written to a file, so this report carries none.\n")
+	}
 	if r.more > 0 {
 		fmt.Fprintf(&b, "%d more arrived while suspended.\n", r.more)
 	}
