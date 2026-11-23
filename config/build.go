@@ -694,6 +694,26 @@ func defaultsOn(settingsDefault, profileDefault *bool) bool {
 	return settingsDefault == nil || *settingsDefault
 }
 
+// manifestWords holds the words the session's own profile resolves for
+// the manifest defaults.
+type manifestWords struct {
+	feeds    bool
+	registry bool
+}
+
+// chosenWords resolves the manifest defaults words the session's own
+// profile runs under: the settings' key speaks first, the chosen
+// profile's word wins. resolveRegistry, resolveFeeds, and the listing's
+// cache seed read this one resolution, so what the session loaded and
+// what the seed keys agree by construction.
+func (r *Runtime) chosenWords(opts BuildOptions) manifestWords {
+	chosen := r.chosenProfile(opts)
+	return manifestWords{
+		feeds:    defaultsOn(r.Settings.Feeds.Defaults, chosen.FeedsDefaults),
+		registry: defaultsOn(r.Settings.CLIRegistry.Defaults, chosen.RegistryDefaults),
+	}
+}
+
 // profileName returns the name of the profile the session runs under:
 // the command line's, the settings', the binary's default, or the first
 // linked profile's. The resolution is resolveProfile's own, so the
@@ -828,8 +848,7 @@ func (r *Runtime) loadRegistry(opts BuildOptions, workingDir string, on bool) (*
 // once: the commands a session may call are the ones its registry holds
 // when the session is built, and a session does not reload one.
 func (r *Runtime) resolveRegistry(opts BuildOptions, workingDir string) error {
-	catalog, fromDefaultsOnly, err := r.loadRegistry(opts, workingDir,
-		defaultsOn(r.Settings.CLIRegistry.Defaults, r.chosenProfile(opts).RegistryDefaults))
+	catalog, fromDefaultsOnly, err := r.loadRegistry(opts, workingDir, r.chosenWords(opts).registry)
 	if err != nil {
 		return err
 	}
@@ -932,8 +951,7 @@ func againstDir(paths []string, dir string) ([]string, error) {
 // once, when the session is built; a session never reloads it. Nothing
 // starts a feed here.
 func (r *Runtime) resolveFeeds(opts BuildOptions, workingDir string) error {
-	set, fromDefaultsOnly, err := r.loadFeeds(opts, workingDir,
-		defaultsOn(r.Settings.Feeds.Defaults, r.chosenProfile(opts).FeedsDefaults))
+	set, fromDefaultsOnly, err := r.loadFeeds(opts, workingDir, r.chosenWords(opts).feeds)
 	if err != nil {
 		return err
 	}
@@ -1241,11 +1259,7 @@ func (r *Runtime) resolveProfiles(opts BuildOptions, definitions []profile.Profi
 		feeds    *feed.Set
 		registry *cli.Catalog
 	}
-	chosen := r.chosenProfile(opts)
-	chosenKey := manifestKey{
-		feeds:    defaultsOn(r.Settings.Feeds.Defaults, chosen.FeedsDefaults),
-		registry: defaultsOn(r.Settings.CLIRegistry.Defaults, chosen.RegistryDefaults),
-	}
+	chosenKey := manifestKey(r.chosenWords(opts))
 	sets := map[manifestKey]manifestPair{chosenKey: {feeds: r.Feeds, registry: r.loaded}}
 	pairFor := func(key manifestKey) (manifestPair, error) {
 		if pair, ok := sets[key]; ok {
