@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -128,5 +129,45 @@ func TestTheFilterOutputRefusesWhatIsNotARecord(t *testing.T) {
 				t.Errorf("the output %q was not delivered", c.out)
 			}
 		})
+	}
+}
+
+// TestAFilterNullDataIsAbsentData covers the shape jq writes for a record
+// with no data: `{text, from, data}` emits a null data, and the record is
+// delivered without data rather than faulting the feed.
+func TestAFilterNullDataIsAbsentData(t *testing.T) {
+	message, delivered, err := filterOutput([]byte(`{"text":"the message","from":"alice","data":null}`))
+	if err != nil {
+		t.Fatalf("the output was refused: %v", err)
+	}
+	if !delivered {
+		t.Fatal("the output was dropped")
+	}
+	if message.Data != nil {
+		t.Errorf("the record's data is %q, and a null data is no data", message.Data)
+	}
+}
+
+// TestTheFilterRecordDoesNotEscapeItsWayPastTheLineCap covers the record a
+// filter reads: characters that JSON may escape as HTML stay as they are,
+// so an accepted record does not grow past the cap on its way to the
+// filter.
+func TestTheFilterRecordDoesNotEscapeItsWayPastTheLineCap(t *testing.T) {
+	// 180 KiB of ampersands fits the feed's 1 MiB cap and does not fit it
+	// once each one is escaped to \u0026.
+	text := strings.Repeat("&", 180<<10)
+	line, err := filterRecord("alice", text, nil)
+	if err != nil {
+		t.Fatalf("the record was refused: %v", err)
+	}
+	if len(line) > feed.MaxLineBytes {
+		t.Fatalf("the record is %d bytes, and a record is at most %d", len(line), feed.MaxLineBytes)
+	}
+	var record filterMessage
+	if err := json.Unmarshal([]byte(line), &record); err != nil {
+		t.Fatalf("the record is not JSON: %v", err)
+	}
+	if record.Text != text || record.From != "alice" {
+		t.Errorf("the record round trip lost the message: %d bytes of text, from %q", len(record.Text), record.From)
 	}
 }

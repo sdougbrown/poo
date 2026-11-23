@@ -474,9 +474,16 @@ func hasProfile(profiles []Profile, name string) bool {
 // A tool that is gone, that changed its class or that changed its
 // background mode is a difference: the session was made under a tool
 // set this build does not have.
+//
+// The core's subscribe_feed is not: it exists to serve optional feeds, so
+// its absence means the feed set changed, which missingFeedWarnings
+// reports. Failing the restore here would make that warning unreachable.
 func toolDifferences(recorded []ToolInfo, current map[string]Tool) []string {
 	var diffs []string
 	for _, info := range recorded {
+		if info.Name == SubscribeFeedToolName {
+			continue
+		}
 		tool, ok := current[info.Name]
 		if !ok || tool == nil {
 			diffs = append(diffs, fmt.Sprintf("the tool %q is no longer linked", info.Name))

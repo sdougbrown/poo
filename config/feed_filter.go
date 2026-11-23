@@ -140,6 +140,8 @@ func questionOf(io poo.FeedIO, manifest *feed.Filter) (poo.FeedFilterPrompt, boo
 	if prompt.MinNoProbability != 0 {
 		return prompt, true
 	}
+	// The manifest's threshold is always above 0.5: readFilter enforces
+	// it. A zero here would overwrite the default and drop every message.
 	prompt.MinNoProbability = defaultPromptMinNoProbability
 	if manifest != nil {
 		prompt.MinNoProbability = manifest.MinNoProbability
@@ -234,14 +236,20 @@ func filterRecord(from, text string, image *poo.FeedImage) (string, error) {
 	if image != nil {
 		record.Image = &feed.Image{Path: image.Path, MediaType: image.MediaType}
 	}
-	encoded, err := json.Marshal(record)
-	if err != nil {
+	// The encoder writes the record without escaping <, > and &, so a
+	// record the feed's line cap accepted stays under the cap here too:
+	// escaping an ampersand alone would more than double it.
+	var encoded bytes.Buffer
+	encoder := json.NewEncoder(&encoded)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(record); err != nil {
 		return "", fmt.Errorf("rendering the record a filter reads: %w", err)
 	}
-	if len(encoded) > feed.MaxLineBytes {
-		return "", fmt.Errorf("the record a filter reads is %d bytes, and a record is at most %d", len(encoded), feed.MaxLineBytes)
+	line := bytes.TrimSuffix(encoded.Bytes(), []byte("\n"))
+	if len(line) > feed.MaxLineBytes {
+		return "", fmt.Errorf("the record a filter reads is %d bytes, and a record is at most %d", len(line), feed.MaxLineBytes)
 	}
-	return string(encoded), nil
+	return string(line), nil
 }
 
 // filterMessage is the record a filter reads and writes: the feed's own
@@ -278,6 +286,12 @@ func filterOutput(out []byte) (filterMessage, bool, error) {
 	}
 	if message.Image != nil && message.Image.Path == "" {
 		return filterMessage{}, false, fmt.Errorf("the filter's record names an image with no path")
+	}
+	// A filter that forwards jq's `{text, from, data}` writes a null data
+	// for a record with none. Null is the absence of data, not a record
+	// the session refuses: the record is delivered without it.
+	if bytes.Equal(bytes.TrimSpace(message.Data), []byte("null")) {
+		message.Data = nil
 	}
 	if len(message.Data) > 0 && !isJSONObject(message.Data) {
 		return filterMessage{}, false, fmt.Errorf("the filter's record has a data that is not an object")

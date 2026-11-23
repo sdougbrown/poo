@@ -599,7 +599,7 @@ func (s *Session) runFeed(f *feedState) {
 			// A suspended feed runs no attempt and no restart: the report
 			// of the fault is the last thing its supervisor does.
 			if fault != nil {
-				s.reportFeedFault(f, attempt, fault)
+				s.reportFeedFault(f, attempt, runAt, fault)
 			}
 			return
 		}
@@ -965,7 +965,7 @@ type feedFault struct {
 // A fault that arrives before the last report was delivered joins it
 // instead of waking the session again: one suspension is one wake, and the
 // report counts what joined.
-func (s *Session) reportFeedFault(f *feedState, attempt int, fault *FeedFault) {
+func (s *Session) reportFeedFault(f *feedState, attempt int, startedAt time.Time, fault *FeedFault) {
 	report := &feedFault{
 		name:     f.name,
 		instance: f.instance,
@@ -973,7 +973,7 @@ func (s *Session) reportFeedFault(f *feedState, attempt int, fault *FeedFault) {
 		optional: f.spec.Optional,
 		code:     fault.Code,
 		message:  fault.Message,
-		logPath:  s.writeFeedFaultLog(f, attempt, fault.Stderr),
+		logPath:  s.writeFeedFaultLog(f, attempt, startedAt, fault.Stderr),
 	}
 	// The fold check and the report's acceptance are one critical
 	// section: a fault that arrives in the gap folds into the report in
@@ -1024,12 +1024,12 @@ func (s *Session) reportFeedFault(f *feedState, attempt int, fault *FeedFault) {
 // must never point at a later run's diagnostics. A session that keeps no
 // files writes to the working directory. A write that fails is the log's
 // to report: the report still names the path it would have had.
-func (s *Session) writeFeedFaultLog(f *feedState, attempt int, stderr []byte) string {
+func (s *Session) writeFeedFaultLog(f *feedState, attempt int, startedAt time.Time, stderr []byte) string {
 	dir := s.opts.SessionDir
 	if dir == "" {
 		dir = s.opts.WorkingDir
 	}
-	path := filepath.Join(dir, fmt.Sprintf("%s-fault-%d-%d.log", f.instance, attempt, f.startedAt.UnixNano()))
+	path := filepath.Join(dir, fmt.Sprintf("%s-fault-%d-%d.log", f.instance, attempt, startedAt.UnixNano()))
 	if err := os.WriteFile(path, stderr, 0o600); err != nil {
 		s.logger().Warn("the feed's fault log could not be written",
 			slog.String("feed", f.instance), slog.String("path", path), slog.String("error", err.Error()))
@@ -1130,12 +1130,16 @@ func (s *Session) cancelFeed(instanceID string) error {
 		s.mu.Unlock()
 		return ErrUnknownJob
 	}
-	cancel := f.cancel
 	if f.status == feedSuspended {
 		f.status = feedStopped
 	}
+	// The cancel runs under the lock: a subscription that re-arms a
+	// suspended instance replaces the context and its cancel, so a cancel
+	// captured here and invoked after the unlock could stop nothing while
+	// this call reported success. Cancelling only closes a channel: it
+	// waits for nothing, so a goroutine it wakes settles after the unlock.
+	f.cancel(ErrJobCancelled)
 	s.mu.Unlock()
-	cancel(ErrJobCancelled)
 	return nil
 }
 

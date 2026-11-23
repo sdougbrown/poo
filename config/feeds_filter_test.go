@@ -479,3 +479,55 @@ func feedStartsOf(sink *pootest.Sink) int {
 	}
 	return n
 }
+
+// TestAFaultLogOfASessionTheRuntimeCreatedLandsBesideItsRecords covers the
+// session directory the runtime hands a session it creates: a feed's fault
+// log belongs beside the session's records, not in the directory the
+// session works in.
+func TestAFaultLogOfASessionTheRuntimeCreatedLandsBesideItsRecords(t *testing.T) {
+	encoded, err := json.Marshal(map[string]any{"version": 1, "feeds": map[string]any{"chat": map[string]any{
+		"command": []string{feedScript(t, "chat")},
+		"on_idle": "wake",
+		"filter":  map[string]any{"command": []string{filterScript(t, "filter-fail")}},
+	}}})
+	if err != nil {
+		t.Fatalf("encoding the manifest: %v", err)
+	}
+	manifestPath := filepath.Join(t.TempDir(), "feeds.json")
+	if err := os.WriteFile(manifestPath, encoded, 0o600); err != nil {
+		t.Fatalf("writing the manifest: %v", err)
+	}
+	settings, err := config.Parse([]byte(theFeedsSettings(manifestPath)+"session:\n  mode: logged\n  dir: "+t.TempDir()+"\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+	defer runtime.Store.Close()
+	runtime.Options.Transport = pootest.NewTransport(pootest.Turn{Text: "ack"}, pootest.Turn{Text: "ack"})
+	created := &poo.SessionCreatedRecord{
+		RecordMeta: poo.NewRecordMeta("session.created"), SessionMetadata: poo.SessionMetadata{Format: poo.FormatVersion,
+			SessionID:  "s1",
+			Mode:       "logged",
+			CreatedAt:  "2026-11-04T12:00:00Z",
+			WorkingDir: t.TempDir(),
+			Profile:    "code",
+			Tools:      runtime.Profile.Tools, Model: poo.SessionModel{ModelID: "test-model"},
+			ContextLimit: 32768},
+	}
+	sess, err := runtime.CreateSession(context.Background(), runtime.Store, created)
+	if err != nil {
+		t.Fatalf("creating the session: %v", err)
+	}
+	defer sess.Close()
+	waitUntil(t, "the fault log beside the session's records", func() bool {
+		matches, err := filepath.Glob(filepath.Join(runtime.Store.Dir(), "*-fault-*.log"))
+		return err == nil && len(matches) > 0
+	})
+	stray, err := filepath.Glob(filepath.Join(created.WorkingDir, "*-fault-*.log"))
+	if err != nil {
+		t.Fatalf("looking for a fault log in the working directory: %v", err)
+	}
+	if len(stray) != 0 {
+		t.Errorf("the fault log is in the working directory: %v", stray)
+	}
+}

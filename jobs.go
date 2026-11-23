@@ -1075,22 +1075,6 @@ type feedInput struct {
 	admit func() bool
 }
 
-// queueFeedInput queues one instance of a feed's input for the model.
-//
-// The model-facing text is rendered here, once, and the acceptance record
-// carries it with the input's attachments and its structured data: the
-// delivery uses the stored text, the stored files and the stored object,
-// live and after a restore. A feed's message never stands in for the
-// user's turn, so the model reads it as untrusted text.
-//
-// The input joins the session's job queue, so the idle policy, the wake
-// limit and the close's held record act on it exactly as they do on a
-// job's result. An input the session cannot take returns
-// ErrSessionClosed or ErrSessionBroken, and a store that refuses its
-// record returns the store's error: the input is then not queued.
-//
-// The instance's label is not validated here: a caller that takes a
-// feed's name validates it before it queues the input.
 // feedInputClaim is the decision to accept one feed's input, taken under
 // the session's lock: the write registration, the input's number and the
 // input the backlog cap dropped to make room.
