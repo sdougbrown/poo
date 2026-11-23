@@ -13,7 +13,7 @@ import (
 	"github.com/sdougbrown/poo/tool/cliregistry"
 )
 
-// recorderTool returns a tool whose CLI records that it ran, and the
+// recorderTool returns a tool whose command records that it ran, and the
 // path of that record.
 //
 // A refused call must not start a process, and a record the command
@@ -133,7 +133,7 @@ func TestAnEqualsBindingAcceptsAValueThatLooksLikeAFixedOption(t *testing.T) {
 	}
 	res, err := tool.Call(context.Background(), prepared, poo.ToolEnv{})
 	if err != nil {
-		t.Fatalf("calling the CLI: %v", err)
+		t.Fatalf("calling the tool: %v", err)
 	}
 	output, _ := observation(t, res)[bash.EnvelopeOutput].(string)
 	if output != "<--recursive>\n<--ignore=--recursive>\n" {

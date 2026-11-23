@@ -10,14 +10,14 @@ import (
 	"github.com/sdougbrown/poo/tool/cliregistry"
 )
 
-// The fixture registry is two CLIs whose commands are the scripts in
+// The fixture registry is two tools whose commands are the scripts in
 // testdata/bin: a real command-line interface with a flag, an array
 // argument, a failing exit code and a record that it ran.
 //
 // The command is the script's absolute path, so the manifest does not
 // depend on the directory the test runs in.
 
-// script returns the absolute path of a fixture CLI.
+// script returns the absolute path of a fixture tool.
 func script(t *testing.T, name string) string {
 	t.Helper()
 	path, err := filepath.Abs(filepath.Join("testdata", "bin", name))
@@ -30,7 +30,7 @@ func script(t *testing.T, name string) string {
 // markerEnv is the variable the say fixture appends to when it runs.
 const markerEnv = "FIXTURE_MARKER"
 
-// sayTool is the manifest body of the say CLI.
+// sayTool is the manifest body of the say tool.
 func sayTool(t *testing.T) map[string]any {
 	return map[string]any{
 		"description": "Say hello to a name",
@@ -49,7 +49,7 @@ func sayTool(t *testing.T) map[string]any {
 	}
 }
 
-// listTool is the manifest body of the list CLI.
+// listTool is the manifest body of the list tool.
 func listTool(t *testing.T) map[string]any {
 	return map[string]any{
 		"description": "Print the words it is given, one per line",
@@ -94,9 +94,9 @@ func load(t *testing.T, paths ...string) *cliregistry.Catalog {
 	return catalog
 }
 
-// fixtureCatalog loads a catalog with the two fixture CLIs.
+// fixtureCatalog loads a catalog with the two fixture tools.
 //
-// The say CLI records that it ran in the file markerPath names.
+// The say tool records that it ran in the file markerPath names.
 func fixtureCatalog(t *testing.T) *cliregistry.Catalog {
 	t.Helper()
 	t.Setenv(markerEnv, filepath.Join(t.TempDir(), "ran"))
@@ -107,14 +107,14 @@ func fixtureCatalog(t *testing.T) *cliregistry.Catalog {
 	return load(t, path)
 }
 
-// wideCatalog loads a catalog with two hundred CLIs, the size a real
+// wideCatalog loads a catalog with two hundred tools, the size a real
 // registry of a company's commands reaches.
 func wideCatalog(t *testing.T) *cliregistry.Catalog {
 	t.Helper()
 	tools := map[string]any{}
 	for i := 0; i < 200; i++ {
 		tools[wideName(i)] = map[string]any{
-			"description": fmt.Sprintf("The fixture CLI number %d", i),
+			"description": fmt.Sprintf("The fixture tool number %d", i),
 			"command":     []string{script(t, "list")},
 			"inputSchema": map[string]any{
 				"type":                 "object",

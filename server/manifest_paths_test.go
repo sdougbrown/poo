@@ -44,7 +44,7 @@ func TestServersKeepTheirEnvironmentForLaterSessions(t *testing.T) {
 	executors.Register("local", func(exec.Options) (exec.Executor, error) { return bash.NewLocal(), nil })
 	opts := server.Options{Settings: servedSettings(t, search.Name, `{"chat":"chat-model"}`), DefaultProfile: search.Name, WorkingDir: t.TempDir(), Overrides: config.Overrides{FeedsPaths: feeds, CLIRegistryPaths: registries}, Executors: executors, Profiles: []profile.Profile{search.Profile()}, Tools: map[string]config.ToolFactory{
 		"read": func(config.ToolOptions) poo.Tool { return read.New() }, "grep": func(config.ToolOptions) poo.Tool { return grep.New() },
-		"call_cli": func(o config.ToolOptions) poo.Tool {
+		"call_tool": func(o config.ToolOptions) poo.Tool {
 			return cliregistry.NewCall(o.Registry).WithSearch(o.Search).WithExecutor(o.Executor)
 		},
 		"find_tool": func(o config.ToolOptions) poo.Tool { return cliregistry.NewFind(o.Registry) },

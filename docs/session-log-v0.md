@@ -310,7 +310,7 @@ replaced original is cut the same way.
 
 The record's `structured` payload is kept whole, so a tool whose
 payload holds its output has that output in the log once. Bash's
-capture always fits under the nested cap. `call_cli`'s stdout and
+capture always fits under the nested cap. `call_tool`'s stdout and
 stderr share the cap, so two streams that pass it together are kept
 as their heads and tails. A tool with no payload, such as read or
 grep, has only the cut text.

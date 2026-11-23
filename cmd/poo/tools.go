@@ -97,7 +97,7 @@ func linkedTools() map[string]config.ToolFactory {
 		"fetch": func(config.ToolOptions) poo.Tool {
 			return fetch.New()
 		},
-		"call_cli": func(opts config.ToolOptions) poo.Tool {
+		"call_tool": func(opts config.ToolOptions) poo.Tool {
 			return cliregistry.NewCall(opts.Registry).WithSearch(opts.Search).WithExecutor(opts.Executor)
 		},
 		"find_tool": func(opts config.ToolOptions) poo.Tool {

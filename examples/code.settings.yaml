@@ -198,9 +198,9 @@ tools:
 # load.
 #
 # Naming a registry offers the registry's tools to a profile that already
-# offers a side-effecting tool: call_cli runs one registered CLI, and a
+# offers a side-effecting tool: call_tool runs one registered tool, and a
 # catalog over thirty entries with a decider model is searched with
-# find_tool instead of listed. A registered CLI runs through the same
+# find_tool instead of listed. A registered tool runs through the same
 # executor as bash, so a sandboxed session runs it in the sandbox;
 # docs/sandbox.md says what that means.
 cli_registry:

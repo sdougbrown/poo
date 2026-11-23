@@ -404,7 +404,7 @@ func TestTheSessionGoesToTheStoreWhenNoLogIsGiven(t *testing.T) {
 }
 
 func TestTheAPIKeyIsScrubbedFromTheChildEnvironment(t *testing.T) {
-	// The model asks the shell to print the variable the CLI was told to
+	// The model asks the shell to print the variable the tool was told to
 	// scrub. The value must not reach the child.
 	toolCall := "data: " + `{"choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"bash","arguments":"{\"command\":\"echo key=[$POO_TEST_KEY]\"}"}}]},"finish_reason":"tool_calls"}]}` + "\n\n" +
 		"data: [DONE]\n\n"

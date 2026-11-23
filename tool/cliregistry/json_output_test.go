@@ -10,7 +10,7 @@ import (
 	"github.com/sdougbrown/poo/tool/cliregistry"
 )
 
-// jsonTool writes a registry with one CLI that takes its json-bound
+// jsonTool writes a registry with one tool that takes its json-bound
 // object on stdin and decodes its stdout as json. The command is a
 // script through /bin/sh -c; a script that does not read its input
 // drains it through /dev/null last, the way the stdin fixture drains
@@ -60,7 +60,7 @@ func TestACallCLIToolReturnsItsDecodedJSON(t *testing.T) {
 }
 
 // TestACallCLIToolCarriesStderrOnTheDecodedPath covers a successful
-// call whose CLI wrote a warning to stderr before succeeding: the
+// call whose tool wrote a warning to stderr before succeeding: the
 // warning rides on the decoded text after a newline, and the
 // structured result stays the byte-exact JSON, without the HTML
 // escaping a plain Marshal would add.

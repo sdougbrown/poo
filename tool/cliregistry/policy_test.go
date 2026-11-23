@@ -13,7 +13,7 @@ import (
 	"github.com/sdougbrown/poo/tool/cliregistry"
 )
 
-// TestCallCLIGoesThroughThePolicy covers the class: a registered CLI can
+// TestCallCLIGoesThroughThePolicy covers the class: a registered tool can
 // do anything, so it is a side-effecting call, and a policy that refuses
 // side-effecting calls refuses it as well. The fixture's record shows
 // that nothing ran.

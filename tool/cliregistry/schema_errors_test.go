@@ -16,7 +16,7 @@ import (
 //
 // A refused call is the model's to correct, so the text has to name the
 // argument it got wrong and what would have been accepted. The old text
-// was an RFC 6901 pointer and an empty message ("call_cli: deploy:
+// was an RFC 6901 pointer and an empty message ("call_tool: deploy:
 // /mode: "), which told the model nothing.
 
 // deployTool is a manifest body with a schema whose constraints the
@@ -42,7 +42,7 @@ func deployTool(t *testing.T) map[string]any {
 	}
 }
 
-// prepareDeploy loads a one-CLI catalog with deployTool and prepares a
+// prepareDeploy loads a one-tool catalog with deployTool and prepares a
 // call against it.
 func prepareDeploy(t *testing.T, args string) error {
 	t.Helper()
@@ -114,7 +114,7 @@ func TestAMissingRequiredArgumentIsNamed(t *testing.T) {
 }
 
 // TestABadEnumNamesTheValues covers the enum refusal the connectivity
-// test's second probe hit: an action the CLI does not offer.
+// test's second probe hit: an action the tool does not offer.
 func TestABadEnumNamesTheValues(t *testing.T) {
 	err := prepareDeploy(t, `{"name":"deploy","args":{"env":"canary"}}`)
 	if !strings.Contains(err.Error(), `"env" must be one of: "staging", "production"`) {
@@ -601,7 +601,7 @@ func TestTheCatalogCarriesEachToolSArguments(t *testing.T) {
 	}
 }
 
-// TestTheCatalogOmitsEmptyArguments covers a CLI whose schema declares
+// TestTheCatalogOmitsEmptyArguments covers a tool whose schema declares
 // no properties: its line stays bare.
 func TestTheCatalogOmitsEmptyArguments(t *testing.T) {
 	dir := t.TempDir()
@@ -626,6 +626,6 @@ func TestTheCatalogOmitsEmptyArguments(t *testing.T) {
 	}
 	text := catalog.Section(false)
 	if strings.Contains(text, "args:") {
-		t.Errorf("a bare CLI's line carries an argument list: %q", text)
+		t.Errorf("a bare tool's line carries an argument list: %q", text)
 	}
 }

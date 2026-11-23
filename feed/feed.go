@@ -11,7 +11,7 @@
 // returns. The session owns the lifecycle that starts and stops attempts,
 // and the config layer wires the runner to the session.
 //
-// A feed's environment follows a registered CLI's rules. An entry is a
+// A feed's environment follows a registered tool's rules. An entry is a
 // literal, an `env:NAME` reference to the session's scrubbed
 // environment, or a `session:id` reference to the session's own ID,
 // resolved when the feed starts, not when the settings load. A session

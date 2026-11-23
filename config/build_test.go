@@ -53,7 +53,7 @@ func theTools() map[string]config.ToolFactory {
 		"edit":     func(config.ToolOptions) poo.Tool { return edit.New() },
 		"codemode": func(config.ToolOptions) poo.Tool { return toolcodemode.New(stubEngine{}) },
 		"fetch":    func(config.ToolOptions) poo.Tool { return fetchtool.New() },
-		"call_cli": func(opts config.ToolOptions) poo.Tool {
+		"call_tool": func(opts config.ToolOptions) poo.Tool {
 			return cliregistry.NewCall(opts.Registry).WithSearch(opts.Search).WithExecutor(opts.Executor)
 		},
 		"find_tool": func(opts config.ToolOptions) poo.Tool {
@@ -1774,7 +1774,7 @@ func TestABashSettingWithoutTheBashToolIsRefused(t *testing.T) {
 }
 
 // TestACLIRegistryWithoutTheBashToolBuildsAnExecutor covers the executor's
-// other caller: call_cli runs a command too, so a binary that offers it
+// other caller: call_tool runs a command too, so a binary that offers it
 // gets the session's executor, and a binary that carries no executor at
 // all is told so rather than left without one.
 func TestACLIRegistryWithoutTheBashToolBuildsAnExecutor(t *testing.T) {
@@ -1792,7 +1792,7 @@ func TestACLIRegistryWithoutTheBashToolBuildsAnExecutor(t *testing.T) {
 			DefaultProfile: files.Name,
 			Tools: map[string]config.ToolFactory{
 				"edit": func(config.ToolOptions) poo.Tool { return edit.New() },
-				"call_cli": func(opts config.ToolOptions) poo.Tool {
+				"call_tool": func(opts config.ToolOptions) poo.Tool {
 					got = opts.Executor
 					return cliregistry.NewCall(opts.Registry).WithExecutor(opts.Executor)
 				},
@@ -1804,19 +1804,19 @@ func TestACLIRegistryWithoutTheBashToolBuildsAnExecutor(t *testing.T) {
 
 	runtime, err := build(theExecutors())
 	if err != nil {
-		t.Fatalf("building a runtime with call_cli and no bash: %v", err)
+		t.Fatalf("building a runtime with call_tool and no bash: %v", err)
 	}
-	if !hasTool(runtime.Options.ToolOrder, "call_cli") {
-		t.Errorf("the session offers %v, and not call_cli", runtime.Options.ToolOrder)
+	if !hasTool(runtime.Options.ToolOrder, "call_tool") {
+		t.Errorf("the session offers %v, and not call_tool", runtime.Options.ToolOrder)
 	}
 	if got == nil {
-		t.Error("call_cli was built with no executor")
+		t.Error("call_tool was built with no executor")
 	}
 
 	_, err = build(nil)
 	var failure *config.Error
 	if !errors.As(err, &failure) {
-		t.Fatalf("a binary with call_cli and no executor built anyway: %v", err)
+		t.Fatalf("a binary with call_tool and no executor built anyway: %v", err)
 	}
 	if failure.Code != config.CodeUnsupported || failure.Field != "tools.bash.executor" {
 		t.Errorf("the failure is %+v, want unsupported on tools.bash.executor", failure)
@@ -2110,23 +2110,23 @@ func TestAProfileTheSettingsDisableEveryToolOfCannotRun(t *testing.T) {
 }
 
 // TestADisabledRegistryToolIsNotOffered covers a registry tool the
-// settings disable: call_cli comes back from the registry rather than from
+// settings disable: call_tool comes back from the registry rather than from
 // the profile, so the disabled list still takes it off the session that
 // builds.
 func TestADisabledRegistryToolIsNotOffered(t *testing.T) {
 	dir := registry(t, "deploy")
 	settings, err := config.Parse([]byte(registrySettings(dir)+`tools:
-  disabled: [call_cli]
+  disabled: [call_tool]
 `), config.FormatYAML)
 	if err != nil {
 		t.Fatalf("decoding the settings: %v", err)
 	}
 	runtime := build(t, settings, config.Overrides{})
 
-	if hasTool(runtime.Options.ToolOrder, "call_cli") {
+	if hasTool(runtime.Options.ToolOrder, "call_tool") {
 		t.Errorf("the session offers %v", runtime.Options.ToolOrder)
 	}
-	if slices.ContainsFunc(runtime.Profile.Tools, func(tool poo.ToolInfo) bool { return tool.Name == "call_cli" }) {
+	if slices.ContainsFunc(runtime.Profile.Tools, func(tool poo.ToolInfo) bool { return tool.Name == "call_tool" }) {
 		t.Error("the profile still offers the disabled registry tool")
 	}
 	// The profile's own tools are untouched, so the setting removes the
@@ -2137,10 +2137,10 @@ func TestADisabledRegistryToolIsNotOffered(t *testing.T) {
 }
 
 // TestADisabledSideEffectingToolEarnsNoRegistryTool covers the order the
-// registry joins in: a registered CLI can change anything, so it comes
+// registry joins in: a registered tool can change anything, so it comes
 // with a profile that already offers a side-effecting tool. A profile
 // whose only such tool the settings disable has none left, and earns no
-// call_cli.
+// call_tool.
 func TestADisabledSideEffectingToolEarnsNoRegistryTool(t *testing.T) {
 	dir := registry(t, "deploy")
 	settings, err := config.Parse([]byte(registrySettings(dir)+`tools:
@@ -2174,7 +2174,7 @@ func TestADisabledSideEffectingToolEarnsNoRegistryTool(t *testing.T) {
 	if len(listed) == 0 {
 		t.Fatalf("the binary does not offer the %q profile", files.Name)
 	}
-	if hasTool(listed, "call_cli") {
+	if hasTool(listed, "call_tool") {
 		t.Errorf("the %q profile offers %v, and its only side-effecting tool is disabled", files.Name, listed)
 	}
 }

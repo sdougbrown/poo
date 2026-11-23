@@ -88,25 +88,25 @@ poo.
 ## Launcher credentials
 
 A launcher can set `POO_CREDENTIAL_ENV` to the names of credentials poo's
-feeds or registered CLIs need. Separate names with the operating system's
+feeds or registered tools need. Separate names with the operating system's
 path-list separator (`:` on Linux and macOS). The variable lists names,
 not their values; the launcher supplies the values separately.
 
-The session environment keeps these values, so a feed or a registered CLI
+The session environment keeps these values, so a feed or a registered tool
 can receive one through an explicit manifest `env:NAME` binding. A `bash`
 command does not inherit the declared names in its environment. A registered
-CLI that receives a credential can still use or disclose it, so trust its
+tool that receives a credential can still use or disclose it, so trust its
 manifest and command.
 
 This differs from `tools.env.scrub`, which removes names from the session
-environment too. A feed or CLI binding cannot resolve a name removed there
+environment too. A feed or tool binding cannot resolve a name removed there
 or excluded by `tools.env.passthrough`. Environment scrubbing is not process
 isolation: with the `local` executor, a command can read poo's environment
 through procfs as described below.
 
-## Registered CLIs
+## Registered tools
 
-A `call_cli` call is one of the operator's registered CLIs, and it runs
+A `call_tool` call is one of the operator's registered tools, and it runs
 where a bash command runs: through the session's executor, with the
 sandbox's binds and the protected paths it masks.
 
@@ -116,7 +116,7 @@ sandbox's binds and the protected paths it masks.
 - **Its directory** is the manifest's when the manifest fixes one, and
   the session's working directory otherwise.
 - **Its environment** is the session's environment, already scrubbed: the
-  benign names the CLI needs (`PATH`, `HOME`, `LANG`, `LC_ALL`, `TMPDIR`)
+  benign names the tool needs (`PATH`, `HOME`, `LANG`, `LC_ALL`, `TMPDIR`)
   come from it, then the variables the manifest declares, with an
   `env:NAME` reference resolved against the scrubbed environment, and a
   `session:id` reference resolved to the session's own ID at the call.
@@ -136,15 +136,15 @@ sandbox's binds and the protected paths it masks.
   one the manifest fixes itself.
 - **Its lifetime** is the plan's timeout, enforced by poo, and the run's
   context: a timeout, an interrupt, a cancel, a close or
-  `--no-wait-jobs` stops the CLI and everything it started in its process
+  `--no-wait-jobs` stops the tool and everything it started in its process
   group.
 - **The output is bash's envelope**: both streams, the exit status, null
   for a killed process, and the partial output of a timeout.
 
-The `local` executor still cannot hide what it does not own: a CLI it
+The `local` executor still cannot hide what it does not own: a tool it
 runs can read poo's own environment through `/proc/$PPID/environ`,
 because the process that started it is poo. The `bwrap` executor closes
-that, because the CLI's parent is inside the sandbox's pid namespace.
+that, because the tool's parent is inside the sandbox's pid namespace.
 Scrubbing stops a manifest reference; only isolation stops procfs.
 
 ## What the `bwrap` executor does not contain

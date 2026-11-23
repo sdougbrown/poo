@@ -1,7 +1,7 @@
-// Package cli holds the catalog of registered command-line tools a
-// session may offer.
+// Package cli holds the catalog of registered tools a session may
+// offer.
 //
-// A registered CLI is a small manifest describing a real command: its
+// A registered tool is a small manifest describing a real command: its
 // argv, its flags and the JSON schema of its arguments. The package loads
 // the manifests the settings name, holds the library's compiled registry,
 // and renders the catalog's section of the prompt.
@@ -25,8 +25,8 @@ import (
 
 // The names the catalog and its tools answer to.
 const (
-	// CallToolName is the name of the tool that runs a registered CLI.
-	CallToolName = "call_cli"
+	// CallToolName is the name of the tool that runs a catalog entry.
+	CallToolName = "call_tool"
 	// FindToolName is the name of the tool that searches the catalog.
 	FindToolName = "find_tool"
 	// SectionName is the name of the prompt section that lists the
@@ -42,13 +42,13 @@ const (
 // itself.
 const FindThreshold = 30
 
-// Entry is one registered CLI.
+// Entry is one registered tool.
 type Entry struct {
-	// Name is the name the model calls the CLI by.
+	// Name is the name the model calls the tool by.
 	Name string
-	// Description is what the CLI does, as its manifest says.
+	// Description is what the tool does, as its manifest says.
 	Description string
-	// Schema is the JSON schema of the CLI's arguments.
+	// Schema is the JSON schema of the tool's arguments.
 	Schema map[string]any
 	// Args renders the schema's top-level arguments for the prompt, in
 	// name order, required ones marked, an enum's values in brackets,
@@ -56,7 +56,7 @@ type Entry struct {
 	Args string
 }
 
-// Catalog is the set of registered CLIs a session offers.
+// Catalog is the set of registered tools a session offers.
 //
 // The catalog is immutable after Load, so every tool over it may be
 // called concurrently.
@@ -65,7 +65,7 @@ type Catalog struct {
 	registry *cliregistry.Registry
 	// tools are the compiled tool descriptors, by name.
 	tools map[string]cliregistry.Tool
-	// entries are the CLIs, in name order.
+	// entries are the tools, in name order.
 	entries []Entry
 }
 
@@ -76,7 +76,7 @@ type Catalog struct {
 // them. A tool name defined by two manifests fails the load, and the
 // failure names both files: a name a model calls has to mean one command.
 //
-// The arguments of every CLI are compiled by the library when the catalog
+// The arguments of every tool are compiled by the library when the catalog
 // loads, so a call that does not fit its schema is refused before any
 // process is started.
 func Load(paths ...string) (*Catalog, error) {
@@ -101,7 +101,7 @@ func Load(paths ...string) (*Catalog, error) {
 	return c, nil
 }
 
-// Len is the number of registered CLIs.
+// Len is the number of registered tools.
 func (c *Catalog) Len() int {
 	if c == nil {
 		return 0
@@ -109,7 +109,7 @@ func (c *Catalog) Len() int {
 	return len(c.entries)
 }
 
-// Entries returns the registered CLIs, in name order.
+// Entries returns the registered tools, in name order.
 //
 // The list is a copy, so a caller may reorder it. The argument schemas
 // are the catalog's own and are not to be changed.
@@ -137,10 +137,10 @@ func (c *Catalog) Lookup(name string) (Entry, bool) {
 	return Entry{}, false
 }
 
-// EnvBindings returns the env bindings the named CLI's manifest declares,
-// in name order, or false when no CLI answers to the name. A host that
-// validates references when the settings load asks the same question the
-// call's resolution does through them.
+// EnvBindings returns the env bindings the named tool's manifest
+// declares, in name order, or false when no tool answers to the name. A
+// host that validates references when the settings load asks the same
+// question the call's resolution does through them.
 func (c *Catalog) EnvBindings(name string) ([]cliregistry.EnvBinding, bool) {
 	if c == nil {
 		return nil, false
@@ -216,7 +216,7 @@ func (c *Catalog) Filter(inputs map[string]any) (*Catalog, error) {
 // pointed at the prompt's list instead.
 func (c *Catalog) NamesHint(search bool) string {
 	if c.Len() == 0 {
-		return "no CLI is registered"
+		return "no tool is registered"
 	}
 	if c.Len() <= 8 {
 		return "the catalog holds " + strings.Join(c.Names(), ", ")
@@ -236,7 +236,7 @@ func (c *Catalog) NamesHint(search bool) string {
 func (c *Catalog) Plan(name string, args map[string]any) (*cliregistry.Plan, error) {
 	tool, ok := c.tools[name]
 	if !ok {
-		return nil, fmt.Errorf("no CLI named %q", name)
+		return nil, fmt.Errorf("no tool named %q", name)
 	}
 	return c.registry.Plan(tool, args)
 }
@@ -256,8 +256,8 @@ var catalogText string
 // catalogData is the data the catalog's section template renders with.
 //
 // Search says the catalog is behind a search rather than listed whole.
-// Count is the number of registered CLIs, Call and Find are the tools
-// that run one and that search the catalog, and Entries are the CLIs, in
+// Count is the number of registered tools, Call and Find are the tools
+// that run one and that search the catalog, and Entries are the tools, in
 // name order.
 type catalogData struct {
 	Search  bool
@@ -271,7 +271,7 @@ type catalogData struct {
 // template.
 //
 // The full catalog is one line per entry: the name the model calls the
-// CLI by, its arguments with required ones marked and enum values in
+// tool by, its arguments with required ones marked and enum values in
 // brackets, and what it does. A session that searches the catalog
 // instead is told what the search is and how to use it, and the
 // entries stay out of the prompt.

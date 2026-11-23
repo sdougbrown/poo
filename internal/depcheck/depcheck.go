@@ -39,7 +39,7 @@
 //   - the schematext package may import the standard library and the
 //     cli-registry schema package: it renders a schema's findings for
 //     the model, for the core's own schema check and for the registered
-//     CLIs' check alike
+//     tools' check alike
 //
 // The import graph comes from "go list -e -deps -json", and the toolchain
 // decides what counts as the standard library. The rules cover each checked

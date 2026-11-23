@@ -23,18 +23,18 @@ const DefaultTopK = 8
 // hundreds of entries is what the search was there to avoid, and a model
 // told "here is everything" learns nothing about which entry fits. The
 // model is told the search failed and how to go on without it.
-const UnavailableText = "tool search unavailable; call_cli with a known name"
+const UnavailableText = "tool search unavailable; call_tool with a known name"
 
 // FindInstructions tell the decision model what the questions are.
-const FindInstructions = "Each question names one registered command-line tool and asks whether that tool fits the intent. " +
+const FindInstructions = "Each question names one registered tool and asks whether that tool fits the intent. " +
 	"Answer yes when the tool does the work the intent asks for, and no when it does something else."
 
-// FindTool searches the catalog for the CLIs that fit an intent.
+// FindTool searches the catalog for the tools that fit an intent.
 //
 // The search is a decision-model question per entry, so it needs a
 // decision model: a session without one shows the whole catalog instead.
 type FindTool struct {
-	// catalog is the set of CLIs the search narrows.
+	// catalog is the set of tools the search narrows.
 	catalog *Catalog
 	// topK is how many entries a search returns. Zero means
 	// DefaultTopK.
@@ -56,7 +56,7 @@ func (t *FindTool) WithTopK(k int) *FindTool {
 func (t *FindTool) Spec() poo.ToolSpec {
 	return poo.ToolSpec{
 		Name:        FindToolName,
-		Description: "Search the registered command-line tools for the ones that fit what you want to do.",
+		Description: "Search the registered tools for the ones that fit what you want to do.",
 		Schema: json.RawMessage(`{
   "type": "object",
   "properties": {
@@ -121,7 +121,7 @@ func (t *FindTool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepare
 
 // ranked is one entry with the model's answer about it.
 type ranked struct {
-	// entry is the registered CLI.
+	// entry is the registered tool.
 	entry Entry
 	// probability is the model's probability that the entry fits.
 	probability float64
@@ -226,7 +226,7 @@ func answerFor(answers []decide.Answer, id string) (float64, bool) {
 // name, what the tool does, and the schema of its arguments.
 func result(intent string, total int, hits []ranked) poo.ToolResult {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%d of %d registered CLIs fit %q, best first:\n", len(hits), total, intent)
+	fmt.Fprintf(&b, "%d of %d registered tools fit %q, best first:\n", len(hits), total, intent)
 	for _, r := range hits {
 		fmt.Fprintf(&b, "%s: %s\n  args: %s\n", r.entry.Name, r.entry.Description, string(marshal(r.entry.Schema)))
 	}
