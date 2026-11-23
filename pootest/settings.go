@@ -69,20 +69,28 @@ var userConfigVars = []string{"XDG_CONFIG_HOME", "HOME", "APPDATA"}
 // test instead of leaking the developer's own manifests into it.
 func IsolateUserConfigDirT(t *testing.T, dir string) {
 	t.Helper()
-	before := make(map[string]*string, len(userConfigVars))
+	// The prior state is recorded for every variable, set or not: the
+	// isolation sets all three, so a variable the machine had unset
+	// would otherwise keep pointing at the test's directory after the
+	// test ends, where a test that deleted its directory leaves a stale
+	// root behind.
+	type saved struct {
+		name  string
+		value string
+		set   bool
+	}
+	before := make([]saved, 0, len(userConfigVars))
 	for _, name := range userConfigVars {
-		if value, set := os.LookupEnv(name); set {
-			copied := value
-			before[name] = &copied
-		}
+		value, set := os.LookupEnv(name)
+		before = append(before, saved{name: name, value: value, set: set})
 	}
 	t.Cleanup(func() {
-		for name, value := range before {
-			if value == nil {
-				os.Unsetenv(name)
+		for _, v := range before {
+			if !v.set {
+				os.Unsetenv(v.name)
 				continue
 			}
-			os.Setenv(name, *value)
+			os.Setenv(v.name, v.value)
 		}
 	})
 	if err := IsolateUserConfigDir(dir); err != nil {
@@ -98,6 +106,10 @@ func IsolateUserConfigDirT(t *testing.T, dir string) {
 // build fails on the machine of anyone who uses the feature. It is the
 // one place a package's TestMain asks for that, so the rule cannot
 // drift between the binaries that need it.
+//
+// Pointing HOME at the directory moves the home directory itself:
+// a ~-prefixed settings path and the skills' default directory resolve
+// under the test's directory too, not the developer's home.
 func IsolateUserConfigDir(dir string) error {
 	for _, name := range userConfigVars {
 		if err := os.Setenv(name, dir); err != nil {
