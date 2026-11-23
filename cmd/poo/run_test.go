@@ -794,6 +794,36 @@ func TestTheRunHeaderRecordsTheToolsBackgroundMode(t *testing.T) {
 	}
 }
 
+// TestTheEphemeralSessionServesItsHistoryToTheTool covers the
+// ephemeral read side: with no log and no store, the sink's buffer is
+// the history tool's only supply, and the tool reads the turns the
+// session itself wrote.
+func TestTheEphemeralSessionServesItsHistoryToTheTool(t *testing.T) {
+	historyBody := "data: " + `{"choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"id":"c1","type":"function","function":{"name":"history","arguments":"{\"pattern\":\"the thing\"}"}}]},"finish_reason":null}]}` + "\n\n" +
+		"data: [DONE]\n\n"
+	finalBody := "data: " + `{"choices":[{"index":0,"delta":{"role":"assistant","content":"the history holds: do the thing"},"finish_reason":"stop"}]}` + "\n\n" +
+		"data: [DONE]\n\n"
+	endpoint := newFakeEndpointSequence(t, []string{historyBody, finalBody})
+	dir := t.TempDir()
+
+	var out bytes.Buffer
+	code := clicontract.Run(pooApp(&out), pooAdapter{}, []string{
+		"run",
+		"--endpoint", endpoint.URL + "/v1",
+		"--model-id", "test-model",
+		"--context-limit", "32768",
+		"--working-dir", dir,
+		"--ephemeral",
+		"do the thing",
+	}, &out, io.Discard)
+	if code != 0 {
+		t.Fatalf("the exit code is %d, want 0", code)
+	}
+	if !strings.Contains(out.String(), "the history holds") {
+		t.Errorf("the writer got %q, want the answer quoting the history", out.String())
+	}
+}
+
 // TestTheRunsAnswerGoesToTheAppsWriter covers the writer the command
 // surface is built with: the answer is written there, not to the process's
 // own stdout.
