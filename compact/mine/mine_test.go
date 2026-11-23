@@ -8,8 +8,8 @@ import (
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/compact/mine"
-	"github.com/sdougbrown/poo/tool/history"
 	"github.com/sdougbrown/poo/pootest"
+	"github.com/sdougbrown/poo/tool/history"
 )
 
 // The mine strategy: a fork names what the history must preserve, a
