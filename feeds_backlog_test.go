@@ -229,6 +229,59 @@ func TestADroppedInputStaysFatedWhenTheAcceptanceFails(t *testing.T) {
 	}
 }
 
+// TestTheCapDropsTheOldestWhateverOrderTheQueueHolds covers the drop's
+// order: an abandoned delivery goes back at the queue's front, so the
+// queue is not in acceptance order, and the cap still drops the input
+// the feed accepted first.
+func TestTheCapDropsTheOldestWhateverOrderTheQueueHolds(t *testing.T) {
+	tr := scripted([]fakeResponse{{text: "the answer"}})
+	sink := &recordingSink{}
+	opts := testOptions(t, tr, &echoTool{}, sink)
+	opts.Jobs = poo.JobOptions{OnIdle: poo.OnIdleHold}
+	opts.Feeds = []poo.FeedSpec{backlogFeedSpec("inbox", 2)}
+	s := newTestSession(t, opts)
+
+	for _, text := range []string{"A", "B"} {
+		if err := poo.QueueFeedInput(s, "inbox", "", text); err != nil {
+			t.Fatalf("queueing %s: %v", text, err)
+		}
+	}
+	waitFor(t, "both inputs to be held", func() bool { return sink.count("input.held") == 2 })
+
+	// The queue reads [A, B] by acceptance order. An abandoned delivery
+	// puts its item back at the front: the queue then reads [B, A].
+	var queuedIDs []string
+	for _, rec := range sink.allRecords() {
+		if r, ok := rec.(*poo.InputQueuedRecord); ok {
+			queuedIDs = append(queuedIDs, r.InputID)
+		}
+	}
+	if len(queuedIDs) != 2 {
+		t.Fatalf("the log holds %d queued inputs, want 2", len(queuedIDs))
+	}
+	poo.RequeueAtFront(s, queuedIDs[1])
+
+	// C arrives at the cap. The drop names the first accepted input,
+	// whatever position the queue holds it at.
+	if err := poo.QueueFeedInput(s, "inbox", "", "C"); err != nil {
+		t.Fatalf("queueing C: %v", err)
+	}
+	waitFor(t, "the cap to drop an input", func() bool { return sink.count("input.dropped") == 1 })
+
+	var droppedID string
+	for _, rec := range sink.allRecords() {
+		if r, ok := rec.(*poo.InputDroppedRecord); ok {
+			droppedID = r.InputID
+		}
+	}
+	if droppedID == "" {
+		t.Fatal("the log holds no input.dropped record")
+	}
+	if droppedID != queuedIDs[0] {
+		t.Errorf("the cap dropped input %q, want the first accepted one %q", droppedID, queuedIDs[0])
+	}
+}
+
 // TestAFeedWithoutASpecTakesTheDefaultBacklog covers the default: a
 // feed that sets no cap holds DefaultFeedBacklog undelivered inputs,
 // and the next one drops the oldest.

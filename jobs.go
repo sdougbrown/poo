@@ -314,6 +314,11 @@ type jobResult struct {
 	// origin is a feed's origin for a feed's input, and empty for a
 	// job's result.
 	origin Origin
+	// seq numbers the input in the session's acceptance order. The
+	// queue is in completion order, and an abandoned delivery goes
+	// back at its front, so the backlog cap drops by this number, not
+	// by queue position.
+	seq int
 	// onIdle is the idle policy a feed asked for, and empty for a job's
 	// result: a result that carries none takes the session's.
 	onIdle OnIdle
@@ -920,7 +925,8 @@ func (s *Session) finishJob(job *jobState, outcome Outcome, out afterToolOutcome
 	s.jobCompletions++
 	jobOutcome := jobOutcomeOf(outcome)
 	s.inputSeq++
-	inputID := jobInputID(s.opts.SessionID, s.inputSeq)
+	inputSeq := s.inputSeq
+	inputID := jobInputID(s.opts.SessionID, inputSeq)
 	runID := job.runID
 	handle := job.handle
 	tool := job.tool
@@ -957,6 +963,7 @@ func (s *Session) finishJob(job *jobState, outcome Outcome, out afterToolOutcome
 		text:        text,
 		attachments: cloneAttachments(out.result.Attachments),
 		fatal:       fatal,
+		seq:         inputSeq,
 	})
 }
 
@@ -1081,6 +1088,7 @@ func (s *Session) queueFeedInput(feed, from, text string, attachments []Attachme
 	}
 	s.inputSeq++
 	inputID := jobInputID(s.opts.SessionID, s.inputSeq)
+	inputSeq := s.inputSeq
 	s.jobCompletions++
 	s.mu.Unlock()
 	defer func() {
@@ -1144,6 +1152,7 @@ func (s *Session) queueFeedInput(feed, from, text string, attachments []Attachme
 		text:        rendered,
 		attachments: cloneAttachments(attachments),
 		origin:      origin,
+		seq:         inputSeq,
 		onIdle:      onIdle,
 	})
 	return nil
@@ -1238,16 +1247,25 @@ func (s *Session) pendingFeedInputsLocked(origin Origin) int {
 
 // dropOldestFeedInputLocked removes the feed's oldest undelivered input
 // from the queue and returns its input id, or "" when the feed has
-// none. The caller holds the session's lock.
+// none. Oldest is by acceptance order, not by queue position: an
+// abandoned delivery goes back at the queue's front. The caller holds
+// the session's lock.
 func (s *Session) dropOldestFeedInputLocked(origin Origin) string {
+	oldest := -1
 	for i, item := range s.jobQueue {
 		if item.result.origin != origin {
 			continue
 		}
-		s.jobQueue = append(s.jobQueue[:i], s.jobQueue[i+1:]...)
-		return item.result.id
+		if oldest < 0 || item.result.seq < s.jobQueue[oldest].result.seq {
+			oldest = i
+		}
 	}
-	return ""
+	if oldest < 0 {
+		return ""
+	}
+	item := s.jobQueue[oldest]
+	s.jobQueue = append(s.jobQueue[:oldest], s.jobQueue[oldest+1:]...)
+	return item.result.id
 }
 
 // queueJobResult puts a finished result on the session's job queue and
