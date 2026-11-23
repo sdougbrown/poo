@@ -473,16 +473,9 @@ func PromptRenderError(err error) *Error {
 // binary has a default. The profile names the tools the session
 // offers, and every tool it names must be one the binary links.
 func (r *Runtime) resolveProfile(opts BuildOptions, workingDir string) error {
-	name := opts.Overrides.Profile
-	if name == "" {
-		name = r.Settings.Profile
-	}
-	if name == "" {
-		name = opts.DefaultProfile
-	}
-	if name == "" && len(opts.Profiles) > 0 {
-		name = opts.Profiles[0].Name
-	}
+	// The manifest resolvers read the same profile the session runs
+	// under: the name comes from the one resolution they share.
+	name := r.profileName(opts)
 	if name == "" {
 		return &Error{Code: CodeUnsupported, Message: "the build has no profile to run under"}
 	}
@@ -1242,22 +1235,6 @@ func withoutDisabled(tools []poo.ToolInfo, disabled []string) []poo.ToolInfo {
 // disabled tools come off a profile before it is judged runnable, a
 // profile the settings empty is not offered, and a profile earns the
 // registry tools its own entries leave for it.
-// resolveProfiles resolves every profile the binary links.
-//
-// A profile that names a tool the binary does not link offers the
-// tools it has: the profile cannot be run with the others, and a
-// profile that cannot be run is not one the binary offers.
-//
-// The disabled list and the registry follow the same order here as they
-// do for the session running, so the listing and the session agree: the
-// disabled tools come off a profile before it is judged runnable, a
-// profile the settings empty is not offered, and a profile earns the
-// registry tools its own entries leave for it.
-//
-// Each profile's own word on the manifest defaults selects the manifest
-// set its listing composes from, the way a session under it would
-// resolve them. The sets cache per word pair, and the session's own
-// pair reuses what the build already loaded.
 func (r *Runtime) resolveProfiles(opts BuildOptions, definitions []profile.Profile, workingDir string) ([]poo.Profile, error) {
 	type manifestKey struct{ feeds, registry bool }
 	type manifestPair struct {
