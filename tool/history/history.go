@@ -30,9 +30,6 @@ const (
 	// flood the context on a search; a turn read is where the full text
 	// goes.
 	MaxLineChars = 2000
-	// DefaultMaxChars is the most text the tool returns when the
-	// settings carry no observation cap.
-	DefaultMaxChars = 30000
 )
 
 //go:embed prompt.md
@@ -145,7 +142,7 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 
 	cap := env.Settings.ObservationCapChars
 	if cap <= 0 {
-		cap = DefaultMaxChars
+		cap = caps.ObservationMax
 	}
 
 	if p.turn != nil {
