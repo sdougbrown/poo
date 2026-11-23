@@ -138,7 +138,7 @@ func (p *preparedCall) EvidenceArguments() json.RawMessage { return p.key }
 // environment is read and no process is started until Call.
 func (t *CallTool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, error) {
 	if t.catalog == nil {
-		return nil, poo.InvalidArgsf("%s: no cli registry is configured", CallToolName)
+		return nil, poo.InvalidArgsf("%s: no CLI registry is configured", CallToolName)
 	}
 	var a callArgs
 	if err := decodeStrict(raw, &a); err != nil {
