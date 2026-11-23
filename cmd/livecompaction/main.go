@@ -30,6 +30,7 @@ import (
 	codemodestarlark "github.com/sdougbrown/poo/codemode/starlark"
 	"github.com/sdougbrown/poo/compact/mine"
 	"github.com/sdougbrown/poo/pootest"
+	"github.com/sdougbrown/poo/profile/code"
 	"github.com/sdougbrown/poo/provider/openai"
 	"github.com/sdougbrown/poo/session"
 	"github.com/sdougbrown/poo/tool/bash"
@@ -41,6 +42,17 @@ import (
 	"github.com/sdougbrown/poo/tool/history"
 	"github.com/sdougbrown/poo/tool/read"
 )
+
+// toolInfos describes the linked tools the way the profile names them,
+// straight from each tool's own spec.
+func toolInfos(linked map[string]poo.Tool) []poo.ToolInfo {
+	infos := make([]poo.ToolInfo, 0, len(linked))
+	for _, name := range code.Profile().Tools {
+		spec := linked[name].Spec()
+		infos = append(infos, poo.ToolInfo{Name: name, Class: spec.Class, Background: spec.Background})
+	}
+	return infos
+}
 
 func main() {
 	logPath := flag.String("log", "", "the session log to restore")
@@ -89,52 +101,48 @@ func main() {
 	}
 	fmt.Printf("view chars: %d, estimate at ratio 4: %d\n", poo.EstimateHistoryChars(view), poo.EstimateHistoryChars(view)/4)
 
-	transport := openai.New(openai.Options{
-		Endpoint: *endpoint,
-		Model:    *model,
-		ModelInfo: poo.ModelInfo{
-			ModelID:      *model,
-			Tools:        poo.ToolCalling{Mode: poo.ToolsNative},
-			Reasoning:    poo.ReasoningControl{Mode: poo.ReasoningEffort, Param: "reasoning_effort"},
-			MaxOutput:    16384,
-			ContextLimit: *limit,
-		},
-	})
 	sink := pootest.NewSink()
 	events := &eventPrinter{}
+	// One ModelInfo for both surfaces: the transport stamps its requests
+	// with it, and the session sends it in every request. A model whose
+	// header records a reasoning effort needs the control on both, or
+	// the restored session's first request refuses to send.
+	modelInfo := poo.ModelInfo{
+		ModelID:      *model,
+		Tools:        poo.ToolCalling{Mode: poo.ToolsNative},
+		Reasoning:    poo.ReasoningControl{Mode: poo.ReasoningEffort, Param: "reasoning_effort"},
+		MaxOutput:    16384,
+		ContextLimit: *limit,
+	}
+	transport := openai.New(openai.Options{
+		Endpoint:  *endpoint,
+		Model:     *model,
+		ModelInfo: modelInfo,
+	})
+	// The tools the shipped code profile offers, and the profile's own
+	// declaration of them: the classes come from the tools' specs, so
+	// the copy here cannot drift from what poo ships.
+	linked := map[string]poo.Tool{
+		"read":     read.New(),
+		"grep":     grep.New(),
+		"history":  history.New(),
+		"edit":     edit.New(),
+		"bash":     bash.New(),
+		"fetch":    fetch.New(),
+		"codemode": codemode.New(codemodestarlark.New()),
+		"call_cli": cliregistry.NewCall(nil),
+	}
 	opts := poo.Options{
 		Transport: transport,
-		Model: poo.ModelInfo{
-			ModelID:      *model,
-			Tools:        poo.ToolCalling{Mode: poo.ToolsNative},
-			MaxOutput:    16384,
-			ContextLimit: *limit,
-		},
-		Tools: map[string]poo.Tool{
-			"read":     read.New(),
-			"grep":     grep.New(),
-			"history":  history.New(),
-			"edit":     edit.New(),
-			"bash":     bash.New(),
-			"fetch":    fetch.New(),
-			"codemode": codemode.New(codemodestarlark.New()),
-			"call_cli": cliregistry.NewCall(nil),
-		},
-		ToolOrder: []string{"bash", "read", "grep", "history", "edit", "fetch", "codemode", "call_cli"},
+		Model:     modelInfo,
+		Tools:     linked,
+		ToolOrder: code.Profile().Tools,
 		Sink:      sink,
 		Profile:   "code",
 		Profiles: []poo.Profile{{
-			Name: "code",
-			Tools: []poo.ToolInfo{
-				{Name: "bash", Class: poo.ClassSideEffecting},
-				{Name: "read", Class: poo.ClassReadOnly},
-				{Name: "grep", Class: poo.ClassReadOnly},
-				{Name: "edit", Class: poo.ClassSideEffecting},
-				{Name: "fetch", Class: poo.ClassReadOnly},
-				{Name: "codemode", Class: poo.ClassReadOnly},
-				{Name: "call_cli", Class: poo.ClassSideEffecting},
-			},
-			Unmatched: "allow",
+			Name:      code.Name,
+			Tools:     toolInfos(linked),
+			Unmatched: code.Profile().Unmatched,
 		}},
 		Compactor:    mine.New(mine.Options{Ratio: *ratio, MaxTokens: *maxTokens, KeepRecentTokens: *keepRecent}),
 		Observers:    []poo.Observer{events},
