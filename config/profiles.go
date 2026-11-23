@@ -89,7 +89,7 @@ func (r *Runtime) profilePromptFile() string {
 // carries: the file's text in place of the section, and the append's
 // text after whatever the section holds. Both compose with the linked
 // base's own prose, which the build set earlier.
-func (r *Runtime) profilePrompt() (func(*prompt.Builder), error) {
+func (r *Runtime) profilePrompt() ([]func(*prompt.Builder), error) {
 	if r.profileSectionOwned() {
 		return nil, nil
 	}
@@ -104,18 +104,12 @@ func (r *Runtime) profilePrompt() (func(*prompt.Builder), error) {
 	if text := r.Settings.Profiles[r.Profile.Name].PromptAppend; text != "" {
 		edits = append(edits, func(b *prompt.Builder) { b.Append(prompt.ProfileSection, text) })
 	}
-	if len(edits) == 0 {
-		return nil, nil
-	}
-	return func(b *prompt.Builder) {
-		for _, edit := range edits {
-			edit(b)
-		}
-	}, nil
+	return edits, nil
 }
 
 // SessionPrompt reads the prompt sections that belong to a new session rather
-// than to the shared runtime.
+// than to the shared runtime. The sources that hold nothing contribute no
+// edit: the composition appends each source's edits to one slice.
 func (r *Runtime) SessionPrompt(dir string) ([]func(*prompt.Builder), error) {
 	role, err := r.profilePrompt()
 	if err != nil {
@@ -125,11 +119,9 @@ func (r *Runtime) SessionPrompt(dir string) ([]func(*prompt.Builder), error) {
 	if err != nil {
 		return nil, err
 	}
-	var edits []func(*prompt.Builder)
-	for _, edit := range []func(*prompt.Builder){role, project} {
-		if edit != nil {
-			edits = append(edits, edit)
-		}
+	edits := append([]func(*prompt.Builder){}, role...)
+	if project != nil {
+		edits = append(edits, project)
 	}
 	return edits, nil
 }
