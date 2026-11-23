@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -57,6 +58,78 @@ func IsolateStateRoot(dir string) error {
 	return os.Setenv(StateRootEnv, dir)
 }
 
+// userConfigVars are the environment variables the user config directory
+// resolves from, one per platform: XDG_CONFIG_HOME on Linux, HOME on
+// darwin, APPDATA on windows. A test binary that points all three at the
+// same directory isolates the config root on every one of them.
+var userConfigVars = []string{"XDG_CONFIG_HOME", "HOME", "APPDATA"}
+
+// IsolateUserConfigDirT is IsolateUserConfigDir for one test: the
+// variables restore when the test ends, and a platform drift fails the
+// test instead of leaking the developer's own manifests into it.
+func IsolateUserConfigDirT(t *testing.T, dir string) {
+	t.Helper()
+	// The prior state is recorded for every variable, set or not: the
+	// isolation sets all three, so a variable the machine had unset
+	// would otherwise keep pointing at the test's directory after the
+	// test ends, where a test that deleted its directory leaves a stale
+	// root behind.
+	type saved struct {
+		name  string
+		value string
+		set   bool
+	}
+	before := make([]saved, 0, len(userConfigVars))
+	for _, name := range userConfigVars {
+		value, set := os.LookupEnv(name)
+		before = append(before, saved{name: name, value: value, set: set})
+	}
+	t.Cleanup(func() {
+		for _, v := range before {
+			if !v.set {
+				os.Unsetenv(v.name)
+				continue
+			}
+			os.Setenv(v.name, v.value)
+		}
+	})
+	if err := IsolateUserConfigDir(dir); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// IsolateUserConfigDir points the user config directory at dir.
+//
+// The manifest defaults resolve under the user config directory, and the
+// settings discovery searches it as a fallback: without this, a
+// developer's own manifests merge into a test's build, and a test's
+// build fails on the machine of anyone who uses the feature. It is the
+// one place a package's TestMain asks for that, so the rule cannot
+// drift between the binaries that need it.
+//
+// Pointing HOME at the directory moves the home directory itself:
+// a ~-prefixed settings path and the skills' default directory resolve
+// under the test's directory too, not the developer's home.
+func IsolateUserConfigDir(dir string) error {
+	for _, name := range userConfigVars {
+		if err := os.Setenv(name, dir); err != nil {
+			return err
+		}
+	}
+	// The variables are the platform's own, and a Go release that reads
+	// a different one would leave the developer's own config in the
+	// tests' view. The resolved directory is checked against dir, so
+	// such a drift fails the suite loudly instead of leaking silently.
+	resolved, err := os.UserConfigDir()
+	if err != nil {
+		return err
+	}
+	if resolved != dir && !strings.HasPrefix(resolved, dir+string(filepath.Separator)) {
+		return fmt.Errorf("the user config directory resolved to %s, outside the test's %s", resolved, dir)
+	}
+	return nil
+}
+
 // ServeSubcommand is the subcommand the repl starts its server as:
 // os.Executable() ServeSubcommand. The guard in Main compares
 // os.Args[1] against it, so a rename on either side fails a test
@@ -77,6 +150,10 @@ const ServeSubcommand = "serve"
 // The file lives in a directory of the process's own, so packages
 // running at the same time never write over one another, and the
 // directory is removed once the tests finish.
+//
+// The user config directory points at the same directory, so the
+// manifest defaults and the discovery fallback read nothing of the
+// developer's own.
 //
 // A test binary started as ServeSubcommand is refused before anything
 // else: the repl starts its server as os.Executable() ServeSubcommand,
@@ -99,6 +176,10 @@ func Main(m *testing.M) int {
 	// must not overwrite it.
 	if err := IsolateStateRoot(dir); err != nil {
 		println("poo tests: pointing the state root at the test directory:", err.Error())
+		return 1
+	}
+	if err := IsolateUserConfigDir(dir); err != nil {
+		println("poo tests: pointing the user config directory at the test directory:", err.Error())
 		return 1
 	}
 	path := filepath.Join(dir, "settings.yaml")

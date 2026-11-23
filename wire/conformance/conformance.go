@@ -444,6 +444,22 @@ func newEndpoint(t interface{ Cleanup(func()) }, turns []ScriptedAnswer) *FakeEn
 	return endpoint
 }
 
+// turnManifestDefaultsOff names the settings blocks whose defaults
+// switch turns every default manifest kind off. The suite stays a black
+// box and spells the kinds itself; the pairing test holds this list
+// against the kinds the config package loads, so a kind added there
+// without a switch here fails the suite.
+func turnManifestDefaultsOff(document map[string]any) {
+	for _, kind := range []string{"feeds", "cli_registry"} {
+		block, _ := document[kind].(map[string]any)
+		if block == nil {
+			block = map[string]any{}
+		}
+		block["defaults"] = false
+		document[kind] = block
+	}
+}
+
 // settings writes a settings file for a flow and returns its path.
 //
 // The file points the binary at the fake endpoint, names the model and
@@ -471,6 +487,14 @@ func (s *suite) settings(endpoint *FakeEndpoint, contextLimit int, extra map[str
 	for name, value := range extra {
 		document[name] = value
 	}
+	// A developer's own default manifests must not change what a flow
+	// sees. The environment isolation pootest.Main applies is the
+	// operative guard on every platform: it reaches the flow binaries
+	// through the test process's environment. These keys are the guard
+	// that does not depend on the environment. The suite stays a black
+	// box — it imports no config — so the kinds are spelled here, and
+	// the pairing test holds this list against config's own.
+	turnManifestDefaultsOff(document)
 	// Every flow has a settings file of its own: a binary that starts
 	// late must not read the settings of the flow that came after it.
 	s.settingsCount++

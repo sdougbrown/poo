@@ -513,6 +513,11 @@ type CLIRegistry struct {
 	// directory; a path that starts with ~/ is under the home directory
 	// instead.
 	Paths []string `json:"paths,omitempty"`
+	// Defaults says whether the manifests in poo's default cli-registry
+	// directory load beside the paths. They load when the key is absent
+	// or true; a false turns them off, so a binary or a test runs with
+	// exactly the manifests it names.
+	Defaults *bool `json:"defaults,omitempty"`
 }
 
 // Feeds are the feed manifests' settings.
@@ -521,6 +526,11 @@ type Feeds struct {
 	// working directory; a path that starts with ~/ is under the home
 	// directory instead.
 	Paths []string `json:"paths,omitempty"`
+	// Defaults says whether the manifests in poo's default feeds
+	// directory load beside the paths. They load when the key is absent
+	// or true; a false turns them off, so a binary or a test runs with
+	// exactly the manifests it names.
+	Defaults *bool `json:"defaults,omitempty"`
 }
 
 // Skills are the skills' settings.

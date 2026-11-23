@@ -315,8 +315,17 @@ empty command, an `on_idle` that is neither `wake` nor `hold`, a negative
 field or one name in two manifests fails the build, so the binary does not
 start, and the failure names the file and the feed.
 
-`feeds.paths` is a settings entry beside `cli_registry.paths`. For
-binaries built on `server.New` and for `poo run` and `prompt`,
+`feeds.paths` is a settings entry beside `cli_registry.paths`. poo also
+loads the manifests in its own directories under the user config
+directory, before the settings' paths. The directories are
+`$XDG_CONFIG_HOME/poo/feeds/` and `$XDG_CONFIG_HOME/poo/cli-registry/`.
+A manifest a person wants in every session needs no settings entry. A
+missing directory is not an error, and a name two directories define is
+the same duplicate-name error as any other. `feeds.defaults: false` and
+the matching `cli_registry.defaults` turn the defaults off. A binary or a
+test then runs with exactly the manifests it names.
+
+For binaries built on `server.New` and for `poo run` and `prompt`,
 `POO_FEEDS_PATH`, `POO_CLI_REGISTRY_PATH` and `POO_SKILLS_PATH` add paths to
 those settings respectively. Each is a path list separated by the operating system's
 path-list separator. The `poo run`, `serve` and `prompt` commands also

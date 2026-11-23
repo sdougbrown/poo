@@ -236,6 +236,11 @@ type Runtime struct {
 	// catalog. A binary may link them, and a profile may name them, without the
 	// session offering any.
 	registryOffered bool
+	// registryFromDefaults and feedsFromDefaults report that the only
+	// manifest paths the build loaded came from the default directories.
+	// An error that would say "the settings" names the real source.
+	registryFromDefaults bool
+	feedsFromDefaults    bool
 	// Feeds are the feed manifests the settings name, or nil when the
 	// settings name none.
 	Feeds *feed.Set
@@ -686,28 +691,76 @@ func (r *Runtime) warn(text string) {
 	r.Warning += "; " + text
 }
 
-// resolveRegistry loads the cli registries the settings and overrides name.
-//
-// The paths are resolved by againstDir, and every manifest reachable
-// from them is one catalog. The catalog is loaded here,
-// once: the commands a session may call are the ones its registry holds
-// when the session is built, and a session does not reload one.
-func (r *Runtime) resolveRegistry(opts BuildOptions, workingDir string) error {
-	if len(r.Settings.CLIRegistry.Paths) == 0 && len(opts.Overrides.CLIRegistryPaths) == 0 {
-		return nil
+// manifestPaths joins the paths one manifest kind loads with the kind's
+// default directory, when the kind's word turns the defaults on. It
+// reports whether the default directory was the only source: the empty
+// set it produces is then nothing at all, and the errors name it rather
+// than the settings.
+func manifestPaths(paths []string, settingsKey string, on bool) ([]string, bool) {
+	out := append([]string(nil), paths...)
+	fromDefaultsOnly := false
+	if on {
+		if dir, ok := defaultManifestDir(settingsKey); ok {
+			out = append([]string{dir}, out...)
+			fromDefaultsOnly = len(paths) == 0
+		}
 	}
-	paths, err := againstDir(append(append([]string{}, r.Settings.CLIRegistry.Paths...), opts.Overrides.CLIRegistryPaths...), workingDir)
+	return out, fromDefaultsOnly
+}
+
+// loadFeeds loads the feed manifests the kind's word on the defaults
+// selects. No paths is no set: the resolver returns nil, and the session
+// runs none. It reports whether the default directory was the only
+// source.
+func (r *Runtime) loadFeeds(opts BuildOptions, workingDir string, on bool) (*feed.Set, bool, error) {
+	paths, fromDefaultsOnly := manifestPaths(
+		append(append([]string{}, r.Settings.Feeds.Paths...), opts.Overrides.FeedsPaths...), "feeds", on)
+	if len(paths) == 0 {
+		return nil, fromDefaultsOnly, nil
+	}
+	resolved, err := againstDir(paths, workingDir)
 	if err != nil {
-		return &Error{
+		return nil, fromDefaultsOnly, &Error{
+			Code:    CodeInvalid,
+			Field:   "feeds.paths",
+			Message: "the feeds paths cannot be resolved",
+			Err:     err,
+		}
+	}
+	set, err := feed.Load(resolved...)
+	if err != nil {
+		return nil, fromDefaultsOnly, &Error{
+			Code:    CodeInvalid,
+			Field:   "feeds.paths",
+			Message: "the feeds do not load",
+			Err:     err,
+		}
+	}
+	return set, fromDefaultsOnly, nil
+}
+
+// loadRegistry loads the cli catalog the kind's word on the defaults
+// selects, with the checks the session's own load carries: a session
+// reference the session scope does not carry fails the build, and the
+// conditions the manifests declare must be ones poo can supply.
+func (r *Runtime) loadRegistry(opts BuildOptions, workingDir string, on bool) (*cli.Catalog, bool, error) {
+	paths, fromDefaultsOnly := manifestPaths(
+		append(append([]string{}, r.Settings.CLIRegistry.Paths...), opts.Overrides.CLIRegistryPaths...), "cli_registry", on)
+	if len(paths) == 0 {
+		return nil, fromDefaultsOnly, nil
+	}
+	resolved, err := againstDir(paths, workingDir)
+	if err != nil {
+		return nil, fromDefaultsOnly, &Error{
 			Code:    CodeInvalid,
 			Field:   "cli_registry.paths",
 			Message: "the cli registry paths cannot be resolved",
 			Err:     err,
 		}
 	}
-	catalog, err := cli.Load(paths...)
+	catalog, err := cli.Load(resolved...)
 	if err != nil {
-		return &Error{
+		return nil, fromDefaultsOnly, &Error{
 			Code:    CodeInvalid,
 			Field:   "cli_registry.paths",
 			Message: "the cli registry does not load",
@@ -725,7 +778,7 @@ func (r *Runtime) resolveRegistry(opts BuildOptions, workingDir string) error {
 				continue
 			}
 			if err := exec.ValidSessionReference(binding.Scope, binding.From); err != nil {
-				return &Error{
+				return nil, fromDefaultsOnly, &Error{
 					Code:    CodeInvalid,
 					Field:   "cli_registry.paths",
 					Message: fmt.Sprintf("the tool %q declares an unknown session reference", entry.Name),
@@ -734,9 +787,103 @@ func (r *Runtime) resolveRegistry(opts BuildOptions, workingDir string) error {
 			}
 		}
 	}
+	if err := checkRegistryConditions(catalog.AvailabilityInputs()); err != nil {
+		return nil, fromDefaultsOnly, err
+	}
+	return catalog, fromDefaultsOnly, nil
+}
+
+// resolveRegistry loads the cli registries the kind's word on the
+// defaults selects. The catalog is loaded here,
+// once: the commands a session may call are the ones its registry holds
+// when the session is built, and a session does not reload one.
+func (r *Runtime) resolveRegistry(opts BuildOptions, workingDir string) error {
+	catalog, fromDefaultsOnly, err := r.loadRegistry(opts, workingDir,
+		defaultsOn(r.Settings.CLIRegistry.Defaults))
+	if err != nil {
+		return err
+	}
+	// The default directories are the build's own suggestion, so an
+	// empty one is no registry at all: a person who created the
+	// directory but holds no manifests left the build exactly where it
+	// was. Paths the settings or the overrides named keep the behavior
+	// those paths have always had.
+	if catalog != nil && catalog.Len() == 0 && fromDefaultsOnly {
+		catalog = nil
+	}
+	r.registryFromDefaults = catalog != nil && fromDefaultsOnly
 	r.Registry = catalog
 	r.loaded = catalog
-	return checkRegistryConditions(catalog.AvailabilityInputs())
+	return nil
+}
+
+// defaultsOn reports whether the default manifest directories load: the
+// key is absent or true, unless the settings turn them off.
+func defaultsOn(value *bool) bool {
+	return value == nil || *value
+}
+
+// DefaultManifest describes one manifest kind that loads from a default
+// directory.
+type DefaultManifest struct {
+	// Kind is the default directory's name under poo's config directory.
+	Kind string
+	// SettingsKey is the settings block whose defaults switch turns the
+	// kind off.
+	SettingsKey string
+}
+
+// defaultManifests are the manifest kinds that load from the default
+// directories. The list is the kinds' single owner: the resolvers read
+// their kinds here, and anything that turns the defaults off turns off
+// everything the list names, so a kind added here is isolated with the
+// others or loaded nowhere.
+var defaultManifests = []DefaultManifest{
+	{Kind: "feeds", SettingsKey: "feeds"},
+	{Kind: "cli-registry", SettingsKey: "cli_registry"},
+}
+
+// DefaultManifests returns the manifest kinds that load from the default
+// directories, and the settings block each kind turns off. A suite that
+// writes settings turns off everything this list names.
+func DefaultManifests() []DefaultManifest {
+	out := make([]DefaultManifest, len(defaultManifests))
+	copy(out, defaultManifests)
+	return out
+}
+
+// defaultManifestDir returns poo's default directory for the manifest
+// kind whose settings block is the named key, when the directory is
+// there. A missing directory is not an error: a person with no defaults
+// sees no change, the way the skills' default directory is a convention
+// and not a promise.
+func defaultManifestDir(settingsKey string) (string, bool) {
+	kind := ""
+	for _, m := range defaultManifests {
+		if m.SettingsKey == settingsKey {
+			kind = m.Kind
+			break
+		}
+	}
+	if kind == "" {
+		return "", false
+	}
+	if dir, err := UserConfigDir(); err == nil {
+		path := filepath.Join(dir, kind)
+		if info, err := os.Stat(path); err == nil && info.IsDir() {
+			return path, true
+		}
+	}
+	// The macOS fallback the settings and credentials read: a person
+	// whose poo lives under ~/.config keeps their manifests beside
+	// them, or the feature is dead for them with nothing said.
+	if fallback, ok := userConfigFallbackDir(); ok {
+		path := filepath.Join(fallback, kind)
+		if info, err := os.Stat(path); err == nil && info.IsDir() {
+			return path, true
+		}
+	}
+	return "", false
 }
 
 // againstDir resolves each path. ~ and a path that starts with ~/ are
@@ -761,27 +908,17 @@ func againstDir(paths []string, dir string) ([]string, error) {
 // once, when the session is built; a session never reloads it. Nothing
 // starts a feed here.
 func (r *Runtime) resolveFeeds(opts BuildOptions, workingDir string) error {
-	if len(r.Settings.Feeds.Paths) == 0 && len(opts.Overrides.FeedsPaths) == 0 {
-		return nil
-	}
-	paths, err := againstDir(append(append([]string{}, r.Settings.Feeds.Paths...), opts.Overrides.FeedsPaths...), workingDir)
+	set, fromDefaultsOnly, err := r.loadFeeds(opts, workingDir,
+		defaultsOn(r.Settings.Feeds.Defaults))
 	if err != nil {
-		return &Error{
-			Code:    CodeInvalid,
-			Field:   "feeds.paths",
-			Message: "the feeds paths cannot be resolved",
-			Err:     err,
-		}
+		return err
 	}
-	set, err := feed.Load(paths...)
-	if err != nil {
-		return &Error{
-			Code:    CodeInvalid,
-			Field:   "feeds.paths",
-			Message: "the feeds do not load",
-			Err:     err,
-		}
+	// An empty set the defaults alone produced is no feed set at all:
+	// the session runs nothing, and the build says nothing.
+	if set != nil && set.Len() == 0 && fromDefaultsOnly {
+		set = nil
 	}
+	r.feedsFromDefaults = set != nil && fromDefaultsOnly
 	r.Feeds = set
 	return nil
 }
@@ -907,6 +1044,15 @@ func (r *Runtime) requireRegistryTools(opts BuildOptions, names []string) error 
 	for _, name := range names {
 		if linksTool(opts, name) {
 			continue
+		}
+		switch {
+		case r.registryFromDefaults:
+			return &Error{
+				Code:  CodeUnsupported,
+				Field: "cli_registry.paths",
+				Message: fmt.Sprintf("the default cli-registry directory names a cli registry, and this binary does not link the %q tool; "+
+					"set cli_registry.defaults to false, or name the registries you want under cli_registry.paths", name),
+			}
 		}
 		source := "the settings"
 		if len(opts.Overrides.CLIRegistryPaths) > 0 {
@@ -1370,9 +1516,14 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 	if linksTool(opts, ToolBash) || r.needsExecutor() {
 		feedSource := ""
 		if r.hasFeeds() {
-			feedSource = "the settings name a feed, and "
-			if len(opts.Overrides.FeedsPaths) > 0 {
-				feedSource = "the settings or POO_FEEDS_PATH / --feeds-path name a feed, and "
+			switch {
+			case r.feedsFromDefaults:
+				feedSource = "the default feeds directory names a feed, and "
+			default:
+				feedSource = "the settings name a feed, and "
+				if len(opts.Overrides.FeedsPaths) > 0 {
+					feedSource = "the settings or POO_FEEDS_PATH / --feeds-path name a feed, and "
+				}
 			}
 		}
 		if opts.Executors == nil {
@@ -1454,18 +1605,10 @@ func (r *Runtime) resolveFeedRuns(opts BuildOptions) error {
 	if !r.hasFeeds() {
 		return nil
 	}
-	if r.executor == nil {
-		source := "the settings"
-		if len(opts.Overrides.FeedsPaths) > 0 {
-			source = "the settings or POO_FEEDS_PATH / --feeds-path"
-		}
-		message := source + " name a feed, and this binary has no executor to run a feed's command"
-		return &Error{
-			Code:    CodeUnsupported,
-			Field:   "feeds.paths",
-			Message: message,
-		}
-	}
+	// A feed is a command of the session's own, so the executor the
+	// session resolves above is the one the feed's command runs through:
+	// the binary that reaches here with no executor has already failed
+	// there.
 	lookup := exec.Lookup(r.Env)
 	specs := make([]poo.FeedSpec, 0, r.Feeds.Len())
 	for _, spec := range r.Feeds.Specs() {
