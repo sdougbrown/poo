@@ -392,7 +392,7 @@ context:
   mine:
     ratio: 0.85
     keep_recent_tokens: 12000
-    max_tokens: 4096
+    max_tokens: 32768
     pointer_max_tokens: 1024
 ```
 

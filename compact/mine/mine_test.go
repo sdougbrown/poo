@@ -236,6 +236,19 @@ func TestTheRunMinesAndCarriesOn(t *testing.T) {
 		}
 	}
 
+	// The record's side report says what the pass cost: a fork whose
+	// reply arrived whole and whose pointers were read.
+	fork := compaction(t, sink).Compaction.Side.Fork
+	if fork == nil {
+		t.Fatal("the compaction carries no fork side report")
+	}
+	if fork.Bytes != len("- the file main.go was edited\n- the error in the log") {
+		t.Errorf("the fork's side report counts %d bytes, want the pointers' length", fork.Bytes)
+	}
+	if fork.Truncated || fork.ToolCall {
+		t.Errorf("the fork's side report says truncated=%v toolcall=%v, want both false", fork.Truncated, fork.ToolCall)
+	}
+
 	// The model reads the reconstruction where the covered turns were,
 	// with the file list and the retention pointer after it.
 	text := replacementText(t, sink)
@@ -361,6 +374,13 @@ func TestAMinedReconstructionRunsWhenTheForkFails(t *testing.T) {
 	if ask := asks[0].Messages[1].Text(); strings.Contains(ask, "</pointers>") {
 		t.Errorf("the mining request is %q, want it to carry no pointers", ask)
 	}
+
+	// The record's side report carries the pass's failure: the
+	// diagnostic a consumer of the compaction record reads.
+	fork := compaction(t, sink).Compaction.Side.Fork
+	if fork == nil || fork.Error == "" {
+		t.Error("the compaction carries no fork failure in its side report")
+	}
 }
 
 // TestTheMiningRequestUsesTheSideModel covers the compaction role: a
@@ -405,6 +425,9 @@ func TestTheMiningRequestUsesTheSideModel(t *testing.T) {
 	}
 	if sideReqs[0].Model != "side-model" {
 		t.Errorf("the side request names the model %q, want side-model", sideReqs[0].Model)
+	}
+	if sideReqs[0].SessionID != "s1-compaction" {
+		t.Errorf("the side request names the session %q, want s1-compaction", sideReqs[0].SessionID)
 	}
 	if ask := sideReqs[0].Messages[1].Text(); !strings.Contains(ask, "<pointers>") {
 		t.Errorf("the mining request is %q, want it to carry the pointers", ask)

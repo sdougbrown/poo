@@ -995,6 +995,17 @@ func (s *Session) DeciderModel() (ModelInfo, bool) {
 	return s.deciderModel, true
 }
 
+// CompactionModel returns the model the session's compaction strategies
+// reconstruct with, and reports whether the session has one.
+func (s *Session) CompactionModel() (ModelInfo, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.opts.SideModel.ModelID == "" {
+		return ModelInfo{}, false
+	}
+	return s.opts.SideModel, true
+}
+
 // Broken reports that the store failed and the session cannot be used.
 func (s *Session) Broken() bool {
 	s.mu.Lock()

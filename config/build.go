@@ -2723,6 +2723,22 @@ func (r *Runtime) DeciderModel() (poo.ModelInfo, error) {
 	return model, nil
 }
 
+// CompactionModel returns the model the session's compaction strategies
+// reconstruct with.
+//
+// A session without a compaction role has none: the failure is only a
+// failure when the caller asked for one.
+func (r *Runtime) CompactionModel() (poo.ModelInfo, error) {
+	if r.Catalog == nil {
+		return poo.ModelInfo{}, &Error{Code: CodeInvalid, Message: "the build has no catalog"}
+	}
+	model, err := r.Catalog.Role(catalog.RoleCompaction)
+	if err != nil {
+		return poo.ModelInfo{}, fmt.Errorf("config: %w", err)
+	}
+	return model, nil
+}
+
 // Transport returns the transport for a model.
 //
 // The transport talks to the endpoint the model is served by, with the

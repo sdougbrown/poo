@@ -103,6 +103,9 @@ type ModelRoles struct {
 	Chat string `json:"chat,omitempty"`
 	// Decider is the name of the decision model.
 	Decider string `json:"decider,omitempty"`
+	// Compaction is the name of the model the strategies reconstruct
+	// with.
+	Compaction string `json:"compaction,omitempty"`
 }
 
 // The reasoning modes a model's catalog entry reports.

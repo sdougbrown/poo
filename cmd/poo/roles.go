@@ -47,11 +47,11 @@ func handleRoles(inv clicontract.Invocation, stdout, stderr io.Writer) exit {
 	// this reports on: a role assigned in the settings but unknown to the catalog would
 	// be enforced by neither.
 	assigned := cat.Roles()
-	names := make([]string, 0, len(assigned)+2)
+	names := make([]string, 0, len(assigned)+3)
 	for role := range assigned {
 		names = append(names, string(role))
 	}
-	for _, role := range []catalog.Role{catalog.RoleChat, catalog.RoleDecider} {
+	for _, role := range []catalog.Role{catalog.RoleChat, catalog.RoleDecider, catalog.RoleCompaction} {
 		if _, ok := assigned[role]; !ok {
 			names = append(names, string(role))
 		}
@@ -62,8 +62,8 @@ func handleRoles(inv clicontract.Invocation, stdout, stderr io.Writer) exit {
 		chosen, ok := assigned[role]
 		if !ok {
 			// A role the settings do not assign is a role a session does
-			// without: the run's flags may name the chat model instead, and the
-			// decider is optional.
+			// without: the run's flags may name the chat model instead, and
+			// the decider and the compaction role are optional.
 			fmt.Fprintf(w, "%s\t-\t-\t-\n", role)
 			continue
 		}
