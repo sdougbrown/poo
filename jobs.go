@@ -265,6 +265,10 @@ type jobState struct {
 	// arguments are the call's raw arguments, so a completion still
 	// shows the call to its hooks.
 	arguments json.RawMessage
+	// dupKey is the key the duplicate rule matches on: the tool plus
+	// the canonical form of the call's data, without the reserved
+	// background argument.
+	dupKey string
 	// completing reports that the job's completion owns the chain, so
 	// only one caller runs it.
 	completing bool
@@ -445,7 +449,18 @@ func (s *Session) startJob(run *runState, turn int, handle, tool string, prepare
 		s.mu.Unlock()
 		return "", false, false, ""
 	}
-	if dup := s.duplicateJobLocked(tool, arguments); dup != "" {
+	// The duplicate key keys the call's data, not the request's
+	// envelope: the reserved background argument is the envelope, so a
+	// call that asks for the background and one that need not ask are
+	// the same job to the tool.
+	args := arguments
+	if s.backgroundModeOf(tool) != BackgroundNever {
+		if _, stripped, err := backgroundArg(arguments); err == nil {
+			args = stripped
+		}
+	}
+	dupKey := exactKeyOf(tool, prepared, args)
+	if dup := s.duplicateJobLocked(dupKey); dup != "" {
 		s.mu.Unlock()
 		return "", false, false, fmt.Sprintf(DuplicateJobText, tool, dup)
 	}
@@ -479,6 +494,7 @@ func (s *Session) startJob(run *runState, turn int, handle, tool string, prepare
 		done:      make(chan struct{}),
 		prepared:  prepared,
 		arguments: cloneArguments(arguments),
+		dupKey:    dupKey,
 	}
 	s.jobs[jobID] = job
 	s.jobOrder = append(s.jobOrder, jobID)
@@ -544,41 +560,22 @@ func (s *Session) startJob(run *runState, turn int, handle, tool string, prepare
 	return jobID, true, false, ""
 }
 
-// duplicateJobLocked names the running job whose tool and arguments
-// match the call, or "" when no running job does. The match compares
-// the tool's name and the arguments' canonical JSON, so the same data
-// in a different key order still matches, and data that differs still
-// differs. The caller holds the session's lock.
-func (s *Session) duplicateJobLocked(tool string, arguments json.RawMessage) string {
-	canonical := canonicalArguments(arguments)
+// duplicateJobLocked names the running job whose duplicate key matches
+// the call's, or "" when no running job does. The key is the tool
+// plus the call's canonical data, so the same data in a different key
+// order still matches, and data that differs still differs. The caller
+// holds the session's lock.
+func (s *Session) duplicateJobLocked(dupKey string) string {
 	for _, id := range s.jobOrder {
 		job, ok := s.jobs[id]
-		if !ok || job.ended || job.tool != tool {
+		if !ok || job.ended {
 			continue
 		}
-		if canonicalArguments(job.arguments) == canonical {
+		if job.dupKey == dupKey {
 			return id
 		}
 	}
 	return ""
-}
-
-// canonicalArguments renders the arguments' canonical JSON, so two
-// calls that carry the same data compare equal whatever spacing or key
-// order they use. Arguments that do not parse compare as their bytes.
-func canonicalArguments(arguments json.RawMessage) string {
-	if len(arguments) == 0 {
-		return ""
-	}
-	var v any
-	if err := json.Unmarshal(arguments, &v); err != nil {
-		return string(arguments)
-	}
-	canonical, err := json.Marshal(v)
-	if err != nil {
-		return string(arguments)
-	}
-	return string(canonical)
 }
 
 // removeJob forgets a job that never ran.
@@ -1084,13 +1081,6 @@ func (s *Session) queueFeedInput(feed, from, text string, attachments []Attachme
 	if cap := s.feedBacklogLocked(origin); cap > 0 && s.pendingFeedInputsLocked(origin) >= cap {
 		droppedID = s.dropOldestFeedInputLocked(origin)
 	}
-	drops := s.feedDrops[origin]
-	if droppedID != "" {
-		drops++
-	}
-	if s.feedDrops != nil {
-		s.feedDrops[origin] = 0
-	}
 	s.inputSeq++
 	inputID := jobInputID(s.opts.SessionID, s.inputSeq)
 	s.jobCompletions++
@@ -1102,10 +1092,10 @@ func (s *Session) queueFeedInput(feed, from, text string, attachments []Attachme
 	}()
 
 	rendered := feedInputText(feed, from, text)
-	if drops > 0 {
+	if droppedID != "" {
 		// The note rides the input's stored text, so a restored session
 		// delivers the same words.
-		rendered += "\n" + feedDropNote(drops)
+		rendered += "\n" + feedDropNote
 	}
 	// The dropped input's fate is recorded before the acceptance, so a
 	// store that refuses the acceptance still leaves the dropped input
@@ -1216,14 +1206,10 @@ var attributeEscaper = strings.NewReplacer(
 	"\r", `&#13;`,
 )
 
-// feedDropNote renders the note a feed's input carries when earlier
-// inputs of the same feed were dropped unread.
-func feedDropNote(n int) string {
-	if n == 1 {
-		return "[poo: 1 earlier input from this feed was dropped unread]"
-	}
-	return fmt.Sprintf("[poo: %d earlier inputs from this feed were dropped unread]", n)
-}
+// feedDropNote is the note a feed's input carries when its acceptance
+// dropped the feed's oldest undelivered input. A drop happens with an
+// acceptance, so the input the note rides names exactly that drop.
+const feedDropNote = "[poo: 1 earlier input from this feed was dropped unread]"
 
 // feedBacklogLocked returns how many undelivered inputs the feed may
 // hold in the queue. The cap is the feed's own, and a feed that sets

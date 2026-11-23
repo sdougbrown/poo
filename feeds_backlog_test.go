@@ -137,6 +137,42 @@ func TestAFeedBacklogDropsItsOldestInput(t *testing.T) {
 	}
 }
 
+// TestADroppedInputStaysFatedWhenTheAcceptanceFails covers the order:
+// the drop's record is written before the acceptance, so a store that
+// refuses the acceptance still leaves the dropped input fated — a
+// restore reads the fate and never re-queues it.
+func TestADroppedInputStaysFatedWhenTheAcceptanceFails(t *testing.T) {
+	tr := scripted([]fakeResponse{{text: "the answer"}})
+	sink := &failingSink{failRecord: "input.queued", failAfter: 2}
+	opts := testOptions(t, tr, &echoTool{}, sink)
+	opts.Jobs = poo.JobOptions{OnIdle: poo.OnIdleHold}
+	opts.Feeds = []poo.FeedSpec{backlogFeedSpec("inbox", 2)}
+	s := newTestSession(t, opts)
+
+	if err := poo.QueueFeedInput(s, "inbox", "", "one"); err != nil {
+		t.Fatalf("queueing one: %v", err)
+	}
+	if err := poo.QueueFeedInput(s, "inbox", "", "two"); err != nil {
+		t.Fatalf("queueing two: %v", err)
+	}
+	if err := poo.QueueFeedInput(s, "inbox", "", "three"); err == nil {
+		t.Fatal("the refused acceptance returned no error")
+	}
+	if got := sink.count("input.dropped"); got != 1 {
+		t.Fatalf("the log holds %d input.dropped record(s), want 1", got)
+	}
+
+	// The dropped input is fated, so a restore holds only the one
+	// undelivered input that was accepted.
+	pending := poo.PendingJobResults(sink.records)
+	if len(pending) != 1 {
+		t.Fatalf("the log holds %d pending inputs, want 1", len(pending))
+	}
+	if !strings.Contains(pending[0].Text, "two") {
+		t.Errorf("the pending input is %q, want the second one", pending[0].Text)
+	}
+}
+
 // TestAFeedWithoutASpecTakesTheDefaultBacklog covers the default: a
 // feed that sets no cap holds DefaultFeedBacklog undelivered inputs,
 // and the next one drops the oldest.

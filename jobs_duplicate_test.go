@@ -93,6 +93,49 @@ func TestAJobThatMatchesARunningJobIsRefused(t *testing.T) {
 	}
 }
 
+// TestATwinThatDiffersOnlyInTheBackgroundArgumentIsRefused covers the
+// envelope: the reserved background argument is not part of a call's
+// data, so a tool that runs every call in the background refuses the
+// twin that spells the flag differently.
+func TestATwinThatDiffersOnlyInTheBackgroundArgumentIsRefused(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{
+			rawJobCall("call_1", `{"text":"one"}`),
+			rawJobCall("call_2", `{"background":true,"text":"one"}`),
+		}},
+	})
+	sink := &recordingSink{}
+	tool := pootest.NewJobTool("job", poo.BackgroundAlways)
+	opts := jobOptions(t, tr, tool, sink)
+	opts.MaxTurns = 1
+	s := newTestSession(t, opts)
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	if _, err := s.Wait(context.Background()); err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+
+	refused := false
+	for _, rec := range sink.allRecords() {
+		r, ok := rec.(*poo.ToolResultRecord)
+		if !ok || r.CallID != "call_2" {
+			continue
+		}
+		if r.IsError && strings.Contains(r.Text, "already running as job j1") {
+			refused = true
+		} else {
+			t.Errorf("the flagged twin was not refused: %q", r.Text)
+		}
+	}
+	if !refused {
+		t.Error("the log holds no refusal for the flagged twin")
+	}
+	if got := sink.count("job.started"); got != 1 {
+		t.Errorf("the log holds %d job.started records, want 1", got)
+	}
+}
+
 // TestARepeatCallAfterTheJobEndedRuns covers the rule's edge: the
 // duplicate rule refuses a call while its twin runs, and a call that
 // arrives after the twin ended is a job again.
