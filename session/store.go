@@ -217,6 +217,25 @@ func NewStore(dir string, opts ...Option) (*FileStore, error) {
 // Dir returns the directory the store keeps its sessions in.
 func (s *FileStore) Dir() string { return s.dir }
 
+// DirStore is a store that keeps its sessions in a directory.
+//
+// A consumer that needs the directory asks StoreDir, so a store of its own
+// answers it by having the method: the seam is the method, not the concrete
+// type it is declared on.
+type DirStore interface {
+	// Dir returns the directory the store keeps its session files in.
+	Dir() string
+}
+
+// StoreDir returns the directory store keeps its session files in, and the
+// empty string for a store that keeps none.
+func StoreDir(store Store) string {
+	if dir, ok := store.(DirStore); ok {
+		return dir.Dir()
+	}
+	return ""
+}
+
 // path returns the path of a session's file.
 func (s *FileStore) path(id string) string {
 	return filepath.Join(s.dir, id+".jsonl")

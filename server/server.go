@@ -509,7 +509,7 @@ func (f *Server) Create(ctx context.Context, params protocol.CreateParams, env w
 		info.Warnings = append(info.Warnings, warning)
 	}
 	if mode == string(session.ModeLogged) {
-		info.SessionDir = storeDir(store)
+		info.SessionDir = session.StoreDir(store)
 	}
 	return sess, info, nil
 }
@@ -571,7 +571,7 @@ func (f *Server) Load(ctx context.Context, params protocol.LoadParams, env wire.
 	}
 	info := &wire.Info{
 		Mode:            string(loaded.Metadata.Mode),
-		SessionDir:      storeDir(store),
+		SessionDir:      session.StoreDir(store),
 		Tools:           toolInfos(runtime.Profile.Tools),
 		Models:          rolesOf(resumed.Session, runtime),
 		RecoveredTail:   loaded.RecoveredTail,
@@ -824,14 +824,6 @@ func toolInfos(tools []poo.ToolInfo) []protocol.ToolInfo {
 		})
 	}
 	return out
-}
-
-// storeDir returns the directory a store keeps its sessions in.
-func storeDir(store session.Store) string {
-	if file, ok := store.(*session.FileStore); ok {
-		return file.Dir()
-	}
-	return ""
 }
 
 // opNames returns the names of a model's operations.

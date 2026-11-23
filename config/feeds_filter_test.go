@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
@@ -132,6 +133,89 @@ func TestAScriptFilterPassesTheRecordItReads(t *testing.T) {
 	}
 	if queued[0].Text != `<feed name="chat" from="alice">the first message</feed>` {
 		t.Errorf("the first input is %q, want the filter's first record", queued[0].Text)
+	}
+}
+
+// TestAScriptFilterPassesAnImageThrough covers a record that names an image:
+// the picture is the record's, the filter passes it back with the rest, and
+// the session delivers it beside the text. The path the filter wrote back is
+// the file the bytes are read from, and the media type it wrote is the one the
+// delivery holds.
+func TestAScriptFilterPassesAnImageThrough(t *testing.T) {
+	png := append([]byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}, 1, 2, 3, 4)
+	dir := t.TempDir()
+	imagePath := filepath.Join(dir, "shot.png")
+	if err := os.WriteFile(imagePath, png, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	record := `{"text":"the look","from":"alice","image":{"path":"` + imagePath + `","media":"image/png"}}`
+	records := filepath.Join(dir, "records.jsonl")
+	if err := os.WriteFile(records, []byte(record+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	seen := filepath.Join(dir, "filter.stdin")
+	manifest := `{
+  "version": 1,
+  "feeds": {
+    "inbox": {
+      "command": ["sh", "-c", "cat \"$1\"; sleep 60", "feed", "` + records + `"],
+      "on_idle": "wake",
+      "filter": {"command": ["` + filterScript(t, "filter-echo") + `"]},
+      "env": {"FIXTURE_FILTER_LOG": "` + seen + `"}
+    }
+  }
+}`
+	path := filepath.Join(dir, "feeds.json")
+	if err := os.WriteFile(path, []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	settings, err := config.Parse([]byte(theFeedsSettings(path)), config.FormatYAML)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+	// The session's model reads images, so the feed's picture is one the
+	// admission takes.
+	runtime.Options.Model.Inputs = []poo.Modality{poo.ModalityText, poo.ModalityImage}
+	sink := pootest.NewSink()
+	runtime.Options.Transport = pootest.NewTransport(pootest.Turn{Text: "ack"}, pootest.Turn{Text: "ack"})
+	runtime.Options.Sink = sink
+	sess, err := poo.New(runtime.Options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sess.Close() })
+
+	waitUntil(t, "the message with its picture to be delivered", func() bool {
+		return deliveredFeedMessage(sink) != nil
+	})
+	// The record the filter read named the picture, path and media type
+	// included, so the image branch of the record a filter is handed is the
+	// one the feed's own input carried.
+	logged, err := os.ReadFile(seen)
+	if err != nil {
+		t.Fatalf("reading the filter's log: %v", err)
+	}
+	if got := strings.TrimSpace(string(logged)); got != record {
+		t.Errorf("the filter read %q, want %q", got, record)
+	}
+	// What the filter wrote back is the message: the picture is read again
+	// from the path it named, and the media type it named is the one the
+	// message carries.
+	queued := queuedFeedInputs(sink)
+	if len(queued) != 1 {
+		t.Fatalf("the session queued %d feed inputs, want the one message", len(queued))
+	}
+	if queued[0].Text != `<feed name="inbox" from="alice">the look</feed>` {
+		t.Errorf("the input is %q, want the filter's record beside the picture", queued[0].Text)
+	}
+	if len(queued[0].Attachments) != 1 || queued[0].Attachments[0].MediaType != "image/png" || !bytes.Equal(queued[0].Attachments[0].Data, png) {
+		t.Errorf("the queued input holds %+v, want the png the filter's record names", queued[0].Attachments)
+	}
+	message := deliveredFeedMessage(sink)
+	if len(message.Content) != 2 || message.Content[1].Kind != poo.ContentImage ||
+		message.Content[1].MediaType != "image/png" || !bytes.Equal(message.Content[1].Data, png) {
+		t.Errorf("the delivered message holds %+v, want the text and its png", message.Content)
 	}
 }
 

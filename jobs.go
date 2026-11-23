@@ -55,6 +55,15 @@ const (
 	// DefaultFeedBacklog is how many undelivered inputs a feed may hold
 	// when its spec sets no cap of its own.
 	DefaultFeedBacklog = 16
+	// MaxFeedInstances is how many feed instances one session runs at
+	// once: the instances a job list shows, whether they are running,
+	// waiting to restart or suspended.
+	//
+	// A subscription is the model's to make, and each distinct scope value
+	// starts a process of its own, so without a cap a prompt-injected loop
+	// could grow the session's processes without bound. A call beyond the
+	// cap is refused, and stopping an instance with cancel_job makes room.
+	MaxFeedInstances = 8
 )
 
 // The texts the plan fixes.

@@ -3,6 +3,7 @@ package poo_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -333,6 +334,56 @@ func TestResubscribingAStoppedFeedStartsItAgain(t *testing.T) {
 	}
 	if strings.Contains(results[1].Text, "already running") {
 		t.Errorf("the second call says %q, want it to report a start", results[1].Text)
+	}
+}
+
+// TestSubscribingBeyondTheInstanceCapIsRefused covers the cap: a session runs
+// at most MaxFeedInstances instances at once, and the call that would start
+// one more is refused, naming the cap, so a loop that subscribes with a fresh
+// scope value each time cannot grow the session's processes without bound.
+func TestSubscribingBeyondTheInstanceCapIsRefused(t *testing.T) {
+	sink := &recordingSink{}
+	s := newTestSession(t, testOptions(t, scripted(nil), &echoTool{}, sink), poo.WithFeeds(theOptionalFeedSpec(waitingFeed, "")))
+
+	instances := make([]string, 0, poo.MaxFeedInstances)
+	for i := range poo.MaxFeedInstances {
+		scope := map[string]string{"url": fmt.Sprintf("https://example.test/%d", i)}
+		instance, started, err := poo.SubscribeFeed(s, "git-feedback", scope)
+		if err != nil || !started {
+			t.Fatalf("starting instance %d: started=%v, err=%v", i, started, err)
+		}
+		instances = append(instances, instance)
+	}
+	waitFor(t, "the instances to start", func() bool { return len(feedStarts(sink)) == poo.MaxFeedInstances })
+
+	// One more is past the cap, and the refusal says how many the session
+	// runs and how to make room.
+	refused, started, err := poo.SubscribeFeed(s, "git-feedback", map[string]string{"url": "https://example.test/one-too-many"})
+	if err == nil {
+		t.Fatalf("the call past the cap reached the instance %q (started=%v), want a refusal", refused, started)
+	}
+	if !strings.Contains(err.Error(), fmt.Sprintf("%d", poo.MaxFeedInstances)) || !strings.Contains(err.Error(), "cancel_job") {
+		t.Errorf("the refusal is %q, want it to name the cap and how to make room", err)
+	}
+	if starts := feedStarts(sink); len(starts) != poo.MaxFeedInstances {
+		t.Errorf("the session started %d attempts, want the %d instances the cap allows", len(starts), poo.MaxFeedInstances)
+	}
+
+	// The cap counts instances, not calls: a subscription that reaches one
+	// that is already there is never refused.
+	if instance, started, err := poo.SubscribeFeed(s, "git-feedback", map[string]string{"url": "https://example.test/0"}); err != nil || started || instance != instances[0] {
+		t.Fatalf("the repeated call reached %q (started=%v, err=%v), want the running instance %q", instance, started, err, instances[0])
+	}
+
+	// Stopping an instance makes room, and the freed slot is the one the
+	// next call takes.
+	if err := s.CancelJob(instances[0]); err != nil {
+		t.Fatalf("stopping the instance: %v", err)
+	}
+	waitFor(t, "the instance to stop", func() bool { return len(feedEnds(sink)) == 1 })
+	instance, started, err := poo.SubscribeFeed(s, "git-feedback", map[string]string{"url": "https://example.test/one-too-many"})
+	if err != nil || !started {
+		t.Fatalf("the call after a stop reached %q (started=%v, err=%v), want a new instance", instance, started, err)
 	}
 }
 

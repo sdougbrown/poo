@@ -105,6 +105,14 @@ type FeedFilterPrompt struct {
 	MinNoProbability float64
 }
 
+// DefaultPromptMinNoProbability is the probability of no at which a filter
+// prompt drops a message, when neither the call nor the manifest names one.
+//
+// A prompt is the model's judgment about what is worth delivering, and its
+// threshold is not expected to be a considered one: the default sits at the
+// low end of the confidence a manifest usually asks for.
+const DefaultPromptMinNoProbability = 0.6
+
 // FeedFault is a feed's filter failing closed: a record the filter would
 // not pass, and the attempt it failed.
 //
@@ -1157,6 +1165,18 @@ func (s *Session) listedFeedsLocked() []*feedState {
 	return out
 }
 
+// listedFeedCountLocked returns how many feeds the job lists show. The
+// caller holds the session's lock.
+func (s *Session) listedFeedCountLocked() int {
+	n := 0
+	for _, f := range s.feedOrder {
+		if f.listed() {
+			n++
+		}
+	}
+	return n
+}
+
 // subscribeFeed starts one instance of an optional feed, or reaches the
 // instance the same feed and scope already named, and applies the call's
 // filter prompt when it names one.
@@ -1174,6 +1194,11 @@ func (s *Session) listedFeedsLocked() []*feedState {
 // the question the decision model is asked about each record, so it replaces
 // the manifest's while it is set, and a feed that cannot be asked the
 // question refuses it.
+//
+// A new instance is refused once the session runs MaxFeedInstances of them:
+// the instances are processes, and a call with a fresh scope value each time
+// is the one way a model can start them without bound. A call that reaches an
+// instance already there is never refused, so the cap costs no idempotence.
 //
 // The call reports the instance's origin and whether this call started
 // it.
@@ -1217,11 +1242,23 @@ func (s *Session) subscribeFeed(name string, scope map[string]string, prompt *Fe
 		// The instance stopped or is suspended: its supervisor is gone with
 		// its context, so a re-arm is a fresh context and a fresh
 		// supervisor. The prompt is the instance's own, and stays with it.
+		// The context being replaced is released here, because its
+		// supervisor is not the only holder of it: leaving it to the
+		// garbage collector would keep a child of the job context alive per
+		// re-arm.
+		f.cancel(ErrJobCancelled)
 		f.ctx, f.cancel = context.WithCancelCause(s.jobCtx)
 		f.done = make(chan struct{})
 		f.startedAt = time.Now()
 		f.status = feedRunning
 	default:
+		// The instances a session runs at once are capped: a call is the
+		// model's to make, and one subscribed with a fresh scope value each
+		// time would otherwise start a process per value without bound.
+		if running := s.listedFeedCountLocked(); running >= MaxFeedInstances {
+			s.mu.Unlock()
+			return "", false, InvalidArgsf("%s: the session already runs %d feeds at once, which is the most it runs; stop one with cancel_job first", SubscribeFeedToolName, MaxFeedInstances)
+		}
 		f = s.newFeedState(spec, values)
 		s.feeds[id] = f
 		s.feedOrder = append(s.feedOrder, f)

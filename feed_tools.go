@@ -24,6 +24,14 @@ var subscribeFeedSection = prompt.MustCompile(SubscribeFeedToolName, subscribeFe
 // the session does not start itself.
 const SubscribeFeedToolName = "subscribe_feed"
 
+// defaultPromptMinNoProbabilityText is the schema's description of the
+// threshold a prompt takes, written from the default beside the
+// filter-prompt type so the two cannot disagree.
+var defaultPromptMinNoProbabilityText = fmt.Sprintf(
+	"The probability of no at which a message is dropped, used with the prompt. The feed's own value applies when it names one, and %v when it names none.",
+	DefaultPromptMinNoProbability,
+)
+
 // SubscribeFeedTool is the core's own tool for starting an optional feed.
 //
 // The tool only starts work the session declared and the operator loaded:
@@ -52,7 +60,7 @@ func (t *SubscribeFeedTool) Spec() ToolSpec {
     "feed": {"type": "string", "description": "The feed's name, as the section that lists the optional feeds spells it."},
     "scope": {"type": "object", "description": "The values the feed watches, keyed by the scope fields the feed declares.", "additionalProperties": true},
     "prompt": {"type": "string", "description": "The question to ask the decision model about each message, replacing the feed's own question while it is set. Phrase it so yes means deliver. An empty string clears it, and the feed's own question applies again."},
-    "min_no_probability": {"type": "number", "exclusiveMinimum": 0.5, "maximum": 1, "description": "The probability of no at which a message is dropped, used with the prompt. The feed's own value applies when it names one, and 0.6 when it names none."}
+    "min_no_probability": {"type": "number", "exclusiveMinimum": 0.5, "maximum": 1, "description": "` + defaultPromptMinNoProbabilityText + `"}
   },
   "required": ["feed"]
 ,"additionalProperties":false}`),

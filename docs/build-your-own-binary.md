@@ -439,6 +439,14 @@ subscription that stopped starts again on the next call to it. The fields
 and their patterns are in the prompt, so the model knows what it may ask
 for.
 
+A session runs at most eight instances at once, counting the ones a job list
+shows: running, waiting to restart and suspended. A call that would start a
+ninth is refused with the cap named, because each distinct set of values is a
+process of its own and a model that subscribed in a loop could grow the
+session's processes without bound. Stopping an instance with `cancel_job`
+makes room, and a call that reaches an instance already there is never
+refused.
+
 **Filters before delivery.** An optional `filter` names one of two kinds:
 a `question`, put to the session's decision model, or a `command`, run as
 one process per record. A manifest that names both fails the load. A feed

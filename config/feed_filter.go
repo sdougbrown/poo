@@ -23,14 +23,6 @@ const maxFeedFilterBytes = 8 << 10
 // delivered.
 const filterDecisionTimeout = 1500 * time.Millisecond
 
-// defaultPromptMinNoProbability is the probability of no at which a filter
-// prompt drops a message, when neither the call nor the manifest names one.
-//
-// A prompt is the model's judgment about what is worth delivering, and its
-// threshold is not expected to be a considered one: the default sits at the
-// low end of the confidence a manifest usually asks for.
-const defaultPromptMinNoProbability = 0.6
-
 // filterEmitter returns the delivery wrapper a feed's manifest asks for.
 //
 // A feed names one filter kind or none: the command filter screens each
@@ -142,7 +134,7 @@ func questionOf(io poo.FeedIO, manifest *feed.Filter) (poo.FeedFilterPrompt, boo
 	}
 	// The manifest's threshold is always above 0.5: readFilter enforces
 	// it. A zero here would overwrite the default and drop every message.
-	prompt.MinNoProbability = defaultPromptMinNoProbability
+	prompt.MinNoProbability = poo.DefaultPromptMinNoProbability
 	if manifest != nil {
 		prompt.MinNoProbability = manifest.MinNoProbability
 	}

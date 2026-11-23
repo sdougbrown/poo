@@ -2524,7 +2524,7 @@ func (r *Runtime) CreateSession(ctx context.Context, store session.Store, create
 	opts := r.Options
 	// The feed fault logs live beside the session's files, so the
 	// session's directory is the store's own.
-	if dir := storeSessionDir(store); dir != "" {
+	if dir := session.StoreDir(store); dir != "" {
 		opts.SessionDir = dir
 	}
 	// The session works in the directory its header names: the tools
@@ -2577,7 +2577,7 @@ func (r *Runtime) ResumeSession(ctx context.Context, store session.Store, id str
 	opts := r.Options
 	// The feed fault logs live beside the session's files, so the
 	// session's directory is the store's own.
-	if dir := storeSessionDir(store); dir != "" {
+	if dir := session.StoreDir(store); dir != "" {
 		opts.SessionDir = dir
 	}
 	// A restored session continues in the directory it was recorded
@@ -2585,15 +2585,6 @@ func (r *Runtime) ResumeSession(ctx context.Context, store session.Store, id str
 	// none.
 	opts.WorkingDir = ""
 	return session.Resume(ctx, store, id, opts, append(fns, poo.WithPolicy(r.Policy), poo.WithPromptLoader(r.SessionPrompt))...)
-}
-
-// storeSessionDir returns the directory a store keeps its session files
-// in, and empty for a store that keeps none.
-func storeSessionDir(store session.Store) string {
-	if file, ok := store.(*session.FileStore); ok {
-		return file.Dir()
-	}
-	return ""
 }
 
 // PromptOverrides are the prompt changes a client asks for.
