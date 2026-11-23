@@ -83,8 +83,8 @@ github.com/sdougbrown/cli-contract v0.10.0 h1:W6+jFVclqH6fB+D5gJWW80avdUzQTDYlL5
 github.com/sdougbrown/cli-contract v0.10.0/go.mod h1:gUVC+vCw8jx+czT9PMdPsMQPq4pJMWBh0tsOoOKdEMo=
 github.com/sdougbrown/cli-registry v0.6.2 h1:Eg6f+j+9x6iiXvzFhu6auUaifMhHHBlWpwoy4PzC5/Q=
 github.com/sdougbrown/cli-registry v0.6.2/go.mod h1:940fkUMIzh1pgY3nzKfWiyM2RChY9IlU4qhTIjrAiK8=
-github.com/sdougbrown/readline v1.3.1-0.20261122225819-72927df9bfd2 h1:Q0q7/OG/hkVmD7+3AWsJNCig8Tjt1jKuXr342AxPU9k=
-github.com/sdougbrown/readline v1.3.1-0.20261122225819-72927df9bfd2/go.mod h1:bOpqx2/VqGlIoobyWR1Vgt/p5FiMfIHj4OicPuw6RfU=
+github.com/sdougbrown/readline v1.3.0-poo.7 h1:e220CYBH9Lpr75G1z/NJaR0OkLu3aAa+CKjWWq1gtsE=
+github.com/sdougbrown/readline v1.3.0-poo.7/go.mod h1:bOpqx2/VqGlIoobyWR1Vgt/p5FiMfIHj4OicPuw6RfU=
 github.com/sebdah/goldie/v2 v2.8.0 h1:dZb9wR8q5++oplmEiJT+U/5KyotVD+HNGCAc5gNr8rc=
 github.com/sebdah/goldie/v2 v2.8.0/go.mod h1:oZ9fp0+se1eapSRjfYbsV/0Hqhbuu3bJVvKI/NNtssI=
 github.com/sergi/go-diff v1.4.0 h1:n/SP9D5ad1fORl+llWyN+D6qoUETXNZARKjyY2/KVCw=
