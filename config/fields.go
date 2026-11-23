@@ -88,11 +88,13 @@ func fieldsOf(s *Settings) SettingsFields {
 	f.FinishSchemaFile = text(s.Finish.SchemaFile)
 
 	f.CliRegistryPaths = list(s.CLIRegistry.Paths)
+	f.CliRegistryDefaults = flag(s.CLIRegistry.Defaults)
 
 	f.SkillsDefault = flag(s.Skills.Default)
 	f.SkillsUserPath = pointer(s.Skills.UserPath)
 	f.SkillsPaths = list(s.Skills.Paths)
 	f.FeedsPaths = list(s.Feeds.Paths)
+	f.FeedsDefaults = flag(s.Feeds.Defaults)
 
 	f.SessionMode = pointer(s.Session.Mode)
 	f.SessionDir = pointer(s.Session.Dir)

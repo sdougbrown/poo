@@ -58,3 +58,31 @@ func TestTheFieldsKeepAnEmptyChainApart(t *testing.T) {
 		t.Errorf("the fields hold %v, want no chain: the settings named none", got)
 	}
 }
+
+// TestTheFieldsHoldTheManifestDefaults covers the two defaults leaves:
+// a switch the settings name is present with its value, and one they do
+// not name is absent, like every other leaf the bridge holds.
+func TestTheFieldsHoldTheManifestDefaults(t *testing.T) {
+	named, err := Parse([]byte("version: 1\nfeeds:\n  defaults: false\ncli_registry:\n  defaults: true\n"), FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	fields := fieldsOf(named)
+	if got := fields.FeedsDefaults; got == nil || *got {
+		t.Errorf("the fields hold feeds.defaults %v, want present and off", got)
+	}
+	if got := fields.CliRegistryDefaults; got == nil || !*got {
+		t.Errorf("the fields hold cli_registry.defaults %v, want present and on", got)
+	}
+
+	absent, err := Parse([]byte("version: 1\n"), FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	if got := fieldsOf(absent).FeedsDefaults; got != nil {
+		t.Errorf("the fields hold feeds.defaults %v, want absent: the settings named none", got)
+	}
+	if got := fieldsOf(absent).CliRegistryDefaults; got != nil {
+		t.Errorf("the fields hold cli_registry.defaults %v, want absent", got)
+	}
+}
