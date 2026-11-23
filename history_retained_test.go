@@ -49,9 +49,10 @@ func result(runID string, turn int, handle, text string) *poo.ToolResultRecord {
 	}
 }
 
-// TestTheHistoryServesTheTurnsTheRecordsRetain covers the read side's
-// whole job: the turns are the session's own numbers, the text is what
-// was said, and a compaction record is a line rather than a cut.
+// TestTheHistoryServesTheTurnsTheRecordsRetain covers the numbering
+// and the text: the turns are the session's own numbers, and the text
+// is what was said. The compaction guarantee - a compaction record is
+// a line, never a cut - is TestARetainedHistoryKeepsTheCutTurns.
 func TestTheHistoryServesTheTurnsTheRecordsRetain(t *testing.T) {
 	records := []poo.Record{
 		&poo.RunStartedRecord{RecordMeta: poo.NewRecordMeta("run_started"), RunID: "r1"},
