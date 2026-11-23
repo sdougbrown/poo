@@ -301,14 +301,20 @@ func (t *CallTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (
 	// result: the decoded value is the output, and the bash
 	// exit-code envelope is bypassed. Two edges fall through to the
 	// envelope (both pinned): a decoded null, and a decoded result
-	// whose marshalled form is longer than the observation cap.
+	// whose marshalled form is longer than the observation cap. A
+	// successful call's stderr is diagnostics the model still needs, so
+	// it rides on the decoded text after a newline.
 	if res.Decoded != nil {
 		raw, err := json.Marshal(res.Decoded)
 		if err != nil {
 			return failed(err, cap)
 		}
 		if len(raw) <= cap {
-			return poo.ToolResult{Text: string(raw), Structured: raw}, nil
+			text := string(raw)
+			if len(res.Stderr) > 0 {
+				text += "\n" + string(res.Stderr)
+			}
+			return poo.ToolResult{Text: text, Structured: raw}, nil
 		}
 		// An over-budget decoded result falls through to the envelope
 		// below, which elides the middle and keeps the exit code.

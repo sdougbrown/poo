@@ -59,6 +59,31 @@ func TestACallCLIToolReturnsItsDecodedJSON(t *testing.T) {
 	}
 }
 
+// TestACallCLIToolCarriesStderrOnTheDecodedPath covers a successful
+// call whose CLI wrote a warning to stderr before succeeding: the
+// warning rides on the decoded text after a newline, and the
+// structured result stays the byte-exact JSON.
+func TestACallCLIToolCarriesStderrOnTheDecodedPath(t *testing.T) {
+	tool := cliregistry.NewCall(load(t, jsonTool(t, `printf 'warning: the cache is cold\n' >&2; printf '%s' '{"sum":3,"op":"add"}'; cat > /dev/null`)))
+
+	res := call(t, tool, `{"name":"json","args":{"data":{"op":"add","a":1,"b":2}}}`, poo.ToolEnv{
+		Settings: poo.ToolSettings{ObservationCapChars: 10000},
+	})
+	if res.IsError {
+		t.Fatalf("the call is an error: %q", res.Text)
+	}
+	want := `{"op":"add","sum":3}`
+	if got := string(res.Structured); got != want {
+		t.Errorf("the structured result is %s, want the byte-exact JSON %s", got, want)
+	}
+	if !strings.Contains(res.Text, want) {
+		t.Errorf("the text %q has no JSON", res.Text)
+	}
+	if !strings.Contains(res.Text, "warning: the cache is cold") {
+		t.Errorf("the text %q has no stderr warning", res.Text)
+	}
+}
+
 // TestACallCLIToolReportsADecodeFailure covers a successful exit whose
 // stdout does not decode: the call is a recoverable error that names the
 // decode failure.

@@ -24,7 +24,10 @@
 //
 // The plan's own timeout is poo's to enforce, and the call shows the
 // model the same observation bash shows it: the two streams, the exit
-// status, the partial output of a timeout, and null for a killed process.
+// status, the partial output of a timeout, and null for a killed
+// process. The one exception: a tool whose manifest decodes JSON
+// returns that JSON instead of the envelope, with the run's stderr
+// after a newline when there is any.
 //
 // # Validation
 //
