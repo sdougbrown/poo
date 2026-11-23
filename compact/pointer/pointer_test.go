@@ -216,6 +216,56 @@ func TestTheRunReconstructsFromTheQueries(t *testing.T) {
 	}
 }
 
+// TestTheForkRetrySurvivesARefusedJSONAsk covers the response-format
+// fallback: an endpoint that refuses the JSON ask gets one more fork
+// without it, and the pass carries on with what that reply said.
+func TestTheForkRetrySurvivesARefusedJSONAsk(t *testing.T) {
+	tr := pootest.NewTransport(
+		pootest.Turn{Text: long("TURN-ONE"), Calls: []pootest.Call{{Name: "echo", Arguments: json.RawMessage(`{"text":"one"}`)}}},
+		pootest.Turn{Text: long("TURN-TWO"), Calls: []pootest.Call{{Name: "echo", Arguments: json.RawMessage(`{"text":"two"}`)}}},
+		pootest.Turn{Text: "## Goal\nfinish the task"},
+		pootest.Turn{Text: "the final answer"},
+	)
+	tr.SetForkTurns(
+		pootest.Turn{Err: errors.New("response_format is not supported")},
+		pootest.Turn{Text: `{"queries": ["TURN-ONE"], "notes": "the notes"}`},
+	)
+	s, sink := session(t, tr, pointer.Options{Ratio: 0.05, KeepRecentTokens: 1})
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	res, err := s.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	if res.Reason != poo.ReasonEndTurn {
+		t.Fatalf("the run settled %q (%s), want end_turn", res.Reason, res.Detail.Text)
+	}
+
+	forks := tr.Forks()
+	if len(forks) != 2 {
+		t.Fatalf("the transport holds %d forks, want the refused ask and the retry", len(forks))
+	}
+	if !forks[0].JSON {
+		t.Error("the first fork was not asked for a JSON reply")
+	}
+	if forks[1].JSON {
+		t.Error("the retry asked for a JSON reply again")
+	}
+	compacted := false
+	for _, rec := range sink.Records() {
+		if cr, ok := rec.(*poo.CompactionRecord); ok && cr.Strategy == "pointer" {
+			compacted = true
+			if cr.Compaction.Side == nil || cr.Compaction.Side.Fork == nil || cr.Compaction.Side.Fork.Error != "" {
+				t.Errorf("the pointer compaction's fork side is %+v, want the retry's success on it", cr.Compaction.Side)
+			}
+		}
+	}
+	if !compacted {
+		t.Error("the run holds no pointer compaction")
+	}
+}
+
 // TestAMalformedPointerReplyIsReformed covers the recovery layer: a
 // fork reply that does not parse goes back to the compaction role for
 // one cheap reformat, and the queries the reform returns drive the

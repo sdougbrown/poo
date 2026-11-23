@@ -359,6 +359,11 @@ func (t *Transport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.
 	}
 	turn := t.forkTurns[t.forkIndex]
 	t.forkIndex++
+	// A turn that fails fails the fork the way the main script's does:
+	// the request errors before a stream opens.
+	if turn.Err != nil {
+		return nil, turn.Err
+	}
 	return newReader(t, turn, t.forkIndex-1), nil
 }
 

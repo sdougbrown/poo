@@ -272,17 +272,26 @@ func (c *Compactor) Compact(ctx context.Context, in poo.CompactionEnv) (poo.Comp
 			// without it, and the reply is parsed leniently either way.
 			reply, err = in.Fork(ctx, pointerRequest(), c.pointerMaxTokens, poo.ForkOptions{})
 		}
-		if err == nil && len(reply.Message.ToolCalls()) == 0 {
-			queries, notes = parsePointers(reply.Message.Text())
-			// A reply that did not parse is one malformed pass away from
-			// machine-readable: the fork paid the window's prefill, so a
-			// small reformat ask is cheap next to doing the pass again.
-			if queries == nil && reformationWanted(reply.Message.Text()) {
-				queries, notes = c.reform(ctx, in, reply.Message.Text())
-				fork.Reformed = queries != nil
+		if err != nil {
+			// Both passes failed: the record says so, the way the mine
+			// strategy's does, instead of a side that looks successful.
+			fork.Error = err.Error()
+		} else {
+			fork.Truncated = reply.Finish == poo.FinishLength
+			fork.ToolCall = len(reply.Message.ToolCalls()) > 0
+			if !fork.ToolCall {
+				queries, notes = parsePointers(reply.Message.Text())
+				// A reply that did not parse is one malformed pass away
+				// from machine-readable: the fork paid the window's
+				// prefill, so a small reformat ask is cheap next to
+				// doing the pass again.
+				if queries == nil && reformationWanted(reply.Message.Text()) {
+					queries, notes = c.reform(ctx, in, reply.Message.Text())
+					fork.Reformed = queries != nil
+				}
 			}
+			fork.Bytes = len(notes)
 		}
-		fork.Bytes = len(notes)
 	}
 
 	snippets := c.extract(ctx, in.History, c.queryLimit(queries))
@@ -407,9 +416,9 @@ func (c *Compactor) reform(ctx context.Context, in poo.CompactionEnv, malformed 
 	return queries, notes
 }
 
-// seed returns the orientation messages: the first user message, the
-// last few, and the last turn's messages, as the compose ask reads
-// them.
+// seed returns the orientation messages: the last three non-empty
+// user messages of the view, as the compose ask reads them. A session
+// longer than that orients by where it stands, not by where it began.
 func seed(view poo.View) []poo.Message {
 	var users []poo.Message
 	for _, m := range view.Messages() {
@@ -421,8 +430,6 @@ func seed(view poo.View) []poo.Message {
 		}
 		users = append(users, m)
 	}
-	// The first user message orients what the session is; the last few
-	// say where it stands now.
 	if len(users) > 3 {
 		users = users[len(users)-3:]
 	}

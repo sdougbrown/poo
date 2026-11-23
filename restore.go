@@ -676,6 +676,10 @@ func (s *Session) rebuild(records []Record, out *Restored) error {
 				return fmt.Errorf("poo: restoring the compaction of the run %s: %w", r.RunID, err)
 			}
 			out.Compactions++
+			// The session's own count reads the records it restored:
+			// a resumed session continues the pacing it had, instead
+			// of another escalate_after rounds before the fallback.
+			s.compactions++
 		case *RunSettledRecord:
 			if r.Reason == ReasonInterrupted {
 				out.Interrupted = append(out.Interrupted, r.RunID)

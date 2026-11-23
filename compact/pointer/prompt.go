@@ -109,7 +109,10 @@ func matchText(matches []poo.HistoryMatch) string {
 	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].Turn < sorted[j].Turn })
 	lines := make([]string, 0, len(sorted))
 	for _, m := range sorted {
-		lines = append(lines, "turn "+itoa(m.Turn)+": "+m.Text)
+		// The text is stored content - tool results included - so a
+		// line that reads as a tag is escaped like the transcript's
+		// own: the block it lands in is the one the compose ask reads.
+		lines = append(lines, "turn "+itoa(m.Turn)+": "+cut.EscapeTags(m.Text))
 	}
 	return strings.Join(lines, "\n")
 }

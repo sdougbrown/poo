@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -396,10 +397,8 @@ func (o *runOptions) validate(rest []string) error {
 	if o.maxOutput < 0 {
 		return errors.New("--max-output must not be negative")
 	}
-	switch o.contextStrategy {
-	case "", "summary", "mine", "pointer", "native", "handoff":
-	default:
-		return errors.New("--context-strategy must be summary, mine, pointer, native or handoff")
+	if o.contextStrategy != "" && !slices.Contains(contextStrategies, o.contextStrategy) {
+		return errors.New("--context-strategy must be one of " + strings.Join(contextStrategies, ", "))
 	}
 	if o.contextKeepRecent < 0 {
 		return errors.New("--context-keep-recent must not be negative")
@@ -408,6 +407,31 @@ func (o *runOptions) validate(rest []string) error {
 		return errors.New("a prompt is required")
 	}
 	return nil
+}
+
+// contextStrategies are the strategy names --context-strategy accepts.
+// The block strategies among them are the ones
+// --context-keep-recent sizes: one table for both flags, so a strategy
+// added here is validated and sized together.
+var contextStrategies = []string{"summary", "mine", "pointer", "native", "handoff"}
+
+// blockStrategies are the strategies whose settings a keep-recent tail
+// lands in.
+var blockStrategies = []string{"summary", "mine", "pointer"}
+
+// keepRecentField returns the settings field the named block strategy
+// reads its keep-recent tail from, or nil for a strategy without one.
+func keepRecentField(settings *config.Settings, strategy string) **int {
+	switch strategy {
+	case "summary":
+		return &settings.Context.Summary.KeepRecentTokens
+	case "mine":
+		return &settings.Context.Mine.KeepRecentTokens
+	case "pointer":
+		return &settings.Context.Pointer.KeepRecentTokens
+	default:
+		return nil
+	}
 }
 
 // apply turns the flags into settings.
@@ -425,13 +449,16 @@ func (o *runOptions) apply(settings *config.Settings) error {
 	}
 	if o.contextKeepRecent > 0 {
 		// The tail is a per-strategy setting, and the flag names one
-		// tail for whichever strategy runs: the three block
-		// strategies all take it, and the ones without a tail ignore
-		// it.
+		// tail for whichever strategy runs: every block strategy takes
+		// it, and the ones without a tail ignore it. The strategies
+		// and their settings come from one table, so a strategy added
+		// there is validated and sized together.
 		keep := o.contextKeepRecent
-		settings.Context.Summary.KeepRecentTokens = &keep
-		settings.Context.Mine.KeepRecentTokens = &keep
-		settings.Context.Pointer.KeepRecentTokens = &keep
+		for _, name := range blockStrategies {
+			if field := keepRecentField(settings, name); field != nil {
+				*field = &keep
+			}
+		}
 	}
 	// The timeout is the run's deadline, not its budget: the deadline
 	// ends the run, and the settings' limits.max_duration_s is the
