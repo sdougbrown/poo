@@ -297,6 +297,17 @@ func (t *CallTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (
 	if errors.Is(waitErr, exec.ErrStdinIncomplete) {
 		return poo.ToolResult{}, fmt.Errorf("%s: %s: %w", CallToolName, p.name, exec.ErrStdinIncomplete)
 	}
+	// A tool whose manifest decodes JSON returns that JSON as the
+	// result: the decoded value is the output, and the bash
+	// exit-code envelope is bypassed. A decoded null falls through to
+	// the envelope (pinned edge).
+	if res.Decoded != nil {
+		raw, err := json.Marshal(res.Decoded)
+		if err != nil {
+			return failed(err, cap)
+		}
+		return poo.ToolResult{Text: string(raw), Structured: raw}, nil
+	}
 	returncode := res.ExitCode
 	text, structured := bash.Envelope(bash.Observation{
 		ExitCode:  &returncode,
