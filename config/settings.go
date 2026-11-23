@@ -286,8 +286,8 @@ type ProfileSettings struct {
 	// The settings' feeds.paths still control which feeds load, and
 	// a declared feed the settings do not load is skipped with a
 	// warning.
-	Feeds      []string     `json:"feeds,omitempty"`
-	PromptFile string `json:"prompt_file,omitempty"`
+	Feeds      []string `json:"feeds,omitempty"`
+	PromptFile string   `json:"prompt_file,omitempty"`
 	// FeedsDefaults says whether the default feeds directory loads for a
 	// session under this profile. The profile's word wins over the
 	// settings' feeds.defaults; a key the profile does not name leaves
@@ -295,7 +295,7 @@ type ProfileSettings struct {
 	FeedsDefaults *bool `json:"feeds_defaults,omitempty"`
 	// RegistryDefaults says the same of the default cli-registry
 	// directory, against the settings' cli_registry.defaults.
-	RegistryDefaults *bool `json:"cli_registry_defaults,omitempty"`
+	RegistryDefaults *bool        `json:"cli_registry_defaults,omitempty"`
 	Tools            ProfileTools `json:"tools,omitempty"`
 }
 
