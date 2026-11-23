@@ -102,6 +102,66 @@ func TestACallCLIToolNullGoesThroughTheEnvelope(t *testing.T) {
 	}
 }
 
+// TestACallCLIToolOverCapGoesThroughTheEnvelope pins the over-cap
+// fall-through edge: a decoded result whose marshalled form is longer
+// than the observation cap is not returned whole, so the call comes
+// back through the exit-status envelope, which carries the exit code
+// and elides the output in the middle.
+func TestACallCLIToolOverCapGoesThroughTheEnvelope(t *testing.T) {
+	// The tool prints a JSON object whose marshalled form is well
+	// over the 40-character observation cap.
+	long := strings.Repeat("a", 200)
+	tool := cliregistry.NewCall(load(t, jsonTool(t, `printf '%s' '{"key":"`+long+`"}'; cat > /dev/null`)))
+
+	res := call(t, tool, `{"name":"json","args":{"data":{"op":"add"}}}`, poo.ToolEnv{
+		Settings: poo.ToolSettings{ObservationCapChars: 40},
+	})
+	if res.IsError {
+		t.Fatalf("the call is an error: %q", res.Text)
+	}
+	obs := observation(t, res)
+	if code, ok := obs[bash.EnvelopeReturncode].(float64); !ok || code != 0 {
+		t.Errorf("the observation has no exit code 0: %v", obs[bash.EnvelopeReturncode])
+	}
+	if _, ok := obs[bash.EnvelopeElidedChars].(float64); !ok {
+		t.Errorf("the observation %q has no elided count", obs)
+	}
+	if !strings.Contains(res.Text, `"returncode": 0`) {
+		t.Errorf("the text %q has no exit code", res.Text)
+	}
+	if !strings.Contains(res.Text, `elided_chars`) {
+		t.Errorf("the text %q has no elision marker", res.Text)
+	}
+	want := `{"key":"` + long + `"}`
+	if strings.Contains(res.Text, want) {
+		t.Errorf("the text holds the full unelided JSON: %q", res.Text)
+	}
+}
+
+// TestACallCLIToolAtCapStaysDecoded covers the cap boundary: a decoded
+// result that is exactly the observation cap long still returns as the
+// JSON, not the envelope.
+func TestACallCLIToolAtCapStaysDecoded(t *testing.T) {
+	// The tool prints a JSON object whose marshalled form is exactly
+	// 40 characters, the cap.
+	val := strings.Repeat("a", 30)
+	tool := cliregistry.NewCall(load(t, jsonTool(t, `printf '%s' '{"key":"`+val+`"}'; cat > /dev/null`)))
+
+	res := call(t, tool, `{"name":"json","args":{"data":{"op":"add"}}}`, poo.ToolEnv{
+		Settings: poo.ToolSettings{ObservationCapChars: 40},
+	})
+	if res.IsError {
+		t.Fatalf("the call is an error: %q", res.Text)
+	}
+	want := `{"key":"` + val + `"}`
+	if got := string(res.Structured); got != want {
+		t.Errorf("the structured result is %s, want %s", got, want)
+	}
+	if res.Text != want {
+		t.Errorf("the text is %q, want %q", res.Text, want)
+	}
+}
+
 // TestACallCLIToolCarriesJSONBoundArgsToTheChild covers the round trip:
 // the json-bound object is written to the child's stdin intact, and what
 // the child prints comes back as the tool result.

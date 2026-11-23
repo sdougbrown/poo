@@ -299,14 +299,19 @@ func (t *CallTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (
 	}
 	// A tool whose manifest decodes JSON returns that JSON as the
 	// result: the decoded value is the output, and the bash
-	// exit-code envelope is bypassed. A decoded null falls through to
-	// the envelope (pinned edge).
+	// exit-code envelope is bypassed. Two edges fall through to the
+	// envelope (both pinned): a decoded null, and a decoded result
+	// whose marshalled form is longer than the observation cap.
 	if res.Decoded != nil {
 		raw, err := json.Marshal(res.Decoded)
 		if err != nil {
 			return failed(err, cap)
 		}
-		return poo.ToolResult{Text: string(raw), Structured: raw}, nil
+		if len(raw) <= cap {
+			return poo.ToolResult{Text: string(raw), Structured: raw}, nil
+		}
+		// An over-budget decoded result falls through to the envelope
+		// below, which elides the middle and keeps the exit code.
 	}
 	returncode := res.ExitCode
 	text, structured := bash.Envelope(bash.Observation{
