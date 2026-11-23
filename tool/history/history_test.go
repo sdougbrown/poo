@@ -117,14 +117,9 @@ func TestTheToolSaysWhenTheStoreCannotBeRead(t *testing.T) {
 	}
 }
 
-// TestTheCutHonorsTheBudgetAndTheCharacters covers the truncation
-// arithmetic: a line over its character budget is cut on a character
-// boundary with the marker, a line that fits is returned whole however
-// many bytes its characters take, and a search over the cap truncates
-// with the elision note.
 // TestTheSearchTruncatesAtTheObservationCap covers the cap: a search
-// whose matches overflow the settings' observation cap returns the head
-// of the matches with the truncation note, not the flood.
+// whose matches overflow the settings' observation cap returns an
+// answer bounded at the cap, naming the truncation.
 func TestTheSearchTruncatesAtTheObservationCap(t *testing.T) {
 	tool := history.New()
 	prepared, err := tool.Prepare(json.RawMessage(`{"pattern":"y"}`), poo.PrepareEnv{})
