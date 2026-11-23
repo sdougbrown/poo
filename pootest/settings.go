@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -76,6 +77,17 @@ func IsolateUserConfigDir(dir string) error {
 		if err := os.Setenv(name, dir); err != nil {
 			return err
 		}
+	}
+	// The variables are the platform's own, and a Go release that reads
+	// a different one would leave the developer's own config in the
+	// tests' view. The resolved directory is checked against dir, so
+	// such a drift fails the suite loudly instead of leaking silently.
+	resolved, err := os.UserConfigDir()
+	if err != nil {
+		return err
+	}
+	if resolved != dir && !strings.HasPrefix(resolved, dir+string(filepath.Separator)) {
+		return fmt.Errorf("the user config directory resolved to %s, outside the test's %s", resolved, dir)
 	}
 	return nil
 }

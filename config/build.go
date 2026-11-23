@@ -236,6 +236,11 @@ type Runtime struct {
 	// catalog. A binary may link them, and a profile may name them, without the
 	// session offering any.
 	registryOffered bool
+	// registryFromDefaults and feedsFromDefaults report that the only
+	// manifest paths the build loaded came from the default directories.
+	// An error that would say "the settings" names the real source.
+	registryFromDefaults bool
+	feedsFromDefaults    bool
 	// Feeds are the feed manifests the settings name, or nil when the
 	// settings name none.
 	Feeds *feed.Set
@@ -694,9 +699,11 @@ func (r *Runtime) warn(text string) {
 // when the session is built, and a session does not reload one.
 func (r *Runtime) resolveRegistry(opts BuildOptions, workingDir string) error {
 	paths := append(append([]string{}, r.Settings.CLIRegistry.Paths...), opts.Overrides.CLIRegistryPaths...)
+	fromDefaultsOnly := false
 	if defaultsOn(r.Settings.CLIRegistry.Defaults) {
-		if dir, ok := defaultManifestDir("cli-registry"); ok {
+		if dir, ok := defaultManifestDir("cli_registry"); ok {
 			paths = append([]string{dir}, paths...)
+			fromDefaultsOnly = len(r.Settings.CLIRegistry.Paths) == 0 && len(opts.Overrides.CLIRegistryPaths) == 0
 		}
 	}
 	if len(paths) == 0 {
@@ -740,6 +747,15 @@ func (r *Runtime) resolveRegistry(opts BuildOptions, workingDir string) error {
 			}
 		}
 	}
+	// The default directories are the build's own suggestion, so an
+	// empty one is no registry at all: a person who created the
+	// directory but holds no manifests left the build exactly where it
+	// was. Paths the settings or the overrides named keep the behavior
+	// those paths have always had.
+	if catalog.Len() == 0 && fromDefaultsOnly {
+		return nil
+	}
+	r.registryFromDefaults = fromDefaultsOnly
 	r.Registry = catalog
 	r.loaded = catalog
 	return checkRegistryConditions(catalog.AvailabilityInputs())
@@ -751,12 +767,51 @@ func defaultsOn(value *bool) bool {
 	return value == nil || *value
 }
 
-// defaultManifestDir returns poo's default directory for one manifest
-// kind under the user config directory, when the directory is there. A
-// missing directory is not an error: a person with no defaults sees no
-// change, the way the skills' default directory is a convention and not
-// a promise.
-func defaultManifestDir(kind string) (string, bool) {
+// DefaultManifest describes one manifest kind that loads from a default
+// directory.
+type DefaultManifest struct {
+	// Kind is the default directory's name under poo's config directory.
+	Kind string
+	// SettingsKey is the settings block whose defaults switch turns the
+	// kind off.
+	SettingsKey string
+}
+
+// defaultManifests are the manifest kinds that load from the default
+// directories. The list is the kinds' single owner: the resolvers read
+// their kinds here, and anything that turns the defaults off turns off
+// everything the list names, so a kind added here is isolated with the
+// others or loaded nowhere.
+var defaultManifests = []DefaultManifest{
+	{Kind: "feeds", SettingsKey: "feeds"},
+	{Kind: "cli-registry", SettingsKey: "cli_registry"},
+}
+
+// DefaultManifests returns the manifest kinds that load from the default
+// directories, and the settings block each kind turns off. A suite that
+// writes settings turns off everything this list names.
+func DefaultManifests() []DefaultManifest {
+	out := make([]DefaultManifest, len(defaultManifests))
+	copy(out, defaultManifests)
+	return out
+}
+
+// defaultManifestDir returns poo's default directory for the manifest
+// kind whose settings block is the named key, when the directory is
+// there. A missing directory is not an error: a person with no defaults
+// sees no change, the way the skills' default directory is a convention
+// and not a promise.
+func defaultManifestDir(settingsKey string) (string, bool) {
+	kind := ""
+	for _, m := range defaultManifests {
+		if m.SettingsKey == settingsKey {
+			kind = m.Kind
+			break
+		}
+	}
+	if kind == "" {
+		return "", false
+	}
 	dir, err := UserConfigDir()
 	if err != nil {
 		return "", false
@@ -791,9 +846,11 @@ func againstDir(paths []string, dir string) ([]string, error) {
 // starts a feed here.
 func (r *Runtime) resolveFeeds(opts BuildOptions, workingDir string) error {
 	paths := append(append([]string{}, r.Settings.Feeds.Paths...), opts.Overrides.FeedsPaths...)
+	fromDefaultsOnly := false
 	if defaultsOn(r.Settings.Feeds.Defaults) {
 		if dir, ok := defaultManifestDir("feeds"); ok {
 			paths = append([]string{dir}, paths...)
+			fromDefaultsOnly = len(r.Settings.Feeds.Paths) == 0 && len(opts.Overrides.FeedsPaths) == 0
 		}
 	}
 	if len(paths) == 0 {
@@ -817,6 +874,12 @@ func (r *Runtime) resolveFeeds(opts BuildOptions, workingDir string) error {
 			Err:     err,
 		}
 	}
+	// An empty set the defaults alone produced is no feed set at all:
+	// the session runs nothing, and the build says nothing.
+	if set.Len() == 0 && fromDefaultsOnly {
+		return nil
+	}
+	r.feedsFromDefaults = fromDefaultsOnly
 	r.Feeds = set
 	return nil
 }
@@ -942,6 +1005,14 @@ func (r *Runtime) requireRegistryTools(opts BuildOptions, names []string) error 
 	for _, name := range names {
 		if linksTool(opts, name) {
 			continue
+		}
+		switch {
+		case r.registryFromDefaults:
+			return &Error{
+				Code:    CodeUnsupported,
+				Field:   "cli_registry.paths",
+				Message: fmt.Sprintf("the default cli-registry directory names a cli registry, and this binary does not link the %q tool", name),
+			}
 		}
 		source := "the settings"
 		if len(opts.Overrides.CLIRegistryPaths) > 0 {
@@ -1490,11 +1561,17 @@ func (r *Runtime) resolveFeedRuns(opts BuildOptions) error {
 		return nil
 	}
 	if r.executor == nil {
-		source := "the settings"
-		if len(opts.Overrides.FeedsPaths) > 0 {
-			source = "the settings or POO_FEEDS_PATH / --feeds-path"
+		message := ""
+		switch {
+		case r.feedsFromDefaults:
+			message = "the default feeds directory names a feed, and this binary has no executor to run a feed's command"
+		default:
+			source := "the settings"
+			if len(opts.Overrides.FeedsPaths) > 0 {
+				source = "the settings or POO_FEEDS_PATH / --feeds-path"
+			}
+			message = source + " name a feed, and this binary has no executor to run a feed's command"
 		}
-		message := source + " name a feed, and this binary has no executor to run a feed's command"
 		return &Error{
 			Code:    CodeUnsupported,
 			Field:   "feeds.paths",

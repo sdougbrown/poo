@@ -199,3 +199,58 @@ func TestTheDefaultsJoinTheOverrides(t *testing.T) {
 		t.Fatalf("the build loaded %v, want the default feed and the override's one", runtime.Feeds)
 	}
 }
+
+// TestEveryDefaultManifestKindHasItsOffSwitch covers the kinds' list:
+// each kind names a settings block whose defaults switch the settings
+// know and honor, so a kind added to the list without a working off
+// switch fails here.
+func TestEveryDefaultManifestKindHasItsOffSwitch(t *testing.T) {
+	for _, m := range config.DefaultManifests() {
+		document := theModelSettings + m.SettingsKey + ":\n  defaults: false\n"
+		settings, err := config.Parse([]byte(document), config.FormatYAML)
+		if err != nil {
+			t.Errorf("the %q settings block does not parse: %v", m.SettingsKey, err)
+			continue
+		}
+		off := build(t, settings, config.Overrides{})
+		switch m.SettingsKey {
+		case "feeds":
+			if off.Feeds != nil && off.Feeds.Len() != 0 {
+				t.Errorf("the %q switch left feeds loaded: %v", m.SettingsKey, off.Feeds)
+			}
+		case "cli_registry":
+			if off.Registry != nil && off.Registry.Len() != 0 {
+				t.Errorf("the %q switch left a registry loaded: %v", m.SettingsKey, off.Registry)
+			}
+		default:
+			t.Errorf("the kind %q names a settings block this test does not know", m.SettingsKey)
+		}
+	}
+}
+
+// TestAnEmptyDefaultManifestDirectoryIsNoRegistry covers the quiet
+// directory: a default directory that exists but holds no manifests
+// leaves the build exactly where it was, with no registry, no feeds,
+// and no error a binary that links no call_cli would trip.
+func TestAnEmptyDefaultManifestDirectoryIsNoRegistry(t *testing.T) {
+	pooDir := theDefaultsPooDir(t)
+	for _, kind := range []string{"feeds", "cli-registry"} {
+		if err := os.MkdirAll(filepath.Join(pooDir, kind), 0o700); err != nil {
+			t.Fatalf("making the empty %s directory: %v", kind, err)
+		}
+	}
+	settings, err := config.Parse([]byte(theModelSettings), config.FormatYAML)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+	if runtime.Registry != nil {
+		t.Errorf("an empty default directory loaded a registry %v", runtime.Registry)
+	}
+	if runtime.Feeds != nil && runtime.Feeds.Len() != 0 {
+		t.Errorf("an empty default directory loaded feeds %v", runtime.Feeds)
+	}
+	if runtime.Warning != "" {
+		t.Errorf("an empty default directory warned: %s", runtime.Warning)
+	}
+}
