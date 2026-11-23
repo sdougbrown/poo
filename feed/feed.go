@@ -41,6 +41,7 @@ import (
 	"github.com/sdougbrown/cli-registry"
 	"github.com/sdougbrown/cli-registry/manifest"
 	"github.com/sdougbrown/poo/exec"
+	"github.com/sdougbrown/poo/scopeschema"
 )
 
 // The idle policies a feed's manifest may name. An entry without one
@@ -61,16 +62,8 @@ const manifestVersion = 1
 // job ids and records, so it stays lowercase and short.
 var namePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 
-// scopeNamePattern is the shape of a scope field's name. The name is what
-// an `scope:NAME` binding and a subscription both spell, and the prompt
-// prints it, so it stays a word.
-var scopeNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
-
-// scopeStringType is the only scope field type a manifest may declare.
-//
-// A scope value reaches the feed as an environment variable's value, so it
-// is a string: a field of another type would have no way to arrive.
-const scopeStringType = "string"
+// scopeNamePattern is scopeschema.ScopeNamePattern, compiled.
+var scopeNamePattern = regexp.MustCompile(scopeschema.ScopeNamePattern)
 
 // ScopeField is one field of a feed's scope: a value a subscription
 // supplies, and the shape the value takes.
@@ -442,8 +435,8 @@ func readScope(path, name string, b body) ([]ScopeField, error) {
 		if !scopeNamePattern.MatchString(field) {
 			return nil, fmt.Errorf("feed manifest %s: feed %q: scope field %q is not a valid field name", path, name, field)
 		}
-		if entry.Type != scopeStringType {
-			return nil, fmt.Errorf("feed manifest %s: feed %q: scope field %q has the type %q, want %q", path, name, field, entry.Type, scopeStringType)
+		if entry.Type != scopeschema.ScopeStringType {
+			return nil, fmt.Errorf("feed manifest %s: feed %q: scope field %q has the type %q, want %q", path, name, field, entry.Type, scopeschema.ScopeStringType)
 		}
 		if entry.Pattern != "" {
 			if _, err := regexp.Compile(entry.Pattern); err != nil {

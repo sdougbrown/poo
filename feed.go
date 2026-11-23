@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/sdougbrown/poo/decide"
+	"github.com/sdougbrown/poo/scopeschema"
 )
 
 // A feed is a long-lived source that pushes messages into a session.
@@ -348,16 +349,8 @@ func feedRestartDelay(ran, previous time.Duration) time.Duration {
 // cannot be read back.
 var feedNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 
-// feedScopeNamePattern is the shape a scope field's name takes. The name
-// is what a manifest's `scope:NAME` reference and a subscription both
-// spell.
-var feedScopeNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
-
-// feedScopeStringType is the only scope field type a feed may declare.
-//
-// A scope value reaches the feed as an environment variable's value, so a
-// field of another type has no way to arrive.
-const feedScopeStringType = "string"
+// scopeNamePattern is scopeschema.ScopeNamePattern, compiled.
+var scopeNamePattern = regexp.MustCompile(scopeschema.ScopeNamePattern)
 
 // MissingFeedWarning is what the build and the restore say when a
 // profile declares a feed the settings do not load.
@@ -409,15 +402,15 @@ func checkFeeds(specs []FeedSpec) error {
 func checkFeedScopeFields(spec FeedSpec) error {
 	seen := make(map[string]bool, len(spec.Scope))
 	for _, field := range spec.Scope {
-		if !feedScopeNamePattern.MatchString(field.Name) {
+		if !scopeNamePattern.MatchString(field.Name) {
 			return fmt.Errorf("poo: the feed %q has a scope field %q that is not a valid name", spec.Name, field.Name)
 		}
 		if seen[field.Name] {
 			return fmt.Errorf("poo: the feed %q declares the scope field %q twice", spec.Name, field.Name)
 		}
 		seen[field.Name] = true
-		if field.Type != feedScopeStringType {
-			return fmt.Errorf("poo: the feed %q has a scope field %q of the type %q, want %q", spec.Name, field.Name, field.Type, feedScopeStringType)
+		if field.Type != scopeschema.ScopeStringType {
+			return fmt.Errorf("poo: the feed %q has a scope field %q of the type %q, want %q", spec.Name, field.Name, field.Type, scopeschema.ScopeStringType)
 		}
 		if field.Pattern != "" {
 			if _, err := regexp.Compile(field.Pattern); err != nil {
