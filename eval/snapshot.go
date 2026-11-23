@@ -22,6 +22,12 @@ type sourceGuard struct {
 	hashes map[string]string
 }
 
+// sharedGenerator is the generator script the fixtures' own generate
+// scripts run: one corpus writer, beside the fixtures that call it.
+func sharedGenerator(fixtureRoot string) string {
+	return filepath.Join(filepath.Dir(fixtureRoot), "tasks", "generate-services.py")
+}
+
 // newSourceGuard snapshots the fixtures the tasks use under root and
 // hashes the fixtures and the task directories they come from.
 func newSourceGuard(tasks []Task, fixtureRoot, root string) (*sourceGuard, error) {
@@ -57,6 +63,13 @@ func newSourceGuard(tasks []Task, fixtureRoot, root string) (*sourceGuard, error
 		dst := filepath.Join(root, "fixtures", rel)
 		if err := copyTree(src, dst); err != nil {
 			return nil, fmt.Errorf("eval: snapshotting fixture %s: %w", src, err)
+		}
+		// A fixture that ships a generate script produces its files
+		// into the snapshot, and the snapshot's hash covers them: the
+		// generated output is what the run reads, and what the source
+		// guard guards.
+		if err := generateFixture(dst, sharedGenerator(fixtureRoot)); err != nil {
+			return nil, err
 		}
 		if err := g.record(dst, true); err != nil {
 			return nil, err

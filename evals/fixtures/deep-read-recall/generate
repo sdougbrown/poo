@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# The config the task reads is generated, not committed: the shared
+# generator writes it into the copy this fixture was snapshotted to,
+# and the committed source is the generator, not the file.
+set -euo pipefail
+dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+python3 "$1" "$dir/config/services.yaml" 10000
