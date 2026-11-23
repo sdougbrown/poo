@@ -92,8 +92,8 @@ type FeedSpec struct {
 	OnIdle OnIdle
 	// MaxPending caps the feed's undelivered inputs. When an accepted
 	// input arrives at the cap, the feed's oldest undelivered input is
-	// dropped with an input.dropped record, and the next input names
-	// the drops. Zero means DefaultFeedBacklog.
+	// dropped with an input.dropped record. The input that made room
+	// names the drop. Zero means DefaultFeedBacklog.
 	MaxPending int
 }
 

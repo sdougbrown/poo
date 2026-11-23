@@ -429,8 +429,8 @@ func WithJobs(o JobOptions) Option {
 //
 // The refusal result carries the model-facing text of a call the
 // admission refuses as a duplicate of a running job. An empty refusal
-// with a false ok is the slot exhaustion (or a session that is closed
-// or broken), and the caller renders its own text for that.
+// with a false ok is the slot exhaustion, or a session that is closed
+// or broken; the caller renders its own text for that.
 func (s *Session) startJob(run *runState, turn int, handle, tool string, prepared Prepared, summary string, arguments json.RawMessage) (jobID string, ok bool, winding bool, refusal string) {
 	// The slot is reserved under the lock, and the job is registered
 	// there too, so a job that is admitted is a job the session knows
@@ -450,7 +450,7 @@ func (s *Session) startJob(run *runState, turn int, handle, tool string, prepare
 		return "", false, false, ""
 	}
 	// The duplicate key keys the call's data, not the request's
-	// envelope: the reserved background argument is the envelope, so a
+	// envelope. The reserved background argument is the envelope, so a
 	// call that asks for the background and one that need not ask are
 	// the same job to the tool.
 	args := arguments
@@ -1097,9 +1097,9 @@ func (s *Session) queueFeedInput(feed, from, text string, attachments []Attachme
 		// delivers the same words.
 		rendered += "\n" + feedDropNote
 	}
-	// The dropped input's fate is recorded before the acceptance, so a
-	// store that refuses the acceptance still leaves the dropped input
-	// fated: a restore reads the fate and skips it.
+	// The dropped input's fate is recorded before the acceptance. A
+	// store that refuses the acceptance then still leaves the dropped
+	// input fated, and a restore reads the fate and skips it.
 	if droppedID != "" {
 		_ = s.write(context.Background(), &InputDroppedRecord{
 			RecordMeta: NewRecordMeta("input.dropped"),
