@@ -113,6 +113,9 @@ type Compactor struct {
 	pointerMaxTokens int
 	// files reports the file a tool call names.
 	files FileOp
+	// trigger is the reconstruction trigger the block strategies
+	// share: the cut package's own arithmetic.
+	trigger cut.Trigger
 }
 
 // New returns the mine strategy.
@@ -133,6 +136,7 @@ func New(opts Options) *Compactor {
 	if c.files == nil {
 		c.files = cut.DefaultFileOp
 	}
+	c.trigger = cut.Trigger{Ratio: c.ratio, KeepRecent: c.keepRecent, MaxTokens: c.maxTokens, Files: c.files}
 	return c
 }
 
@@ -156,40 +160,12 @@ func (c *Compactor) PointerMaxTokens() int { return c.pointerMaxTokens }
 // left in the window is under the output limit and a compaction would
 // give the room back. It also acts when the conversation alone exceeds
 // the window: a run that starts over the window cannot wait for a turn,
-// because the ratio trigger needs a request behind it. The guard is the
-// summary strategy's: a window whose tail fills everything has nothing
-// older to reconstruct, and starting a compaction would only fail.
+// because the ratio trigger needs a request behind it. The trigger is
+// the cut package's, shared with the other block strategies: the same
+// view under the same budget reconstructs at the same window fill,
+// whichever strategy runs.
 func (c *Compactor) ShouldCompact(view poo.View, budget poo.ContextBudget) bool {
-	if len(cut.LiveTurns(view.Turns())) < 2 {
-		return false
-	}
-	return budget.OverWindow() || budget.Reached(c.ratio) || c.restoresOutputRoom(view, budget)
-}
-
-// restoresOutputRoom reports that the output room is short and a
-// reconstruction would end the shortage.
-func (c *Compactor) restoresOutputRoom(view poo.View, budget poo.ContextBudget) bool {
-	if !budget.RoomShort(budget.OutputLimit) {
-		return false
-	}
-	messages := view.Messages()
-	r, ok := cut.Select(messages, view.Turns(), budget, c.keepRecent)
-	if !ok {
-		return false
-	}
-	covered := messages[r.Start:r.End]
-	after := cut.RoomAfter(budget, cut.TurnTokens(covered, budget),
-		c.maxTokens+c.replacementCarriageTokens(r, covered, budget))
-	return !after.RoomShort(after.OutputLimit)
-}
-
-// replacementCarriageTokens estimates what the replacement carries
-// besides the reconstruction: the marker line, the retention pointer
-// and the file list.
-func (c *Compactor) replacementCarriageTokens(r cut.Range, covered []poo.Message, budget poo.ContextBudget) int {
-	text := cut.Marker(r, markerVerb) + "\n\n" + cut.Retention(r.Cut, "", true) +
-		"\n\n" + cut.FileList(c.files, covered)
-	return cut.TurnTokens([]poo.Message{poo.NewTextMessage(poo.RoleUser, text)}, budget)
+	return c.trigger.ShouldCompact(view, budget)
 }
 
 // Compact reconstructs the turns the view can spare and replaces them

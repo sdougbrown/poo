@@ -253,6 +253,65 @@ func Retention(turns poo.TurnRange, sessionID string, historyTool bool) string {
 		" (turns " + strconv.Itoa(turns.First) + "-" + strconv.Itoa(turns.Last) + "): nothing was deleted." + recover + "]"
 }
 
+// Trigger is the reconstruction trigger the block strategies share:
+// the ratio at which the view acts, the verbatim tail the replacement
+// keeps, the compose limit the reconstruction may use, and the file
+// reporter the replacement's file list reads.
+//
+// The strategies live separately, but they trigger together: the same
+// view under the same budget reconstructs at the same window fill,
+// whichever strategy runs. The arithmetic lives here, next to the
+// cut machinery it reads, so the copies cannot drift.
+type Trigger struct {
+	// Ratio is the share of the prompt limit at which the strategy
+	// acts.
+	Ratio float64
+	// KeepRecent is how much of the newest history stays verbatim.
+	KeepRecent int
+	// MaxTokens is the replacement request's output limit.
+	MaxTokens int
+	// Files reports the file a tool call names, for the file list.
+	Files FileOp
+}
+
+// ShouldCompact reports whether the view should be reconstructed: the
+// conversation alone exceeds the window, the fill share the ratio
+// names is reached, or the room left is under the compose limit and a
+// replacement would give it back. A view with fewer than two live
+// turns has nothing older to reconstruct, and starting a compaction
+// would only fail.
+func (t Trigger) ShouldCompact(view poo.View, budget poo.ContextBudget) bool {
+	if len(LiveTurns(view.Turns())) < 2 {
+		return false
+	}
+	return budget.OverWindow() || budget.Reached(t.Ratio) || t.restoresOutputRoom(view, budget)
+}
+
+// restoresOutputRoom reports that the output room is short and a
+// reconstruction would end the shortage.
+func (t Trigger) restoresOutputRoom(view poo.View, budget poo.ContextBudget) bool {
+	if !budget.RoomShort(budget.OutputLimit) {
+		return false
+	}
+	messages := view.Messages()
+	r, ok := Select(messages, view.Turns(), budget, t.KeepRecent)
+	if !ok {
+		return false
+	}
+	after := RoomAfter(budget, TurnTokens(messages[r.Start:r.End], budget),
+		t.MaxTokens+t.replacementCarriageTokens(r, messages[r.Start:r.End], budget))
+	return !after.RoomShort(after.OutputLimit)
+}
+
+// replacementCarriageTokens estimates what the replacement carries
+// besides the reconstruction: the marker line, the retention pointer
+// and the file list.
+func (t Trigger) replacementCarriageTokens(r Range, covered []poo.Message, budget poo.ContextBudget) int {
+	text := Marker(r, "reconstructed") + "\n\n" + Retention(r.Cut, "", true) +
+		"\n\n" + FileList(t.Files, covered)
+	return TurnTokens([]poo.Message{poo.NewTextMessage(poo.RoleUser, text)}, budget)
+}
+
 // bullets renders paths as a list, one per line.
 func bullets(paths []string) string {
 	lines := make([]string, len(paths))

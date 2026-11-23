@@ -128,6 +128,9 @@ type Compactor struct {
 	escalateAfter int
 	// files reports the file a tool call names.
 	files FileOp
+	// trigger is the reconstruction trigger the block strategies
+	// share: the cut package's own arithmetic.
+	trigger cut.Trigger
 	// fallback is the full-span strategy the selective pass falls back
 	// to.
 	fallback poo.Compactor
@@ -168,6 +171,7 @@ func New(opts Options) *Compactor {
 	if c.files == nil {
 		c.files = cut.DefaultFileOp
 	}
+	c.trigger = cut.Trigger{Ratio: c.ratio, KeepRecent: c.keepRecent, MaxTokens: c.maxTokens, Files: c.files}
 	if c.fallback == nil {
 		c.fallback = mine.New(mine.Options{
 			Ratio:            c.ratio,
@@ -196,42 +200,10 @@ func (c *Compactor) EscalateAfter() int { return c.escalateAfter }
 // ShouldCompact reports whether the view should be reconstructed: the
 // conversation alone exceeds the window, the fill share the ratio names
 // is reached, or the room left is under the compose limit and a
-// replacement would give it back.
+// replacement would give it back. The trigger is the cut package's,
+// shared with the other block strategies.
 func (c *Compactor) ShouldCompact(view poo.View, budget poo.ContextBudget) bool {
-	if len(cut.LiveTurns(view.Turns())) < 2 {
-		return false
-	}
-	return budget.OverWindow() || budget.Reached(c.ratio) || c.restoresOutputRoom(view, budget)
-}
-
-// restoresOutputRoom reports that the output room is short and a
-// reconstruction would end the shortage.
-func (c *Compactor) restoresOutputRoom(view poo.View, budget poo.ContextBudget) bool {
-	if !budget.RoomShort(budget.OutputLimit) {
-		return false
-	}
-	messages := view.Messages()
-	r, ok := cut.Select(messages, view.Turns(), budget, c.keepRecent)
-	if !ok {
-		return false
-	}
-	after := cut.RoomAfter(budget, cut.TurnTokens(messages[r.Start:r.End], budget),
-		c.maxTokens+c.replacementCarriageTokens(r, covered(messages, r), budget))
-	return !after.RoomShort(after.OutputLimit)
-}
-
-// covered returns the messages a range covers.
-func covered(messages []poo.Message, r cut.Range) []poo.Message {
-	return messages[r.Start:r.End]
-}
-
-// replacementCarriageTokens estimates what the replacement carries
-// besides the reconstruction: the marker line, the retention pointer
-// and the file list.
-func (c *Compactor) replacementCarriageTokens(r cut.Range, covered []poo.Message, budget poo.ContextBudget) int {
-	text := cut.Marker(r, markerVerb) + "\n\n" + cut.Retention(r.Cut, "", true) +
-		"\n\n" + cut.FileList(c.files, covered)
-	return cut.TurnTokens([]poo.Message{poo.NewTextMessage(poo.RoleUser, text)}, budget)
+	return c.trigger.ShouldCompact(view, budget)
 }
 
 // Compact reconstructs the turns the view can spare from what the
@@ -280,12 +252,14 @@ func (c *Compactor) Compact(ctx context.Context, in poo.CompactionEnv) (poo.Comp
 			fork.Truncated = reply.Finish == poo.FinishLength
 			fork.ToolCall = len(reply.Message.ToolCalls()) > 0
 			if !fork.ToolCall {
-				queries, notes = parsePointers(reply.Message.Text())
+				var parsed bool
+				queries, notes, parsed = parsePointers(reply.Message.Text())
 				// A reply that did not parse is one malformed pass away
 				// from machine-readable: the fork paid the window's
 				// prefill, so a small reformat ask is cheap next to
-				// doing the pass again.
-				if queries == nil && reformationWanted(reply.Message.Text()) {
+				// doing the pass again. A reply that parsed needs
+				// nothing, even when it named no queries.
+				if !parsed && reformationWanted(reply.Message.Text()) {
 					queries, notes = c.reform(ctx, in, reply.Message.Text())
 					fork.Reformed = queries != nil
 				}
@@ -368,24 +342,23 @@ func (c *Compactor) extract(ctx context.Context, history poo.History, queries []
 }
 
 // parsePointers reads the fork's reply: one JSON object of queries and
-// notes. A reply that does not parse is the notes, as it was said.
-func parsePointers(reply string) (queries []string, notes string) {
+// notes. A reply that does not parse is the notes, as it was said, and
+// parsed reports that it did parse - a reply that parsed but named no
+// queries is machine-readable already, and the reformation it does not
+// need is not spent on it.
+func parsePointers(reply string) (queries []string, notes string, parsed bool) {
 	start := strings.Index(reply, "{")
 	end := strings.LastIndex(reply, "}")
 	if start >= 0 && end > start {
-		var parsed struct {
+		var parsedReply struct {
 			Queries []string `json:"queries"`
 			Notes   string   `json:"notes"`
 		}
-		if err := json.Unmarshal([]byte(reply[start:end+1]), &parsed); err == nil {
-			count := len(parsed.Queries)
-			if count > 0 {
-				return parsed.Queries, strings.TrimSpace(parsed.Notes)
-			}
-			return nil, strings.TrimSpace(reply)
+		if err := json.Unmarshal([]byte(reply[start:end+1]), &parsedReply); err == nil {
+			return parsedReply.Queries, strings.TrimSpace(parsedReply.Notes), true
 		}
 	}
-	return nil, strings.TrimSpace(reply)
+	return nil, strings.TrimSpace(reply), false
 }
 
 // reformationWanted reports that a pointer reply has something to
@@ -407,8 +380,8 @@ func (c *Compactor) reform(ctx context.Context, in poo.CompactionEnv, malformed 
 	if err != nil || len(reply.Message.ToolCalls()) > 0 {
 		return nil, strings.TrimSpace(malformed)
 	}
-	queries, notes := parsePointers(reply.Message.Text())
-	if queries == nil {
+	queries, notes, parsed := parsePointers(reply.Message.Text())
+	if !parsed {
 		// The reform did not parse either: the reply was prose worth
 		// keeping, and the notes carry it.
 		return nil, strings.TrimSpace(malformed)
