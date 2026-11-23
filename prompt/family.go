@@ -67,7 +67,14 @@ func FamilyHolds(b *Builder) bool {
 // variant — the family's own, or a default the prompt directory
 // supplied — must not be empty.
 func FamilyRenders(b *Builder, variant string) bool {
-	for _, section := range b.WithVariant(variant).Sections() {
+	sections, err := b.WithVariant(variant).SectionsError()
+	if err != nil {
+		// The prompt cannot render at all: the render error reaches the
+		// caller on its own path, and this predicate only answers
+		// whether the family's guidance is among what renders.
+		return false
+	}
+	for _, section := range sections {
 		if section.Name == FamilySection {
 			return strings.TrimSpace(section.Text) != ""
 		}
