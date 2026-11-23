@@ -31,11 +31,11 @@ import (
 	"errors"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/compact/internal/cut"
 	"github.com/sdougbrown/poo/compact/mine"
-	"github.com/sdougbrown/poo/internal/caps"
 )
 
 // The strategy's constants.
@@ -304,6 +304,23 @@ func (c *Compactor) Compact(ctx context.Context, in poo.CompactionEnv) (poo.Comp
 	}, nil
 }
 
+// bytePrefix returns the longest prefix of s that fits n bytes, cut
+// on a rune boundary: the budget it serves is a byte count, and a cut
+// that landed mid-rune would hand the compose ask text that is not
+// text.
+func bytePrefix(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	if n >= len(s) {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
+}
+
 // extract runs the queries over the retained history and returns the
 // matching lines within the snippet budget. A history that cannot be
 // read returns nothing: the compose ask still has the seed and the
@@ -331,10 +348,12 @@ func (c *Compactor) extract(ctx context.Context, history poo.History, queries []
 			text := m.Text
 			if used+len(text) > c.snippetBudget {
 				// The budget is the whole digest's: a line that does
-				// not fit is cut to what remains, on a rune boundary,
-				// and the queries after it have nothing left to add.
+				// not fit is cut to what remains - a byte cut that
+				// backs up to a rune boundary, so the line is text
+				// and the budget stays bytes - and the queries after
+				// it have nothing left to add.
 				if remaining := c.snippetBudget - used; remaining > 0 {
-					text = caps.RunePrefix(text, remaining)
+					text = bytePrefix(text, remaining)
 				} else {
 					return out
 				}

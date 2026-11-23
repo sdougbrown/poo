@@ -63,9 +63,9 @@ const (
 	// when the settings do not say.
 	DefaultSessionMode = "logged"
 	// DefaultContextStrategy is how the view is compacted when the
-	// settings do not say. A run that hits the window summarizes the
-	// oldest turns and carries on; a consumer that wants the run to stop
-	// instead names handoff.
+	// settings do not say. A run that hits the window reconstructs the
+	// work from the retained transcript and carries on; a consumer that
+	// wants the run to stop instead names handoff.
 	DefaultContextStrategy = "mine"
 	// DefaultExecutor is the executor the commands run through when
 	// the settings do not say.

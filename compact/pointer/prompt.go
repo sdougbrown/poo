@@ -2,8 +2,8 @@ package pointer
 
 import (
 	_ "embed"
-	"encoding/json"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/sdougbrown/poo"
@@ -118,10 +118,7 @@ func matchText(matches []poo.HistoryMatch) string {
 }
 
 // itoa renders a turn number.
-func itoa(n int) string {
-	b, _ := json.Marshal(n)
-	return string(b)
-}
+func itoa(n int) string { return strconv.Itoa(n) }
 
 // reformRequest builds the messages the reformat ask carries: the
 // instruction and the malformed reply, and nothing else.
