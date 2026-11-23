@@ -145,14 +145,17 @@ func (b ContextBudget) RoomShort(need int) bool {
 	return b.InputLimit > 0 && b.EstimatedInput+OutputReserve > b.InputLimit
 }
 
-// OverWindow reports that the conversation alone exceeds the window: the
-// view cannot be requested as it stands, whatever the output need.
+// OverWindow reports that the room the window leaves is under the
+// minimum output the gate asks for: the next request cannot go out, so
+// the view cannot be requested as it stands, whatever the output need.
 //
-// The estimate is the one the request gate reads, and a run that starts
-// here cannot wait for a turn: the ratio trigger needs a request behind
-// it, so a strategy is asked to make room before anything else.
+// The rule is the gate's own, so a strategy that acts here closes
+// exactly the band the gate would settle the run for. The estimate is
+// the one the request gate reads, and a run that starts here cannot
+// wait for a turn: the ratio trigger needs a request behind it, so a
+// strategy is asked to make room before anything else.
 func (b ContextBudget) OverWindow() bool {
-	return b.ContextLimit > 0 && b.EstimatedInput+OutputReserve > b.ContextLimit
+	return b.ContextLimit > 0 && b.EstimatedInput+OutputReserve+MinOutputTokens > b.ContextLimit
 }
 
 // RequestBlocked reports that the next request cannot go out. Either the

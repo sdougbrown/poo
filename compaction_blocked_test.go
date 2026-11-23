@@ -7,12 +7,83 @@ import (
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/compact/mine"
+	"github.com/sdougbrown/poo/compact/summary"
 )
 
 // A session whose view already exceeds its window cannot wait for a
 // turn: the ratio trigger needs a request behind it, and the budget
 // check would settle the run first. The gate gives the strategy one
 // forced compaction there instead.
+
+// TestARestoredSessionOverItsWindowSummarizesFirst covers the same run
+// under the summary strategy: the restored view is over the window on
+// the first gate pass, the strategy summarizes, and the run carries on
+// instead of settling.
+func TestARestoredSessionOverItsWindowSummarizesFirst(t *testing.T) {
+	big := strings.Repeat("x", 40000)
+	original := scripted([]fakeResponse{
+		{text: big, calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: json.RawMessage(`{"text":"one"}`)}}},
+		{text: big, calls: []poo.ToolCall{{CallID: "c2", Name: "echo", Arguments: json.RawMessage(`{"text":"two"}`)}}},
+		{text: "done"},
+	})
+	sink := &recordingSink{}
+	runSession(t, newTestSession(t, testOptions(t, original, &echoTool{}, sink)), "hello")
+
+	records := append([]poo.Record{header("s1")}, sink.allRecords()...)
+	for _, rec := range records {
+		if created, ok := rec.(*poo.SessionCreatedRecord); ok {
+			created.ContextLimit = 20000
+			created.Roles.Chat.ContextLimit = 20000
+		}
+	}
+
+	// The summary pass reads the transcript and answers with the
+	// digest; the run's own request follows.
+	restoredTransport := scripted([]fakeResponse{
+		{text: "the conversation: the user said hello and the task echoed one, then two"},
+		{text: "the final answer"},
+	})
+	restoredSink := &recordingSink{}
+	restoredOpts := restoreOptions(t, restoredTransport, restoredSink)
+	restoredOpts.Model.ContextLimit = 20000
+	restoredOpts.Compactor = summary.New(summary.Options{KeepRecentTokens: 1})
+
+	restored, _, err := poo.Restore(restoredOpts, records)
+	if err != nil {
+		t.Fatalf("restoring the session: %v", err)
+	}
+	t.Cleanup(func() { restored.Close() })
+
+	res := runSession(t, restored, "carry on")
+	if res.Reason != poo.ReasonEndTurn {
+		t.Fatalf("the run settled %q (%s), want end_turn", res.Reason, res.Detail.Text)
+	}
+	var compaction *poo.CompactionRecord
+	for _, rec := range restoredSink.allRecords() {
+		if cr, ok := rec.(*poo.CompactionRecord); ok {
+			compaction = cr
+		}
+	}
+	if compaction == nil {
+		t.Fatal("the run holds no compaction")
+	}
+
+	last := restoredTransport.Requests()
+	if len(last) == 0 {
+		t.Fatal("the transport holds no requests")
+	}
+	var sent strings.Builder
+	for _, m := range last[len(last)-1].Messages {
+		sent.WriteString(m.Text())
+		sent.WriteString("\n")
+	}
+	if !strings.Contains(sent.String(), "the conversation:") {
+		t.Errorf("the request is %q, want the digest in it", sent.String())
+	}
+	if strings.Contains(sent.String(), big) {
+		t.Errorf("the request is %q, want the summarized view out of it", sent.String())
+	}
+}
 
 // TestARestoredSessionOverItsWindowCompactsFirst covers that run: the
 // restored view is over the window on the first gate pass, the strategy

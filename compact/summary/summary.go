@@ -118,6 +118,11 @@ func (c *Compactor) MaxTokens() int { return c.maxTokens }
 // summarize, so starting a compaction would only fail: the same guard
 // Compact applies belongs here, before the run is told one started.
 //
+// It also acts when the room the window leaves is under the minimum
+// output: a run that starts there cannot wait for a turn, because the
+// ratio trigger needs a request behind it. The rule is the budget's
+// own, shared with the other strategies and the request gate.
+//
 // A configured ratio is an explicit override: when it is set, the strategy
 // also acts at that share of the prompt limit.
 //
@@ -127,6 +132,9 @@ func (c *Compactor) MaxTokens() int { return c.maxTokens }
 func (c *Compactor) ShouldCompact(view poo.View, budget poo.ContextBudget) bool {
 	if len(cut.LiveTurns(view.Turns())) < 2 {
 		return false
+	}
+	if budget.OverWindow() {
+		return true
 	}
 	if c.ratio > 0 && budget.Reached(c.ratio) {
 		return true
