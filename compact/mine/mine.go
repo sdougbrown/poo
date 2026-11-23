@@ -217,7 +217,7 @@ func (c *Compactor) Compact(ctx context.Context, in poo.CompactionEnv) (poo.Comp
 	pointers := ""
 	var fork *poo.ForkSide
 	if in.Fork != nil {
-		reply, err := in.Fork(ctx, pointerRequest(), c.pointerMaxTokens)
+		reply, err := in.Fork(ctx, pointerRequest(), c.pointerMaxTokens, poo.ForkOptions{})
 		// The pass is advisory, so a fork that fails mines without it.
 		// A tool call is not pointers either: a model that answers with
 		// one has not read the ask, and the transcript holds what its

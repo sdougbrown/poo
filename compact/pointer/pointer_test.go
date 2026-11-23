@@ -3,6 +3,7 @@ package pointer_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -51,6 +52,17 @@ type echoPrepared struct {
 
 // Summary describes the call.
 func (p echoPrepared) Summary() string { return "echo " + p.text }
+
+// unreadableSink is a sink whose read side always fails: the strategy
+// composes from the seed and the notes alone.
+type unreadableSink struct {
+	*pootest.Sink
+}
+
+// ReadRecords always fails.
+func (u unreadableSink) ReadRecords(context.Context) ([]poo.Record, error) {
+	return nil, errors.New("the store is closed")
+}
 
 // readSink is a test sink that also reads its records back, so the
 // strategy's queries run over the session's own records.
@@ -343,7 +355,7 @@ func TestAStoreThatCannotBeReadStillComposes(t *testing.T) {
 		pootest.Turn{Text: "the final answer"},
 	)
 	tr.SetForkTurns(pootest.Turn{Text: `{"queries": ["TURN-ONE"], "notes": "the notes"}`})
-	sink := pootest.NewSink()
+	sink := unreadableSink{pootest.NewSink()}
 	s, err := poo.New(poo.Options{
 		Transport:    tr,
 		Tools:        map[string]poo.Tool{"echo": &echoTool{}},

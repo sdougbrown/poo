@@ -194,7 +194,7 @@ func main() {
 			Tools:     infos,
 			Unmatched: code.Profile().Unmatched,
 		}},
-		Compactor: mine.New(mine.Options{Ratio: *ratio, MaxTokens: *maxTokens, KeepRecentTokens: *keepRecent}),
+		Compactor: compactor(*strategy, *ratio, *maxTokens, *keepRecent),
 		Observers: []poo.Observer{events},
 		// Restore replaces this with the recorded prompt whenever the
 		// log holds one, so it applies only to a log without it.

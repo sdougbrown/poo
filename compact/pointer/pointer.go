@@ -287,7 +287,7 @@ func (c *Compactor) Compact(ctx context.Context, in poo.CompactionEnv) (poo.Comp
 		fork.Bytes = len(notes)
 	}
 
-	snippets := c.extract(in.History, c.queryLimit(queries))
+	snippets := c.extract(ctx, in.History, c.queryLimit(queries))
 	request := composeRequest(seed(in.View), snippets, notes, cut.PreviousSummary(messages[:r.Start]))
 	reply, err := in.Ask(ctx, request, c.maxTokens)
 	// A reconstruction the output limit cut short is not a context: the
@@ -322,7 +322,7 @@ func (c *Compactor) Compact(ctx context.Context, in poo.CompactionEnv) (poo.Comp
 // matching lines within the snippet budget. A history that cannot be
 // read returns nothing: the compose ask still has the seed and the
 // notes.
-func (c *Compactor) extract(history poo.History, queries []string) []poo.HistoryMatch {
+func (c *Compactor) extract(ctx context.Context, history poo.History, queries []string) []poo.HistoryMatch {
 	if history == nil {
 		return nil
 	}
@@ -333,7 +333,7 @@ func (c *Compactor) extract(history poo.History, queries []string) []poo.History
 		// The query is the pointer's literal string: it is quoted
 		// before it reaches the search, so a query that reads as a
 		// pattern is still the text it was.
-		matches, err := history.Search(regexp.QuoteMeta(query))
+		matches, err := history.Search(ctx, regexp.QuoteMeta(query))
 		if err != nil {
 			continue
 		}

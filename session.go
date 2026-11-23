@@ -1563,7 +1563,7 @@ func (s *Session) beginCompactionWrite(run *runState) (context.Context, func(), 
 			}
 		}
 		run.runWrites--
-		s.signalWorkLocked(run)
+		s.signalWorkLocked(&run.callOwner)
 		s.mu.Unlock()
 	}
 	return ctx, release, true
