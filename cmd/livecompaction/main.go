@@ -27,8 +27,10 @@ import (
 	"time"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/codemode/quickjs"
 	codemodestarlark "github.com/sdougbrown/poo/codemode/starlark"
 	"github.com/sdougbrown/poo/compact/mine"
+	"github.com/sdougbrown/poo/config"
 	"github.com/sdougbrown/poo/pootest"
 	"github.com/sdougbrown/poo/profile/code"
 	"github.com/sdougbrown/poo/provider/openai"
@@ -43,15 +45,31 @@ import (
 	"github.com/sdougbrown/poo/tool/read"
 )
 
+// codemodeEngine builds the codemode tool under the named engine: the
+// shipped binary's selection, so a replay offers the schema the
+// recorded session worked with.
+func codemodeEngine(name string) poo.Tool {
+	if name == "starlark" {
+		return codemode.New(codemodestarlark.New())
+	}
+	return codemode.New(quickjs.New())
+}
+
 // toolInfos describes the linked tools the way the profile names them,
-// straight from each tool's own spec.
-func toolInfos(linked map[string]poo.Tool) []poo.ToolInfo {
+// straight from each tool's own spec. A name the profile offers that
+// nothing links fails here, before restore's compatibility check names
+// it readably.
+func toolInfos(linked map[string]poo.Tool) ([]poo.ToolInfo, error) {
 	infos := make([]poo.ToolInfo, 0, len(linked))
 	for _, name := range code.Profile().Tools {
-		spec := linked[name].Spec()
+		tool, ok := linked[name]
+		if !ok {
+			return nil, fmt.Errorf("the %s profile offers %q and nothing links it", code.Name, name)
+		}
+		spec := tool.Spec()
 		infos = append(infos, poo.ToolInfo{Name: name, Class: spec.Class, Background: spec.Background})
 	}
-	return infos
+	return infos, nil
 }
 
 func main() {
@@ -63,6 +81,7 @@ func main() {
 	ratio := flag.Float64("ratio", 0.85, "the fill share the mine strategy acts at")
 	keepRecent := flag.Int("keeprecent", 0, "the verbatim tail the strategy keeps; 0 takes the strategy's own default")
 	maxTokens := flag.Int("maxtokens", 0, "the mining request's output limit; 0 takes the strategy's own default")
+	engine := flag.String("engine", config.DefaultCodemodeEngine, "the codemode engine the replay offers; match the recorded session")
 	flag.Parse()
 	if *logPath == "" {
 		flag.Usage()
@@ -89,6 +108,12 @@ func main() {
 			created.ContextLimit = *limit
 			if created.Roles.Chat != nil {
 				created.Roles.Chat.ContextLimit = *limit
+				// The session's model identity is the recorded one:
+				// restore sends the header's model in every request,
+				// so the flag rewrites it here.
+				if *model != "" {
+					created.Roles.Chat.ModelID = *model
+				}
 			}
 		}
 	}
@@ -120,8 +145,9 @@ func main() {
 		ModelInfo: modelInfo,
 	})
 	// The tools the shipped code profile offers, and the profile's own
-	// declaration of them: the classes come from the tools' specs, so
-	// the copy here cannot drift from what poo ships.
+	// declaration of them: the classes come from the tools' specs, and
+	// a name the profile offers that nothing links fails the build with
+	// the missing tool named.
 	linked := map[string]poo.Tool{
 		"read":     read.New(),
 		"grep":     grep.New(),
@@ -129,8 +155,13 @@ func main() {
 		"edit":     edit.New(),
 		"bash":     bash.New(),
 		"fetch":    fetch.New(),
-		"codemode": codemode.New(codemodestarlark.New()),
+		"codemode": codemodeEngine(*engine),
 		"call_cli": cliregistry.NewCall(nil),
+	}
+	infos, err := toolInfos(linked)
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
 	}
 	opts := poo.Options{
 		Transport: transport,
@@ -141,11 +172,13 @@ func main() {
 		Profile:   "code",
 		Profiles: []poo.Profile{{
 			Name:      code.Name,
-			Tools:     toolInfos(linked),
+			Tools:     infos,
 			Unmatched: code.Profile().Unmatched,
 		}},
-		Compactor:    mine.New(mine.Options{Ratio: *ratio, MaxTokens: *maxTokens, KeepRecentTokens: *keepRecent}),
-		Observers:    []poo.Observer{events},
+		Compactor: mine.New(mine.Options{Ratio: *ratio, MaxTokens: *maxTokens, KeepRecentTokens: *keepRecent}),
+		Observers: []poo.Observer{events},
+		// Restore replaces this with the recorded prompt whenever the
+		// log holds one, so it applies only to a log without it.
 		SystemPrompt: "You are continuing an earlier session. Work from the context you are given.",
 	}
 	restored, meta, err := poo.Restore(opts, records)
