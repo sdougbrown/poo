@@ -153,8 +153,9 @@ var errCompactionStore = errors.New("poo: the compaction record was refused")
 func (s *Session) offersHistoryTool() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, ok := s.opts.Tools["history"]
-	return ok
+	_, offered := s.opts.Tools["history"]
+	_, canRead := s.opts.Sink.(RecordReader)
+	return offered && canRead
 }
 
 // compact asks the compactor to compact the view and applies what it
