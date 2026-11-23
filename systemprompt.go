@@ -114,11 +114,15 @@ func buildPrompt(opts *Options) *prompt.Builder {
 			}
 		}
 		// The family section holds a text per model family, keyed by
-		// the prompt variant the model names. It has no default text,
-		// so it renders nothing until the variant names one. A raw
-		// prompt carries none of it: the raw text comes back as
+		// the prompt variant the model names, and the session's own
+		// switch turns it on: the guidance is an opt-in, so a session
+		// a consumer builds directly carries none. It has no default
+		// text, so it renders nothing until the variant names one. A
+		// raw prompt carries none of it: the raw text comes back as
 		// supplied.
-		setPromptVariants(b, prompt.FamilySection, prompt.FamilyVariants())
+		if opts.ModelFamily {
+			setPromptVariants(b, prompt.FamilySection, prompt.FamilyVariants())
+		}
 	}
 	for _, edit := range opts.Prompt {
 		if edit != nil {
@@ -270,16 +274,33 @@ func (s *Session) PromptState() PromptState {
 // alternative for it renders that one and a section that does not renders
 // its default text. A prompt that cannot render in the variant refuses the
 // change, and the session keeps the variant and the prompt it had.
-func (s *Session) SetPromptVariant(name string) error {
+//
+// The warnings name what the caller should know about the run that
+// follows: the family guidance a profile opted into rides the variant,
+// and a variant no family the prompt ships covers renders none of it.
+func (s *Session) SetPromptVariant(name string) ([]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	variant := s.promptVariant
 	s.promptVariant = name
 	if err := s.renderPromptLocked(); err != nil {
 		s.promptVariant = variant
-		return err
+		return nil, err
 	}
-	return nil
+	var warnings []string
+	// The family guidance is a profile's opt-in, and the section rides
+	// the variant: a variant no family the prompt ships covers renders
+	// none of it, and the change says so instead of dropping the
+	// guidance silently. A prompt without the section — a raw one, or a
+	// session that never opted in — stays unmentioned.
+	if slices.Contains(s.promptBuilder.Names(), prompt.FamilySection) && !slices.Contains(prompt.FamilyNames(), name) {
+		if name == "" {
+			warnings = append(warnings, "the prompt renders with no variant, so the model family's guidance does not render")
+		} else {
+			warnings = append(warnings, fmt.Sprintf("the prompt variant %q names no family the prompt ships, so the model family's guidance does not render", name))
+		}
+	}
+	return warnings, nil
 }
 
 // SetPrompt applies prompt changes to the session.
@@ -335,3 +356,6 @@ func (s *Session) applyPromptEdit(edit SystemPromptEdit) error {
 	}
 	return s.SetPrompt(func(b *prompt.Builder) { edit(b) })
 }
+
+// PromptBuilderNames is a debug helper.
+func (s *Session) PromptBuilderNames() []string { return s.promptBuilder.Names() }

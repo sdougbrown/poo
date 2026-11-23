@@ -109,6 +109,21 @@ func (s *Session) SetModel(info ModelInfo, transport ...ChatTransport) (ModelSwi
 			promptLimit, name, reason))
 	}
 
+	// The family guidance is a profile's opt-in, and the section rides
+	// the variant: a model whose variant names no family the prompt
+	// ships renders none, and the switch says so instead of dropping
+	// the guidance silently. A prompt without the section — a raw one,
+	// or a profile that never opted in — stays unmentioned. The note
+	// joins the warnings before the outcome is built, so the result,
+	// the record, and the event carry the same list.
+	if slices.Contains(s.promptBuilder.Names(), prompt.FamilySection) && !slices.Contains(prompt.FamilyNames(), info.PromptVariant) {
+		if info.PromptVariant == "" {
+			warnings = append(warnings, "the model names no prompt variant, so the model family's guidance does not render")
+		} else {
+			warnings = append(warnings, fmt.Sprintf("the prompt variant %q names no family the prompt ships, so the model family's guidance does not render", info.PromptVariant))
+		}
+	}
+
 	from := modelLabel(s.opts.Model)
 	outcome := ModelSwitch{From: from, To: name, Warnings: warnings}
 
@@ -117,21 +132,10 @@ func (s *Session) SetModel(info ModelInfo, transport ...ChatTransport) (ModelSwi
 	// environment. A prompt that cannot render there refuses the switch,
 	// and the session keeps the model and the prompt it had.
 	modelID := modelIdentifier(info)
+
 	env := s.promptBuilder.Env()
 	env.Model = modelID
 	env.Variant = info.PromptVariant
-	// The family guidance is a profile's opt-in, and the section rides
-	// the variant: a model whose variant names no family the prompt
-	// ships renders none, and the switch says so instead of dropping
-	// the guidance silently. A prompt without the section — a raw one,
-	// or a profile that never opted in — stays unmentioned.
-	if slices.Contains(s.promptBuilder.Names(), prompt.FamilySection) && !slices.Contains(prompt.FamilyNames(), info.PromptVariant) {
-		if info.PromptVariant == "" {
-			outcome.Warnings = append(outcome.Warnings, "the model names no prompt variant, so the model family's guidance does not render")
-		} else {
-			outcome.Warnings = append(outcome.Warnings, fmt.Sprintf("the prompt variant %q names no family the prompt ships, so the model family's guidance does not render", info.PromptVariant))
-		}
-	}
 	promptText, promptSections, err := renderPrompt(s.promptBuilder.WithEnv(env), s.opts.SystemPrompt)
 	if err != nil {
 		s.mu.Unlock()

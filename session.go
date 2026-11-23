@@ -570,6 +570,11 @@ type Options struct {
 	// It is the variant the session starts in. The session's own
 	// variant may change between the runs.
 	PromptVariant string
+	// ModelFamily says whether the prompt carries the model family's
+	// section: a text per family, keyed by the model's prompt variant.
+	// It is off unless the profile's word turned it on, so a session a
+	// consumer builds directly carries no guidance nobody asked for.
+	ModelFamily bool
 	// WorkingDir is the directory the tools work in.
 	WorkingDir string
 	// Env is the scrubbed child environment for the tools.

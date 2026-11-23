@@ -173,7 +173,7 @@ func TestTheVariantIsFixedForTheRun(t *testing.T) {
 	})
 	var s *poo.Session
 	tool := &echoTool{result: "echoed", call: func(ctx context.Context) (poo.ToolResult, error) {
-		if err := s.SetPromptVariant("other"); err != nil {
+		if _, err := s.SetPromptVariant("other"); err != nil {
 			return poo.ToolResult{}, err
 		}
 		return poo.ToolResult{Text: "echoed"}, nil
@@ -207,7 +207,7 @@ func TestTheVariantChangesBetweenTheRuns(t *testing.T) {
 		poo.WithPromptVariant("small-local"))
 	runSession(t, s, "do the thing")
 
-	if err := s.SetPromptVariant(""); err != nil {
+	if _, err := s.SetPromptVariant(""); err != nil {
 		t.Fatalf("changing the variant: %v", err)
 	}
 	runSession(t, s, "do the thing again")

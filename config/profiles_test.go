@@ -385,3 +385,22 @@ func TestAProfileAppendsItsFileBesideTheSettings(t *testing.T) {
 		t.Errorf("the append displaced the base's prose")
 	}
 }
+
+// TestTheFamilyGuidanceSaysWhenNoChatModelRuns covers the no-model
+// attribution: a build without a chat model warns that there is none,
+// not that a model names no variant.
+func TestTheFamilyGuidanceSaysWhenNoChatModelRuns(t *testing.T) {
+	settings, err := config.Parse([]byte(theModelSettings+"profiles:\n  codex:\n    base: code\n    model_family: true\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings.Profile = "codex"
+	settings.Roles = nil
+	runtime := buildWith(t, config.BuildOptions{
+		Settings: settings, NoChatModel: true, WorkingDir: t.TempDir(),
+		Tools: theTools(), Profiles: theProfiles(), Executors: theExecutors(),
+	})
+	if !strings.Contains(runtime.Warning, "the build has no chat model") {
+		t.Errorf("the build warned %q, want the no-chat-model note", runtime.Warning)
+	}
+}

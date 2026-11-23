@@ -725,12 +725,13 @@ func TestASwitchWarnsWhenTheFamilyGuidanceCannotFollow(t *testing.T) {
 	}
 	oldTransport := openai.New(openai.Options{Endpoint: oldServer.URL, Model: first.ModelID, ModelInfo: first})
 	s := newTestSession(t, poo.Options{
-		Transport:  oldTransport,
-		Tools:      map[string]poo.Tool{"echo": &echoTool{}},
-		ToolOrder:  []string{"echo"},
-		SessionID:  "s1",
-		Model:      first,
-		WorkingDir: t.TempDir(),
+		Transport:   oldTransport,
+		Tools:       map[string]poo.Tool{"echo": &echoTool{}},
+		ToolOrder:   []string{"echo"},
+		SessionID:   "s1",
+		Model:       first,
+		ModelFamily: true,
+		WorkingDir:  t.TempDir(),
 	})
 
 	unknown := poo.ModelInfo{

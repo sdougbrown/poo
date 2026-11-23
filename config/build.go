@@ -241,6 +241,11 @@ type Runtime struct {
 	// An error that would say "the settings" names the real source.
 	registryFromDefaults bool
 	feedsFromDefaults    bool
+	// chatModelResolved reports whether the build resolved a chat
+	// model: a build that runs without one says so when a profile's
+	// opt-in cannot render, instead of naming a model that is not
+	// there.
+	chatModelResolved bool
 	// Feeds are the feed manifests the settings name, or nil when the
 	// settings name none.
 	Feeds *feed.Set
@@ -2002,6 +2007,7 @@ func (r *Runtime) resolveSession(opts BuildOptions, workingDir string) error {
 			return err
 		}
 	} else {
+		r.chatModelResolved = true
 		r.Options.Model = model
 		// The prompt renders in the chat model's own variant: the model
 		// family's section among them. A switch to another model
@@ -2220,21 +2226,17 @@ func (r *Runtime) resolvePrompt(opts BuildOptions, workingDir string) error {
 			}
 		})
 	}
-	// The family section follows the model's prompt variant, and a
-	// profile that has not turned it on runs without it, whatever its
-	// own prompt directory carried. Unlike the manifest defaults, absent
-	// means off: the family guidance is an opt-in.
-	if family := r.chosenProfile(opts).ModelFamily; family == nil || !*family {
-		r.Prompt = append(r.Prompt, func(b *prompt.Builder) {
-			b.Remove(prompt.FamilySection)
-		})
-	} else if variant := r.Options.PromptVariant; !slices.Contains(prompt.FamilyNames(), variant) {
-		// The profile opted in, but the chat model's variant names no
-		// family the prompt ships: the guidance never renders, and the
+	// The family section follows the model's prompt variant, and poo's
+	// own default leaves it out: the profile's word turns it on. Unlike
+	// the manifest defaults, absent means off — the family guidance is
+	// an opt-in.
+	if family := r.chosenProfile(opts).ModelFamily; family != nil && *family {
+		r.Options.ModelFamily = true
+		// The profile opted in, but the guidance cannot render: the
 		// operator hears why instead of losing it silently.
-		if variant == "" {
-			r.warn(fmt.Sprintf("profiles.%s: the chat model names no prompt variant, so the model family's guidance does not render", r.profileName(opts)))
-		} else {
+		if !r.chatModelResolved {
+			r.warn(fmt.Sprintf("profiles.%s: the build has no chat model, so the model family's guidance does not render", r.profileName(opts)))
+		} else if variant := r.Options.PromptVariant; !slices.Contains(prompt.FamilyNames(), variant) {
 			r.warn(fmt.Sprintf("profiles.%s: the prompt variant %q names no family the prompt ships, so the model family's guidance does not render", r.profileName(opts), variant))
 		}
 	}
