@@ -2584,6 +2584,8 @@ context:
     ratio: 0.7
     keep_recent_tokens: 4096
     max_tokens: 1024
+    pointer_max_tokens: 512
+    snippet_budget: 2048
     escalate_after: 3
 `), config.FormatYAML)
 	if err != nil {
@@ -2602,6 +2604,8 @@ context:
 		{"ratio", int(strategy.Ratio() * 100), 70},
 		{"keep_recent_tokens", strategy.KeepRecentTokens(), 4096},
 		{"max_tokens", strategy.MaxTokens(), 1024},
+		{"pointer_max_tokens", strategy.PointerMaxTokens(), 512},
+		{"snippet_budget", strategy.SnippetBudget(), 2048},
 		{"escalate_after", strategy.EscalateAfter(), 3},
 	} {
 		if field.got != field.want {

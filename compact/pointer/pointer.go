@@ -193,6 +193,12 @@ func (c *Compactor) KeepRecentTokens() int { return c.keepRecent }
 // MaxTokens returns the output limit of the compose request.
 func (c *Compactor) MaxTokens() int { return c.maxTokens }
 
+// PointerMaxTokens returns the output limit of the pointer pass.
+func (c *Compactor) PointerMaxTokens() int { return c.pointerMaxTokens }
+
+// SnippetBudget returns the most text the queries may collect.
+func (c *Compactor) SnippetBudget() int { return c.snippetBudget }
+
 // EscalateAfter returns the number of the strategy's own compactions a
 // session runs before the rest are the full-span fallback's.
 func (c *Compactor) EscalateAfter() int { return c.escalateAfter }

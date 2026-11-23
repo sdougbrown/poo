@@ -438,6 +438,13 @@
     },
     {
       "type": "check",
+      "field": "context.pointer.escalate_after",
+      "op": "min",
+      "value": 0,
+      "reason": "context.pointer.escalate_after must not be negative"
+    },
+    {
+      "type": "check",
       "field": "session.retention.max_age_days",
       "op": "min",
       "value": 0,

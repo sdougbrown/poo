@@ -148,10 +148,6 @@ func TestTheRunReconstructsFromTheQueries(t *testing.T) {
 
 	// The fork was asked for JSON.
 	forks := tr.Forks()
-	t.Logf("forks: %d", len(forks))
-	for i, f := range forks {
-		t.Logf("fork %d: json %v, appended %q", i, f.JSON, f.Appended[0].Text()[:80])
-	}
 	if !forks[0].JSON {
 		t.Error("the fork was not asked for a JSON reply")
 	}

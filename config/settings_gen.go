@@ -661,9 +661,12 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 			Required:  ContextPointerEscalateAfterEnabled && false,
 			Enabled:   ContextPointerEscalateAfterEnabled,
 			Satisfied: ContextPointerEscalateAfterSatisfied,
-			Fair:      true,
+			Fair:      f.ContextPointerEscalateAfter != nil && *f.ContextPointerEscalateAfter >= 0,
 			Reason: func() *string {
 				var reasons []string
+				if !(f.ContextPointerEscalateAfter != nil && *f.ContextPointerEscalateAfter >= 0) && "context.pointer.escalate_after must not be negative" != "" {
+					reasons = append(reasons, "context.pointer.escalate_after must not be negative")
+				}
 				if len(reasons) == 0 {
 					return nil
 				}
@@ -671,6 +674,9 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 			}(),
 			Reasons: func() []string {
 				var reasons []string
+				if !(f.ContextPointerEscalateAfter != nil && *f.ContextPointerEscalateAfter >= 0) && "context.pointer.escalate_after must not be negative" != "" {
+					reasons = append(reasons, "context.pointer.escalate_after must not be negative")
+				}
 				if reasons == nil {
 					reasons = []string{}
 				}
@@ -3003,6 +3009,7 @@ var ruleMeta = []RuleMetaEntry{
 	{Field: "ContextMineMaxTokens", RuleType: "check", Expr: "f.ContextMineMaxTokens != nil && *f.ContextMineMaxTokens >= 0", Reason: "context.mine.max_tokens must not be negative"},
 	{Field: "ContextMinePointerMaxTokens", RuleType: "check", Expr: "f.ContextMinePointerMaxTokens != nil && *f.ContextMinePointerMaxTokens >= 0", Reason: "context.mine.pointer_max_tokens must not be negative"},
 	{Field: "ContextMineRatio", RuleType: "check", Expr: "f.ContextMineRatio != nil && *f.ContextMineRatio >= 0 && *f.ContextMineRatio <= 1", Reason: "context.mine.ratio must be between 0 and 1"},
+	{Field: "ContextPointerEscalateAfter", RuleType: "check", Expr: "f.ContextPointerEscalateAfter != nil && *f.ContextPointerEscalateAfter >= 0", Reason: "context.pointer.escalate_after must not be negative"},
 	{Field: "ContextPointerKeepRecentTokens", RuleType: "check", Expr: "f.ContextPointerKeepRecentTokens != nil && *f.ContextPointerKeepRecentTokens >= 0", Reason: "context.pointer.keep_recent_tokens must not be negative"},
 	{Field: "ContextPointerMaxTokens", RuleType: "check", Expr: "f.ContextPointerMaxTokens != nil && *f.ContextPointerMaxTokens >= 0", Reason: "context.pointer.max_tokens must not be negative"},
 	{Field: "ContextPointerPointerMaxTokens", RuleType: "check", Expr: "f.ContextPointerPointerMaxTokens != nil && *f.ContextPointerPointerMaxTokens >= 0", Reason: "context.pointer.pointer_max_tokens must not be negative"},
@@ -3127,6 +3134,7 @@ func Challenge(fieldName string, f SettingsFields, c SettingsConditions, prev Se
 		if status.Reason != nil {
 			explanations = append(explanations, "* "+*status.Reason)
 		}
+		explanations = append(explanations, "* check: context.pointer.escalate_after must not be negative")
 	case "ContextPointerKeepRecentTokens", "context.pointer.keep_recent_tokens":
 		found = true
 		status = avail.ContextPointerKeepRecentTokens
