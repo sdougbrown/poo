@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -13,6 +14,8 @@ import (
 	"testing"
 
 	clicontract "github.com/sdougbrown/cli-contract"
+	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/session"
 )
 
 // fakeEndpoint is a scripted chat endpoint.
@@ -791,6 +794,88 @@ func TestTheRunHeaderRecordsTheToolsBackgroundMode(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("the header does not name the bash tool")
+	}
+}
+
+// TestTheSinkReadSideCoversItsThreeSupplies covers the sink's read
+// contract directly: the fallback buffer reads back what it buffered,
+// oldest first, and the log and store paths read through what owns
+// the records.
+func TestTheSinkReadSideCoversItsThreeSupplies(t *testing.T) {
+	// The fallback: the buffer is the whole supply, in write order.
+	buffered := &sink{}
+	for _, text := range []string{"first", "second"} {
+		if err := buffered.Append(context.Background(), &poo.MessageRecord{
+			RecordMeta: poo.NewRecordMeta("message"),
+			Role:       "user",
+			Content:    []poo.ContentBlock{{Kind: poo.ContentText, Text: "the " + text + " thing"}},
+		}); err != nil {
+			t.Fatalf("appending %q: %v", text, err)
+		}
+	}
+	read, err := buffered.ReadRecords(context.Background())
+	if err != nil {
+		t.Fatalf("reading the buffer: %v", err)
+	}
+	if len(read) != 2 || read[0].(*poo.MessageRecord).Content[0].Text != "the first thing" || read[1].(*poo.MessageRecord).Content[0].Text != "the second thing" {
+		t.Errorf("the buffer read back %d records, want first then second", len(read))
+	}
+
+	// The log path: the read goes through the log's file.
+	dir := t.TempDir()
+	log, err := session.Open(filepath.Join(dir, "session.jsonl"))
+	if err != nil {
+		t.Fatalf("opening the log: %v", err)
+	}
+	t.Cleanup(func() { log.Close() })
+	logged := &sink{log: log}
+	if err := logged.Append(context.Background(), &poo.MessageRecord{
+		RecordMeta: poo.NewRecordMeta("message"),
+		Role:       "user",
+		Content:    []poo.ContentBlock{{Kind: poo.ContentText, Text: "through the log"}},
+	}); err != nil {
+		t.Fatalf("appending through the log: %v", err)
+	}
+	read, err = logged.ReadRecords(context.Background())
+	if err != nil {
+		t.Fatalf("reading the log: %v", err)
+	}
+	if len(read) != 1 || read[0].(*poo.MessageRecord).Content[0].Text != "through the log" {
+		t.Errorf("the log read back %v, want the record it wrote", len(read))
+	}
+
+	// The store path: the read goes through the store's open session.
+	store, err := session.NewStore(dir)
+	if err != nil {
+		t.Fatalf("opening the store: %v", err)
+	}
+	t.Cleanup(func() { store.Close() })
+	if _, err := store.Create(context.Background(), &poo.SessionCreatedRecord{
+		RecordMeta:      poo.NewRecordMeta("session.created"),
+		SessionMetadata: poo.SessionMetadata{SessionID: "s1", Format: poo.FormatVersion, Mode: string(session.ModeLogged)},
+	}); err != nil {
+		t.Fatalf("creating the store session: %v", err)
+	}
+	stored := &sink{store: store}
+	if err := stored.Append(context.Background(), &poo.MessageRecord{
+		RecordMeta: poo.NewRecordMeta("message"),
+		Role:       "user",
+		Content:    []poo.ContentBlock{{Kind: poo.ContentText, Text: "through the store"}},
+	}); err != nil {
+		t.Fatalf("appending through the store: %v", err)
+	}
+	read, err = stored.ReadRecords(context.Background())
+	if err != nil {
+		t.Fatalf("reading the store: %v", err)
+	}
+	// The store's read is the whole retained chain: the header it
+	// wrote, then the record.
+	if len(read) != 2 {
+		t.Fatalf("the store read back %d records, want the header and the message", len(read))
+	}
+	msg, ok := read[1].(*poo.MessageRecord)
+	if !ok || msg.Content[0].Text != "through the store" {
+		t.Errorf("the store read back %T, want the message it wrote", read[1])
 	}
 }
 
