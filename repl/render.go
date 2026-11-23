@@ -46,9 +46,6 @@ const maxResultLines = 8
 
 // renderer writes the transcript: the rendered replies, the tool
 // calls' decoration and the notices.
-//
-// Everything it writes is mirrored into a transcript buffer, so a
-// pager can show the session again without the server.
 type renderer struct {
 	// out is the terminal the transcript goes to.
 	out io.Writer
