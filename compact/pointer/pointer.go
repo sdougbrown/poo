@@ -60,6 +60,15 @@ const (
 	// DefaultSnippetBudget is the most text the queries may collect.
 	DefaultSnippetBudget = 32768
 
+	// DefaultEscalateAfter is the number of the strategy's own
+	// compactions a session runs before the rest are the full-span
+	// fallback's.
+	//
+	// A strategy whose reconstruction keeps losing the work's findings
+	// is not converging: the model reads, the window cuts, the model
+	// reads again. After this many rounds the cheap path has had its
+	// chance, and the fallback's whole-span read takes the work.
+	DefaultEscalateAfter = 5
 	// DefaultQueryCount is the most queries the pointer pass may name.
 	DefaultQueryCount = 8
 
@@ -88,6 +97,10 @@ type Options struct {
 	// QueryCount is the most queries the pointer pass may name. It
 	// defaults to DefaultQueryCount.
 	QueryCount int
+	// EscalateAfter is the number of the strategy's own compactions a
+	// session runs before the rest are the full-span fallback's. It
+	// defaults to DefaultEscalateAfter.
+	EscalateAfter int
 	// Files reports the file a tool call names. It defaults to the two
 	// file tools poo ships, read and edit, with the path in a "path"
 	// argument.
@@ -115,6 +128,12 @@ type Compactor struct {
 	snippetBudget int
 	// queryCount is the most queries the pointer pass may name.
 	queryCount int
+	// escalateAfter is the number of the strategy's own compactions
+	// before the rest are the fallback's.
+	escalateAfter int
+	// compactions is how many compactions this session has run under
+	// the strategy itself, the fallback's excluded.
+	compactions int
 	// files reports the file a tool call names.
 	files FileOp
 	// fallback is the full-span strategy the selective pass falls back
@@ -131,6 +150,7 @@ func New(opts Options) *Compactor {
 		pointerMaxTokens: opts.PointerMaxTokens,
 		snippetBudget:    opts.SnippetBudget,
 		queryCount:       opts.QueryCount,
+		escalateAfter:    opts.EscalateAfter,
 		files:            opts.Files,
 		fallback:         opts.Fallback,
 	}
@@ -151,6 +171,9 @@ func New(opts Options) *Compactor {
 	}
 	if c.queryCount <= 0 {
 		c.queryCount = DefaultQueryCount
+	}
+	if c.escalateAfter <= 0 {
+		c.escalateAfter = DefaultEscalateAfter
 	}
 	if c.files == nil {
 		c.files = cut.DefaultFileOp
@@ -175,6 +198,10 @@ func (c *Compactor) KeepRecentTokens() int { return c.keepRecent }
 
 // MaxTokens returns the output limit of the compose request.
 func (c *Compactor) MaxTokens() int { return c.maxTokens }
+
+// EscalateAfter returns the number of the strategy's own compactions a
+// session runs before the rest are the full-span fallback's.
+func (c *Compactor) EscalateAfter() int { return c.escalateAfter }
 
 // ShouldCompact reports whether the view should be reconstructed: the
 // conversation alone exceeds the window, the fill share the ratio names
@@ -229,6 +256,12 @@ func (c *Compactor) Compact(ctx context.Context, in poo.CompactionEnv) (poo.Comp
 	if in.Ask == nil {
 		return poo.Compaction{}, errors.New("pointer: there is no request to make")
 	}
+	if c.compactions >= c.escalateAfter {
+		// The cheap path has had its rounds: a session that keeps
+		// refilling the window is one the reconstruction is not
+		// converging on, so the rest are the fallback's.
+		return c.fallback.Compact(ctx, in)
+	}
 	messages := in.View.Messages()
 	r, ok := cut.Select(messages, in.View.Turns(), in.Budget, c.keepRecent)
 	if !ok {
@@ -282,6 +315,7 @@ func (c *Compactor) Compact(ctx context.Context, in poo.CompactionEnv) (poo.Comp
 		replacement += "\n\n" + files
 	}
 	replacement += "\n\n" + cut.Retention(r.Cut, in.SessionID)
+	c.compactions++
 	return poo.Compaction{
 		Strategy: Strategy,
 		Replace: &poo.RangeReplacement{

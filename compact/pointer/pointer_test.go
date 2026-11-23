@@ -382,3 +382,62 @@ func TestAStoreThatCannotBeReadStillComposes(t *testing.T) {
 		t.Errorf("the compose request is %q, want the notes and the seed in it", ask)
 	}
 }
+
+// TestASessionThatKeepsCompactingEscalatesToTheFallback covers the
+// thrash guard: a run whose window keeps refilling compacts under the
+// selective pass a bounded number of times, and the compactions after
+// that are the full-span fallback's, whose reconstruction carries what
+// the selective pass kept dropping.
+func TestASessionThatKeepsCompactingEscalatesToTheFallback(t *testing.T) {
+	// The turns are a kilobyte-token each: big enough to cross the
+	// ratio trigger, small enough that the window never exhausts
+	// between compactions.
+	big := strings.Repeat("x", 3500)
+	tr := pootest.NewTransport(
+		pootest.Turn{Text: big, Calls: []pootest.Call{{Name: "echo", Arguments: json.RawMessage(`{"text":"one"}`)}}},
+		pootest.Turn{Text: big, Calls: []pootest.Call{{Name: "echo", Arguments: json.RawMessage(`{"text":"two"}`)}}},
+		pootest.Turn{Text: big},
+		pootest.Turn{Text: big, Calls: []pootest.Call{{Name: "echo", Arguments: json.RawMessage(`{"text":"three"}`)}}},
+		pootest.Turn{Text: strings.Repeat("y", 3500)},
+		pootest.Turn{Text: big, Calls: []pootest.Call{{Name: "echo", Arguments: json.RawMessage(`{"text":"four"}`)}}},
+		pootest.Turn{Text: strings.Repeat("y", 3500)},
+		pootest.Turn{Text: "the final answer"},
+	)
+	tr.SetForkTurns(
+		pootest.Turn{Text: `{"queries": ["TURN-ONE"], "notes": ""}`},
+		pootest.Turn{Text: `{"queries": ["TURN-ONE"], "notes": ""}`},
+		pootest.Turn{Text: `{"queries": ["TURN-ONE"], "notes": ""}`},
+	)
+	s, sink := session(t, tr, pointer.Options{Ratio: 0.05, KeepRecentTokens: 1, EscalateAfter: 2})
+
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	res, err := s.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	if res.Reason != poo.ReasonEndTurn {
+		t.Fatalf("the run settled %q (%s), want end_turn", res.Reason, res.Detail.Text)
+	}
+
+	kinds := map[string]int{}
+	for _, rec := range sink.Records() {
+		kinds[rec.Meta().Record]++
+	}
+	t.Logf("sink records: %v, settle %q source %q", kinds, res.Reason, res.Detail.Source)
+	var strategies []string
+	for _, rec := range sink.Records() {
+		if cr, ok := rec.(*poo.CompactionRecord); ok {
+			strategies = append(strategies, cr.Strategy)
+		}
+	}
+	if len(strategies) != 3 {
+		t.Fatalf("the run compacted %d times (%v), want 3", len(strategies), strategies)
+	}
+	for i, want := range []string{"pointer", "pointer", "mine"} {
+		if strategies[i] != want {
+			t.Errorf("compaction %d ran under %q, want %q", i+1, strategies[i], want)
+		}
+	}
+}

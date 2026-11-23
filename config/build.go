@@ -2204,6 +2204,9 @@ func (r *Runtime) resolveSession(opts BuildOptions, workingDir string) error {
 		if settings.Context.Pointer.SnippetBudget != nil {
 			pointerOptions.SnippetBudget = *settings.Context.Pointer.SnippetBudget
 		}
+		if settings.Context.Pointer.EscalateAfter != nil {
+			pointerOptions.EscalateAfter = *settings.Context.Pointer.EscalateAfter
+		}
 		r.Options.Compactor = pointerstrategy.New(pointerOptions)
 	case "mine":
 		mineOptions := mine.Options{}

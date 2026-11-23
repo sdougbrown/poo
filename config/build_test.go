@@ -2572,6 +2572,43 @@ func TestTheDefaultStrategyIsPointer(t *testing.T) {
 	}
 }
 
+// TestThePointerStrategySettings covers a settings document that names
+// the pointer strategy's own: the compactor takes the ratio, the tail,
+// and the compactions before the full-span fallback takes over.
+func TestThePointerStrategySettings(t *testing.T) {
+	settings, err := config.Parse([]byte(theModelSettings+`
+context:
+  strategy: pointer
+  pointer:
+    ratio: 0.7
+    keep_recent_tokens: 4096
+    max_tokens: 1024
+    escalate_after: 3
+`), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+	strategy, ok := runtime.Options.Compactor.(*pointer.Compactor)
+	if !ok {
+		t.Fatalf("the session's compactor is %T, want the pointer strategy", runtime.Options.Compactor)
+	}
+	for _, field := range []struct {
+		name string
+		got  int
+		want int
+	}{
+		{"ratio", int(strategy.Ratio() * 100), 70},
+		{"keep_recent_tokens", strategy.KeepRecentTokens(), 4096},
+		{"max_tokens", strategy.MaxTokens(), 1024},
+		{"escalate_after", strategy.EscalateAfter(), 3},
+	} {
+		if field.got != field.want {
+			t.Errorf("context.pointer.%s reached the strategy as %d, want %d", field.name, field.got, field.want)
+		}
+	}
+}
+
 // TestAModelTheModelsFileDeclaresSendsTheEndpointsKey covers the credential of a
 // model no settings entry names. The provider is the model's own, as the catalog
 // resolved it, and the key is that endpoint's: the environment variable it names,

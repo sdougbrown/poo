@@ -41,6 +41,7 @@
     "context.pointer.max_tokens": { "isEmpty": "number" },
     "context.pointer.pointer_max_tokens": { "isEmpty": "number" },
     "context.pointer.snippet_budget": { "isEmpty": "number" },
+    "context.pointer.escalate_after": { "isEmpty": "number" },
     "tools.read.restrict_to_working_dir": { "isEmpty": "boolean" },
     "tools.grep.restrict_to_working_dir": { "isEmpty": "boolean" },
     "tools.edit.restrict_to_working_dir": { "isEmpty": "boolean" },

@@ -394,6 +394,9 @@ type Pointer struct {
 	PointerMaxTokens *int `json:"pointer_max_tokens,omitempty"`
 	// SnippetBudget is the most text the queries may collect, in bytes.
 	SnippetBudget *int `json:"snippet_budget,omitempty"`
+	// EscalateAfter is the number of the strategy's own compactions a
+	// session runs before the rest are the full-span fallback's.
+	EscalateAfter *int `json:"escalate_after,omitempty"`
 }
 
 // Tools are the tools' settings.

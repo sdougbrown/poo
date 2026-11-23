@@ -19,6 +19,7 @@ type SettingsFields struct {
 	ContextMineMaxTokens            *float64 "json:\"context.mine.max_tokens,omitempty\""
 	ContextMinePointerMaxTokens     *float64 "json:\"context.mine.pointer_max_tokens,omitempty\""
 	ContextMineRatio                *float64 "json:\"context.mine.ratio,omitempty\""
+	ContextPointerEscalateAfter     *float64 "json:\"context.pointer.escalate_after,omitempty\""
 	ContextPointerKeepRecentTokens  *float64 "json:\"context.pointer.keep_recent_tokens,omitempty\""
 	ContextPointerMaxTokens         *float64 "json:\"context.pointer.max_tokens,omitempty\""
 	ContextPointerPointerMaxTokens  *float64 "json:\"context.pointer.pointer_max_tokens,omitempty\""
@@ -118,6 +119,7 @@ type SettingsAvailability struct {
 	ContextMineMaxTokens            FieldStatus
 	ContextMinePointerMaxTokens     FieldStatus
 	ContextMineRatio                FieldStatus
+	ContextPointerEscalateAfter     FieldStatus
 	ContextPointerKeepRecentTokens  FieldStatus
 	ContextPointerMaxTokens         FieldStatus
 	ContextPointerPointerMaxTokens  FieldStatus
@@ -259,6 +261,8 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 	ContextMinePointerMaxTokensSatisfied := f.ContextMinePointerMaxTokens != nil
 	ContextMineRatioEnabled := true
 	ContextMineRatioSatisfied := f.ContextMineRatio != nil
+	ContextPointerEscalateAfterEnabled := true
+	ContextPointerEscalateAfterSatisfied := f.ContextPointerEscalateAfter != nil
 	ContextPointerKeepRecentTokensEnabled := true
 	ContextPointerKeepRecentTokensSatisfied := f.ContextPointerKeepRecentTokens != nil
 	ContextPointerMaxTokensEnabled := true
@@ -645,6 +649,28 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 				if !(f.ContextMineRatio != nil && *f.ContextMineRatio >= 0 && *f.ContextMineRatio <= 1) && "context.mine.ratio must be between 0 and 1" != "" {
 					reasons = append(reasons, "context.mine.ratio must be between 0 and 1")
 				}
+				if reasons == nil {
+					reasons = []string{}
+				}
+				return reasons
+			}(),
+			Valid: nil,
+			Error: "",
+		},
+		ContextPointerEscalateAfter: FieldStatus{
+			Required:  ContextPointerEscalateAfterEnabled && false,
+			Enabled:   ContextPointerEscalateAfterEnabled,
+			Satisfied: ContextPointerEscalateAfterSatisfied,
+			Fair:      true,
+			Reason: func() *string {
+				var reasons []string
+				if len(reasons) == 0 {
+					return nil
+				}
+				return &reasons[0]
+			}(),
+			Reasons: func() []string {
+				var reasons []string
 				if reasons == nil {
 					reasons = []string{}
 				}
@@ -2674,6 +2700,8 @@ func depSatisfied(f SettingsFields, name string) bool {
 		return f.ContextMinePointerMaxTokens != nil
 	case "ContextMineRatio":
 		return f.ContextMineRatio != nil
+	case "ContextPointerEscalateAfter":
+		return f.ContextPointerEscalateAfter != nil
 	case "ContextPointerKeepRecentTokens":
 		return f.ContextPointerKeepRecentTokens != nil
 	case "ContextPointerMaxTokens":
@@ -3093,6 +3121,12 @@ func Challenge(fieldName string, f SettingsFields, c SettingsConditions, prev Se
 			explanations = append(explanations, "* "+*status.Reason)
 		}
 		explanations = append(explanations, "* check: context.mine.ratio must be between 0 and 1")
+	case "ContextPointerEscalateAfter", "context.pointer.escalate_after":
+		found = true
+		status = avail.ContextPointerEscalateAfter
+		if status.Reason != nil {
+			explanations = append(explanations, "* "+*status.Reason)
+		}
 	case "ContextPointerKeepRecentTokens", "context.pointer.keep_recent_tokens":
 		found = true
 		status = avail.ContextPointerKeepRecentTokens
