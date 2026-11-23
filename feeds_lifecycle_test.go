@@ -818,6 +818,10 @@ func TestAFeedSpecIsValidatedOnConstruction(t *testing.T) {
 			feeds: []poo.FeedSpec{{Name: "inbox", Run: run, OnIdle: poo.OnIdle("sometimes")}},
 			want:  "inbox",
 		},
+		"negative input cap": {
+			feeds: []poo.FeedSpec{{Name: "inbox", Run: run, MaxPending: -1}},
+			want:  "inbox",
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			tr := scripted([]fakeResponse{{text: "the answer"}})

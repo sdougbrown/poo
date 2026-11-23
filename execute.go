@@ -52,6 +52,10 @@ type callPlan struct {
 	// background reports that the model asked for the call to run in
 	// the background.
 	background bool
+	// stripped is the call's arguments without the reserved background
+	// argument, so a job's duplicate key keys the same data prepare
+	// saw.
+	stripped json.RawMessage
 	// summary describes the call, for the job's own bookkeeping.
 	summary string
 	// parent is the handle of the call that made this one. It is
@@ -309,6 +313,7 @@ func (s *Session) planCalls(owner *callOwner, turn int, calls []ToolCall, trunca
 			}
 		}
 		plan.background = asked
+		plan.stripped = stripped
 		if err := s.argSchemas.validate(call.Name, stripped); err != nil {
 			plan.invalid = true
 			plan.prepareErr = err
@@ -755,17 +760,22 @@ func (s *Session) executeOne(owner *callOwner, turn int, plan callPlan) {
 // starts. The call's own result is the "started" one, and the batch
 // carries on.
 func (s *Session) startJobCall(owner *callOwner, turn int, handle string, call ToolCall, plan callPlan) {
-	jobID, ok, winding := s.startJob(owner.run, turn, handle, call.Name, plan.prepared, plan.summary, call.Arguments)
+	jobID, ok, winding, refusal := s.startJob(owner.run, turn, handle, call.Name, plan.prepared, plan.summary, call.Arguments, plan.stripped)
 	if winding {
 		// The run settled while the job was being accepted; nothing
 		// else starts, and the finalization owns the run.
 		return
 	}
 	if !ok {
-		// There was no free slot. The failure is recoverable: the
-		// model sees the message and may wait or cancel one.
+		// The admission refused the call: no free slot, or a duplicate
+		// of a running job. The failure is recoverable: the model sees
+		// the message and may wait or cancel one.
+		text := TooManyJobsText
+		if refusal != "" {
+			text = refusal
+		}
 		s.recordResult(owner, turn, handle, call.Name, call.CallID, ToolResult{
-			Text:    TooManyJobsText,
+			Text:    text,
 			IsError: true,
 		}, OutcomeError)
 		return

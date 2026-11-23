@@ -135,8 +135,10 @@ type InputDeliveredRecord struct {
 
 // InputDroppedRecord records an input that never reached the model.
 //
-// The reason is the run's final settle reason, so a reader can tell why
-// a message the client accepted was never seen by the model.
+// The reason is the run's final settle reason, or backlog when the
+// feed's backlog cap dropped the input with no run involved, so a
+// reader can tell why a message the client accepted was never seen by
+// the model.
 type InputDroppedRecord struct {
 	RecordMeta
 	// SessionID identifies the session.

@@ -23,7 +23,7 @@ func theFeedsSettings(paths ...string) string {
 // feedManifest writes a manifest with one feed and returns its path.
 func feedManifest(t *testing.T) string {
 	t.Helper()
-	body := `{"version": 1, "feeds": {"broker": {"description": "Messages from the broker.", "command": ["true"], "on_idle": "wake"}}}`
+	body := `{"version": 1, "feeds": {"broker": {"description": "Messages from the broker.", "command": ["true"], "on_idle": "wake", "max_pending": 2}}}`
 	path := filepath.Join(t.TempDir(), "feeds.json")
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatalf("writing the manifest: %v", err)
@@ -58,6 +58,9 @@ func TestAFeedManifestReachesTheRuntime(t *testing.T) {
 	specs := runtime.Feeds.Specs()
 	if specs[0].Name != "broker" || specs[0].OnIdle != "wake" || strings.Join(specs[0].Command, " ") != "true" {
 		t.Errorf("the spec is %+v", specs[0])
+	}
+	if specs[0].MaxPending != 2 {
+		t.Errorf("the spec's MaxPending is %d, want 2", specs[0].MaxPending)
 	}
 }
 

@@ -69,6 +69,9 @@ type Spec struct {
 	// OnIdle is the feed's idle policy, or the empty string to inherit
 	// the session's.
 	OnIdle string
+	// MaxPending caps the feed's undelivered inputs. Zero means the
+	// core's default backlog.
+	MaxPending int
 	// Filter is the manifest's optional delivery screen. The config
 	// layer applies it to the text of each emitted message; the
 	// runner ignores it.
@@ -205,6 +208,7 @@ type body struct {
 	Env         map[string]string `json:"env"`
 	Restart     bool              `json:"restart"`
 	OnIdle      string            `json:"on_idle"`
+	MaxPending  *int              `json:"max_pending"`
 	Filter      *Filter           `json:"filter"`
 }
 
@@ -261,6 +265,13 @@ func readFeed(path, name string, raw json.RawMessage) (Spec, error) {
 	default:
 		return Spec{}, fmt.Errorf("feed manifest %s: feed %q has an on_idle %q, want %q or %q", path, name, b.OnIdle, OnIdleWake, OnIdleHold)
 	}
+	maxPending := 0
+	if b.MaxPending != nil {
+		if *b.MaxPending < 0 {
+			return Spec{}, fmt.Errorf("feed manifest %s: feed %q has a negative max_pending %d", path, name, *b.MaxPending)
+		}
+		maxPending = *b.MaxPending
+	}
 	if f := b.Filter; f != nil {
 		f.Question = strings.TrimSpace(f.Question)
 		if f.Question == "" {
@@ -294,6 +305,7 @@ func readFeed(path, name string, raw json.RawMessage) (Spec, error) {
 		Env:         envs,
 		Restart:     b.Restart,
 		OnIdle:      b.OnIdle,
+		MaxPending:  maxPending,
 		Filter:      b.Filter,
 	}, nil
 }

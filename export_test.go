@@ -97,3 +97,20 @@ func SetFeedRestartDelay(s *Session, fn func(ran, prev time.Duration) time.Durat
 	s.feedDelay = fn
 	return func() { s.feedDelay = previous }
 }
+
+// RequeueAtFront puts a queued input back at the front of the session's
+// job queue, the way an abandoned delivery does. The queue is in
+// completion order, so a test reaches the reordered queue the backlog
+// cap must read through this.
+func RequeueAtFront(s *Session, inputID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, item := range s.jobQueue {
+		if item.result.id != inputID {
+			continue
+		}
+		s.jobQueue = append(s.jobQueue[:i], s.jobQueue[i+1:]...)
+		s.jobQueue = append([]jobQueueItem{item}, s.jobQueue...)
+		return
+	}
+}

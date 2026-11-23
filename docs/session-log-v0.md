@@ -403,7 +403,8 @@ writes the missing record from the message.
 ## `input.dropped`
 
 An input that never reached the model. The reason is the run's final
-settle reason.
+settle reason, or `backlog` when the feed's backlog cap dropped the
+input with no run involved.
 
 | Field | Type | Meaning |
 |---|---|---|
