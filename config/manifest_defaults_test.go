@@ -485,23 +485,25 @@ func TestAListingFollowsTheProfileWord(t *testing.T) {
 
 // TestAListingFollowsTheProfileFeedsWord covers the feeds side of the
 // picker: the job tools a profile's listing offers follow the manifest
-// set the profile's own word resolves. The quiet profile turns the feed
-// defaults off and runs nothing in the background, so its listing offers
-// no job tools, while the linked code profile's listing keeps them.
+// set the profile's own word resolves. The session runs the base
+// profile, whose word keeps the feed defaults on, so the session's feeds
+// are loaded; the quiet variant turns the feed defaults off and runs
+// nothing in the background, so its listing offers no job tools — under
+// a session-wide feeds word it would earn them from the session's
+// loaded feed. The linked code profile's listing keeps its job tools.
 func TestAListingFollowsTheProfileFeedsWord(t *testing.T) {
 	pooDir := theDefaultsPooDir(t)
 	theDefaultFeedManifest(t, pooDir)
-	document := theDumbProfileSettings("profiles:\n  quiet:\n    base: base\n    feeds_defaults: false\nprofile: quiet\n")
+	document := theDumbProfileSettings("profiles:\n  quiet:\n    base: base\n    feeds_defaults: false\n")
 	settings, err := config.Parse([]byte(document), config.FormatYAML)
 	if err != nil {
 		t.Fatalf("decoding the settings: %v", err)
 	}
 	runtime := build(t, settings, config.Overrides{})
-	// The session runs under quiet, whose word turns the feed defaults
-	// off and whose own tools run nothing in the background: no feed
-	// loads for it, and its listing offers no job tools.
-	if runtime.Feeds != nil && runtime.Feeds.Len() != 0 {
-		t.Fatalf("the session's feeds are %v, want none", runtime.Feeds)
+	// The session runs under a linked profile whose word keeps the
+	// defaults on: the default feed loads for it.
+	if runtime.Feeds == nil || runtime.Feeds.Len() != 1 {
+		t.Fatalf("the session's feeds are %v, want the default feed", runtime.Feeds)
 	}
 	var quiet *poo.Profile
 	for i := range runtime.Profiles {
