@@ -18,7 +18,16 @@ func theDefaultsPooDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	pootest.IsolateUserConfigDirT(t, dir)
-	return filepath.Join(dir, "poo")
+	// The poo directory is the one the resolvers read, and the platform
+	// resolves the config root its own way — darwin appends Library
+	// under the variables, Linux takes XDG at face value. Derive it
+	// from the resolved root, so the manifests land where the build
+	// looks on every one of them.
+	root, err := os.UserConfigDir()
+	if err != nil {
+		t.Fatalf("reading the resolved config root: %v", err)
+	}
+	return filepath.Join(root, "poo")
 }
 
 // theDefaultFeedManifest writes one feed into the default feeds
