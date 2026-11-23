@@ -268,8 +268,11 @@ them is active:
 `version` is 1. A name is lowercase letters, digits, `-` and `_`, and it
 names the feed everywhere its records go: its origin is `feed:<name>`.
 `command` is the argv and is required. `description` is what the jobs
-prompt says about the feed. A bad version, a name outside the pattern, an
-empty command, an `on_idle` that is neither `wake` nor `hold`, an unknown
+prompt says about the feed. `max_pending` caps the feed's undelivered
+inputs at that many; past the cap the oldest undelivered input is
+dropped unread (default 16). A bad version, a name outside the pattern, an
+empty command, an `on_idle` that is neither `wake` nor `hold`, a negative
+`max_pending`, an unknown
 field or one name in two manifests fails the build, so the binary does not
 start, and the failure names the file and the feed.
 

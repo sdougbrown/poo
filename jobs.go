@@ -431,7 +431,11 @@ func WithJobs(o JobOptions) Option {
 // admission refuses as a duplicate of a running job. An empty refusal
 // with a false ok is the slot exhaustion, or a session that is closed
 // or broken; the caller renders its own text for that.
-func (s *Session) startJob(run *runState, turn int, handle, tool string, prepared Prepared, summary string, arguments json.RawMessage) (jobID string, ok bool, winding bool, refusal string) {
+//
+// The raw and stripped arguments both ride in: the job keeps the raw
+// call for its records, and the duplicate key keys the stripped form,
+// the same data prepare saw.
+func (s *Session) startJob(run *runState, turn int, handle, tool string, prepared Prepared, summary string, raw, stripped json.RawMessage) (jobID string, ok bool, winding bool, refusal string) {
 	// The slot is reserved under the lock, and the job is registered
 	// there too, so a job that is admitted is a job the session knows
 	// about. A run that is winding down admits nothing: no new effect
@@ -450,16 +454,10 @@ func (s *Session) startJob(run *runState, turn int, handle, tool string, prepare
 		return "", false, false, ""
 	}
 	// The duplicate key keys the call's data, not the request's
-	// envelope. The reserved background argument is the envelope, so a
-	// call that asks for the background and one that need not ask are
-	// the same job to the tool.
-	args := arguments
-	if s.backgroundModeOf(tool) != BackgroundNever {
-		if _, stripped, err := backgroundArg(arguments); err == nil {
-			args = stripped
-		}
-	}
-	dupKey := exactKeyOf(tool, prepared, args)
+	// envelope. The stripped arguments carry no reserved background
+	// argument, so a call that asks for the background and one that
+	// need not ask are the same job to the tool.
+	dupKey := exactKeyOf(tool, prepared, stripped)
 	if dup := s.duplicateJobLocked(dupKey); dup != "" {
 		s.mu.Unlock()
 		return "", false, false, fmt.Sprintf(DuplicateJobText, tool, dup)
@@ -493,7 +491,7 @@ func (s *Session) startJob(run *runState, turn int, handle, tool string, prepare
 		cancel:    cancel,
 		done:      make(chan struct{}),
 		prepared:  prepared,
-		arguments: cloneArguments(arguments),
+		arguments: cloneArguments(raw),
 		dupKey:    dupKey,
 	}
 	s.jobs[jobID] = job

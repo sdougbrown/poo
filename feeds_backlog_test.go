@@ -61,8 +61,6 @@ func TestAFeedBacklogDropsItsOldestInput(t *testing.T) {
 	}
 
 	// The queued texts: the input that made room names the drop, and
-	// the one before it does not.
-	// The queued texts: the input that made room names the drop, and
 	// the one before it does not. The dropped input is the oldest one.
 	type queuedInput struct {
 		id   string
@@ -134,6 +132,64 @@ func TestAFeedBacklogDropsItsOldestInput(t *testing.T) {
 	}
 	if !noted {
 		t.Error("the model read no message that names the drop")
+	}
+}
+
+// TestAFeedBacklogCapsEachFeedOnItsOwn covers the per-feed origin: two
+// feeds' undelivered inputs sit on one queue, and each feed's cap
+// counts and drops only its own. A feed at its cap does not drop
+// another feed's input, and another feed's inputs do not fill its cap.
+func TestAFeedBacklogCapsEachFeedOnItsOwn(t *testing.T) {
+	tr := scripted([]fakeResponse{{text: "the answer"}})
+	sink := &recordingSink{}
+	opts := testOptions(t, tr, &echoTool{}, sink)
+	opts.Jobs = poo.JobOptions{OnIdle: poo.OnIdleHold}
+	opts.Feeds = []poo.FeedSpec{backlogFeedSpec("inbox", 1), backlogFeedSpec("other", 1)}
+	s := newTestSession(t, opts)
+
+	for _, input := range []struct{ feed, text string }{
+		{"inbox", "a1"}, {"other", "b1"}, {"inbox", "a2"}, {"other", "b2"},
+	} {
+		if err := poo.QueueFeedInput(s, input.feed, "", input.text); err != nil {
+			t.Fatalf("queueing %s on %s: %v", input.text, input.feed, err)
+		}
+	}
+	waitFor(t, "both of inbox's first inputs to be dropped", func() bool {
+		return sink.count("input.dropped") == 2
+	})
+
+	// Each feed dropped its own oldest input, in its own order.
+	var dropped []string
+	for _, rec := range sink.allRecords() {
+		r, ok := rec.(*poo.InputDroppedRecord)
+		if !ok {
+			continue
+		}
+		dropped = append(dropped, r.InputID)
+	}
+	if len(dropped) != 2 {
+		t.Fatalf("the log holds %d input.dropped record(s), want 2", len(dropped))
+	}
+	pending := poo.PendingJobResults(sink.allRecords())
+	if len(pending) != 2 {
+		t.Fatalf("the log holds %d pending inputs, want 2", len(pending))
+	}
+	for _, p := range pending {
+		if !strings.Contains(p.Text, "a2") && !strings.Contains(p.Text, "b2") {
+			t.Errorf("a dropped or displaced input is still pending: %q", p.Text)
+		}
+		if p.Origin != poo.FeedOrigin("inbox") && p.Origin != poo.FeedOrigin("other") {
+			t.Errorf("the pending input's origin is %q", p.Origin)
+		}
+	}
+	// One pending input per feed: neither feed's cap consumed the
+	// other's inputs.
+	origins := map[poo.Origin]int{}
+	for _, p := range pending {
+		origins[p.Origin]++
+	}
+	if origins[poo.FeedOrigin("inbox")] != 1 || origins[poo.FeedOrigin("other")] != 1 {
+		t.Errorf("the pending inputs' origins are %v, want one per feed", origins)
 	}
 }
 
