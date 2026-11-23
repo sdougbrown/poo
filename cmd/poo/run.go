@@ -67,7 +67,7 @@ func runFlagSpecs() []clicontract.Flag {
 		clicontract.Flag{Name: "reasoning-effort", Kind: clicontract.String, Usage: "The reasoning_effort to send, for models that think only when asked"},
 		clicontract.Flag{Name: "max-turns", Kind: clicontract.Int, Usage: "The turn limit"},
 		clicontract.Flag{Name: "max-output", Kind: clicontract.Int, Usage: "The model's output-token limit"},
-		clicontract.Flag{Name: "context-strategy", Kind: clicontract.String, Usage: "The compaction strategy: summary, mine, pointer, native or handoff"},
+		clicontract.Flag{Name: "context-strategy", Kind: clicontract.String, Usage: "The compaction strategy: summary, mine, pointer, native, handoff or none"},
 		clicontract.Flag{Name: "context-keep-recent", Kind: clicontract.Int, Usage: "The verbatim tail the compaction keeps, in tokens"},
 		clicontract.Flag{Name: "log", Kind: clicontract.String, Usage: "The session log path"},
 	)
@@ -413,7 +413,7 @@ func (o *runOptions) validate(rest []string) error {
 // The block strategies among them are the ones
 // --context-keep-recent sizes: one table for both flags, so a strategy
 // added here is validated and sized together.
-var contextStrategies = []string{"summary", "mine", "pointer", "native", "handoff"}
+var contextStrategies = []string{"summary", "mine", "pointer", "native", "handoff", "none"}
 
 // blockStrategies are the strategies whose settings a keep-recent tail
 // lands in.

@@ -153,7 +153,7 @@ func runRun(args []string) int {
 	fs.IntVar(&o.seeds, "seeds", 0, "How many times each task runs against each model")
 	fs.IntVar(&o.parallel, "parallel", 0, "How many runs may be in flight at once")
 	fs.IntVar(&o.maxTurns, "max-turns", 0, "The turn limit passed to poo")
-	fs.StringVar(&o.strategy, "strategy", "", "The compaction strategy to pin: summary, mine, pointer, native or handoff")
+	fs.StringVar(&o.strategy, "strategy", "", "The compaction strategy to pin: summary, mine, pointer, native, handoff or none")
 	fs.IntVar(&o.keepRecent, "keep-recent", 0, "The verbatim tail the compaction keeps, in tokens")
 	fs.StringVar(&o.out, "out", "", "Where the report goes")
 	fs.StringVar(&o.modelsFile, "models-file", "", "The model catalog")
