@@ -3,6 +3,8 @@ package config_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -61,8 +63,9 @@ func (d *promptDecider) questions() []string {
 // returns it with its sink.
 //
 // The feed is optional, so it holds its inputs by default: every run of the
-// session comes from the test's own prompt, and the turns the test scripts
-// are the ones it reads.
+// session comes from the test's own prompt. The turns are the calls each of
+// those runs makes; the script acknowledges what the session delivers in
+// between.
 func promptFeedSession(t *testing.T, name string, entry map[string]any, decider decide.Decider, turns ...pootest.Turn) (*poo.Session, *pootest.Sink) {
 	t.Helper()
 	encoded, err := json.Marshal(map[string]any{"version": 1, "feeds": map[string]any{name: entry}})
@@ -78,7 +81,7 @@ func promptFeedSession(t *testing.T, name string, entry map[string]any, decider 
 		t.Fatal(err)
 	}
 	runtime := build(t, settings, config.Overrides{})
-	runtime.Options.Transport = pootest.NewTransport(turns...)
+	runtime.Options.Transport = &promptScript{calls: turns}
 	sink := pootest.NewSink()
 	runtime.Options.Sink = sink
 	runtime.Options.SessionDir = t.TempDir()
@@ -103,6 +106,55 @@ func subscribePromptTurn(name string, args map[string]any) pootest.Turn {
 
 // ackTurn is the turn that ends a run after the tool call.
 var ackTurn = pootest.Turn{Text: "ack"}
+
+// errNoFork is what a script that never compacts answers a fork with.
+var errNoFork = errors.New("config_test: the scripted transport cannot fork")
+
+// promptScript is the transport the prompt tests script: it hands the
+// session's answer to the test's own prompt the next scripted call, and
+// acknowledges every other request.
+//
+// A run is not one request per prompt. A feed's records arrive while a run
+// is open, and the run takes them at its turn ends, so a record's request
+// sits between the call's request and the acknowledgement that ends the
+// run. A script counted by request would hand the next prompt's call to a
+// record's request and drift out of step with the prompts; keying the call
+// to the request that carries the test's own prompt keeps each call with
+// the run it was scripted for, however the records land.
+type promptScript struct {
+	mu    sync.Mutex
+	calls []pootest.Turn
+	index int
+}
+
+// Stream serves the next scripted call to the test's own prompt, and an
+// acknowledgement to anything else.
+func (p *promptScript) Stream(ctx context.Context, req poo.ChatRequest) (poo.StreamReader, poo.Rendered, error) {
+	turn := ackTurn
+	p.mu.Lock()
+	if carriesThePrompt(req) && p.index < len(p.calls) {
+		turn = p.calls[p.index]
+		p.index++
+	}
+	p.mu.Unlock()
+	return pootest.NewTransport(turn).Stream(ctx, req)
+}
+
+// Fork refuses: the prompt tests never compact.
+func (p *promptScript) Fork(context.Context, poo.Rendered, []poo.Message, int) (poo.StreamReader, error) {
+	return nil, errNoFork
+}
+
+// carriesThePrompt reports whether the request answers the test's own
+// prompt, rather than something the session delivered while the run was
+// open.
+func carriesThePrompt(req poo.ChatRequest) bool {
+	if len(req.Messages) == 0 {
+		return false
+	}
+	last := req.Messages[len(req.Messages)-1]
+	return last.Role == poo.RoleUser && last.Origin == poo.OriginUser
+}
 
 // promptRun runs one turn of the session and waits for it to end.
 func promptRun(t *testing.T, sess *poo.Session, text string) {
@@ -168,6 +220,23 @@ func subscribeResults(sink *pootest.Sink) []*poo.ToolResultRecord {
 	return out
 }
 
+// waitForQueued waits until the session has queued exactly want messages,
+// and returns them.
+//
+// A decision is recorded before the message it lets through is queued, so a
+// test that waits on the decisions and then reads the queue can read it before
+// the delivery lands. The queue is the delivery, so it is what a test waits
+// for when the messages are what it asserts about.
+func waitForQueued(t *testing.T, sink *pootest.Sink, want int) []string {
+	t.Helper()
+	var got []string
+	waitUntil(t, fmt.Sprintf("the feed to queue %d messages", want), func() bool {
+		got = queuedFeedTexts(sink)
+		return len(got) == want
+	})
+	return got
+}
+
 // The questions the prompt tests put to the decider.
 const (
 	theManifestQuestion = "Does the manifest want this message?"
@@ -205,14 +274,14 @@ func TestTheFilterPromptReplacesTheManifestsQuestion(t *testing.T) {
 	}, decider,
 		// The manifest's question would drop both messages, so whatever
 		// arrives is the prompt's doing.
-		subscribePromptTurn("chat", map[string]any{"prompt": theFirstOnly}), ackTurn,
-		subscribePromptTurn("chat", map[string]any{"prompt": theSecondOnly}), ackTurn,
-		subscribePromptTurn("chat", map[string]any{"prompt": ""}), ackTurn,
+		subscribePromptTurn("chat", map[string]any{"prompt": theFirstOnly}),
+		subscribePromptTurn("chat", map[string]any{"prompt": theSecondOnly}),
+		subscribePromptTurn("chat", map[string]any{"prompt": ""}),
 	)
 
 	promptRun(t, sess, "watch it for the tests")
 	waitUntil(t, "the first two records to be asked about", func() bool { return decisionCount(sink) == 2 })
-	if got := queuedFeedTexts(sink); len(got) != 1 || !strings.Contains(got[0], "the first message") {
+	if got := waitForQueued(t, sink, 1); !strings.Contains(got[0], "the first message") {
 		t.Fatalf("the prompt delivered %v, want the first message alone", got)
 	}
 
@@ -221,7 +290,7 @@ func TestTheFilterPromptReplacesTheManifestsQuestion(t *testing.T) {
 	stopFeed(t, sess, sink, 1)
 	promptRun(t, sess, "watch it for the failures")
 	waitUntil(t, "the re-armed feed's records to be asked about", func() bool { return decisionCount(sink) == 4 })
-	if got := queuedFeedTexts(sink); len(got) != 2 || !strings.Contains(got[1], "the second message") {
+	if got := waitForQueued(t, sink, 2); !strings.Contains(got[1], "the second message") {
 		t.Fatalf("the replaced prompt delivered %v, want the second message beside the first", got)
 	}
 
@@ -281,8 +350,8 @@ func TestAPlainSubscriptionKeepsTheFilterPrompt(t *testing.T) {
 		"command":  []string{feedScript(t, "chat")},
 		"optional": true,
 	}, decider,
-		subscribePromptTurn("chat", map[string]any{"prompt": theFirstOnly}), ackTurn,
-		subscribePromptTurn("chat", nil), ackTurn,
+		subscribePromptTurn("chat", map[string]any{"prompt": theFirstOnly}),
+		subscribePromptTurn("chat", nil),
 	)
 
 	promptRun(t, sess, "watch it for the tests")
@@ -291,7 +360,7 @@ func TestAPlainSubscriptionKeepsTheFilterPrompt(t *testing.T) {
 	stopFeed(t, sess, sink, 1)
 	promptRun(t, sess, "watch it again")
 	waitUntil(t, "the re-armed feed's records to be asked about", func() bool { return decisionCount(sink) == 4 })
-	if queued := queuedFeedTexts(sink); len(queued) != 2 {
+	if queued := waitForQueued(t, sink, 2); !strings.Contains(queued[1], "the first message") {
 		t.Fatalf("the re-armed feed delivered %v, want the first message twice", queued)
 	}
 	if got := decider.questions(); len(got) != 4 {
@@ -365,9 +434,14 @@ func TestTheFilterPromptsProbability(t *testing.T) {
 				entry["filter"] = tc.filter
 			}
 			sess, sink := promptFeedSession(t, "chat", entry, decider,
-				subscribePromptTurn("chat", tc.args), ackTurn)
+				subscribePromptTurn("chat", tc.args))
 			promptRun(t, sess, "watch it for the tests")
 			waitUntil(t, "the feed's records to be asked about", func() bool { return decisionCount(sink) == 2 })
+			if tc.want > 0 {
+				// The messages the threshold lets through land after
+				// the decisions that let them through.
+				waitForQueued(t, sink, tc.want)
+			}
 			if queued := queuedFeedTexts(sink); len(queued) != tc.want {
 				t.Errorf("the threshold delivered %v, want %d messages", queued, tc.want)
 			}
@@ -413,7 +487,7 @@ func TestTheFilterPromptIsRefusedWhenTheFeedCannotTakeIt(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			decider := &promptDecider{answer: func(string, string) float64 { return 0.01 }}
 			sess, sink := promptFeedSession(t, "chat", tc.entry, decider,
-				subscribePromptTurn("chat", tc.args), ackTurn)
+				subscribePromptTurn("chat", tc.args))
 			promptRun(t, sess, "watch it for the tests")
 
 			results := subscribeResults(sink)
@@ -457,9 +531,9 @@ func TestAnExplicitMinNoProbabilityWithNoPromptIsRefused(t *testing.T) {
 		"command":  []string{feedScript(t, "chat")},
 		"optional": true,
 	}, decider,
-		subscribePromptTurn("chat", map[string]any{"prompt": theFirstOnly}), ackTurn,
-		subscribePromptTurn("chat", map[string]any{"min_no_probability": 0}), ackTurn,
-		subscribePromptTurn("chat", nil), ackTurn,
+		subscribePromptTurn("chat", map[string]any{"prompt": theFirstOnly}),
+		subscribePromptTurn("chat", map[string]any{"min_no_probability": 0}),
+		subscribePromptTurn("chat", nil),
 	)
 
 	promptRun(t, sess, "watch it for the tests")
