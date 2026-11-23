@@ -518,17 +518,24 @@ func (s *sink) sessionDir() string { return s.recordDir }
 
 // Append writes one record.
 func (s *sink) Append(ctx context.Context, rec poo.Record) error {
-	s.mu.Lock()
-	s.records = append(s.records, rec)
-	s.mu.Unlock()
-	switch {
-	case s.log != nil:
-		return s.log.Append(ctx, rec)
-	case s.store != nil:
-		return s.store.Append(ctx, rec)
-	default:
-		return nil
+	err := func() error {
+		switch {
+		case s.log != nil:
+			return s.log.Append(ctx, rec)
+		case s.store != nil:
+			return s.store.Append(ctx, rec)
+		default:
+			return nil
+		}
+	}()
+	// The reader's promise is the records the store has written: a
+	// record the write refused is not one.
+	if err == nil {
+		s.mu.Lock()
+		s.records = append(s.records, rec)
+		s.mu.Unlock()
 	}
+	return err
 }
 
 // Flush pushes the buffered records out.
@@ -553,11 +560,13 @@ func (s *sink) ReadRecords(ctx context.Context) ([]poo.Record, error) {
 	case s.log != nil:
 		return s.log.ReadRecords(ctx)
 	case s.store != nil:
-		// The store's session is open under this process's authority, so
-		// the records come from memory rather than a load: a read of the
-		// file would contend with the lock the sink holds. The memory
-		// holds what this process wrote, so a session restored from an
-		// earlier one reads only what it wrote itself.
+		// The store is open under this process's authority and holds the
+		// whole retained chain, restored sessions included: the read goes
+		// through it, so the retention pointer's numbering is the one
+		// the session was built with.
+		if reader, ok := s.store.(poo.RecordReader); ok {
+			return reader.ReadRecords(ctx)
+		}
 		return s.recordsSnapshot(), nil
 	default:
 		return s.recordsSnapshot(), nil

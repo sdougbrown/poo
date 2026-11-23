@@ -28,8 +28,8 @@
 // The replacement ends with a retention pointer: the store keeps every
 // original message, so the text the cut removed is recoverable, and the
 // pointer names the session and the turns to recover it from. A
-// consumer whose model can read the store serves the recovery; poo
-// itself does not ship the tool.
+// consumer whose model can read the store serves the recovery; the
+// history tool ships beside it for exactly that.
 //
 // The prompts the requests carry are markdown files under prompts/, so
 // they are edited and reviewed as prose. scripts/lint-prompts.sh lints

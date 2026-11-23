@@ -17,6 +17,7 @@ import (
 	"strings"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/internal/caps"
 	"github.com/sdougbrown/poo/prompt"
 )
 
@@ -191,7 +192,9 @@ func cut(line string, max int) string {
 	if max <= 0 || len(line) <= max {
 		return line
 	}
-	return line[:max] + "…"
+	// The prefix is cut on a character boundary: a byte slice would
+	// split a multi-byte character and put invalid UTF-8 in the result.
+	return caps.RunePrefix(line, max) + "…"
 }
 
 // compile compiles the pattern, so the error names the tool.

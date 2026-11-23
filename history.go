@@ -364,9 +364,6 @@ type retainedHistory struct {
 func retainedLine(item HistoryItem) (string, bool) {
 	switch item.Type {
 	case HistoryMessage:
-		if item.Role == RoleTool {
-			return "", false
-		}
 		if strings.TrimSpace(item.Text) == "" {
 			return "", false
 		}

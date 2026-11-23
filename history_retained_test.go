@@ -3,6 +3,7 @@ package poo_test
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
@@ -213,3 +214,33 @@ type recordingPrepared struct{}
 
 // Summary describes the call.
 func (p recordingPrepared) Summary() string { return "probe" }
+
+// TestARetainedHistoryKeepsTheCutTurns covers the recovery semantics
+// the retention pointer names: a compaction record in the chain removes
+// turns from the view, never from the store, so the retained history
+// still numbers and holds the turns the compaction cut.
+func TestARetainedHistoryKeepsTheCutTurns(t *testing.T) {
+	records := []poo.Record{
+		header("s1"),
+		&poo.MessageRecord{RecordMeta: poo.NewRecordMeta("message"), RunID: "r1", Turn: 1, Role: poo.RoleUser,
+			Content: poo.NewTextMessage(poo.RoleUser, "first").Content},
+		&poo.MessageRecord{RecordMeta: poo.NewRecordMeta("message"), RunID: "r1", Turn: 2, Role: poo.RoleAssistant,
+			Content: poo.NewTextMessage(poo.RoleAssistant, "second").Content},
+		&poo.CompactionRecord{RecordMeta: poo.NewRecordMeta("compaction"), RunID: "r1",
+			Strategy: "mine", Cut: &poo.TurnRange{First: 1, Last: 2}},
+		&poo.MessageRecord{RecordMeta: poo.NewRecordMeta("message"), RunID: "r1", Turn: 3, Role: poo.RoleAssistant,
+			Content: poo.NewTextMessage(poo.RoleAssistant, "third").Content},
+	}
+	h := poo.NewHistory(records)
+	turns, err := h.Turns()
+	if err != nil {
+		t.Fatalf("reading the turns: %v", err)
+	}
+	if !slices.Equal(turns, []int{1, 2, 3}) {
+		t.Errorf("the retained turns are %v, want 1, 2, 3: the compaction cuts the view, never the store", turns)
+	}
+	text, err := h.Turn(1)
+	if err != nil || text == "" {
+		t.Errorf("the cut turn 1 is not recoverable: text %q err %v", text, err)
+	}
+}
