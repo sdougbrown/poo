@@ -14,7 +14,8 @@ import (
 // records: the history is a projection of them, and a store that
 // only writes them to a file cannot hand them over.
 type Recording struct {
-	// Store is the store the records are written to.
+	// Store is the store the records are written to. A recording over
+	// nothing keeps its records in memory.
 	Store
 
 	// mu guards the records.
@@ -25,23 +26,29 @@ type Recording struct {
 
 // Append writes a record and keeps it.
 func (r *Recording) Append(ctx context.Context, rec poo.Record) error {
+	if r.Store != nil {
+		// The buffer is a copy of what the store accepted: a record the
+		// write refused is in neither.
+		if err := r.Store.Append(ctx, rec); err != nil {
+			return err
+		}
+	}
 	r.mu.Lock()
 	r.records = append(r.records, rec)
 	r.mu.Unlock()
-	return r.Store.Append(ctx, rec)
+	return nil
 }
 
 // ReadRecords reads the session's records back, oldest first.
 //
 // It is the read side poo.RecordReader asks for. The recording writes
-// through its store, so the store's read is the session's: a session
-// restored from an earlier one reads what the store retained, not just
-// what this process wrote. Without a store the memory is all there is.
+// through its store, so a store that can read its chain back serves
+// the read: a session restored from an earlier one reads what the
+// store retained, not just what this process wrote. Without a readable
+// store, the memory is what there is.
 func (r *Recording) ReadRecords(ctx context.Context) ([]poo.Record, error) {
-	if r.Store != nil {
-		if reader, ok := r.Store.(poo.RecordReader); ok {
-			return reader.ReadRecords(ctx)
-		}
+	if reader, ok := r.Store.(poo.RecordReader); ok {
+		return reader.ReadRecords(ctx)
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()

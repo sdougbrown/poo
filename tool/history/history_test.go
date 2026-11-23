@@ -18,10 +18,10 @@ import (
 type fixedHistory struct{}
 
 // Turns returns the turn numbers the records retain.
-func (fixedHistory) Turns() ([]int, error) { return []int{1, 2}, nil }
+func (fixedHistory) Turns(context.Context) ([]int, error) { return []int{1, 2}, nil }
 
 // Turn returns one turn's text.
-func (fixedHistory) Turn(turn int) (string, error) {
+func (fixedHistory) Turn(_ context.Context, turn int) (string, error) {
 	if turn == 1 {
 		return "[user] fix the panic in main.go\n[assistant] reading main.go", nil
 	}
@@ -29,7 +29,7 @@ func (fixedHistory) Turn(turn int) (string, error) {
 }
 
 // Search returns the retained lines that match.
-func (fixedHistory) Search(pattern string) ([]poo.HistoryMatch, error) {
+func (fixedHistory) Search(_ context.Context, pattern string) ([]poo.HistoryMatch, error) {
 	re, err := regexp.Compile(pattern)
 	if err != nil {
 		return nil, err
@@ -115,4 +115,63 @@ func TestTheToolSaysWhenTheStoreCannotBeRead(t *testing.T) {
 	if !res.IsError || !strings.Contains(res.Text, "cannot be read") {
 		t.Errorf("the read is %+v, want the no-history answer", res)
 	}
+}
+
+// TestTheCutHonorsTheBudgetAndTheCharacters covers the truncation
+// arithmetic: a line over its character budget is cut on a character
+// boundary with the marker, a line that fits is returned whole however
+// many bytes its characters take, and a search over the cap truncates
+// with the elision note.
+// TestTheSearchTruncatesAtTheObservationCap covers the cap: a search
+// whose matches overflow the settings' observation cap returns the head
+// of the matches with the truncation note, not the flood.
+func TestTheSearchTruncatesAtTheObservationCap(t *testing.T) {
+	tool := history.New()
+	prepared, err := tool.Prepare(json.RawMessage(`{"pattern":"y"}`), poo.PrepareEnv{})
+	if err != nil {
+		t.Fatalf("preparing: %v", err)
+	}
+	lines := make([]poo.HistoryMatch, 0, 40)
+	for i := 0; i < 40; i++ {
+		lines = append(lines, poo.HistoryMatch{Turn: i + 1, Text: strings.Repeat("y", 3000)})
+	}
+	res, err := tool.Call(context.Background(), prepared, poo.ToolEnv{
+		History:  cappedHistory{lines: lines},
+		Settings: poo.ToolSettings{ObservationCapChars: 20000},
+	})
+	if err != nil {
+		t.Fatalf("calling: %v", err)
+	}
+	if len(res.Text) > 20000+200 {
+		t.Errorf("the answer is %d bytes, want it at the observation cap", len(res.Text))
+	}
+	if !strings.Contains(res.Text, "truncated at the observation cap") {
+		t.Errorf("the answer does not say it was truncated: %q", res.Text[len(res.Text)-120:])
+	}
+}
+
+// cappedHistory is a history that answers a search with the lines it
+// was built with.
+type cappedHistory struct {
+	lines []poo.HistoryMatch
+}
+
+func (cappedHistory) Turns(context.Context) ([]int, error) { return nil, nil }
+
+func (cappedHistory) Turn(_ context.Context, turn int) (string, error) {
+	return "", nil
+}
+
+func (c cappedHistory) Search(_ context.Context, pattern string) ([]poo.HistoryMatch, error) {
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return nil, err
+	}
+	var out []poo.HistoryMatch
+	for _, m := range c.lines {
+		if re.MatchString(m.Text) {
+			out = append(out, m)
+		}
+	}
+	return out, nil
 }

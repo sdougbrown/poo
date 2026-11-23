@@ -46,6 +46,12 @@ func (m *Memory) Append(ctx context.Context, rec poo.Record) error {
 // Flush does nothing: the records are already in memory.
 func (m *Memory) Flush(ctx context.Context) error { return nil }
 
+// ReadRecords reads the memory's records back, oldest first. It is the
+// read side the session's history tool reads through.
+func (m *Memory) ReadRecords(ctx context.Context) ([]poo.Record, error) {
+	return m.Records(), nil
+}
+
 // Records returns the records the memory kept, in order.
 //
 // The slice is a copy, but the records in it are the memory's own: they

@@ -57,6 +57,11 @@ func CheckMode(mode Mode) error {
 type Store interface {
 	poo.RecordSink
 
+	// ReadRecords reads the current session's records back, oldest
+	// first. The read side is how the session's history tool and its
+	// strategies read what the store retained.
+	poo.RecordReader
+
 	// Create starts a session in the store and makes it the store's
 	// current session. It returns the session's id.
 	Create(ctx context.Context, created *poo.SessionCreatedRecord) (string, error)

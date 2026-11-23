@@ -264,15 +264,16 @@ func messageText(content []ContentBlock) string {
 // about what "turn 3" means.
 type History interface {
 	// Turns returns the session's turn numbers, oldest first, including
-	// the turns a compaction removed.
-	Turns() ([]int, error)
+	// the turns a compaction removed. A read runs under the context
+	// given: a caller that is cancelled stops paying for it.
+	Turns(ctx context.Context) ([]int, error)
 	// Turn returns one turn's text, as it was said. A turn the session
 	// never had, or one that holds no message, returns empty text.
-	Turn(turn int) (string, error)
+	Turn(ctx context.Context, turn int) (string, error)
 	// Search returns the retained lines that match the regular
 	// expression, oldest first. A line that matches names the turn it
 	// belongs to.
-	Search(pattern string) ([]HistoryMatch, error)
+	Search(ctx context.Context, pattern string) ([]HistoryMatch, error)
 }
 
 // HistoryMatch is one line a history search matched.
@@ -396,12 +397,12 @@ func (h retainedHistory) turns() []int {
 }
 
 // Turns returns the turn numbers that hold lines, oldest first.
-func (h retainedHistory) Turns() ([]int, error) {
+func (h retainedHistory) Turns(ctx context.Context) ([]int, error) {
 	return h.turns(), nil
 }
 
 // Turn returns one turn's lines, as they were said.
-func (h retainedHistory) Turn(turn int) (string, error) {
+func (h retainedHistory) Turn(ctx context.Context, turn int) (string, error) {
 	var lines []string
 	for _, item := range h.items {
 		if item.Turn != turn {
@@ -415,13 +416,19 @@ func (h retainedHistory) Turn(turn int) (string, error) {
 }
 
 // Search returns the retained lines that match the regular expression.
-func (h retainedHistory) Search(pattern string) ([]HistoryMatch, error) {
+func (h retainedHistory) Search(ctx context.Context, pattern string) ([]HistoryMatch, error) {
 	re, err := regexp.Compile(pattern)
 	if err != nil {
 		return nil, err
 	}
 	var out []HistoryMatch
 	for _, item := range h.items {
+		// The lines a search names have to be turns a read can open:
+		// the prompt's own message carries no turn, and the tool's read
+		// refuses one below one.
+		if item.Turn < 1 {
+			continue
+		}
 		l, ok := retainedLine(item)
 		if !ok || !re.MatchString(l) {
 			continue
@@ -441,29 +448,29 @@ type lazyHistory struct {
 }
 
 // Turns returns the turn numbers the reader's records retain.
-func (l lazyHistory) Turns() ([]int, error) {
-	records, err := l.reader.ReadRecords(context.Background())
+func (l lazyHistory) Turns(ctx context.Context) ([]int, error) {
+	records, err := l.reader.ReadRecords(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return NewHistory(records).Turns()
+	return NewHistory(records).Turns(ctx)
 }
 
 // Turn returns one turn's text from the reader's records.
-func (l lazyHistory) Turn(turn int) (string, error) {
-	records, err := l.reader.ReadRecords(context.Background())
+func (l lazyHistory) Turn(ctx context.Context, turn int) (string, error) {
+	records, err := l.reader.ReadRecords(ctx)
 	if err != nil {
 		return "", err
 	}
-	return NewHistory(records).Turn(turn)
+	return NewHistory(records).Turn(ctx, turn)
 }
 
 // Search returns the retained lines that match, from the reader's
 // records.
-func (l lazyHistory) Search(pattern string) ([]HistoryMatch, error) {
-	records, err := l.reader.ReadRecords(context.Background())
+func (l lazyHistory) Search(ctx context.Context, pattern string) ([]HistoryMatch, error) {
+	records, err := l.reader.ReadRecords(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return NewHistory(records).Search(pattern)
+	return NewHistory(records).Search(ctx, pattern)
 }

@@ -222,6 +222,9 @@ func (l *Log) ReadRecords(ctx context.Context) ([]poo.Record, error) {
 		if len(line) == 0 {
 			continue
 		}
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("session: reading: %w", err)
+		}
 		rec, err := codec.Decode(line)
 		if err != nil {
 			return nil, fmt.Errorf("session: decoding %s: %w", l.path, err)

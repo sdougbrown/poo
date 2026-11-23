@@ -64,7 +64,7 @@ func TestTheHistoryServesTheTurnsTheRecordsRetain(t *testing.T) {
 	}
 	h := poo.NewHistory(records)
 
-	turns, err := h.Turns()
+	turns, err := h.Turns(context.Background())
 	if err != nil {
 		t.Fatalf("reading the turns: %v", err)
 	}
@@ -72,7 +72,7 @@ func TestTheHistoryServesTheTurnsTheRecordsRetain(t *testing.T) {
 		t.Fatalf("the history holds the turns %v, want 1 and 2", turns)
 	}
 
-	text, err := h.Turn(1)
+	text, err := h.Turn(context.Background(), 1)
 	if err != nil {
 		t.Fatalf("reading turn 1: %v", err)
 	}
@@ -83,7 +83,7 @@ func TestTheHistoryServesTheTurnsTheRecordsRetain(t *testing.T) {
 	}
 
 	// The second run's turns continue the session's numbering.
-	text, err = h.Turn(2)
+	text, err = h.Turn(context.Background(), 2)
 	if err != nil {
 		t.Fatalf("reading turn 2: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestTheHistoryServesTheTurnsTheRecordsRetain(t *testing.T) {
 	}
 
 	// A turn the session never had is empty.
-	if text, _ := h.Turn(9); text != "" {
+	if text, _ := h.Turn(context.Background(), 9); text != "" {
 		t.Errorf("turn 9 is %q, want empty", text)
 	}
 }
@@ -108,7 +108,7 @@ func TestTheHistorySearchCoversTheRetainedLines(t *testing.T) {
 		result("r1", 1, "r1", "the stack trace names resolve()"),
 		msg("r1", 2, poo.RoleAssistant, "the panic is fixed"),
 	}
-	matches, err := poo.NewHistory(records).Search("panic|resolve")
+	matches, err := poo.NewHistory(records).Search(context.Background(), "panic|resolve")
 	if err != nil {
 		t.Fatalf("searching: %v", err)
 	}
@@ -124,7 +124,7 @@ func TestTheHistorySearchCoversTheRetainedLines(t *testing.T) {
 	if matches[2].Turn != 2 || !strings.Contains(matches[2].Text, "panic is fixed") {
 		t.Errorf("the third match is %+v, want the turn 2 assistant line", matches[2])
 	}
-	if _, err := poo.NewHistory(records).Search("("); err == nil {
+	if _, err := poo.NewHistory(records).Search(context.Background(), "("); err == nil {
 		t.Error("an invalid pattern was accepted")
 	}
 }
@@ -163,14 +163,14 @@ func TestTheSessionServesItsHistoryToTheTools(t *testing.T) {
 	if historyTool.env == nil || historyTool.env.History == nil {
 		t.Fatal("the tool's environment holds no history, want the sink's read side")
 	}
-	turns, err := historyTool.env.History.Turns()
+	turns, err := historyTool.env.History.Turns(context.Background())
 	if err != nil {
 		t.Fatalf("reading the turns: %v", err)
 	}
 	if len(turns) != 2 {
 		t.Fatalf("the history holds %d turns, want 2", len(turns))
 	}
-	text, err := historyTool.env.History.Turn(1)
+	text, err := historyTool.env.History.Turn(context.Background(), 1)
 	if err != nil {
 		t.Fatalf("reading the turn: %v", err)
 	}
@@ -232,14 +232,14 @@ func TestARetainedHistoryKeepsTheCutTurns(t *testing.T) {
 			Content: poo.NewTextMessage(poo.RoleAssistant, "third").Content},
 	}
 	h := poo.NewHistory(records)
-	turns, err := h.Turns()
+	turns, err := h.Turns(context.Background())
 	if err != nil {
 		t.Fatalf("reading the turns: %v", err)
 	}
 	if !slices.Equal(turns, []int{1, 2, 3}) {
 		t.Errorf("the retained turns are %v, want 1, 2, 3: the compaction cuts the view, never the store", turns)
 	}
-	text, err := h.Turn(1)
+	text, err := h.Turn(context.Background(), 1)
 	if err != nil || text == "" {
 		t.Errorf("the cut turn 1 is not recoverable: text %q err %v", text, err)
 	}

@@ -149,7 +149,7 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 	}
 
 	if p.turn != nil {
-		text, err := env.History.Turn(*p.turn)
+		text, err := env.History.Turn(ctx, *p.turn)
 		if err != nil {
 			return poo.ToolResult{Text: fmt.Sprintf("history: %v", err), IsError: true}, nil
 		}
@@ -159,7 +159,7 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 		return poo.ToolResult{Text: cut(fmt.Sprintf("turn %d\n%s", *p.turn, text), cap)}, nil
 	}
 
-	matches, err := env.History.Search(p.pattern)
+	matches, err := env.History.Search(ctx, p.pattern)
 	if err != nil {
 		return poo.ToolResult{Text: fmt.Sprintf("history: %v", err), IsError: true}, nil
 	}
@@ -189,12 +189,16 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 
 // cut cuts a line at MaxLineChars.
 func cut(line string, max int) string {
-	if max <= 0 || len(line) <= max {
+	if max <= 0 {
 		return line
 	}
 	// The prefix is cut on a character boundary: a byte slice would
 	// split a multi-byte character and put invalid UTF-8 in the result.
-	return caps.RunePrefix(line, max) + "…"
+	prefix := caps.RunePrefix(line, max)
+	if prefix == line {
+		return line
+	}
+	return prefix + "…"
 }
 
 // compile compiles the pattern, so the error names the tool.
