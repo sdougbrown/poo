@@ -132,12 +132,12 @@ func TestTheSettingsTurnTheManifestDefaultsOff(t *testing.T) {
 	}
 }
 
-// TestTheDefaultsLoadBeforeTheSettingsPaths covers the order: the
-// default directories are prepended, so a manifest they hold joins the
-// same set the settings' paths build.
-func TestTheDefaultsLoadBeforeTheSettingsPaths(t *testing.T) {
+// TestTheDefaultsJoinTheSettingsPaths covers the join: the manifests
+// the default directories hold load beside the settings' paths, and the
+// two sets build one whole.
+func TestTheDefaultsJoinTheSettingsPaths(t *testing.T) {
 	pooDir := theDefaultsPooDir(t)
-	feedsDir := theDefaultFeedManifest(t, pooDir)
+	theDefaultFeedManifest(t, pooDir)
 	path := feedManifestNamed(t, "ticker")
 	settings, err := config.Parse([]byte(theFeedsSettings(path)), config.FormatYAML)
 	if err != nil {
@@ -150,7 +150,6 @@ func TestTheDefaultsLoadBeforeTheSettingsPaths(t *testing.T) {
 	if !runtime.Feeds.Has("broker") || !runtime.Feeds.Has("ticker") {
 		t.Errorf("the build loaded the feeds %v, want broker and ticker", runtime.Feeds.Specs())
 	}
-	_ = feedsDir
 }
 
 // TestADefaultManifestNameDefinedTwiceFailsTheLoad covers the duplicate:
