@@ -1068,6 +1068,11 @@ func (s *FileStore) ReadRecords(ctx context.Context) ([]poo.Record, error) {
 	if err != nil {
 		return nil, err
 	}
+	// An empty file holds no session, the way the load says so: a
+	// header is what makes a log a session.
+	if len(lines) == 0 {
+		return nil, &Error{Code: CodeCorruptLog, Message: "the log holds no session"}
+	}
 	format, err := logFormat(lines[0])
 	if err != nil {
 		return nil, err

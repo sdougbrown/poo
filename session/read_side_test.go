@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"errors"
+	"os"
 	"testing"
 
 	"github.com/sdougbrown/poo"
@@ -44,6 +45,41 @@ func TestALogReadRecordsRoundTripsTheRecords(t *testing.T) {
 	secondBack, ok := records[1].(*poo.MessageRecord)
 	if !ok || secondBack.Turn != 2 || secondBack.Content[0].Text != "second" {
 		t.Errorf("the second record read back is %+v, want the second message", records[1])
+	}
+}
+
+// TestTheStoreReaderRefusesAnEmptySessionFile covers the degenerate
+// chain: a session file of zero length holds no session, and the read
+// says so instead of indexing past it.
+func TestTheStoreReaderRefusesAnEmptySessionFile(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	if err != nil {
+		t.Fatalf("opening the store: %v", err)
+	}
+	t.Cleanup(func() { store.Close() })
+	created := &poo.SessionCreatedRecord{
+		RecordMeta:      poo.NewRecordMeta("session.created"),
+		SessionMetadata: poo.SessionMetadata{SessionID: "s1", Format: poo.FormatVersion, Mode: string(ModeLogged)},
+	}
+	if _, err := store.Create(context.Background(), created); err != nil {
+		t.Fatalf("creating the session: %v", err)
+	}
+	// The degenerate chain: a store's file holds the header, so the
+	// empty read comes from a store whose file was emptied out from
+	// under it — the state the load path already treats as expected.
+	store.mu.Lock()
+	if err := os.WriteFile(store.open.path, nil, 0o644); err != nil {
+		t.Fatalf("emptying the file: %v", err)
+	}
+	store.mu.Unlock()
+	_, err = store.ReadRecords(context.Background())
+	if err == nil {
+		t.Fatal("the read succeeded on an empty session file")
+	}
+	var storeErr *Error
+	if !errors.As(err, &storeErr) || storeErr.Code != CodeCorruptLog {
+		t.Errorf("the read failed with %v, want the corrupt-log error", err)
 	}
 }
 
