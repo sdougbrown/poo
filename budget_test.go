@@ -35,6 +35,16 @@ func TestOverWindowReadsTheGateSOwnRule(t *testing.T) {
 	if (poo.ContextBudget{EstimatedInput: 5000}).OverWindow() {
 		t.Error("the trigger fired without a window")
 	}
+	// The input cap: over it, the gate refuses the prompt and the
+	// trigger fires; under it, the request goes out.
+	capped := poo.ContextBudget{ContextLimit: 20000, InputLimit: 8000, EstimatedInput: 8000 - poo.OutputReserve + 1}
+	if !capped.OverWindow() {
+		t.Error("the trigger did not fire over the input cap")
+	}
+	within := poo.ContextBudget{ContextLimit: 20000, InputLimit: 8000, EstimatedInput: 8000 - poo.OutputReserve - 100}
+	if within.OverWindow() {
+		t.Error("the trigger fired under the input cap")
+	}
 }
 
 // TestTheEstimateGrowsWithTheAppendedOutput covers the rule: the
