@@ -83,19 +83,19 @@ func startTypedRepl(t *testing.T, server *fakeServer) (out *syncBuffer, typeLine
 
 // syncBuffer is a transcript a test reads while the repl writes it.
 type syncBuffer struct {
-	mu        sync.Mutex
-	buf       bytes.Buffer
-	changedCh chan struct{}
+	mu  sync.Mutex
+	buf bytes.Buffer
+	// sig is the write signal: the next write closes it, so a wait
+	// ends on the write that landed the text instead of a poll.
+	sig changedSignal
 }
 
 func (b *syncBuffer) Write(p []byte) (int, error) {
 	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.changedCh != nil {
-		close(b.changedCh)
-		b.changedCh = nil
-	}
-	return b.buf.Write(p)
+	n, err := b.buf.Write(p)
+	b.mu.Unlock()
+	b.sig.signal()
+	return n, err
 }
 
 func (b *syncBuffer) String() string {
@@ -104,17 +104,36 @@ func (b *syncBuffer) String() string {
 	return b.buf.String()
 }
 
-// changed returns the buffer's signal: the next write closes it, so a
-// wait ends on the write that landed the text instead of a poll. A
-// wait takes the channel, then checks, then blocks: any write after
-// the check closes the channel the wait holds, so no write is missed.
-func (b *syncBuffer) changed() chan struct{} {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.changedCh == nil {
-		b.changedCh = make(chan struct{})
+// changed hands out the buffer's write signal.
+func (b *syncBuffer) changed() chan struct{} { return b.sig.changed() }
+
+// changedSignal is the wait-on-signal the fakes share: a channel a
+// change closes, so a wait ends on the change instead of a poll. The
+// owner writes its state under its own mutex, then calls signal, which
+// takes only the signal's own mutex. A wait takes the channel, then
+// checks, then blocks: any change after the check closes the channel
+// the wait holds, so no change is missed.
+type changedSignal struct {
+	mu sync.Mutex
+	ch chan struct{}
+}
+
+func (c *changedSignal) changed() chan struct{} {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.ch == nil {
+		c.ch = make(chan struct{})
 	}
-	return b.changedCh
+	return c.ch
+}
+
+func (c *changedSignal) signal() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.ch != nil {
+		close(c.ch)
+		c.ch = nil
+	}
 }
 
 // drawnBuffer is what the drawn-output waits block on: the buffer's

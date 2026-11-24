@@ -40,10 +40,9 @@ type terminal struct {
 	// vt reads the same bytes the terminal is sent, so a test asserts
 	// the screen the person sees instead of the stream that drew it.
 	vt vt10x.Terminal
-	// changed is the draw signal: the next batch of drawn bytes closes
-	// it, so a wait ends on the draw instead of a poll. Nil until a
-	// wait asks for it.
-	changedCh chan struct{}
+	// sig is the draw signal: the next batch of drawn bytes closes it,
+	// so a wait ends on the draw instead of a poll.
+	sig changedSignal
 }
 
 // openTerminal opens a terminal pair and drains what is drawn on it.
@@ -89,9 +88,7 @@ func (term *terminal) resize(cols, rows int) {
 	// screen.
 	if term.vt != nil {
 		term.vt.Resize(cols, rows)
-		term.mu.Lock()
 		term.signalChanged()
-		term.mu.Unlock()
 	}
 	ws := struct {
 		Row, Col, Xpixel, Ypixel uint16
@@ -112,8 +109,8 @@ func (term *terminal) drain() {
 			if term.vt != nil {
 				term.vt.Write(buf[:n])
 			}
-			term.signalChanged()
 			term.mu.Unlock()
+			term.signalChanged()
 		}
 		if err != nil {
 			return
@@ -121,26 +118,11 @@ func (term *terminal) drain() {
 	}
 }
 
-// changed returns the draw signal: the next batch of drawn bytes
-// closes it. A wait takes the channel, then checks, then blocks: any
-// draw after the check closes the channel the wait holds, so no draw
-// is missed.
-func (term *terminal) changed() chan struct{} {
-	term.mu.Lock()
-	defer term.mu.Unlock()
-	if term.changedCh == nil {
-		term.changedCh = make(chan struct{})
-	}
-	return term.changedCh
-}
+// changed hands out the draw signal.
+func (term *terminal) changed() chan struct{} { return term.sig.changed() }
 
-// signalChanged closes the draw signal. The caller holds mu.
-func (term *terminal) signalChanged() {
-	if term.changedCh != nil {
-		close(term.changedCh)
-		term.changedCh = nil
-	}
-}
+// signalChanged closes the draw signal.
+func (term *terminal) signalChanged() { term.sig.signal() }
 
 func (term *terminal) String() string {
 	term.mu.Lock()

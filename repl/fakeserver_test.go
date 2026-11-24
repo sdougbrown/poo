@@ -58,11 +58,10 @@ type fakeServer struct {
 	refuseMessage bool
 	// askSummary is the ask's summary the last tool.call named.
 	askSummary string
-	// changed is the server's signal: each record a wait reads — a
-	// prompt, a message, a cancel, a decision — closes it when it
-	// lands, so the wait ends on the record instead of a poll. Nil
-	// until a wait asks for it.
-	changedCh chan struct{}
+	// sig is the server's signal: each record a wait reads — a prompt,
+	// a message, a cancel, a decision — closes it when it lands, so
+	// the wait ends on the record instead of a poll.
+	sig changedSignal
 	// holdRun keeps the run open until the client cancels it, so a
 	// test has a run to stop.
 	holdRun bool
@@ -300,8 +299,8 @@ func (s *fakeServer) line(line []byte) {
 		json.Unmarshal(req.Params, &params)
 		s.mu.Lock()
 		s.prompts = append(s.prompts, params.Text)
-		s.signal()
 		s.mu.Unlock()
+		s.signal()
 		if s.refusePrompt {
 			s.fail(req.ID, "busy", "the session is busy")
 			return
@@ -321,8 +320,8 @@ func (s *fakeServer) line(line []byte) {
 		s.mu.Lock()
 		s.messages = append(s.messages, params.Text)
 		refuse := s.refuseMessage
-		s.signal()
 		s.mu.Unlock()
+		s.signal()
 		if refuse {
 			s.fail(req.ID, "not_running", "the session is not running")
 			return
@@ -333,8 +332,8 @@ func (s *fakeServer) line(line []byte) {
 		json.Unmarshal(req.Params, &params)
 		s.mu.Lock()
 		s.cancels = append(s.cancels, params.RunID)
-		s.signal()
 		s.mu.Unlock()
+		s.signal()
 		s.reply(req.ID, map[string]any{})
 	case protocol.MethodSessionClose:
 		s.mu.Lock()
@@ -541,26 +540,11 @@ func quietRun(hold chan struct{}) func(*fakeServer) {
 	}
 }
 
-// changed returns the server's signal: the next record closes it. A
-// wait takes the channel, then checks, then blocks: any record after
-// the check closes the channel the wait holds, so no record is
-// missed.
-func (s *fakeServer) changed() chan struct{} {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.changedCh == nil {
-		s.changedCh = make(chan struct{})
-	}
-	return s.changedCh
-}
+// changed hands out the server's signal.
+func (s *fakeServer) changed() chan struct{} { return s.sig.changed() }
 
-// signal closes the server's signal. The caller holds mu.
-func (s *fakeServer) signal() {
-	if s.changedCh != nil {
-		close(s.changedCh)
-		s.changedCh = nil
-	}
-}
+// signal closes the server's signal.
+func (s *fakeServer) signal() { s.sig.signal() }
 
 // cancelCount is how many cancels the client has sent.
 func (s *fakeServer) cancelCount() int {
@@ -688,8 +672,8 @@ func (s *fakeServer) answer(line []byte) {
 		return
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.decisions = append(s.decisions, msg.Result.Decision)
+	s.mu.Unlock()
 	s.signal()
 }
 
