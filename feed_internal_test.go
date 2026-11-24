@@ -53,7 +53,7 @@ func (silentTransport) Stream(context.Context, ChatRequest) (StreamReader, Rende
 }
 
 // Fork fails the fork it is never given.
-func (silentTransport) Fork(context.Context, Rendered, []Message, int) (StreamReader, error) {
+func (silentTransport) Fork(context.Context, Rendered, []Message, int, ForkOptions) (StreamReader, error) {
 	return nil, errors.New("no transport")
 }
 

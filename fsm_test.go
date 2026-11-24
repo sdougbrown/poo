@@ -1255,7 +1255,7 @@ func (t *lateStreamTransport) Stream(ctx context.Context, req poo.ChatRequest) (
 }
 
 // Fork is not implemented by the fake.
-func (t *lateStreamTransport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.Message, maxTokens int) (poo.StreamReader, error) {
+func (t *lateStreamTransport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.Message, maxTokens int, opts poo.ForkOptions) (poo.StreamReader, error) {
 	return nil, errNoFork
 }
 

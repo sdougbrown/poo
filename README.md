@@ -327,6 +327,27 @@ override that adds an earlier trigger at that share of the prompt limit. The
 removed `context.notice_ratio` and `context.hard_ratio` have no effect; a
 settings file that still sets them loads with a warning.
 
+**Pointer compaction.** `context.strategy: pointer` keeps the mine strategy's fork — the chat
+model names, from its own window, what the replacement must preserve — and makes the pointers
+load-bearing: each item is a literal query over the turns the store retains, the strategy runs the
+queries itself, and the compaction model composes the working context from what they hit plus an
+orientation seed (the first user message and the last few). The covered transcript is never read
+whole, so the compaction model's window bounds the compose request, not the session's size. The
+fork's reply is asked for as JSON; endpoints that cannot be asked get the same request without, and
+the reply is parsed leniently either way. A compose request that cannot complete falls back to the
+mine strategy's full-span read. Its own keys sit under `context.pointer`:
+
+```yaml
+context:
+  strategy: pointer
+  pointer:
+    ratio: 0.85
+    keep_recent_tokens: 12000
+    max_tokens: 32768
+    pointer_max_tokens: 2048
+    snippet_budget: 32768
+```
+
 **The compaction role.** `roles.compaction` gives a compaction strategy's own
 requests a model of their own: the summary `summary` writes or the
 reconstruction `mine` writes can be another model's work, defaulting to the chat
@@ -345,8 +366,8 @@ catalog and transport machinery the other roles use.
 
 **Native compaction.** `context.strategy: native` asks the provider to compact
 its own conversation and gives the model the provider's compacted state back.
-It is opt-in: the default stays `summary`, which writes its own summary of the
-oldest turns.
+It is opt-in: the default stays `mine`, which reads the covered transcript
+and reconstructs the working context from it.
 
 A model must declare the `compact` operation, and its provider must have a
 transport that can ask for the state. Neither is an assumption about a built-in
@@ -397,7 +418,7 @@ context:
 ```
 
 The strategy's own requests run inside the run that is compaction, so a model
-that cannot answer two side requests cannot mine; the default stays `summary`.
+that cannot answer two side requests cannot mine; the default stays `mine`.
 
 **The repl.** `poo repl [flags]` takes the serve flags, starts a `poo
 serve` with them, and renders the session in the terminal: replies as

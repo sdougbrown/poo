@@ -367,7 +367,7 @@ func (t *lateAttemptTransport) Stream(_ context.Context, req poo.ChatRequest) (p
 }
 
 // Fork is not used by the test.
-func (t *lateAttemptTransport) Fork(context.Context, poo.Rendered, []poo.Message, int) (poo.StreamReader, error) {
+func (t *lateAttemptTransport) Fork(context.Context, poo.Rendered, []poo.Message, int, poo.ForkOptions) (poo.StreamReader, error) {
 	return nil, errNoFork
 }
 

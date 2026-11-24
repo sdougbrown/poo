@@ -72,7 +72,7 @@ func TestTheForkSendsTheSamePrefix(t *testing.T) {
 	}
 
 	appended := []poo.Message{poo.NewTextMessage(poo.RoleUser, "the appended message")}
-	reader, err := tr.Fork(context.Background(), rendered, appended, 2048)
+	reader, err := tr.Fork(context.Background(), rendered, appended, 2048, poo.ForkOptions{})
 	if err != nil {
 		t.Fatalf("forking: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestTheForkWithoutASnapshotIsRefused(t *testing.T) {
 	srv := newForkServer(t)
 	tr := openai.New(openai.Options{Endpoint: srv.URL, Model: "m"})
 
-	if _, err := tr.Fork(context.Background(), poo.Rendered{}, nil, 0); err == nil {
+	if _, err := tr.Fork(context.Background(), poo.Rendered{}, nil, 0, poo.ForkOptions{}); err == nil {
 		t.Error("the fork of an empty snapshot succeeded, want a failure")
 	}
 }
@@ -151,7 +151,7 @@ func TestTheForkKeepsTheBodyKeyOrder(t *testing.T) {
 		t.Fatalf("starting the request: %v", err)
 	}
 
-	reader, err := tr.Fork(context.Background(), rendered, nil, 0)
+	reader, err := tr.Fork(context.Background(), rendered, nil, 0, poo.ForkOptions{})
 	if err != nil {
 		t.Fatalf("forking: %v", err)
 	}
@@ -173,7 +173,7 @@ func TestAForkOfAnotherAPIsSnapshotIsRefused(t *testing.T) {
 	srv := newForkServer(t)
 	tr := openai.New(openai.Options{Endpoint: srv.URL, Model: "m"})
 
-	_, err := tr.Fork(context.Background(), poo.Rendered{API: poo.APIResponses, Body: []byte(`{"messages":[]}`)}, nil, 16)
+	_, err := tr.Fork(context.Background(), poo.Rendered{API: poo.APIResponses, Body: []byte(`{"messages":[]}`)}, nil, 16, poo.ForkOptions{})
 	var pe *poo.ProviderError
 	if !errors.As(err, &pe) || pe.Kind != poo.ProviderKindInvalidRequest {
 		t.Fatalf("the error is %v, want an invalid_request provider error", err)
@@ -244,7 +244,7 @@ func TestTheForkDiffersOnlyInTheMessagesAndTheCeiling(t *testing.T) {
 	}
 	reader, err := tr.Fork(context.Background(), rendered, []poo.Message{
 		poo.NewTextMessage(poo.RoleUser, "the appended message"),
-	}, 2048)
+	}, 2048, poo.ForkOptions{})
 	if err != nil {
 		t.Fatalf("forking: %v", err)
 	}
@@ -305,7 +305,7 @@ func TestAForkCarriesAnAppendedImage(t *testing.T) {
 
 	appended := []poo.Message{poo.ToolResultMessage("call_1", "read", "read: shot.png", false,
 		[]poo.Attachment{{Modality: poo.ModalityImage, MediaType: "image/png", Data: []byte{1, 2, 3}}})}
-	reader, err := tr.Fork(context.Background(), rendered, appended, 2048)
+	reader, err := tr.Fork(context.Background(), rendered, appended, 2048, poo.ForkOptions{})
 	if err != nil {
 		t.Fatalf("forking: %v", err)
 	}

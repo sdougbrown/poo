@@ -1432,7 +1432,7 @@ func (b *blockingTransport) Stream(ctx context.Context, req poo.ChatRequest) (po
 }
 
 // Fork is not used by the tests.
-func (b *blockingTransport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.Message, maxTokens int) (poo.StreamReader, error) {
+func (b *blockingTransport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.Message, maxTokens int, opts poo.ForkOptions) (poo.StreamReader, error) {
 	return nil, errors.New("the test transport does not fork")
 }
 

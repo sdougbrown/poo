@@ -36,6 +36,17 @@ type Metrics struct {
 	// them to say what compacting cost.
 	CompactionInputTokens  int `json:"compaction_input_tokens"`
 	CompactionOutputTokens int `json:"compaction_output_tokens"`
+	// Compactions is the number of compactions the run applied.
+	Compactions int `json:"compactions"`
+	// CompactionStrategies are the strategies those compactions ran
+	// under, in order. A fallback replaces the whole compaction - the
+	// fallback's strategy is the entry, and the selective pass that
+	// asked for it is not on the record.
+	CompactionStrategies []string `json:"compaction_strategies,omitempty"`
+	// HistoryCallsAfterCompaction is the number of history tool calls
+	// the run made after its first compaction: the recovery path the
+	// retention pointer names, measured.
+	HistoryCallsAfterCompaction int `json:"history_calls_after_compaction"`
 	// CacheReadTokens is the number of prompt tokens the endpoint served
 	// from its cache. It is nil when the endpoint reported no cache
 	// counts at all.
@@ -165,6 +176,24 @@ func ComputeMetrics(log *Log, diff Diff) Metrics {
 	// The tool calls and their outcomes.
 	calls := log.ToolCalls()
 	m.ToolCalls = len(calls)
+
+	// The compactions, and the recovery the retention pointer asks
+	// for: a history call after the first compaction is the run
+	// reading back what the queries missed.
+	compactions := log.Compactions()
+	m.Compactions = len(compactions)
+	seenCompaction := false
+	for _, r := range log.Records {
+		switch {
+		case r.Record == "compaction":
+			seenCompaction = true
+			if r.Compaction != nil && r.Compaction.Strategy != "" {
+				m.CompactionStrategies = append(m.CompactionStrategies, r.Compaction.Strategy)
+			}
+		case seenCompaction && r.Record == "tool.call" && r.Tool == "history":
+			m.HistoryCallsAfterCompaction++
+		}
+	}
 	for _, r := range log.ToolResults() {
 		if r.Outcome == "error" {
 			m.ToolErrors++

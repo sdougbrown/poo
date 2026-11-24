@@ -151,6 +151,33 @@ def derive(workdir, task):
     with several accepted values has more than one right answer, and a
     fact whose values are empty cannot be derived, which is an error.
     """
+    if task in ("long-read-recall", "deep-read-recall"):
+        # The one service whose retry budget is not a whole multiple
+        # of 500, and the incident id its comment names. The
+        # derivation is the same scan the task asks the model to do
+        # over the whole file.
+        config = read(os.path.join(workdir, "config", "services.yaml"))
+        budgets = re.findall(r"- name:\s*(\S+)[\s\S]*?retry_budget_ms:\s*(\d+)", config)
+        odd = [(n, b) for n, b in budgets if int(b) % 500 != 0]
+        if len(odd) != 1:
+            return []
+        service, budget = odd[0]
+        match = re.search(r"retry_budget_ms:\s*" + budget + r"\b", config)
+        if not match:
+            return []
+        head = config[:match.start()]
+        name = [service]
+        # The service's own comment sits between its name and the next
+        # entry, so the incident id is the first one after the name.
+        tail = config[config.index("- name: " + name[-1], match.start() - 4000):]
+        incident = re.findall(r"#\s*(INC-\d+)", tail)
+        if not incident:
+            return []
+        return [
+            ("the service", [name[-1]]),
+            ("the incident id", [incident[0]]),
+        ]
+
     if task == "find-secret-in-config":
         # The function that reads the token, and the environment
         # variable it comes from.

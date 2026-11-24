@@ -56,8 +56,7 @@ type Settings struct {
 	SystemPrompt PromptSettings `json:"system_prompt,omitempty"`
 	// Context are the context window's settings.
 	Context Context `json:"context,omitempty"`
-	// Tools are the tools' settings.
-	Tools Tools `json:"tools,omitempty"`
+	Tools   Tools   `json:"tools,omitempty"`
 	// Limits are the run's limits.
 	Limits Limits `json:"limits,omitempty"`
 	// Jobs are the background jobs' settings.
@@ -347,8 +346,8 @@ type Context struct {
 	NoticeRatio *float64 `json:"notice_ratio,omitempty"`
 	// HardRatio is removed and ignored: it no longer has any effect.
 	HardRatio *float64 `json:"hard_ratio,omitempty"`
-	// Strategy is how the view is compacted: summary, mine, handoff,
-	// native or none.
+	// Strategy is how the view is compacted: summary, mine, pointer,
+	// handoff, native or none.
 	Strategy *string `json:"strategy,omitempty"`
 	// Handoff are the handoff strategy's settings.
 	Handoff Handoff `json:"handoff,omitempty"`
@@ -356,6 +355,8 @@ type Context struct {
 	Summary Summary `json:"summary,omitempty"`
 	// Mine are the mine strategy's settings.
 	Mine Mine `json:"mine,omitempty"`
+	// Pointer are the pointer strategy's settings.
+	Pointer Pointer `json:"pointer,omitempty"`
 }
 
 // Handoff are the handoff strategy's settings.
@@ -390,6 +391,25 @@ type Mine struct {
 	// PointerMaxTokens is the pointer pass's configured limit, in
 	// tokens.
 	PointerMaxTokens *int `json:"pointer_max_tokens,omitempty"`
+}
+
+// Pointer are the pointer strategy's settings.
+type Pointer struct {
+	// Ratio is the share of the prompt limit at which the view is
+	// reconstructed.
+	Ratio *float64 `json:"ratio,omitempty"`
+	// KeepRecentTokens is how much of the newest history stays verbatim.
+	KeepRecentTokens *int `json:"keep_recent_tokens,omitempty"`
+	// MaxTokens is the compose request's configured limit, in tokens.
+	MaxTokens *int `json:"max_tokens,omitempty"`
+	// PointerMaxTokens is the pointer pass's configured limit, in
+	// tokens.
+	PointerMaxTokens *int `json:"pointer_max_tokens,omitempty"`
+	// SnippetBudget is the most text the queries may collect, in bytes.
+	SnippetBudget *int `json:"snippet_budget,omitempty"`
+	// EscalateAfter is the number of the strategy's own compactions a
+	// session runs before the rest are the full-span fallback's.
+	EscalateAfter *int `json:"escalate_after,omitempty"`
 }
 
 // Tools are the tools' settings.

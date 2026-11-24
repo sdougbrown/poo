@@ -49,6 +49,11 @@ type Session struct {
 	// order.
 	transitions []State
 
+	// compactions is how many compactions this session has run, under
+	// any strategy. The count lives here, not on the shared strategy
+	// instance, so the pacing a strategy reads is this session's own.
+	compactions int
+
 	// history is the model's view: what has been said so far.
 	history []Message
 	// turns summarises each turn of the session.
@@ -1547,6 +1552,20 @@ type runWriteClaim struct {
 	timeout context.CancelFunc
 }
 
+// beginCompactionWrite claims the compaction's record write against
+// the run's seal.
+//
+// It is beginRunWrite without the record-write budget: the claim is
+// held across the compactor's own asks, which a slow endpoint takes
+// minutes over, so a claim bounded by one write budget would be
+// expired before the record it protects is written. The finalization's
+// wait bounds the write, the way it bounds a call record's.
+func (s *Session) beginCompactionWrite(run *runState) (context.Context, func(), bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.beginRunWriteLocked(run, 0)
+}
+
 // beginRunWrite claims a record's write against the run's seal.
 //
 // The claim is made under the session's lock, so a write that arrives
@@ -1557,15 +1576,17 @@ type runWriteClaim struct {
 func (s *Session) beginRunWrite(run *runState) (context.Context, func(), bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.beginRunWriteLocked(run)
+	return s.beginRunWriteLocked(run, s.recordWriteBudget)
 }
 
 // beginRunWriteLocked claims a record's write against the run's seal.
 //
 // The caller holds the session's lock. The claim is made under the
 // lock, so a write that registers work and claims its record does so
-// atomically with respect to the seal.
-func (s *Session) beginRunWriteLocked(run *runState) (context.Context, func(), bool) {
+// atomically with respect to the seal. A zero budget claims the write
+// unbounded: the finalization's wait bounds it instead, which is what
+// the compaction's record write wants.
+func (s *Session) beginRunWriteLocked(run *runState, budget time.Duration) (context.Context, func(), bool) {
 	if run.sealed {
 		return nil, nil, false
 	}
@@ -1573,7 +1594,13 @@ func (s *Session) beginRunWriteLocked(run *runState) (context.Context, func(), b
 	if base == nil {
 		base = context.Background()
 	}
-	timed, timeout := context.WithTimeout(context.WithoutCancel(base), s.recordBudget())
+	var timed context.Context
+	var timeout context.CancelFunc
+	if budget > 0 {
+		timed, timeout = context.WithTimeout(context.WithoutCancel(base), budget)
+	} else {
+		timed = context.WithoutCancel(base)
+	}
 	ctx, cancel := context.WithCancelCause(timed)
 	claim := &runWriteClaim{cancel: cancel, timeout: timeout}
 	run.writeClaims = append(run.writeClaims, claim)
@@ -1581,7 +1608,9 @@ func (s *Session) beginRunWriteLocked(run *runState) (context.Context, func(), b
 
 	release := func() {
 		cancel(nil)
-		timeout()
+		if timeout != nil {
+			timeout()
+		}
 		s.mu.Lock()
 		for i, held := range run.writeClaims {
 			if held == claim {

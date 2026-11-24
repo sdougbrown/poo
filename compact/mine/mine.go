@@ -39,7 +39,6 @@ package mine
 import (
 	"context"
 	"errors"
-	"strconv"
 	"strings"
 
 	"github.com/sdougbrown/poo"
@@ -114,6 +113,9 @@ type Compactor struct {
 	pointerMaxTokens int
 	// files reports the file a tool call names.
 	files FileOp
+	// trigger is the reconstruction trigger the block strategies
+	// share: the cut package's own arithmetic.
+	trigger cut.Trigger
 }
 
 // New returns the mine strategy.
@@ -134,6 +136,7 @@ func New(opts Options) *Compactor {
 	if c.files == nil {
 		c.files = cut.DefaultFileOp
 	}
+	c.trigger = cut.Trigger{Ratio: c.ratio, KeepRecent: c.keepRecent, MaxTokens: c.maxTokens, Files: c.files}
 	return c
 }
 
@@ -157,40 +160,12 @@ func (c *Compactor) PointerMaxTokens() int { return c.pointerMaxTokens }
 // left in the window is under the output limit and a compaction would
 // give the room back. It also acts when the conversation alone exceeds
 // the window: a run that starts over the window cannot wait for a turn,
-// because the ratio trigger needs a request behind it. The guard is the
-// summary strategy's: a window whose tail fills everything has nothing
-// older to reconstruct, and starting a compaction would only fail.
+// because the ratio trigger needs a request behind it. The trigger is
+// the cut package's, shared with the other block strategies: the same
+// view under the same budget reconstructs at the same window fill,
+// whichever strategy runs.
 func (c *Compactor) ShouldCompact(view poo.View, budget poo.ContextBudget) bool {
-	if len(cut.LiveTurns(view.Turns())) < 2 {
-		return false
-	}
-	return budget.OverWindow() || budget.Reached(c.ratio) || c.restoresOutputRoom(view, budget)
-}
-
-// restoresOutputRoom reports that the output room is short and a
-// reconstruction would end the shortage.
-func (c *Compactor) restoresOutputRoom(view poo.View, budget poo.ContextBudget) bool {
-	if !budget.RoomShort(budget.OutputLimit) {
-		return false
-	}
-	messages := view.Messages()
-	r, ok := cut.Select(messages, view.Turns(), budget, c.keepRecent)
-	if !ok {
-		return false
-	}
-	covered := messages[r.Start:r.End]
-	after := cut.RoomAfter(budget, cut.TurnTokens(covered, budget),
-		c.maxTokens+c.replacementCarriageTokens(r, covered, budget))
-	return !after.RoomShort(after.OutputLimit)
-}
-
-// replacementCarriageTokens estimates what the replacement carries
-// besides the reconstruction: the marker line, the retention pointer
-// and the file list.
-func (c *Compactor) replacementCarriageTokens(r cut.Range, covered []poo.Message, budget poo.ContextBudget) int {
-	text := cut.Marker(r, markerVerb) + "\n\n" + retention(r.Cut, "", true) +
-		"\n\n" + cut.FileList(c.files, covered)
-	return cut.TurnTokens([]poo.Message{poo.NewTextMessage(poo.RoleUser, text)}, budget)
+	return c.trigger.ShouldCompact(view, budget)
 }
 
 // Compact reconstructs the turns the view can spare and replaces them
@@ -217,7 +192,7 @@ func (c *Compactor) Compact(ctx context.Context, in poo.CompactionEnv) (poo.Comp
 	pointers := ""
 	var fork *poo.ForkSide
 	if in.Fork != nil {
-		reply, err := in.Fork(ctx, pointerRequest(), c.pointerMaxTokens)
+		reply, err := in.Fork(ctx, pointerRequest(), c.pointerMaxTokens, poo.ForkOptions{})
 		// The pass is advisory, so a fork that fails mines without it.
 		// A tool call is not pointers either: a model that answers with
 		// one has not read the ask, and the transcript holds what its
@@ -257,7 +232,7 @@ func (c *Compactor) Compact(ctx context.Context, in poo.CompactionEnv) (poo.Comp
 	if files := cut.FileList(c.files, covered); files != "" {
 		replacement += "\n\n" + files
 	}
-	replacement += "\n\n" + retention(r.Cut, in.SessionID, in.HistoryTool)
+	replacement += "\n\n" + cut.Retention(r.Cut, in.SessionID, in.HistoryTool)
 	return poo.Compaction{
 		Strategy: Strategy,
 		Replace: &poo.RangeReplacement{
@@ -266,27 +241,4 @@ func (c *Compactor) Compact(ctx context.Context, in poo.CompactionEnv) (poo.Comp
 		},
 		Side: &poo.SideRequests{Fork: fork},
 	}, nil
-}
-
-// retention is the pointer the replacement ends with.
-//
-// The store keeps every original message, so the text the cut removed
-// is not gone. The pointer names the turns and the session they belong
-// to, so a consumer whose model can read the store knows what to
-// recover and from where.
-// The recovery sentence names the history tool only when the session
-// offers it: a profile without the tool would send the model looking
-// for a call it cannot make, so the pointer then says the recovery is
-// the reader's own.
-func retention(turns poo.TurnRange, sessionID string, historyTool bool) string {
-	where := ""
-	if sessionID != "" {
-		where = " of session " + sessionID
-	}
-	recover := ""
-	if historyTool {
-		recover = " The history tool reads them: search the retained turns with a pattern, or read one whole with its turn number."
-	}
-	return "[The turns replaced above are retained in this session's store" + where +
-		" (turns " + strconv.Itoa(turns.First) + "-" + strconv.Itoa(turns.Last) + "): nothing was deleted." + recover + "]"
 }

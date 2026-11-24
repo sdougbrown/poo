@@ -19,6 +19,12 @@ type SettingsFields struct {
 	ContextMineMaxTokens            *float64 "json:\"context.mine.max_tokens,omitempty\""
 	ContextMinePointerMaxTokens     *float64 "json:\"context.mine.pointer_max_tokens,omitempty\""
 	ContextMineRatio                *float64 "json:\"context.mine.ratio,omitempty\""
+	ContextPointerEscalateAfter     *float64 "json:\"context.pointer.escalate_after,omitempty\""
+	ContextPointerKeepRecentTokens  *float64 "json:\"context.pointer.keep_recent_tokens,omitempty\""
+	ContextPointerMaxTokens         *float64 "json:\"context.pointer.max_tokens,omitempty\""
+	ContextPointerPointerMaxTokens  *float64 "json:\"context.pointer.pointer_max_tokens,omitempty\""
+	ContextPointerRatio             *float64 "json:\"context.pointer.ratio,omitempty\""
+	ContextPointerSnippetBudget     *float64 "json:\"context.pointer.snippet_budget,omitempty\""
 	ContextStrategy                 *string  "json:\"context.strategy,omitempty\""
 	ContextSummaryKeepRecentTokens  *float64 "json:\"context.summary.keep_recent_tokens,omitempty\""
 	ContextSummaryMaxTokens         *float64 "json:\"context.summary.max_tokens,omitempty\""
@@ -113,6 +119,12 @@ type SettingsAvailability struct {
 	ContextMineMaxTokens            FieldStatus
 	ContextMinePointerMaxTokens     FieldStatus
 	ContextMineRatio                FieldStatus
+	ContextPointerEscalateAfter     FieldStatus
+	ContextPointerKeepRecentTokens  FieldStatus
+	ContextPointerMaxTokens         FieldStatus
+	ContextPointerPointerMaxTokens  FieldStatus
+	ContextPointerRatio             FieldStatus
+	ContextPointerSnippetBudget     FieldStatus
 	ContextStrategy                 FieldStatus
 	ContextSummaryKeepRecentTokens  FieldStatus
 	ContextSummaryMaxTokens         FieldStatus
@@ -249,6 +261,18 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 	ContextMinePointerMaxTokensSatisfied := f.ContextMinePointerMaxTokens != nil
 	ContextMineRatioEnabled := true
 	ContextMineRatioSatisfied := f.ContextMineRatio != nil
+	ContextPointerEscalateAfterEnabled := true
+	ContextPointerEscalateAfterSatisfied := f.ContextPointerEscalateAfter != nil
+	ContextPointerKeepRecentTokensEnabled := true
+	ContextPointerKeepRecentTokensSatisfied := f.ContextPointerKeepRecentTokens != nil
+	ContextPointerMaxTokensEnabled := true
+	ContextPointerMaxTokensSatisfied := f.ContextPointerMaxTokens != nil
+	ContextPointerPointerMaxTokensEnabled := true
+	ContextPointerPointerMaxTokensSatisfied := f.ContextPointerPointerMaxTokens != nil
+	ContextPointerRatioEnabled := true
+	ContextPointerRatioSatisfied := f.ContextPointerRatio != nil
+	ContextPointerSnippetBudgetEnabled := true
+	ContextPointerSnippetBudgetSatisfied := f.ContextPointerSnippetBudget != nil
 	ContextStrategyEnabled := true
 	ContextStrategySatisfied := func() bool { v := f.ContextStrategy; return v != nil && *v != "" }()
 	ContextSummaryKeepRecentTokensEnabled := true
@@ -633,15 +657,15 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 			Valid: nil,
 			Error: "",
 		},
-		ContextStrategy: FieldStatus{
-			Required:  ContextStrategyEnabled && false,
-			Enabled:   ContextStrategyEnabled,
-			Satisfied: ContextStrategySatisfied,
-			Fair:      f.ContextStrategy != nil && isValidRegexMatch(*f.ContextStrategy, "^(summary|mine|handoff|native|none)$"),
+		ContextPointerEscalateAfter: FieldStatus{
+			Required:  ContextPointerEscalateAfterEnabled && false,
+			Enabled:   ContextPointerEscalateAfterEnabled,
+			Satisfied: ContextPointerEscalateAfterSatisfied,
+			Fair:      f.ContextPointerEscalateAfter != nil && *f.ContextPointerEscalateAfter >= 0,
 			Reason: func() *string {
 				var reasons []string
-				if !(f.ContextStrategy != nil && isValidRegexMatch(*f.ContextStrategy, "^(summary|mine|handoff|native|none)$")) && "context.strategy must be summary, mine, handoff, native or none" != "" {
-					reasons = append(reasons, "context.strategy must be summary, mine, handoff, native or none")
+				if !(f.ContextPointerEscalateAfter != nil && *f.ContextPointerEscalateAfter >= 0) && "context.pointer.escalate_after must not be negative" != "" {
+					reasons = append(reasons, "context.pointer.escalate_after must not be negative")
 				}
 				if len(reasons) == 0 {
 					return nil
@@ -650,8 +674,176 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 			}(),
 			Reasons: func() []string {
 				var reasons []string
-				if !(f.ContextStrategy != nil && isValidRegexMatch(*f.ContextStrategy, "^(summary|mine|handoff|native|none)$")) && "context.strategy must be summary, mine, handoff, native or none" != "" {
-					reasons = append(reasons, "context.strategy must be summary, mine, handoff, native or none")
+				if !(f.ContextPointerEscalateAfter != nil && *f.ContextPointerEscalateAfter >= 0) && "context.pointer.escalate_after must not be negative" != "" {
+					reasons = append(reasons, "context.pointer.escalate_after must not be negative")
+				}
+				if reasons == nil {
+					reasons = []string{}
+				}
+				return reasons
+			}(),
+			Valid: nil,
+			Error: "",
+		},
+		ContextPointerKeepRecentTokens: FieldStatus{
+			Required:  ContextPointerKeepRecentTokensEnabled && false,
+			Enabled:   ContextPointerKeepRecentTokensEnabled,
+			Satisfied: ContextPointerKeepRecentTokensSatisfied,
+			Fair:      f.ContextPointerKeepRecentTokens != nil && *f.ContextPointerKeepRecentTokens >= 0,
+			Reason: func() *string {
+				var reasons []string
+				if !(f.ContextPointerKeepRecentTokens != nil && *f.ContextPointerKeepRecentTokens >= 0) && "context.pointer.keep_recent_tokens must not be negative" != "" {
+					reasons = append(reasons, "context.pointer.keep_recent_tokens must not be negative")
+				}
+				if len(reasons) == 0 {
+					return nil
+				}
+				return &reasons[0]
+			}(),
+			Reasons: func() []string {
+				var reasons []string
+				if !(f.ContextPointerKeepRecentTokens != nil && *f.ContextPointerKeepRecentTokens >= 0) && "context.pointer.keep_recent_tokens must not be negative" != "" {
+					reasons = append(reasons, "context.pointer.keep_recent_tokens must not be negative")
+				}
+				if reasons == nil {
+					reasons = []string{}
+				}
+				return reasons
+			}(),
+			Valid: nil,
+			Error: "",
+		},
+		ContextPointerMaxTokens: FieldStatus{
+			Required:  ContextPointerMaxTokensEnabled && false,
+			Enabled:   ContextPointerMaxTokensEnabled,
+			Satisfied: ContextPointerMaxTokensSatisfied,
+			Fair:      f.ContextPointerMaxTokens != nil && *f.ContextPointerMaxTokens >= 0,
+			Reason: func() *string {
+				var reasons []string
+				if !(f.ContextPointerMaxTokens != nil && *f.ContextPointerMaxTokens >= 0) && "context.pointer.max_tokens must not be negative" != "" {
+					reasons = append(reasons, "context.pointer.max_tokens must not be negative")
+				}
+				if len(reasons) == 0 {
+					return nil
+				}
+				return &reasons[0]
+			}(),
+			Reasons: func() []string {
+				var reasons []string
+				if !(f.ContextPointerMaxTokens != nil && *f.ContextPointerMaxTokens >= 0) && "context.pointer.max_tokens must not be negative" != "" {
+					reasons = append(reasons, "context.pointer.max_tokens must not be negative")
+				}
+				if reasons == nil {
+					reasons = []string{}
+				}
+				return reasons
+			}(),
+			Valid: nil,
+			Error: "",
+		},
+		ContextPointerPointerMaxTokens: FieldStatus{
+			Required:  ContextPointerPointerMaxTokensEnabled && false,
+			Enabled:   ContextPointerPointerMaxTokensEnabled,
+			Satisfied: ContextPointerPointerMaxTokensSatisfied,
+			Fair:      f.ContextPointerPointerMaxTokens != nil && *f.ContextPointerPointerMaxTokens >= 0,
+			Reason: func() *string {
+				var reasons []string
+				if !(f.ContextPointerPointerMaxTokens != nil && *f.ContextPointerPointerMaxTokens >= 0) && "context.pointer.pointer_max_tokens must not be negative" != "" {
+					reasons = append(reasons, "context.pointer.pointer_max_tokens must not be negative")
+				}
+				if len(reasons) == 0 {
+					return nil
+				}
+				return &reasons[0]
+			}(),
+			Reasons: func() []string {
+				var reasons []string
+				if !(f.ContextPointerPointerMaxTokens != nil && *f.ContextPointerPointerMaxTokens >= 0) && "context.pointer.pointer_max_tokens must not be negative" != "" {
+					reasons = append(reasons, "context.pointer.pointer_max_tokens must not be negative")
+				}
+				if reasons == nil {
+					reasons = []string{}
+				}
+				return reasons
+			}(),
+			Valid: nil,
+			Error: "",
+		},
+		ContextPointerRatio: FieldStatus{
+			Required:  ContextPointerRatioEnabled && false,
+			Enabled:   ContextPointerRatioEnabled,
+			Satisfied: ContextPointerRatioSatisfied,
+			Fair:      f.ContextPointerRatio != nil && *f.ContextPointerRatio >= 0 && *f.ContextPointerRatio <= 1,
+			Reason: func() *string {
+				var reasons []string
+				if !(f.ContextPointerRatio != nil && *f.ContextPointerRatio >= 0 && *f.ContextPointerRatio <= 1) && "context.pointer.ratio must be between 0 and 1" != "" {
+					reasons = append(reasons, "context.pointer.ratio must be between 0 and 1")
+				}
+				if len(reasons) == 0 {
+					return nil
+				}
+				return &reasons[0]
+			}(),
+			Reasons: func() []string {
+				var reasons []string
+				if !(f.ContextPointerRatio != nil && *f.ContextPointerRatio >= 0 && *f.ContextPointerRatio <= 1) && "context.pointer.ratio must be between 0 and 1" != "" {
+					reasons = append(reasons, "context.pointer.ratio must be between 0 and 1")
+				}
+				if reasons == nil {
+					reasons = []string{}
+				}
+				return reasons
+			}(),
+			Valid: nil,
+			Error: "",
+		},
+		ContextPointerSnippetBudget: FieldStatus{
+			Required:  ContextPointerSnippetBudgetEnabled && false,
+			Enabled:   ContextPointerSnippetBudgetEnabled,
+			Satisfied: ContextPointerSnippetBudgetSatisfied,
+			Fair:      f.ContextPointerSnippetBudget != nil && *f.ContextPointerSnippetBudget >= 0,
+			Reason: func() *string {
+				var reasons []string
+				if !(f.ContextPointerSnippetBudget != nil && *f.ContextPointerSnippetBudget >= 0) && "context.pointer.snippet_budget must not be negative" != "" {
+					reasons = append(reasons, "context.pointer.snippet_budget must not be negative")
+				}
+				if len(reasons) == 0 {
+					return nil
+				}
+				return &reasons[0]
+			}(),
+			Reasons: func() []string {
+				var reasons []string
+				if !(f.ContextPointerSnippetBudget != nil && *f.ContextPointerSnippetBudget >= 0) && "context.pointer.snippet_budget must not be negative" != "" {
+					reasons = append(reasons, "context.pointer.snippet_budget must not be negative")
+				}
+				if reasons == nil {
+					reasons = []string{}
+				}
+				return reasons
+			}(),
+			Valid: nil,
+			Error: "",
+		},
+		ContextStrategy: FieldStatus{
+			Required:  ContextStrategyEnabled && false,
+			Enabled:   ContextStrategyEnabled,
+			Satisfied: ContextStrategySatisfied,
+			Fair:      f.ContextStrategy != nil && isValidRegexMatch(*f.ContextStrategy, "^(summary|mine|pointer|handoff|native|none)$"),
+			Reason: func() *string {
+				var reasons []string
+				if !(f.ContextStrategy != nil && isValidRegexMatch(*f.ContextStrategy, "^(summary|mine|pointer|handoff|native|none)$")) && "context.strategy must be summary, mine, pointer, handoff, native or none" != "" {
+					reasons = append(reasons, "context.strategy must be summary, mine, pointer, handoff, native or none")
+				}
+				if len(reasons) == 0 {
+					return nil
+				}
+				return &reasons[0]
+			}(),
+			Reasons: func() []string {
+				var reasons []string
+				if !(f.ContextStrategy != nil && isValidRegexMatch(*f.ContextStrategy, "^(summary|mine|pointer|handoff|native|none)$")) && "context.strategy must be summary, mine, pointer, handoff, native or none" != "" {
+					reasons = append(reasons, "context.strategy must be summary, mine, pointer, handoff, native or none")
 				}
 				if reasons == nil {
 					reasons = []string{}
@@ -2514,6 +2706,18 @@ func depSatisfied(f SettingsFields, name string) bool {
 		return f.ContextMinePointerMaxTokens != nil
 	case "ContextMineRatio":
 		return f.ContextMineRatio != nil
+	case "ContextPointerEscalateAfter":
+		return f.ContextPointerEscalateAfter != nil
+	case "ContextPointerKeepRecentTokens":
+		return f.ContextPointerKeepRecentTokens != nil
+	case "ContextPointerMaxTokens":
+		return f.ContextPointerMaxTokens != nil
+	case "ContextPointerPointerMaxTokens":
+		return f.ContextPointerPointerMaxTokens != nil
+	case "ContextPointerRatio":
+		return f.ContextPointerRatio != nil
+	case "ContextPointerSnippetBudget":
+		return f.ContextPointerSnippetBudget != nil
 	case "ContextStrategy":
 		v := f.ContextStrategy
 		return v != nil && *v != ""
@@ -2805,7 +3009,13 @@ var ruleMeta = []RuleMetaEntry{
 	{Field: "ContextMineMaxTokens", RuleType: "check", Expr: "f.ContextMineMaxTokens != nil && *f.ContextMineMaxTokens >= 0", Reason: "context.mine.max_tokens must not be negative"},
 	{Field: "ContextMinePointerMaxTokens", RuleType: "check", Expr: "f.ContextMinePointerMaxTokens != nil && *f.ContextMinePointerMaxTokens >= 0", Reason: "context.mine.pointer_max_tokens must not be negative"},
 	{Field: "ContextMineRatio", RuleType: "check", Expr: "f.ContextMineRatio != nil && *f.ContextMineRatio >= 0 && *f.ContextMineRatio <= 1", Reason: "context.mine.ratio must be between 0 and 1"},
-	{Field: "ContextStrategy", RuleType: "check", Expr: "f.ContextStrategy != nil && isValidRegexMatch(*f.ContextStrategy, \"^(summary|mine|handoff|native|none)$\")", Reason: "context.strategy must be summary, mine, handoff, native or none"},
+	{Field: "ContextPointerEscalateAfter", RuleType: "check", Expr: "f.ContextPointerEscalateAfter != nil && *f.ContextPointerEscalateAfter >= 0", Reason: "context.pointer.escalate_after must not be negative"},
+	{Field: "ContextPointerKeepRecentTokens", RuleType: "check", Expr: "f.ContextPointerKeepRecentTokens != nil && *f.ContextPointerKeepRecentTokens >= 0", Reason: "context.pointer.keep_recent_tokens must not be negative"},
+	{Field: "ContextPointerMaxTokens", RuleType: "check", Expr: "f.ContextPointerMaxTokens != nil && *f.ContextPointerMaxTokens >= 0", Reason: "context.pointer.max_tokens must not be negative"},
+	{Field: "ContextPointerPointerMaxTokens", RuleType: "check", Expr: "f.ContextPointerPointerMaxTokens != nil && *f.ContextPointerPointerMaxTokens >= 0", Reason: "context.pointer.pointer_max_tokens must not be negative"},
+	{Field: "ContextPointerRatio", RuleType: "check", Expr: "f.ContextPointerRatio != nil && *f.ContextPointerRatio >= 0 && *f.ContextPointerRatio <= 1", Reason: "context.pointer.ratio must be between 0 and 1"},
+	{Field: "ContextPointerSnippetBudget", RuleType: "check", Expr: "f.ContextPointerSnippetBudget != nil && *f.ContextPointerSnippetBudget >= 0", Reason: "context.pointer.snippet_budget must not be negative"},
+	{Field: "ContextStrategy", RuleType: "check", Expr: "f.ContextStrategy != nil && isValidRegexMatch(*f.ContextStrategy, \"^(summary|mine|pointer|handoff|native|none)$\")", Reason: "context.strategy must be summary, mine, pointer, handoff, native or none"},
 	{Field: "ContextSummaryKeepRecentTokens", RuleType: "check", Expr: "f.ContextSummaryKeepRecentTokens != nil && *f.ContextSummaryKeepRecentTokens >= 0", Reason: "context.summary.keep_recent_tokens must not be negative"},
 	{Field: "ContextSummaryMaxTokens", RuleType: "check", Expr: "f.ContextSummaryMaxTokens != nil && *f.ContextSummaryMaxTokens >= 0", Reason: "context.summary.max_tokens must not be negative"},
 	{Field: "ContextSummaryRatio", RuleType: "check", Expr: "f.ContextSummaryRatio != nil && *f.ContextSummaryRatio >= 0 && *f.ContextSummaryRatio <= 1", Reason: "context.summary.ratio must be between 0 and 1"},
@@ -2918,13 +3128,55 @@ func Challenge(fieldName string, f SettingsFields, c SettingsConditions, prev Se
 			explanations = append(explanations, "* "+*status.Reason)
 		}
 		explanations = append(explanations, "* check: context.mine.ratio must be between 0 and 1")
+	case "ContextPointerEscalateAfter", "context.pointer.escalate_after":
+		found = true
+		status = avail.ContextPointerEscalateAfter
+		if status.Reason != nil {
+			explanations = append(explanations, "* "+*status.Reason)
+		}
+		explanations = append(explanations, "* check: context.pointer.escalate_after must not be negative")
+	case "ContextPointerKeepRecentTokens", "context.pointer.keep_recent_tokens":
+		found = true
+		status = avail.ContextPointerKeepRecentTokens
+		if status.Reason != nil {
+			explanations = append(explanations, "* "+*status.Reason)
+		}
+		explanations = append(explanations, "* check: context.pointer.keep_recent_tokens must not be negative")
+	case "ContextPointerMaxTokens", "context.pointer.max_tokens":
+		found = true
+		status = avail.ContextPointerMaxTokens
+		if status.Reason != nil {
+			explanations = append(explanations, "* "+*status.Reason)
+		}
+		explanations = append(explanations, "* check: context.pointer.max_tokens must not be negative")
+	case "ContextPointerPointerMaxTokens", "context.pointer.pointer_max_tokens":
+		found = true
+		status = avail.ContextPointerPointerMaxTokens
+		if status.Reason != nil {
+			explanations = append(explanations, "* "+*status.Reason)
+		}
+		explanations = append(explanations, "* check: context.pointer.pointer_max_tokens must not be negative")
+	case "ContextPointerRatio", "context.pointer.ratio":
+		found = true
+		status = avail.ContextPointerRatio
+		if status.Reason != nil {
+			explanations = append(explanations, "* "+*status.Reason)
+		}
+		explanations = append(explanations, "* check: context.pointer.ratio must be between 0 and 1")
+	case "ContextPointerSnippetBudget", "context.pointer.snippet_budget":
+		found = true
+		status = avail.ContextPointerSnippetBudget
+		if status.Reason != nil {
+			explanations = append(explanations, "* "+*status.Reason)
+		}
+		explanations = append(explanations, "* check: context.pointer.snippet_budget must not be negative")
 	case "ContextStrategy", "context.strategy":
 		found = true
 		status = avail.ContextStrategy
 		if status.Reason != nil {
 			explanations = append(explanations, "* "+*status.Reason)
 		}
-		explanations = append(explanations, "* check: context.strategy must be summary, mine, handoff, native or none")
+		explanations = append(explanations, "* check: context.strategy must be summary, mine, pointer, handoff, native or none")
 	case "ContextSummaryKeepRecentTokens", "context.summary.keep_recent_tokens":
 		found = true
 		status = avail.ContextSummaryKeepRecentTokens

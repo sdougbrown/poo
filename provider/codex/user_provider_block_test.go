@@ -160,7 +160,7 @@ func TestAForkCarriesAnAppendedOpaqueBlock(t *testing.T) {
 	read(t, reader)
 	reader.Close()
 
-	forked, err := tr.Fork(context.Background(), rendered, []poo.Message{windowMessage(compactionBlock())}, 64)
+	forked, err := tr.Fork(context.Background(), rendered, []poo.Message{windowMessage(compactionBlock())}, 64, poo.ForkOptions{})
 	if err != nil {
 		t.Fatalf("forking: %v", err)
 	}

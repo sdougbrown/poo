@@ -179,3 +179,58 @@ func TestTheComparisonSeesACompactionRegression(t *testing.T) {
 		t.Errorf("the regression names %q, want compaction_input_tokens", got)
 	}
 }
+
+// compactionRecord builds a compaction record naming the strategy that
+// produced it.
+func compactionRecord(strategy string) string {
+	return `{"record":"compaction","seq":1,"ts":"2026-10-20T00:00:00Z","run_id":"r","turn":1,` +
+		`"compaction":{"strategy":"` + strategy + `"}}`
+}
+
+// TestTheCompactionsCountAndNameTheirStrategies covers the count and
+// the strategies the run compacted under: a strategy's fallback shows
+// up as a second compaction under its own name.
+func TestTheCompactionsCountAndNameTheirStrategies(t *testing.T) {
+	log, err := ParseLog(writeLog(t,
+		callRecord(1, "history", `{"turns":[1]}`),
+		compactionRecord("pointer"),
+		compactionRecord("mine"),
+		usageRecord(2, 1, 100, 10, 5, nil),
+		settledRecord("end_turn", 2),
+	))
+	if err != nil {
+		t.Fatalf("parsing the log: %v", err)
+	}
+	m := ComputeMetrics(log, Diff{})
+
+	if m.Compactions != 2 {
+		t.Errorf("the run compacted %d times, want 2", m.Compactions)
+	}
+	if len(m.CompactionStrategies) != 2 || m.CompactionStrategies[0] != "pointer" || m.CompactionStrategies[1] != "mine" {
+		t.Errorf("the strategies are %v, want pointer then mine", m.CompactionStrategies)
+	}
+}
+
+// TestTheHistoryCallsCountOnlyAfterACompaction covers the recovery
+// metric: a history call before any compaction is the tool's ordinary
+// use, and only the calls after the first compaction are the run
+// reading back what the queries missed.
+func TestTheHistoryCallsCountOnlyAfterACompaction(t *testing.T) {
+	log, err := ParseLog(writeLog(t,
+		callRecord(1, "history", `{"turns":[1]}`),
+		compactionRecord("pointer"),
+		callRecord(2, "history", `{"turn":3}`),
+		callRecord(2, "read", `{"path":"a.go"}`),
+		callRecord(3, "history", `{"turn":2}`),
+		settledRecord("end_turn", 3),
+	))
+	if err != nil {
+		t.Fatalf("parsing the log: %v", err)
+	}
+	m := ComputeMetrics(log, Diff{})
+
+	if m.HistoryCallsAfterCompaction != 2 {
+		t.Errorf("the run made %d history calls after the compaction, want 2",
+			m.HistoryCallsAfterCompaction)
+	}
+}

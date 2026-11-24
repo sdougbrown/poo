@@ -84,7 +84,7 @@ func TestARequiredForeignBlockFailsTheRequest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("starting the request: %v", err)
 	}
-	_, err = tr.Fork(context.Background(), rendered, []poo.Message{providerMessage(block)}, 16)
+	_, err = tr.Fork(context.Background(), rendered, []poo.Message{providerMessage(block)}, 16, poo.ForkOptions{})
 	assertSessionIncompatible(t, err)
 }
 
@@ -144,7 +144,7 @@ func TestARequiredBlockAfterAToolResultFailsTheRequest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("starting the request: %v", err)
 	}
-	_, err = tr.Fork(context.Background(), rendered, []poo.Message{msg}, 16)
+	_, err = tr.Fork(context.Background(), rendered, []poo.Message{msg}, 16, poo.ForkOptions{})
 	assertSessionIncompatible(t, err)
 }
 

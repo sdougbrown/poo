@@ -185,7 +185,7 @@ func TestTheScriptedCompactorForksTheCallItIsGiven(t *testing.T) {
 	appended := []poo.Message{poo.NewTextMessage(poo.RoleUser, "again")}
 
 	reply, err := c.Fork(context.Background(),
-		func(ctx context.Context, appended []poo.Message, maxTokens int) (poo.Reply, error) {
+		func(ctx context.Context, appended []poo.Message, maxTokens int, opts poo.ForkOptions) (poo.Reply, error) {
 			return poo.Reply{Message: poo.NewTextMessage(poo.RoleAssistant, "the fork"), Usage: poo.UsageReport{TTFTMS: 3}}, nil
 		}, appended, 32)
 	if err != nil {

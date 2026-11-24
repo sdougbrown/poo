@@ -112,7 +112,7 @@ func (t *interruptingTransport) Stream(ctx context.Context, req poo.ChatRequest)
 }
 
 // Fork is not implemented: the transport never forks.
-func (t *interruptingTransport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.Message, maxTokens int) (poo.StreamReader, error) {
+func (t *interruptingTransport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.Message, maxTokens int, opts poo.ForkOptions) (poo.StreamReader, error) {
 	return nil, errors.New("the transport does not fork")
 }
 

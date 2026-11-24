@@ -248,6 +248,17 @@ func (l *Log) Usages() []LogRecord {
 	return out
 }
 
+// Compactions returns the compaction records, in order.
+func (l *Log) Compactions() []LogRecord {
+	var out []LogRecord
+	for _, r := range l.Records {
+		if r.Record == "compaction" {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
 // Settle returns the run's settle record, or nil when the run did not
 // settle.
 func (l *Log) Settle() *LogRecord {

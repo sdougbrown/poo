@@ -557,7 +557,7 @@ func (c *forkCaptureCompactor) ShouldCompact(view poo.View, budget poo.ContextBu
 // wrote, so it is a compaction the session accepts and records.
 func (c *forkCaptureCompactor) Compact(ctx context.Context, in poo.CompactionEnv) (poo.Compaction, error) {
 	c.compactions++
-	reply, err := in.Fork(ctx, []poo.Message{{Role: poo.RoleUser, Content: []poo.ContentBlock{{Kind: poo.ContentText, Text: "write the handoff"}}}}, 0)
+	reply, err := in.Fork(ctx, []poo.Message{{Role: poo.RoleUser, Content: []poo.ContentBlock{{Kind: poo.ContentText, Text: "write the handoff"}}}}, 0, poo.ForkOptions{})
 	if err != nil {
 		return poo.Compaction{}, err
 	}

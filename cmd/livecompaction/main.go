@@ -29,7 +29,6 @@ import (
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/codemode/quickjs"
 	codemodestarlark "github.com/sdougbrown/poo/codemode/starlark"
-	"github.com/sdougbrown/poo/compact/mine"
 	"github.com/sdougbrown/poo/config"
 	"github.com/sdougbrown/poo/pootest"
 	"github.com/sdougbrown/poo/profile/code"
@@ -44,6 +43,35 @@ import (
 	"github.com/sdougbrown/poo/tool/history"
 	"github.com/sdougbrown/poo/tool/read"
 )
+
+// strategySettings turns the flags into the settings the config's own
+// dispatch reads: the strategy is named, and the cross-strategy flags
+// land in that strategy's own fields. One dispatch table - config's -
+// builds the strategy, so a replay's options are the ones the shipped
+// binary would resolve.
+func strategySettings(name string, ratio float64, maxTokens, keepRecent int) *config.Settings {
+	settings := &config.Settings{Version: 1}
+	named := name
+	settings.Context.Strategy = &named
+	r := ratio
+	m := maxTokens
+	k := keepRecent
+	switch name {
+	case "mine":
+		settings.Context.Mine = config.Mine{Ratio: &r, MaxTokens: &m, KeepRecentTokens: &k}
+	case "summary":
+		settings.Context.Summary = config.Summary{Ratio: &r, MaxTokens: &m, KeepRecentTokens: &k}
+	case "pointer":
+		settings.Context.Pointer = config.Pointer{Ratio: &r, MaxTokens: &m, KeepRecentTokens: &k}
+	case "native", "handoff", "none":
+		// The strategies without a compose ask: the ratio flags have
+		// nothing to land in, and the dispatch builds them bare.
+	default:
+		fmt.Println("unknown strategy:", name)
+		os.Exit(2)
+	}
+	return settings
+}
 
 // codemodeEngine builds the codemode tool under the named engine: the
 // shipped binary's selection, so a replay offers the schema the
@@ -80,7 +108,8 @@ func main() {
 	prompt := flag.String("prompt", "Continue with the work.", "the prompt that wakes the restored session")
 	ratio := flag.Float64("ratio", 0.85, "the fill share the mine strategy acts at")
 	keepRecent := flag.Int("keeprecent", 0, "the verbatim tail the strategy keeps; 0 takes the strategy's own default")
-	maxTokens := flag.Int("maxtokens", 0, "the mining request's output limit; 0 takes the strategy's own default")
+	maxTokens := flag.Int("maxtokens", 0, "the strategy's compose output limit; 0 takes the strategy's own default")
+	strategy := flag.String("strategy", "pointer", "the compaction strategy: pointer, mine, or summary")
 	engine := flag.String("engine", config.DefaultCodemodeEngine, "the codemode engine the replay offers; match the recorded session")
 	flag.Parse()
 	if *logPath == "" {
@@ -175,7 +204,7 @@ func main() {
 			Tools:     infos,
 			Unmatched: code.Profile().Unmatched,
 		}},
-		Compactor: mine.New(mine.Options{Ratio: *ratio, MaxTokens: *maxTokens, KeepRecentTokens: *keepRecent}),
+		Compactor: config.CompactorOf(strategySettings(*strategy, *ratio, *maxTokens, *keepRecent)),
 		Observers: []poo.Observer{events},
 		// Restore replaces this with the recorded prompt whenever the
 		// log holds one, so it applies only to a log without it.

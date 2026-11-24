@@ -387,7 +387,7 @@ func TestAForkKeepsTheBodiesPrefixAndNamesTheSession(t *testing.T) {
 	read(t, reader)
 	_ = reader.Close()
 
-	reader, err = tr.Fork(context.Background(), rendered, []poo.Message{poo.NewTextMessage(poo.RoleUser, "more")}, 64)
+	reader, err = tr.Fork(context.Background(), rendered, []poo.Message{poo.NewTextMessage(poo.RoleUser, "more")}, 64, poo.ForkOptions{})
 	if err != nil {
 		t.Fatalf("forking the request: %v", err)
 	}
@@ -559,7 +559,7 @@ func TestAForkResendsTheSnapshotAsItWas(t *testing.T) {
 	first := srv.raw[0]
 
 	// A fork that appends nothing and names no limit is the same bytes.
-	reader, err = tr.Fork(context.Background(), rendered, nil, 0)
+	reader, err = tr.Fork(context.Background(), rendered, nil, 0, poo.ForkOptions{})
 	if err != nil {
 		t.Fatalf("forking the request: %v", err)
 	}
@@ -590,7 +590,7 @@ func TestAForkWithToolsForbidsTheirUse(t *testing.T) {
 	read(t, reader)
 	_ = reader.Close()
 
-	reader, err = tr.Fork(context.Background(), rendered, []poo.Message{poo.NewTextMessage(poo.RoleUser, "more")}, 64)
+	reader, err = tr.Fork(context.Background(), rendered, []poo.Message{poo.NewTextMessage(poo.RoleUser, "more")}, 64, poo.ForkOptions{})
 	if err != nil {
 		t.Fatalf("forking the request: %v", err)
 	}
@@ -612,10 +612,10 @@ func TestAForkRefusesWhatIsNotItsOwn(t *testing.T) {
 	srv := newSSEServer(t, frame(`{"type":"message_stop"}`))
 	tr := anthropic.New(anthropic.Options{Endpoint: srv.URL, Model: "claude-haiku-5-5", ModelInfo: thinkingModel()})
 
-	if _, err := tr.Fork(context.Background(), poo.Rendered{API: poo.APIChatCompletions, Body: []byte(`{}`)}, nil, 0); err == nil {
+	if _, err := tr.Fork(context.Background(), poo.Rendered{API: poo.APIChatCompletions, Body: []byte(`{}`)}, nil, 0, poo.ForkOptions{}); err == nil {
 		t.Error("a foreign snapshot was forked, want it refused")
 	}
-	if _, err := tr.Fork(context.Background(), poo.Rendered{API: poo.APIAnthropicMessages}, nil, 0); err == nil {
+	if _, err := tr.Fork(context.Background(), poo.Rendered{API: poo.APIAnthropicMessages}, nil, 0, poo.ForkOptions{}); err == nil {
 		t.Error("an empty snapshot was forked, want it refused")
 	}
 	if len(srv.requests) != 0 {

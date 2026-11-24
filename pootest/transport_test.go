@@ -142,7 +142,7 @@ func TestTheScriptedTransportForks(t *testing.T) {
 	}
 
 	appended := []poo.Message{poo.NewTextMessage(poo.RoleUser, "the appended message")}
-	reader, err := tr.Fork(context.Background(), rendered, appended, 2048)
+	reader, err := tr.Fork(context.Background(), rendered, appended, 2048, poo.ForkOptions{})
 	if err != nil {
 		t.Fatalf("forking: %v", err)
 	}
@@ -225,7 +225,7 @@ func TestTheRecordedForksAreCopies(t *testing.T) {
 		t.Fatalf("starting the request: %v", err)
 	}
 	appended := []poo.Message{poo.NewTextMessage(poo.RoleUser, "the appended message")}
-	reader, err := tr.Fork(context.Background(), rendered, appended, 2048)
+	reader, err := tr.Fork(context.Background(), rendered, appended, 2048, poo.ForkOptions{})
 	if err != nil {
 		t.Fatalf("forking: %v", err)
 	}
@@ -435,7 +435,7 @@ func TestTheTransportReturnsTheErrorsItWasTold(t *testing.T) {
 		t.Errorf("Stream returned %v, want the set error", err)
 	}
 	tr.SetForkTurns(pootest.Turn{Text: "never"})
-	if _, err := tr.Fork(context.Background(), poo.Rendered{}, nil, 1); !errors.Is(err, boom) {
+	if _, err := tr.Fork(context.Background(), poo.Rendered{}, nil, 1, poo.ForkOptions{}); !errors.Is(err, boom) {
 		t.Errorf("Fork returned %v, want the set error", err)
 	}
 
@@ -454,17 +454,17 @@ func TestTheTransportReturnsTheErrorsItWasTold(t *testing.T) {
 // fork past the last one.
 func TestAnExhaustedForkListIsTyped(t *testing.T) {
 	tr := pootest.NewTransport()
-	if _, err := tr.Fork(context.Background(), poo.Rendered{}, nil, 1); !errors.Is(err, pootest.ErrScriptExhausted) {
+	if _, err := tr.Fork(context.Background(), poo.Rendered{}, nil, 1, poo.ForkOptions{}); !errors.Is(err, pootest.ErrScriptExhausted) {
 		t.Errorf("an empty fork list returned %v, want ErrScriptExhausted", err)
 	}
 
 	tr.SetForkTurns(pootest.Turn{Text: "one"})
-	reader, err := tr.Fork(context.Background(), poo.Rendered{}, nil, 1)
+	reader, err := tr.Fork(context.Background(), poo.Rendered{}, nil, 1, poo.ForkOptions{})
 	if err != nil {
 		t.Fatalf("the first fork failed: %v", err)
 	}
 	reader.Close()
-	if _, err := tr.Fork(context.Background(), poo.Rendered{}, nil, 1); !errors.Is(err, pootest.ErrScriptExhausted) {
+	if _, err := tr.Fork(context.Background(), poo.Rendered{}, nil, 1, poo.ForkOptions{}); !errors.Is(err, pootest.ErrScriptExhausted) {
 		t.Errorf("a fork past the list returned %v, want ErrScriptExhausted", err)
 	}
 	if got := len(tr.Forks()); got != 3 {
@@ -478,7 +478,7 @@ func TestTheForkKeepsACopyOfWhatWasAppended(t *testing.T) {
 	tr := pootest.NewTransport()
 	tr.SetForkTurns(pootest.Turn{Text: "x"})
 	appended := []poo.Message{poo.NewTextMessage(poo.RoleUser, "original")}
-	reader, err := tr.Fork(context.Background(), poo.Rendered{Body: []byte("body")}, appended, 1)
+	reader, err := tr.Fork(context.Background(), poo.Rendered{Body: []byte("body")}, appended, 1, poo.ForkOptions{})
 	if err != nil {
 		t.Fatalf("forking: %v", err)
 	}

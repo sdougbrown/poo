@@ -448,7 +448,7 @@ func (c *forkCompactor) ShouldCompact(view poo.View, budget poo.ContextBudget) b
 // Compact forks the last request and replaces the turn.
 func (c *forkCompactor) Compact(ctx context.Context, in poo.CompactionEnv) (poo.Compaction, error) {
 	msg := poo.NewTextMessage(poo.RoleUser, "the instruction")
-	if _, err := in.Fork(ctx, []poo.Message{msg}, 128); err != nil {
+	if _, err := in.Fork(ctx, []poo.Message{msg}, 128, poo.ForkOptions{}); err != nil {
 		return poo.Compaction{}, err
 	}
 	c.forks++

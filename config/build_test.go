@@ -15,6 +15,7 @@ import (
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/codemode"
 	"github.com/sdougbrown/poo/compact/mine"
+	"github.com/sdougbrown/poo/compact/pointer"
 	"github.com/sdougbrown/poo/compact/summary"
 	"github.com/sdougbrown/poo/config"
 	"github.com/sdougbrown/poo/exec"
@@ -2557,17 +2558,59 @@ context:
 	}
 }
 
-// TestTheDefaultStrategyIsSummary covers the default: a session built
-// without a strategy in its settings summarizes the oldest turns and
-// carries on, and handoff is opt-in.
-func TestTheDefaultStrategyIsSummary(t *testing.T) {
+// TestTheDefaultStrategyIsMine covers the default: a session built
+// without a strategy in its settings reconstructs the working context
+// from the whole covered transcript, and the selective strategies are
+// opt-in.
+func TestTheDefaultStrategyIsMine(t *testing.T) {
 	settings, err := config.Parse([]byte(theModelSettings), config.FormatYAML)
 	if err != nil {
 		t.Fatalf("decoding the settings: %v", err)
 	}
 	runtime := build(t, settings, config.Overrides{})
-	if _, ok := runtime.Options.Compactor.(*summary.Compactor); !ok {
-		t.Fatalf("the session's compactor is %T, want the summary strategy", runtime.Options.Compactor)
+	if _, ok := runtime.Options.Compactor.(*mine.Compactor); !ok {
+		t.Fatalf("the session's compactor is %T, want the mine strategy", runtime.Options.Compactor)
+	}
+}
+
+// TestThePointerStrategySettings covers a settings document that names
+// the pointer strategy's own: the compactor takes the ratio, the tail,
+// and the compactions before the full-span fallback takes over.
+func TestThePointerStrategySettings(t *testing.T) {
+	settings, err := config.Parse([]byte(theModelSettings+`
+context:
+  strategy: pointer
+  pointer:
+    ratio: 0.7
+    keep_recent_tokens: 4096
+    max_tokens: 1024
+    pointer_max_tokens: 512
+    snippet_budget: 2048
+    escalate_after: 3
+`), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+	strategy, ok := runtime.Options.Compactor.(*pointer.Compactor)
+	if !ok {
+		t.Fatalf("the session's compactor is %T, want the pointer strategy", runtime.Options.Compactor)
+	}
+	for _, field := range []struct {
+		name string
+		got  int
+		want int
+	}{
+		{"ratio", int(strategy.Ratio() * 100), 70},
+		{"keep_recent_tokens", strategy.KeepRecentTokens(), 4096},
+		{"max_tokens", strategy.MaxTokens(), 1024},
+		{"pointer_max_tokens", strategy.PointerMaxTokens(), 512},
+		{"snippet_budget", strategy.SnippetBudget(), 2048},
+		{"escalate_after", strategy.EscalateAfter(), 3},
+	} {
+		if field.got != field.want {
+			t.Errorf("context.pointer.%s reached the strategy as %d, want %d", field.name, field.got, field.want)
+		}
 	}
 }
 

@@ -376,8 +376,8 @@ func (t *wokenRunHoldTransport) Stream(ctx context.Context, req poo.ChatRequest)
 }
 
 // Fork hands the fork to the scripted transport.
-func (t *wokenRunHoldTransport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.Message, maxTokens int) (poo.StreamReader, error) {
-	return t.inner.Fork(ctx, prev, appended, maxTokens)
+func (t *wokenRunHoldTransport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.Message, maxTokens int, opts poo.ForkOptions) (poo.StreamReader, error) {
+	return t.inner.Fork(ctx, prev, appended, maxTokens, poo.ForkOptions{})
 }
 
 // TestWaitJobsWaitsForAWokenRun covers the one-shot's wait: a woken run

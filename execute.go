@@ -849,11 +849,7 @@ func (s *Session) toolEnvFor(runID, handle string) ToolEnv {
 		Settings:   s.opts.Settings,
 		Decider:    s.Decider(),
 	}
-	// The history is the store's read side: a sink that can read its
-	// records back lets a tool read what the store retained.
-	if reader, ok := s.opts.Sink.(RecordReader); ok {
-		env.History = lazyHistory{reader: reader}
-	}
+	env.History = s.retainedHistory()
 	return env
 }
 
@@ -873,6 +869,16 @@ func (s *Session) toolInfos() []ToolInfo {
 		infos = append(infos, ToolInfo{Name: spec.Name, Class: spec.Class, Background: spec.Background})
 	}
 	return infos
+}
+
+// retainedHistory returns the store's read side for the session, or nil
+// when the sink cannot read its records back: a sink that can lets a
+// tool or a strategy read what the store retained.
+func (s *Session) retainedHistory() History {
+	if reader, ok := s.opts.Sink.(RecordReader); ok {
+		return lazyHistory{reader: reader}
+	}
+	return nil
 }
 
 // recordResult records a tool result and appends it to the history.

@@ -54,6 +54,22 @@ func fixtureField(t *testing.T, content, name string) string {
 // A prompt that names the function, the variable or the handler makes
 // the task a copy exercise, and a model that reads the prompt gets the
 // answer for free.
+
+// fixtureWorkdir builds a task's working dir the way a run's is: the
+// fixture copied, and the files its generate script writes generated
+// into the copy.
+func fixtureWorkdir(t *testing.T, fixture, fixtureRoot string) string {
+	t.Helper()
+	workdir := t.TempDir()
+	if err := copyTree(fixture, workdir); err != nil {
+		t.Fatalf("copying the fixture: %v", err)
+	}
+	if err := generateFixture(workdir, sharedGenerator(fixtureRoot)); err != nil {
+		t.Fatalf("generating the fixture: %v", err)
+	}
+	return workdir
+}
+
 func TestTheReadOnlyPromptsDoNotNameTheAnswer(t *testing.T) {
 	root := repoRoot(t)
 	tasks, err := LoadTasks(filepath.Join(root, "evals", "tasks"))
@@ -70,6 +86,8 @@ func TestTheReadOnlyPromptsDoNotNameTheAnswer(t *testing.T) {
 		"find-version-mismatch":        {"__version__"},
 		"long-find-error-in-log":       {"req-8f2a41c9"},
 		"long-find-definition-in-tree": {"src/pipeline/ingest/handlers/loader.py"},
+		"long-read-recall":             {"archival", "INC-2214"},
+		"deep-read-recall":             {"archival", "INC-2214"},
 	}
 
 	for _, task := range tasks {
@@ -120,10 +138,7 @@ func TestTheReadOnlyChecksWantEveryFact(t *testing.T) {
 			if err != nil {
 				t.Fatalf("resolving the fixture: %v", err)
 			}
-			workdir := t.TempDir()
-			if err := copyTree(fixture, workdir); err != nil {
-				t.Fatalf("copying the fixture: %v", err)
-			}
+			workdir := fixtureWorkdir(t, fixture, filepath.Join(root, "evals", "fixtures"))
 			log := filepath.Join(workdir, "session.jsonl")
 
 			// An answer that names only some of the facts fails.
@@ -154,6 +169,8 @@ func TestTheReadOnlyChecksAcceptTheRightAnswer(t *testing.T) {
 		"find-version-mismatch":        "pyproject.toml declares version 1.4.0 and src/shop/__init__.py declares __version__ = 1.3.0, so src/shop/__init__.py is out of step with the changelog.",
 		"long-find-error-in-log":       "The one ERROR line carries request id req-8f2a41c9.",
 		"long-find-definition-in-tree": "The definition is in src/pipeline/ingest/handlers/loader.py.",
+		"long-read-recall":             "archival INC-2214",
+		"deep-read-recall":             "archival INC-2214",
 	}
 
 	for _, task := range tasks {
@@ -165,10 +182,7 @@ func TestTheReadOnlyChecksAcceptTheRightAnswer(t *testing.T) {
 			if err != nil {
 				t.Fatalf("resolving the fixture: %v", err)
 			}
-			workdir := t.TempDir()
-			if err := copyTree(fixture, workdir); err != nil {
-				t.Fatalf("copying the fixture: %v", err)
-			}
+			workdir := fixtureWorkdir(t, fixture, filepath.Join(root, "evals", "fixtures"))
 			log := filepath.Join(workdir, "session.jsonl")
 
 			writeSessionLog(t, log, answers[task.ID])
@@ -313,10 +327,7 @@ func TestTheReadOnlyChecksJudgeTheFactNotTheWord(t *testing.T) {
 		if err != nil {
 			t.Fatalf("resolving the fixture: %v", err)
 		}
-		workdir := t.TempDir()
-		if err := copyTree(fixture, workdir); err != nil {
-			t.Fatalf("copying the fixture: %v", err)
-		}
+		workdir := fixtureWorkdir(t, fixture, filepath.Join(root, "evals", "fixtures"))
 		log := filepath.Join(workdir, "session.jsonl")
 		writeSessionLog(t, log, c.answer)
 		code := runCheck(t, task.Dir, workdir, log, "")

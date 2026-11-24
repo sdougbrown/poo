@@ -38,7 +38,7 @@ func (t *eventsTransport) Stream(ctx context.Context, req poo.ChatRequest) (poo.
 	return &fakeReader{events: events}, poo.Rendered{API: poo.APIChatCompletions, Messages: len(req.Messages)}, nil
 }
 
-func (t *eventsTransport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.Message, maxTokens int) (poo.StreamReader, error) {
+func (t *eventsTransport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.Message, maxTokens int, opts poo.ForkOptions) (poo.StreamReader, error) {
 	return nil, errNoFork
 }
 

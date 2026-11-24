@@ -46,6 +46,27 @@ func copyTree(src, dst string) error {
 	})
 }
 
+// generateFixture runs the fixture's generate script, when the fixture
+// ships one. The script writes the files the fixture's task reads into
+// dir - the committed source is the generator, not its output - and
+// the shared generator it runs lives beside the task root, with the
+// fixture's own arguments for everything else.
+func generateFixture(dir, shared string) error {
+	script := filepath.Join(dir, "generate")
+	if _, err := os.Stat(script); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	cmd := exec.Command("bash", script, shared, dir)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("eval: generating the fixture at %s: %w: %s", dir, err, out)
+	}
+	return nil
+}
+
 // copyFile copies one file, making the target's directory as needed.
 func copyFile(src, dst string) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {

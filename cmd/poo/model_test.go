@@ -14,6 +14,37 @@ import (
 	"github.com/sdougbrown/poo/config"
 )
 
+// TestTheContextFlagsValidateAndSizeTheStrategies covers the context
+// flags: the strategy flag accepts the strategies the table names and
+// refuses the rest, and the tail flag writes the one value into every
+// block strategy's settings - including the pointer this stack adds -
+// so no strategy silently misses it.
+func TestTheContextFlagsValidateAndSizeTheStrategies(t *testing.T) {
+	o := runOptions{contextStrategy: "pointer", contextKeepRecent: 500}
+	if err := o.validate([]string{"the prompt"}); err != nil {
+		t.Fatalf("validating the flags: %v", err)
+	}
+	settings := &config.Settings{Version: 1}
+	if err := o.apply(settings); err != nil {
+		t.Fatalf("applying the flags: %v", err)
+	}
+	if settings.Context.Strategy == nil || *settings.Context.Strategy != "pointer" {
+		t.Errorf("the settings pin the strategy %v, want pointer", settings.Context.Strategy)
+	}
+	for _, name := range blockStrategies {
+		field := keepRecentField(settings, name)
+		if field == nil || *field == nil || **field != 500 {
+			t.Errorf("the %s strategy's keep-recent is not 500: %v", name, field)
+		}
+	}
+
+	bogus := runOptions{contextStrategy: "full-span"}
+	err := bogus.validate([]string{"the prompt"})
+	if err == nil || !strings.Contains(err.Error(), "--context-strategy") {
+		t.Errorf("the strategy %q validated (%v), want the flag's error", bogus.contextStrategy, err)
+	}
+}
+
 // modelFromFlags returns the model the flags describe.
 //
 // The flags are the settings the command builds when no settings file

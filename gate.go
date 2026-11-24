@@ -175,7 +175,7 @@ func (s *Session) offersHistoryTool() bool {
 // record's tokens_after is the estimate of the new view at the plan's
 // rebased ratio.
 func (s *Session) compact(run *runState) (compactionOutcome, error) {
-	claimCtx, release, ok := s.beginRunWrite(run)
+	claimCtx, release, ok := s.beginCompactionWrite(run)
 	if !ok {
 		return compactionOutcome{}, errRunWindingDown
 	}
@@ -187,11 +187,16 @@ func (s *Session) compact(run *runState) (compactionOutcome, error) {
 	s.events.emit(EventCompactionStarted, map[string]any{"run_id": run.id})
 
 	tokensBefore := s.estimatedInput()
+	s.mu.Lock()
+	compactions := s.compactions
+	s.mu.Unlock()
 	env := CompactionEnv{
 		View:        s.view(),
 		Budget:      s.budget(),
 		SessionID:   s.ID(),
 		HistoryTool: s.offersHistoryTool(),
+		History:     s.retainedHistory(),
+		Compactions: compactions,
 		Fork:        s.forkFunc(run),
 		Ask:         s.askFunc(run),
 	}
@@ -292,6 +297,12 @@ func (s *Session) compact(run *runState) (compactionOutcome, error) {
 	if change != nil && !s.commitCompactionView(run, *change) {
 		return compactionOutcome{}, errRunWindingDown
 	}
+	// The count is the session's own, so a strategy that paces itself
+	// against the threshold reads what this session did, not what every
+	// session of the runtime did.
+	s.mu.Lock()
+	s.compactions++
+	s.mu.Unlock()
 
 	// The handoff is recorded on its own, so a consumer that carries
 	// the work on can read the note without reading the compaction.
@@ -357,7 +368,7 @@ func compactionForm(c Compaction) string {
 // The fork is bound to the transport and to the last main request's
 // snapshot, so a strategy cannot build a fork request any other way.
 func (s *Session) forkFunc(run *runState) ForkFunc {
-	return func(ctx context.Context, appended []Message, maxTokens int) (Reply, error) {
+	return func(ctx context.Context, appended []Message, maxTokens int, opts ForkOptions) (Reply, error) {
 		s.mu.Lock()
 		rendered := run.lastRendered
 		has := run.hasRendered
@@ -368,7 +379,7 @@ func (s *Session) forkFunc(run *runState) ForkFunc {
 		if !has {
 			return Reply{}, fmt.Errorf("poo: there is no request to fork")
 		}
-		reader, err := s.opts.Transport.Fork(ctx, rendered, appended, maxTokens)
+		reader, err := s.opts.Transport.Fork(ctx, rendered, appended, maxTokens, opts)
 		if err != nil {
 			return Reply{}, err
 		}

@@ -411,7 +411,7 @@ func TestASessionHeaderCarriesTheRequestsSession(t *testing.T) {
 	}
 	read(t, reader)
 	// The fork belongs to the request it forks, so it names the same session.
-	reader, err = tr.Fork(context.Background(), rendered, []poo.Message{poo.NewTextMessage(poo.RoleUser, "more")}, 16)
+	reader, err = tr.Fork(context.Background(), rendered, []poo.Message{poo.NewTextMessage(poo.RoleUser, "more")}, 16, poo.ForkOptions{})
 	if err != nil {
 		t.Fatalf("forking the request: %v", err)
 	}

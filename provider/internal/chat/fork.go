@@ -37,3 +37,26 @@ func AppendMessages(body []byte, messages []Message, maxTokens int) ([]byte, err
 func WithoutTools(body []byte) ([]byte, error) {
 	return transport.SetToolChoice(body, json.RawMessage(`"none"`))
 }
+
+// JSONResponse rewrites the body's response format to a JSON object, so
+// the fork's reply comes back as JSON. A body that already names a
+// response format keeps it.
+func JSONResponse(body []byte) ([]byte, error) {
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, &poo.ProviderError{
+			Kind:    poo.ProviderKindInvalidRequest,
+			Message: "the request snapshot does not hold a JSON body",
+		}
+	}
+	if _, ok := payload["response_format"]; ok {
+		return body, nil
+	}
+	payload["response_format"] = json.RawMessage(`{"type":"json_object"}`)
+	order, err := transport.JSONKeyOrder(body)
+	if err != nil {
+		return nil, err
+	}
+	order = transport.WithKeys(order, payload, []string{"response_format"})
+	return transport.EncodeObject(payload, order), nil
+}

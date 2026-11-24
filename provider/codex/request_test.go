@@ -442,7 +442,7 @@ func TestAForkKeepsTheBodyApartFromTheAppendedItems(t *testing.T) {
 		{Role: poo.RoleAssistant, Content: []poo.ContentBlock{{Kind: poo.ContentText, Text: "an answer"}}},
 		poo.NewTextMessage(poo.RoleSystem, "a later instruction"),
 		poo.NewTextMessage(poo.RoleUser, "carry on"),
-	}, 99)
+	}, 99, poo.ForkOptions{})
 	if err != nil {
 		t.Fatalf("forking: %v", err)
 	}
@@ -517,7 +517,7 @@ func TestAForkWithToolsForbidsTheirUse(t *testing.T) {
 
 	forked, err := tr.Fork(context.Background(), rendered, []poo.Message{
 		poo.NewTextMessage(poo.RoleUser, "carry on"),
-	}, 99)
+	}, 99, poo.ForkOptions{})
 	if err != nil {
 		t.Fatalf("forking: %v", err)
 	}
@@ -549,7 +549,7 @@ func TestAForkKeepsTheSessionsCacheKey(t *testing.T) {
 	read(t, reader)
 	reader.Close()
 
-	fork, err := tr.Fork(context.Background(), rendered, []poo.Message{poo.NewTextMessage(poo.RoleUser, "more")}, 0)
+	fork, err := tr.Fork(context.Background(), rendered, []poo.Message{poo.NewTextMessage(poo.RoleUser, "more")}, 0, poo.ForkOptions{})
 	if err != nil {
 		t.Fatalf("forking: %v", err)
 	}
@@ -567,7 +567,7 @@ func TestAForkOfAnotherAPIIsRefused(t *testing.T) {
 	_, err := tr.Fork(context.Background(), poo.Rendered{
 		API:  poo.APIChatCompletions,
 		Body: []byte(`{"input":[]}`),
-	}, nil, 16)
+	}, nil, 16, poo.ForkOptions{})
 	var perr *poo.ProviderError
 	if !errors.As(err, &perr) || perr.Kind != poo.ProviderKindInvalidRequest {
 		t.Fatalf("the fork failed with %v, want an invalid-request failure", err)
@@ -580,7 +580,7 @@ func TestAForkOfAnotherAPIIsRefused(t *testing.T) {
 // TestASnapshotWithoutABodyIsRefused covers the empty snapshot.
 func TestASnapshotWithoutABodyIsRefused(t *testing.T) {
 	tr := newTransport("http://127.0.0.1:1", func(o *codex.Options) { o.Credentials = credential("t", "a") })
-	_, err := tr.Fork(context.Background(), poo.Rendered{API: poo.APIResponses}, nil, 16)
+	_, err := tr.Fork(context.Background(), poo.Rendered{API: poo.APIResponses}, nil, 16, poo.ForkOptions{})
 	var perr *poo.ProviderError
 	if !errors.As(err, &perr) || perr.Kind != poo.ProviderKindInvalidRequest {
 		t.Fatalf("the fork failed with %v, want an invalid-request failure", err)
@@ -835,7 +835,7 @@ func TestAForkCarriesAnAppendedAttachmentTheSnapshotRead(t *testing.T) {
 	image := poo.Message{Role: poo.RoleUser, Content: []poo.ContentBlock{
 		{Kind: poo.ContentImage, MediaType: "image/png", Data: []byte("PNG")},
 	}}
-	forked, err := tr.Fork(context.Background(), rendered, []poo.Message{image}, 64)
+	forked, err := tr.Fork(context.Background(), rendered, []poo.Message{image}, 64, poo.ForkOptions{})
 	if err != nil {
 		t.Fatalf("forking: %v", err)
 	}
@@ -1258,7 +1258,7 @@ func TestAForkReportsItsAttempts(t *testing.T) {
 
 	// The fork's first attempt fails a status the retry policy repeats.
 	srv.failRequest(1, http.StatusInternalServerError)
-	fork, err := tr.Fork(context.Background(), rendered, []poo.Message{poo.NewTextMessage(poo.RoleUser, "more")}, 0)
+	fork, err := tr.Fork(context.Background(), rendered, []poo.Message{poo.NewTextMessage(poo.RoleUser, "more")}, 0, poo.ForkOptions{})
 	if err != nil {
 		t.Fatalf("forking: %v", err)
 	}
@@ -1295,7 +1295,7 @@ func TestAForkThatAppendsASystemMessageFirst(t *testing.T) {
 	fork, err := tr.Fork(context.Background(), rendered, []poo.Message{
 		poo.NewTextMessage(poo.RoleSystem, "stay in the repository"),
 		poo.NewTextMessage(poo.RoleUser, "more"),
-	}, 0)
+	}, 0, poo.ForkOptions{})
 	if err != nil {
 		t.Fatalf("forking: %v", err)
 	}

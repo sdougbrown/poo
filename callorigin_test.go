@@ -56,7 +56,7 @@ func (t *originTransport) Stream(ctx context.Context, req poo.ChatRequest) (poo.
 
 // Fork is not implemented by the fake: the compaction seam's fork is
 // exercised with the scripted transport.
-func (t *originTransport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.Message, maxTokens int) (poo.StreamReader, error) {
+func (t *originTransport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.Message, maxTokens int, opts poo.ForkOptions) (poo.StreamReader, error) {
 	return nil, errNoFork
 }
 

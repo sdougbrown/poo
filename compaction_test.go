@@ -1563,8 +1563,8 @@ func (t *plainTransport) Stream(ctx context.Context, req poo.ChatRequest) (poo.S
 }
 
 // Fork serves the next forked response.
-func (t *plainTransport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.Message, maxTokens int) (poo.StreamReader, error) {
-	return t.inner.Fork(ctx, prev, appended, maxTokens)
+func (t *plainTransport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.Message, maxTokens int, opts poo.ForkOptions) (poo.StreamReader, error) {
+	return t.inner.Fork(ctx, prev, appended, maxTokens, poo.ForkOptions{})
 }
 
 // TestAWindowFromATransportThatCannotCompactIsRejected covers the rule: a window is accepted only when it came from the

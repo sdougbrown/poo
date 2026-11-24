@@ -146,7 +146,7 @@ func (t *Transport) Stream(ctx context.Context, req poo.ChatRequest) (poo.Stream
 // appended messages added after the last one. The session is the snapshot's,
 // because the fork belongs to the request it forks: a session header is what
 // tells the gateway the two are one conversation.
-func (t *Transport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.Message, maxTokens int) (poo.StreamReader, error) {
+func (t *Transport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.Message, maxTokens int, opts poo.ForkOptions) (poo.StreamReader, error) {
 	if prev.API != poo.APIAnthropicMessages {
 		return nil, &poo.ProviderError{
 			Kind:    poo.ProviderKindInvalidRequest,
