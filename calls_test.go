@@ -210,7 +210,7 @@ func TestTheRestoredSessionContinuesTheJobInputIDs(t *testing.T) {
 	if _, err := session.Wait(context.Background()); err != nil {
 		t.Fatalf("waiting for the run: %v", err)
 	}
-	waitFor(t, "the job to end", func() bool { return jobEnds(sink) == 1 })
+	waitRecords(t, sink, "job.ended", 1)
 
 	ended := lastJobEnd(sink)
 	if ended == nil {
@@ -232,17 +232,6 @@ func jobHeader(id string) *poo.SessionCreatedRecord {
 			Tools:      []poo.ToolInfo{{Name: "job", Class: poo.ClassSideEffecting, Background: poo.BackgroundAlways}}, ContextLimit: 32768,
 			ToolsMode: "native"},
 	}
-}
-
-// jobEnds returns how many job ends a sink holds.
-func jobEnds(sink *recordingSink) int {
-	count := 0
-	for _, rec := range sink.allRecords() {
-		if _, ok := rec.(*poo.JobEndedRecord); ok {
-			count++
-		}
-	}
-	return count
 }
 
 // lastJobEnd returns the last job end a sink holds.

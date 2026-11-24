@@ -63,6 +63,18 @@ func waitUntil(t *testing.T, budget time.Duration, what string, cond func() bool
 	t.Fatalf("timed out after %s waiting for %s", budget, what)
 }
 
+// waitJobEnd waits for the job's end record on the sink's signal, with
+// the codemode budget: a cold CI runner under -race pays for the
+// QuickJS runtime, and the shared five seconds is not enough.
+func waitJobEnd(t *testing.T, sink *recordingSink) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := sink.WaitRecords(ctx, "job.ended", 1); err != nil {
+		t.Fatalf("timed out waiting for the job to end (the sink holds %d)", sink.count("job.ended"))
+	}
+}
+
 // TestABackgroundScriptCallsToolsAfterItsRunEnds covers the mode: a
 // codemode call that asks for the background runs as a job, and the
 // tools its script calls still run after the run that started the job
@@ -108,14 +120,7 @@ return [r.tool, r.is_error, r.text.includes("the reader's text")];
 	}
 	close(release)
 
-	waitUntil(t, 10*time.Second, "the job to end", func() bool {
-		for _, rec := range sink.allRecords() {
-			if _, ok := rec.(*poo.JobEndedRecord); ok {
-				return true
-			}
-		}
-		return false
-	})
+	waitJobEnd(t, sink)
 	if got := len(reader.Calls()); got != 1 {
 		t.Fatalf("the session's reader ran %d times, want 1", got)
 	}
@@ -160,14 +165,7 @@ return [r.outcome, r.is_error, strip(r)];
 `, map[string]poo.Tool{"reader": reader}, sink, poo.WithPolicy(&nestPolicy{deny: "reader"}))
 	runSession(t, s, "start")
 
-	waitUntil(t, 10*time.Second, "the job to end", func() bool {
-		for _, rec := range sink.allRecords() {
-			if _, ok := rec.(*poo.JobEndedRecord); ok {
-				return true
-			}
-		}
-		return false
-	})
+	waitJobEnd(t, sink)
 	if got := len(reader.Calls()); got != 0 {
 		t.Errorf("the refused tool ran %d times, want 0", got)
 	}
@@ -212,14 +210,7 @@ return [r.outcome, r.is_error];
 `, map[string]poo.Tool{"reader": reader}, sink, poo.WithPolicy(policy))
 	runSession(t, s, "start")
 
-	waitUntil(t, 10*time.Second, "the job to end", func() bool {
-		for _, rec := range sink.allRecords() {
-			if _, ok := rec.(*poo.JobEndedRecord); ok {
-				return true
-			}
-		}
-		return false
-	})
+	waitJobEnd(t, sink)
 	if got := len(reader.Calls()); got != 0 {
 		t.Errorf("the tool ran %d times under an ask it could not get", got)
 	}
@@ -244,14 +235,7 @@ return r.is_error;
 `, map[string]poo.Tool{"echo": &fatalTool{}}, sink)
 	runSession(t, s, "start")
 
-	waitUntil(t, 10*time.Second, "the job to end", func() bool {
-		for _, rec := range sink.allRecords() {
-			if _, ok := rec.(*poo.JobEndedRecord); ok {
-				return true
-			}
-		}
-		return false
-	})
+	waitJobEnd(t, sink)
 	if ended := jobEndedRecord(t, sink); !ended.Fatal {
 		t.Errorf("the job ended without the fatal flag: outcome %q, text %s", ended.Outcome, ended.Text)
 	}
@@ -274,14 +258,7 @@ return [a.is_error, b.is_error];
 `, map[string]poo.Tool{"first": first, "second": second}, sink, poo.WithBeforeTool(hook))
 	runSession(t, s, "start")
 
-	waitUntil(t, 10*time.Second, "the job to end", func() bool {
-		for _, rec := range sink.allRecords() {
-			if _, ok := rec.(*poo.JobEndedRecord); ok {
-				return true
-			}
-		}
-		return false
-	})
+	waitJobEnd(t, sink)
 	// A stopped batch skips the second call before its hooks run, so the
 	// hook's own record is what proves the batch kept going.
 	var judged []string
@@ -348,14 +325,7 @@ return rs;
 `, map[string]poo.Tool{"reader": reader}, sink, poo.WithPolicy(policy))
 	runSession(t, s, "start")
 
-	waitUntil(t, 10*time.Second, "the job to end", func() bool {
-		for _, rec := range sink.allRecords() {
-			if _, ok := rec.(*poo.JobEndedRecord); ok {
-				return true
-			}
-		}
-		return false
-	})
+	waitJobEnd(t, sink)
 	for _, kind := range []string{"permission.asked", "permission.answered"} {
 		if got := sink.count(kind); got != 0 {
 			t.Errorf("the log holds %d %s records for a background script, want 0", got, kind)
