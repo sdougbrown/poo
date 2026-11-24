@@ -43,10 +43,6 @@ const (
 	// Strategy is the name the compaction carries.
 	Strategy = "pointer"
 
-	// DefaultRatio is the share of the prompt limit at which the
-	// strategy acts.
-	DefaultRatio = 0.85
-
 	// DefaultKeepRecentTokens is how much of the newest history the
 	// strategy keeps verbatim.
 	DefaultKeepRecentTokens = 12000
@@ -72,7 +68,8 @@ const (
 // Options configure the strategy.
 type Options struct {
 	// Ratio is the share of the prompt limit at which the strategy
-	// acts. It defaults to DefaultRatio.
+	// acts. Zero means no ratio trigger: the strategy acts when the
+	// next answer no longer fits.
 	Ratio float64
 	// KeepRecentTokens is how much of the newest history the strategy
 	// keeps verbatim. It defaults to DefaultKeepRecentTokens.
@@ -148,9 +145,6 @@ func New(opts Options) *Compactor {
 		escalateAfter:    opts.EscalateAfter,
 		files:            opts.Files,
 		fallback:         opts.Fallback,
-	}
-	if c.ratio <= 0 {
-		c.ratio = DefaultRatio
 	}
 	if c.keepRecent <= 0 {
 		c.keepRecent = DefaultKeepRecentTokens

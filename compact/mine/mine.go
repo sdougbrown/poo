@@ -50,11 +50,6 @@ const (
 	// Strategy is the name the compaction carries.
 	Strategy = "mine"
 
-	// DefaultRatio is the share of the prompt limit at which the
-	// strategy mines. It sits under the handoff strategy's ratio, so the
-	// two requests have room to run before the prompt is full.
-	DefaultRatio = 0.85
-
 	// DefaultKeepRecentTokens is how much of the newest history the
 	// strategy keeps verbatim. It is under the summary strategy's
 	// default: the reconstruction carries the long view, so the verbatim
@@ -80,7 +75,8 @@ const (
 // Options configure the strategy.
 type Options struct {
 	// Ratio is the share of the prompt limit at which the strategy
-	// mines. It defaults to DefaultRatio.
+	// mines. Zero means no ratio trigger: the strategy acts when the
+	// next answer no longer fits.
 	Ratio float64
 	// KeepRecentTokens is how much of the newest history the strategy
 	// keeps verbatim. It defaults to DefaultKeepRecentTokens.
@@ -121,9 +117,6 @@ type Compactor struct {
 // New returns the mine strategy.
 func New(opts Options) *Compactor {
 	c := &Compactor{ratio: opts.Ratio, keepRecent: opts.KeepRecentTokens, maxTokens: opts.MaxTokens, pointerMaxTokens: opts.PointerMaxTokens, files: opts.Files}
-	if c.ratio <= 0 {
-		c.ratio = DefaultRatio
-	}
 	if c.keepRecent <= 0 {
 		c.keepRecent = DefaultKeepRecentTokens
 	}
