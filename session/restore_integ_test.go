@@ -206,7 +206,11 @@ func TestARecoveredJobIsQueuedAgain(t *testing.T) {
 
 	// The result reached the model: the idle session woke a run, and
 	// the run's request carried the result.
-	waitForRequest(t, transport)
+	reqCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := transport.WaitRequests(reqCtx, 1); err != nil {
+		t.Fatalf("timed out waiting for the request")
+	}
 	requests := transport.Requests()
 	if len(requests) == 0 {
 		t.Fatal("the restored session made no request, want the job result delivered")
@@ -219,18 +223,6 @@ func TestARecoveredJobIsQueuedAgain(t *testing.T) {
 	}
 	if !carried {
 		t.Error("the request does not carry the job result, want the model to hear how the job ended")
-	}
-}
-
-// waitForRequest waits until the transport has served a request.
-func waitForRequest(t *testing.T, transport *pootest.Transport) {
-	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if len(transport.Requests()) > 0 {
-			return
-		}
-		time.Sleep(5 * time.Millisecond)
 	}
 }
 

@@ -196,6 +196,17 @@ func waitRecords(t *testing.T, s *recordingSink, name string, n int) {
 	}
 }
 
+// waitForSink waits for the sink's contents to satisfy cond, on the
+// sink's own signal instead of a poll loop.
+func waitForSink(t *testing.T, sink *recordingSink, what string, cond func() bool) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := sink.WaitFunc(ctx, cond); err != nil {
+		t.Fatalf("timed out waiting for %s", what)
+	}
+}
+
 // messages returns the message records, in order.
 func (s *recordingSink) messages() []*poo.MessageRecord { return s.Messages() }
 

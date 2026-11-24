@@ -337,7 +337,7 @@ func TestAStoppedSyncCallStillRunsItsAfterToolChain(t *testing.T) {
 			case "cancel":
 				s.Cancel("cancel:test")
 			}
-			waitFor(t, "the run to settle", func() bool { return sink.Settled() != nil })
+			waitForSink(t, sink, "the run to settle", func() bool { return sink.Settled() != nil })
 
 			if got := hook.Calls(); got != 1 {
 				t.Errorf("the chain ran %d time(s), want 1 at the call's completion", got)

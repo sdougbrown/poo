@@ -124,7 +124,7 @@ func TestTwoStalledObserversGetCoalescedDroppedRecords(t *testing.T) {
 
 	// The events the observers missed are reported in a coalesced
 	// record, one per observer.
-	waitFor(t, "the overflow records", func() bool {
+	waitForSink(t, sink, "the overflow records", func() bool {
 		return sink.count("observer.dropped") >= 2
 	})
 	// The records are bounded: a stalled observer does not produce a

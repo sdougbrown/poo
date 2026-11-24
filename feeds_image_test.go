@@ -82,7 +82,7 @@ func TestAFeedImageReachesTheModel(t *testing.T) {
 	}
 	_, emit := imageFeedSession(t, opts, "shot.png", "image/png", "alice", "the look")
 	close(emit)
-	waitFor(t, "the woken run to settle", func() bool { return sink.Settled() != nil })
+	waitForSink(t, sink, "the woken run to settle", func() bool { return sink.Settled() != nil })
 
 	// The acceptance record carries the picture, so a held input is
 	// still one after a restart.
@@ -119,7 +119,7 @@ func TestAnImageOnlyFeedInputDeliversThePicture(t *testing.T) {
 	}
 	_, emit := imageFeedSession(t, opts, "shot.png", "image/png", "", "")
 	close(emit)
-	waitFor(t, "the woken run to settle", func() bool { return sink.Settled() != nil })
+	waitForSink(t, sink, "the woken run to settle", func() bool { return sink.Settled() != nil })
 
 	queued := feedInput(sink.allRecords())
 	if queued == nil {
@@ -193,7 +193,7 @@ func TestAFeedImageAModelCannotReadFailsTheAttempt(t *testing.T) {
 	opts := testOptions(t, tr, &echoTool{}, sink)
 	_, emit := imageFeedSession(t, opts, "shot.png", "image/png", "", "the look")
 	close(emit)
-	waitFor(t, "the failed attempt to end", func() bool {
+	waitForSink(t, sink, "the failed attempt to end", func() bool {
 		return feedEnd(sink.allRecords(), 1) != nil
 	})
 	ended := feedEnd(sink.allRecords(), 1)
@@ -217,7 +217,7 @@ func TestAFeedImageThatDoesNotReadFailsTheAttempt(t *testing.T) {
 	opts := visionOptions(t, tr, sink)
 	_, emit := imageFeedSession(t, opts, filepath.Join(t.TempDir(), "nope.png"), "", "", "the look")
 	close(emit)
-	waitFor(t, "the failed attempt to end", func() bool {
+	waitForSink(t, sink, "the failed attempt to end", func() bool {
 		return feedEnd(sink.allRecords(), 1) != nil
 	})
 	ended := feedEnd(sink.allRecords(), 1)
@@ -309,7 +309,7 @@ func TestTheSniffedTypeIsTheOneDelivered(t *testing.T) {
 	if err := poo.QueueFeedImageInput(s, "inbox", "alice", "the look", &poo.FeedImage{Path: path}); err != nil {
 		t.Fatalf("queueing the image input: %v", err)
 	}
-	waitFor(t, "the woken run to settle", func() bool { return sink.Settled() != nil })
+	waitForSink(t, sink, "the woken run to settle", func() bool { return sink.Settled() != nil })
 
 	queued := feedInput(sink.allRecords())
 	if queued == nil {
