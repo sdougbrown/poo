@@ -188,8 +188,11 @@ type Session struct {
 	// accepted but not yet queued — by origin, so a fault that arrives in
 	// the gap folds into the one in flight rather than queueing a second
 	// report. The fold and the reservation are one critical section, so
-	// two faults for one origin queue one report, whatever the gap.
-	pendingFaultReports map[Origin]*feedFault
+	// two faults for one origin queue one report, whatever the gap. Each
+	// reservation carries the attempt that took it, so a re-armed
+	// instance's fault is neither folded into an older attempt's report
+	// nor retired by its cleanup.
+	pendingFaultReports map[Origin]pendingFaultReport
 
 	// events is the session's event bus.
 	events *eventBus
@@ -781,7 +784,7 @@ func New(opts Options, fns ...Option) (*Session, error) {
 		messageIDs:          ids,
 		jobs:                map[string]*jobState{},
 		feeds:               map[string]*feedState{},
-		pendingFaultReports: map[Origin]*feedFault{},
+		pendingFaultReports: map[Origin]pendingFaultReport{},
 		optionalFeeds:       map[string]FeedSpec{},
 		feedDelay:           feedRestartDelay,
 		jobQueued:           make(chan struct{}, 1),

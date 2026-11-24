@@ -440,3 +440,175 @@ type gatePrepared struct{}
 
 // Summary describes the call.
 func (gatePrepared) Summary() string { return "gate" }
+
+// faultReportTexts returns the texts of the fault reports the session
+// queued, in order.
+func faultReportTexts(sink *recordingSink) []string {
+	var out []string
+	for _, rec := range sink.allRecords() {
+		if r, ok := rec.(*poo.InputQueuedRecord); ok && r.Mode == poo.InputModeFeed && strings.Contains(r.Text, ` fault="`) {
+			out = append(out, r.Text)
+		}
+	}
+	return out
+}
+
+// TestAStaleSuspensionReportIsDropped covers the race between a suspension
+// and a re-subscribe: an instance that was started again is running, so the
+// old supervisor's report is stale and is not queued. A fault on the running
+// attempt still reports on its own.
+func TestAStaleSuspensionReportIsDropped(t *testing.T) {
+	fire := make(chan struct{})
+	var attempts atomic.Int32
+	run := func(ctx context.Context, io poo.FeedIO) error {
+		if attempts.Add(1) == 1 {
+			return theFeedFault()
+		}
+		select {
+		case <-fire:
+			return theFeedFault()
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	sink := &recordingSink{}
+	opts := testOptions(t, scripted([]fakeResponse{{text: "the answer"}}), &echoTool{}, sink)
+	opts.SessionDir = t.TempDir()
+	s := newTestSession(t, opts, poo.WithFeeds(theOptionalFeedSpec(run, poo.OnIdleHold)))
+	scope := map[string]string{"url": "https://example.test/repo"}
+
+	origin, started, err := poo.SubscribeFeed(s, "git-feedback", scope)
+	if err != nil || !started {
+		t.Fatalf("subscribing to the feed: started=%v err=%v", started, err)
+	}
+	waitFor(t, "the first fault's report", func() bool { return len(faultReportTexts(sink)) == 1 })
+
+	// The instance is started again after its suspension, and the second
+	// attempt runs.
+	if _, started, err := poo.SubscribeFeed(s, "git-feedback", scope); err != nil || !started {
+		t.Fatalf("re-arming the feed: started=%v err=%v", started, err)
+	}
+	waitFor(t, "the instance's second attempt", func() bool { return len(feedStarts(sink)) == 2 })
+
+	// The first attempt's supervisor reports after the re-arm. The instance
+	// is running, so there is nothing to remedy: the report is dropped.
+	poo.ReportFeedFault(s, origin, 1, theFeedFault())
+	if got := faultReportTexts(sink); len(got) != 1 {
+		t.Fatalf("the stale report queued %d fault reports, want the first alone", len(got))
+	}
+	if _, ok := poo.PendingFaultReportAttempt(s, origin); ok {
+		t.Error("the stale report took a reservation")
+	}
+	if got := listedAs(s, origin); got != poo.JobRunning {
+		t.Errorf("the re-armed feed is listed %q, want %q", got, poo.JobRunning)
+	}
+
+	// The running attempt's own fault is reported: the stale path left no
+	// reservation to fold into, and no stale report to answer.
+	close(fire)
+	waitFor(t, "the second fault's report", func() bool { return len(faultReportTexts(sink)) == 2 })
+	reports := faultReportTexts(sink)
+	if strings.Contains(reports[1], "more arrived") {
+		t.Errorf("the second report %q folded into the stale one", reports[1])
+	}
+
+	// A stopped instance has nothing to remedy either, even for the attempt
+	// that suspended it.
+	if err := s.CancelJob(origin); err != nil {
+		t.Fatalf("stopping the suspended feed: %v", err)
+	}
+	poo.ReportFeedFault(s, origin, 2, theFeedFault())
+	if got := faultReportTexts(sink); len(got) != 2 {
+		t.Errorf("the report for a stopped instance queued %d reports, want 2", len(got))
+	}
+}
+
+// faultReportGate holds the appends of a feed's fault reports, so a test can
+// act while a report is accepted and not yet queued.
+type faultReportGate struct {
+	*recordingSink
+	mu      sync.Mutex
+	blocked int
+	once    []sync.Once
+	// entered receives the index of each append that is held.
+	entered chan int
+	gates   []chan struct{}
+}
+
+// newFaultReportGate returns a sink that holds the first n appends.
+func newFaultReportGate(t *testing.T, n int) *faultReportGate {
+	t.Helper()
+	g := &faultReportGate{
+		recordingSink: &recordingSink{},
+		entered:       make(chan int, n),
+		once:          make([]sync.Once, n),
+		gates:         make([]chan struct{}, n),
+	}
+	for i := range g.gates {
+		g.gates[i] = make(chan struct{})
+	}
+	t.Cleanup(func() {
+		for i := range g.gates {
+			g.release(i)
+		}
+	})
+	return g
+}
+
+// release lets append i go.
+func (g *faultReportGate) release(i int) {
+	g.once[i].Do(func() { close(g.gates[i]) })
+}
+
+// Append holds the appends the gate was built for and keeps the rest.
+func (g *faultReportGate) Append(ctx context.Context, rec poo.Record) error {
+	if _, ok := rec.(*poo.InputQueuedRecord); ok {
+		g.mu.Lock()
+		n := g.blocked
+		g.blocked++
+		g.mu.Unlock()
+		if n < len(g.gates) {
+			g.entered <- n
+			<-g.gates[n]
+		}
+	}
+	return g.recordingSink.Append(ctx, rec)
+}
+
+// TestAFaultReportReservationBelongsToItsAttempt covers the reservation's
+// owner: the cleanup that retires it names the attempt that took it, so an
+// older attempt's cleanup cannot retire the reservation a newer attempt's
+// fault took.
+func TestAFaultReportReservationBelongsToItsAttempt(t *testing.T) {
+	gate := newFaultReportGate(t, 1)
+	opts := testOptions(t, scripted([]fakeResponse{{text: "the answer"}}), &echoTool{}, gate)
+	opts.SessionDir = t.TempDir()
+	s := newTestSession(t, opts, poo.WithFeeds(theOptionalFeedSpec(faultedFeed, poo.OnIdleHold)))
+	scope := map[string]string{"url": "https://example.test/repo"}
+
+	origin, started, err := poo.SubscribeFeed(s, "git-feedback", scope)
+	if err != nil || !started {
+		t.Fatalf("subscribing to the feed: started=%v err=%v", started, err)
+	}
+	<-gate.entered
+	// The report is accepted and not yet queued: its reservation is attempt
+	// 1's.
+	if attempt, ok := poo.PendingFaultReportAttempt(s, origin); !ok || attempt != 1 {
+		t.Fatalf("the reservation is attempt %d, %v; want attempt 1", attempt, ok)
+	}
+	// A newer attempt's cleanup arrives first, and leaves the reservation
+	// alone.
+	poo.RetireFaultReport(s, origin, 2)
+	if attempt, ok := poo.PendingFaultReportAttempt(s, origin); !ok || attempt != 1 {
+		t.Fatalf("another attempt's cleanup left the reservation at %d, %v; want attempt 1", attempt, ok)
+	}
+	// The attempt's own cleanup retires it.
+	poo.RetireFaultReport(s, origin, 1)
+	if _, ok := poo.PendingFaultReportAttempt(s, origin); ok {
+		t.Error("the reservation outlived its attempt's cleanup")
+	}
+	gate.release(0)
+	waitFor(t, "the report to be queued", func() bool {
+		return len(faultReportTexts(gate.recordingSink)) == 1
+	})
+}

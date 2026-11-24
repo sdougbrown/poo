@@ -128,3 +128,36 @@ func SubscribeFeedWithPrompt(s *Session, feed string, scope map[string]string, p
 	hasMinNoProbability := prompt != nil && prompt.MinNoProbability != 0
 	return s.subscribeFeed(feed, scope, prompt, hasMinNoProbability)
 }
+
+// ReportFeedFault reports one attempt's fault the way the attempt's
+// supervisor does, so a test can drive the path for an attempt that is no
+// longer the instance's current one.
+func ReportFeedFault(s *Session, instance string, attempt int, fault *FeedFault) {
+	s.mu.Lock()
+	f, ok := s.feeds[instance]
+	s.mu.Unlock()
+	if !ok {
+		return
+	}
+	s.reportFeedFault(f, attempt, time.Now(), fault)
+}
+
+// PendingFaultReportAttempt returns the attempt whose fault report is
+// accepted and not yet queued, and whether one is.
+func PendingFaultReportAttempt(s *Session, instance string) (int, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	pending, ok := s.pendingFaultReports[Origin(instance)]
+	if !ok {
+		return 0, false
+	}
+	return pending.attempt, true
+}
+
+// RetireFaultReport retires the fault report reservation an attempt took,
+// the way the report path does once its report is queued.
+func RetireFaultReport(s *Session, instance string, attempt int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.retireFaultReportLocked(Origin(instance), attempt)
+}

@@ -960,6 +960,19 @@ type feedFault struct {
 	more int
 }
 
+// pendingFaultReport is a fault report that is accepted but not yet
+// queued, with the attempt it reports.
+//
+// The attempt is the reservation's owner: a re-arm starts the instance
+// under a new attempt, and the older attempt's cleanup must not retire the
+// newer attempt's reservation.
+type pendingFaultReport struct {
+	// attempt is the attempt whose fault the report carries.
+	attempt int
+	// report is the report the model reads.
+	report *feedFault
+}
+
 // reportFeedFault writes one attempt's filter stderr beside the session's
 // files and wakes the session with the report that names it.
 //
@@ -970,6 +983,13 @@ type feedFault struct {
 // of the filter and not a record the filter let through. Everything else
 // is the wake path's: the queued input's record, the backlog accounting
 // and the restart-safe storage.
+//
+// The fault belongs to the attempt that raised it. A subscription may
+// re-arm a suspended instance before its supervisor reports, and the
+// instance then runs again under a new attempt: the suspension is stale,
+// and its report would offer a remedy for a feed that is already up. The
+// re-arm's cancel does not stop the report from being attempted, so the
+// check is what drops it.
 //
 // A fault that arrives before the last report was delivered joins it
 // instead of waking the session again: one suspension is one wake, and the
@@ -992,11 +1012,20 @@ func (s *Session) reportFeedFault(f *feedState, attempt int, startedAt time.Time
 	// flight rather than queueing one of its own, so one suspension is
 	// one report, whatever the gap between the faults.
 	s.mu.Lock()
-	if s.foldFeedFaultLocked(f) {
+	// The fault belongs to the attempt that raised it. A subscription may
+	// re-arm a suspended instance before its supervisor reports, and the
+	// instance then runs again under a new attempt: the suspension is
+	// stale, and its report would offer a remedy for a feed that is
+	// already up.
+	if f.attempt != attempt || f.status != feedSuspended {
 		s.mu.Unlock()
 		return
 	}
-	s.pendingFaultReports[f.origin] = report
+	if s.foldFeedFaultLocked(f, attempt) {
+		s.mu.Unlock()
+		return
+	}
+	s.pendingFaultReports[f.origin] = pendingFaultReport{attempt: attempt, report: report}
 	claim, err := s.queueFeedInputClaimLocked(feedInput{
 		instance: f.instance,
 		onIdle:   OnIdleWake,
@@ -1006,6 +1035,9 @@ func (s *Session) reportFeedFault(f *feedState, attempt int, startedAt time.Time
 	if err != nil {
 		// The session refuses the report when it is closing or broken, and
 		// the feed's suspension is already in the log.
+		s.mu.Lock()
+		s.retireFaultReportLocked(f.origin, attempt)
+		s.mu.Unlock()
 		s.logger().Warn("the feed's fault report was refused",
 			slog.String("feed", f.instance), slog.String("error", err.Error()))
 		return
@@ -1023,8 +1055,18 @@ func (s *Session) reportFeedFault(f *feedState, attempt int, startedAt time.Time
 	// The report is queued (or the store refused it): retire the
 	// reservation so a fault that arrives after it queues its own report.
 	s.mu.Lock()
-	delete(s.pendingFaultReports, f.origin)
+	s.retireFaultReportLocked(f.origin, attempt)
 	s.mu.Unlock()
+}
+
+// retireFaultReportLocked removes the reservation one attempt's report
+// took, and only when it is still that attempt's: a re-armed instance's
+// fault takes its own reservation, and an older attempt's cleanup must not
+// retire it. The caller holds the session's lock.
+func (s *Session) retireFaultReportLocked(origin Origin, attempt int) {
+	if pending, ok := s.pendingFaultReports[origin]; ok && pending.attempt == attempt {
+		delete(s.pendingFaultReports, origin)
+	}
 }
 
 // writeFeedFaultLog writes one attempt's filter stderr beside the
@@ -1075,9 +1117,10 @@ func feedFaultLogName(instance string, attempt int, startedAt time.Time) string 
 	return fmt.Sprintf("%s-%x-fault-%d-%d.log", stem, sum[:4], attempt, startedAt.UnixNano())
 }
 
-// foldFeedFaultLocked joins a fault to the report that is queued or in
-// flight and not yet delivered, and reports whether it found one. The
-// caller holds the session's lock.
+// foldFeedFaultLocked joins a fault from the attempt given to the report
+// that is queued or in flight and not yet delivered, and reports whether it
+// found one. A report in flight is joined only when it is the same
+// attempt's. The caller holds the session's lock.
 //
 // The report the model reads is rendered again with the new count. The
 // queued input's record keeps the text the report was accepted with, so a
@@ -1087,7 +1130,7 @@ func feedFaultLogName(instance string, attempt int, startedAt time.Time) string 
 // The joining fault's own stderr is written under its own attempt's name
 // like any other, so what the later filter said is still on disk even
 // though the report names the attempt that suspended the feed.
-func (s *Session) foldFeedFaultLocked(f *feedState) bool {
+func (s *Session) foldFeedFaultLocked(f *feedState, attempt int) bool {
 	for i := range s.jobQueue {
 		item := &s.jobQueue[i]
 		if item.result.origin != f.origin || item.result.fault == nil {
@@ -1097,8 +1140,8 @@ func (s *Session) foldFeedFaultLocked(f *feedState) bool {
 		item.result.text = item.result.fault.render()
 		return true
 	}
-	if pending, ok := s.pendingFaultReports[f.origin]; ok {
-		pending.more++
+	if pending, ok := s.pendingFaultReports[f.origin]; ok && pending.attempt == attempt {
+		pending.report.more++
 		return true
 	}
 	return false
