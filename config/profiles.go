@@ -66,10 +66,14 @@ func (r *Runtime) resolveProfileDefinitions(opts BuildOptions) ([]profile.Profil
 
 func (r *Runtime) disabledTools(name string) []string {
 	local := r.Settings.Profiles[name].Tools.Disabled
-	if len(local) == 0 {
-		return r.Settings.Tools.Disabled
+	out := make([]string, 0, len(r.Settings.Tools.Disabled)+len(local))
+	for _, tool := range r.Settings.Tools.Disabled {
+		out = append(out, canonicalToolName(tool))
 	}
-	return append(slices.Clone(r.Settings.Tools.Disabled), local...)
+	for _, tool := range local {
+		out = append(out, canonicalToolName(tool))
+	}
+	return out
 }
 
 // profileSectionOwned reports whether an explicit system_prompt setting

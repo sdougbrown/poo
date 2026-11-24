@@ -230,7 +230,7 @@ func result(intent string, total int, hits []ranked) poo.ToolResult {
 	for _, r := range hits {
 		fmt.Fprintf(&b, "%s: %s\n  args: %s\n", r.entry.Name, r.entry.Description, string(marshal(r.entry.Schema)))
 	}
-	b.WriteString("Call one with " + CallToolName + ".")
+	b.WriteString("Call one with " + CallToolName + ", passing its name as \"command\".")
 
 	structured, err := json.Marshal(struct {
 		Intent  string  `json:"intent"`

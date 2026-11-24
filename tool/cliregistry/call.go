@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"time"
 
@@ -60,11 +61,20 @@ func (t *CallTool) WithSearch(search bool) *CallTool {
 	return t
 }
 
+// callDescription is what the tool says it is for.
+//
+// The name alone read as a dispatcher, so the description says what the call
+// cannot do: a tool the session offers beside it, the call itself, and a
+// shell are all called directly, never through it.
+const callDescription = CallToolName + " runs one of the commands registered in the catalog, and only those. " +
+	"It is not a general dispatcher: the tools this session offers beside it are called directly, and " +
+	CallToolName + " cannot run them, itself, a shell, or anything the catalog does not list."
+
 // Spec describes the tool.
 func (t *CallTool) Spec() poo.ToolSpec {
 	return poo.ToolSpec{
 		Name:        CallToolName,
-		Description: "Run one of the registered tools and return its output.",
+		Description: callDescription,
 		Schema: json.RawMessage(`{
   "type": "object",
   "properties": {
@@ -102,6 +112,16 @@ type callArgs struct {
 	Command string `json:"command"`
 	// Args are the command's arguments, as a JSON object.
 	Args json.RawMessage `json:"args,omitempty"`
+}
+
+// builtinToolNames are the tools poo offers beside the catalog.
+//
+// A model that read the catalog's tool as a dispatcher reached for it with
+// one of these, so the refusal names the mistake rather than the catalog's
+// size. cmd/poo's test pins the list to the tools the binary builds.
+var builtinToolNames = []string{
+	"bash", "read", "grep", "history", "edit", "fetch", "codemode",
+	"jobs", "cancel_job", "find_tool", "subscribe_feed", "finish",
 }
 
 // preparedCall is a validated call_cli call.
@@ -146,11 +166,7 @@ func (t *CallTool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepare
 	}
 	entry, ok := t.catalog.Lookup(a.Command)
 	if !ok {
-		if t.catalog.Len() == 0 {
-			return nil, poo.InvalidArgsf("%s: no tool is registered", CallToolName)
-		}
-		return nil, poo.InvalidArgsf("%s: no tool named %q; %s",
-			CallToolName, a.Command, t.catalog.NamesHint(t.search))
+		return nil, t.unknownCommand(a.Command)
 	}
 	args := map[string]any{}
 	if len(a.Args) > 0 {
@@ -173,6 +189,29 @@ func (t *CallTool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepare
 		Args    map[string]any `json:"args"`
 	}{a.Command, args})
 	return &preparedCall{command: a.Command, args: args, plan: plan, key: key}, nil
+}
+
+// unknownCommand answers a command the catalog does not hold.
+//
+// Two misreadings cost a model a round trip each, so they are answered
+// with the correction: call_cli nested inside itself, and a tool the
+// session offers directly passed to call_cli as if it were registered.
+// Everything else is told what the catalog does hold, as far as the
+// prompt lists it.
+func (t *CallTool) unknownCommand(command string) error {
+	switch {
+	case command == CallToolName || command == "call_tool":
+		return poo.InvalidArgsf("%s: %q is this tool; pass a registered command's name as \"command\", "+
+			"not %s itself", CallToolName, command, CallToolName)
+	case slices.Contains(builtinToolNames, command):
+		return poo.InvalidArgsf("%s: %q is a built-in tool; call it directly instead of through %s",
+			CallToolName, command, CallToolName)
+	}
+	if t.catalog.Len() == 0 {
+		return poo.InvalidArgsf("%s: no tool is registered", CallToolName)
+	}
+	return poo.InvalidArgsf("%s: no tool named %q; %s",
+		CallToolName, command, t.catalog.NamesHint(t.search))
 }
 
 // planError reports a call the tool's own definition refused.

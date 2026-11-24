@@ -1240,23 +1240,33 @@ func (r *Runtime) disableTools(opts BuildOptions) error {
 }
 
 func validateDisabledTools(opts BuildOptions, field string, disabled []string) error {
-	for _, name := range disabled {
+	for _, raw := range disabled {
+		name := canonicalToolName(raw)
 		if slices.Contains(coreToolNames, name) {
 			return &Error{
 				Code:    CodeUnsupported,
 				Field:   field,
-				Message: fmt.Sprintf("the settings disable the %q tool, and the core adds that tool by itself", name),
+				Message: fmt.Sprintf("the settings disable the %q tool, and the core adds that tool by itself", raw),
 			}
 		}
 		if !linksTool(opts, name) {
 			return &Error{
 				Code:    CodeUnsupported,
 				Field:   field,
-				Message: fmt.Sprintf("the settings disable the %q tool, and this binary does not link it", name),
+				Message: fmt.Sprintf("the settings disable the %q tool, and this binary does not link it", raw),
 			}
 		}
 	}
 	return nil
+}
+
+// canonicalToolName resolves retired tool names to the current name so
+// existing settings files keep working without advertising the old name.
+func canonicalToolName(name string) string {
+	if name == "call_tool" {
+		return cli.CallToolName
+	}
+	return name
 }
 
 // withoutToolNames returns the names a session still builds a tool for.

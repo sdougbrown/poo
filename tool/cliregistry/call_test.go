@@ -233,3 +233,56 @@ func floodManifest(t *testing.T) string {
 		},
 	})
 }
+
+// TestAnUnknownCommandIsSelfCorrecting covers the two misreadings the tool's
+// name invited: nesting it inside itself, and handing it a tool the session
+// already offers. Each is answered with the correction, not the catalog's
+// size, and neither starts a process.
+func TestAnUnknownCommandIsSelfCorrecting(t *testing.T) {
+	tool := cliregistry.NewCall(fixtureCatalog(t))
+
+	for _, c := range []struct {
+		name string
+		args string
+		want []string
+	}{
+		{
+			name: "the tool nested inside itself",
+			args: `{"command":"call_cli","args":{"command":"say"}}`,
+			want: []string{"call_cli", `"command"`},
+		},
+		{
+			name: "the retired tool name nested inside itself",
+			args: `{"command":"call_tool","args":{"command":"say"}}`,
+			want: []string{"call_cli", `"command"`},
+		},
+		{
+			name: "a built-in tool",
+			args: `{"command":"bash","args":{"command":"ls"}}`,
+			want: []string{`"bash" is a built-in tool`, "call it directly"},
+		},
+		{
+			name: "a tool the core adds",
+			args: `{"command":"jobs"}`,
+			want: []string{`"jobs" is a built-in tool`, "call it directly"},
+		},
+		{
+			name: "a name the catalog does not hold",
+			args: `{"command":"nope"}`,
+			want: []string{`no tool named "nope"`, "list, say"},
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := prepare(t, tool, c.args)
+			if err == nil {
+				t.Fatalf("%s prepared a call", c.args)
+			}
+			text := err.Error()
+			for _, want := range c.want {
+				if !strings.Contains(text, want) {
+					t.Errorf("the refusal of %s does not carry %q: %q", c.args, want, text)
+				}
+			}
+		})
+	}
+}

@@ -210,15 +210,16 @@ func (c *Catalog) Filter(inputs map[string]any) (*Catalog, error) {
 
 // NamesHint says how a model finds a name it does not know.
 //
-// A short catalog is worth listing in the failure, so the model can
-// correct the call at once. A long one is not: the failure would carry
+// A catalog small enough to be listed in the prompt is listed in the
+// failure too, so a model that named nothing the catalog knows can
+// correct the call at once. A longer one is not: the failure would carry
 // what the prompt was careful not to. A session that offers no search is
 // pointed at the prompt's list instead.
 func (c *Catalog) NamesHint(search bool) string {
 	if c.Len() == 0 {
 		return "no tool is registered"
 	}
-	if c.Len() <= 8 {
+	if c.Len() <= FindThreshold {
 		return "the catalog holds " + strings.Join(c.Names(), ", ")
 	}
 	if search {

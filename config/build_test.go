@@ -2140,6 +2140,23 @@ func TestADisabledRegistryToolIsNotOffered(t *testing.T) {
 	}
 }
 
+// TestDisablingRetiredCallToolAliasDisablesCallCLI covers the quiet alias
+// for settings files that still name the retired call_tool.
+func TestDisablingRetiredCallToolAliasDisablesCallCLI(t *testing.T) {
+	dir := registry(t, "deploy")
+	settings, err := config.Parse([]byte(registrySettings(dir)+`tools:
+  disabled: [call_tool]
+`), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+
+	if hasTool(runtime.Options.ToolOrder, "call_cli") {
+		t.Errorf("the session still offers %v when call_tool is disabled", runtime.Options.ToolOrder)
+	}
+}
+
 // TestADisabledSideEffectingToolEarnsNoRegistryTool covers the order the
 // registry joins in: a registered tool can change anything, so it comes
 // with a profile that already offers a side-effecting tool. A profile
