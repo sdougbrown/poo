@@ -2304,7 +2304,13 @@ func (r *Runtime) resolvePrompt(opts BuildOptions, workingDir string) error {
 		if !r.chatModelResolved {
 			r.warn(fmt.Sprintf("profiles.%s: the build has no chat model, so the model family's guidance does not render", r.profileName(opts)))
 		} else if warning, ok := prompt.FamilyWarning(poo.PromptBuilder(r.Options), r.Options.PromptVariant); ok {
-			r.warn(fmt.Sprintf("profiles.%s: %s", r.profileName(opts), warning))
+			// A served session carries the note on its own start, so
+			// the process does not announce the same guidance gap
+			// twice. The other commands have no session surface to
+			// print it with, and the build says it here.
+			if opts.Wire == nil {
+				r.warn(fmt.Sprintf("profiles.%s: %s", r.profileName(opts), warning))
+			}
 		}
 	}
 	return nil
