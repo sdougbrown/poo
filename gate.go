@@ -363,26 +363,6 @@ func compactionForm(c Compaction) string {
 	}
 }
 
-// forkOutputLimit clamps the fork's output limit to the room the
-// window leaves: the fork re-sends the whole window plus the messages
-// it appends, so a limit over the room they leave is a refusal at the
-// provider. The appended input arrives in tokens, measured the way the
-// run's requests are. The floor is the gate's minimum, because a
-// request whose max_tokens is under it fails at the provider anyway,
-// and a well-formed request fails with a readable error. A fork that
-// asks for no limit keeps asking for none, and a model that declares
-// no window has nothing to clamp against.
-func forkOutputLimit(budget ContextBudget, appended, maxTokens int) int {
-	if maxTokens <= 0 || budget.ContextLimit <= 0 {
-		return maxTokens
-	}
-	room := budget.ContextLimit - budget.EstimatedInput - appended - OutputReserve
-	if maxTokens <= room {
-		return maxTokens
-	}
-	return max(room, MinOutputTokens)
-}
-
 // forkFunc returns the fork a compactor uses to reach the provider.
 //
 // The fork is bound to the transport and to the last main request's
@@ -408,7 +388,7 @@ func (s *Session) forkFunc(run *runState) ForkFunc {
 		if !has {
 			return Reply{}, fmt.Errorf("poo: there is no request to fork")
 		}
-		maxTokens = forkOutputLimit(budget, appendedTokens, maxTokens)
+		maxTokens = budget.OutputRoomFor(appendedTokens, maxTokens)
 		reader, err := s.opts.Transport.Fork(ctx, rendered, appended, maxTokens, opts)
 		if err != nil {
 			return Reply{}, err
