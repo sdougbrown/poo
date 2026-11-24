@@ -1111,6 +1111,11 @@ func TestAResizeBurstDuringAThoughtKeepsTheStreamWhole(t *testing.T) {
 
 func TestAStartupThatFailsLeavesTheTerminalWhole(t *testing.T) {
 	term := openTerminal(t)
+	// A non-stdout terminal still resolves a styled palette from its own
+	// writer rather than falling back to NoTTYStyle when os.Stdout is piped.
+	if got := detectGlamourStyle(term.slave); got != "dark" && got != "light" {
+		t.Fatalf("detectGlamourStyle(pty) = %q, want dark or light", got)
+	}
 	code := make(chan int, 1)
 	opts := Options{
 		WorkingDir: t.TempDir(),

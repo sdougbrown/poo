@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -157,7 +156,7 @@ func newRenderer(out io.Writer) *renderer {
 	r := &renderer{out: out, wrap: 80}
 	r.term = termIsTerminal(out)
 	if r.term {
-		r.armPalette(detectGlamourStyle)
+		r.armPalette(func() string { return detectGlamourStyle(out) })
 		if f, ok := out.(interface{ Fd() uintptr }); ok {
 			// A terminal that will not say how wide it is keeps the
 			// width the markdown is wrapped at, so the streamed rows and
@@ -188,12 +187,12 @@ func (r *renderer) armPalette(detect func() string) {
 }
 
 // detectGlamourStyle resolves the standard style the transcript renders
-// in, the way glamour's auto style picks it: the terminal's own palette.
-func detectGlamourStyle() string {
-	if !term.IsTerminal(int(os.Stdout.Fd())) {
+// in from the output terminal's own palette.
+func detectGlamourStyle(out io.Writer) string {
+	if !termIsTerminal(out) {
 		return styles.NoTTYStyle
 	}
-	if termenv.HasDarkBackground() {
+	if termenv.NewOutput(out).HasDarkBackground() {
 		return styles.DarkStyle
 	}
 	return styles.LightStyle
