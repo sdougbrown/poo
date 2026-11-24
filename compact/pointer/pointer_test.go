@@ -393,7 +393,7 @@ func TestAReconstructionThatCannotCompleteFallsBackToTheMine(t *testing.T) {
 		t.Errorf("the transport holds %d forks, want the selective pass and the fallback's", got)
 	}
 	// The fallback inherits the pointer pass's limit: the mine
-	// strategy's own default would ask for the window-scaled 8192.
+	// strategy's own default is the constant 16384.
 	if got := tr.Forks()[1].MaxTokens; got != 512 {
 		t.Errorf("the fallback's fork asked for %d tokens, want the inherited 512", got)
 	}
