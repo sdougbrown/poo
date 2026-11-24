@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 )
 
 // page shows the transcript through less, with ANSI colors kept
@@ -48,7 +49,17 @@ func (r *renderer) page(in io.Reader) error {
 		defer r.layout.resume()
 	}
 	cmd := exec.Command(less, "-R", f.Name())
-	cmd.Env = append(os.Environ(), "LESSOPEN=", "LESSCLOSE=")
+	// Filter the hook out rather than only appending an empty entry:
+	// the intent reads from the code, and the cleared pair holds no
+	// matter what the child's getenv resolves first.
+	env := make([]string, 0, len(os.Environ())+2)
+	for _, kv := range os.Environ() {
+		if name, _, ok := strings.Cut(kv, "="); ok && (name == "LESSOPEN" || name == "LESSCLOSE") {
+			continue
+		}
+		env = append(env, kv)
+	}
+	cmd.Env = append(env, "LESSOPEN=", "LESSCLOSE=")
 	cmd.Stdin = in
 	cmd.Stdout = r.out
 	cmd.Stderr = r.out
