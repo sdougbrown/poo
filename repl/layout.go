@@ -421,6 +421,22 @@ func (l *layout) commitPreview(body string) {
 	}
 }
 
+// sizeChanged reports whether the terminal's live size differs from the
+// dimensions this layout last rebuilt at.
+func (l *layout) sizeChanged() (int, int, bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.sizeChangedLocked()
+}
+
+func (l *layout) sizeChangedLocked() (int, int, bool) {
+	w, h, ok := l.size()
+	if !ok || (w == l.width && h == l.height) {
+		return 0, 0, false
+	}
+	return w, h, true
+}
+
 // prepare gets the footer ready for the editor's frame: the rows the
 // draft fills plus its spare, no stray rows, and the cursor anchored at
 // the footer's first row — the origin the editor's frame renders from.
@@ -434,24 +450,6 @@ func (l *layout) commitPreview(body string) {
 // width. On a narrower pane the rule wraps and scrolls the region, and
 // a repainted preview stacks a mangled copy of itself. The resize that
 // follows rebuilds the screen at the new size.
-// sizeChanged reports whether the terminal's live size differs from the
-// dimensions this layout last rebuilt at.
-func (l *layout) sizeChanged() (int, int, bool) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.sizeChangedLocked()
-}
-
-// sizeChangedLocked reports whether the terminal's live size differs from
-// the dimensions this layout last rebuilt at.
-func (l *layout) sizeChangedLocked() (int, int, bool) {
-	w, h, ok := l.size()
-	if !ok || (w == l.width && h == l.height) {
-		return 0, 0, false
-	}
-	return w, h, true
-}
-
 func (l *layout) prepare(footer int) {
 	l.mu.Lock()
 	defer l.mu.Unlock()

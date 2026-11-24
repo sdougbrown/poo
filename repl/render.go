@@ -442,10 +442,9 @@ func (r *renderer) contentWidth() int {
 	return r.width
 }
 
-// resize lays out the open stream before rebuilding the screen so that
-// replayed rows never have to scroll to make room for the preview.
-func (r *renderer) resize(width, height, footer int) {
-	r.rewrap(width)
+// drainStall clears the resize stall latch and assembles any parked
+// segments and live preview rows at width.
+func (r *renderer) drainStall(width int) (string, []string) {
 	var committed strings.Builder
 	for _, seg := range r.live.parked {
 		committed.WriteString(r.chunkBody(seg.kind, seg.source))
@@ -463,34 +462,36 @@ func (r *renderer) resize(width, height, footer int) {
 		committed.WriteString(body)
 		rows = textRows(preview, width)
 	}
-	r.layout.resize(width, height, footer, committed.String(), rows)
+	return committed.String(), rows
+}
+
+// resize lays out the open stream before rebuilding the screen so that
+// replayed rows never have to scroll to make room for the preview.
+func (r *renderer) resize(width, height, footer int) {
+	r.rewrap(width)
+	committed, rows := r.drainStall(width)
+	r.layout.resize(width, height, footer, committed, rows)
 }
 
 // clearStall releases a resize stall when a settle cannot read a valid
-// terminal size. Any parked segments and live stream tail paint at the
-// last valid geometry so live updates do not stay frozen.
+// terminal size. Any parked segments and live preview paint at the last
+// valid geometry so live updates do not stay frozen.
 func (r *renderer) clearStall() {
 	if !r.block.stalled {
 		return
 	}
-	r.block.stalled = false
-	r.live.dirty = false
 	if !r.streams() {
+		r.block.stalled = false
+		r.live.dirty = false
 		return
 	}
-	var committed strings.Builder
-	for _, seg := range r.live.parked {
-		committed.WriteString(r.chunkBody(seg.kind, seg.source))
-	}
-	r.live.parked = nil
-	if r.live.kind != "" {
-		body, preview := r.streamBodies()
-		committed.WriteString(body)
-		r.layout.paintStream(committed.String(), textRows(preview, r.width))
+	committed, rows := r.drainStall(r.width)
+	if len(rows) > 0 {
+		r.layout.paintStream(committed, rows)
 		return
 	}
-	if committed.Len() > 0 {
-		r.layout.write(committed.String())
+	if committed != "" {
+		r.layout.write(committed)
 	}
 }
 
