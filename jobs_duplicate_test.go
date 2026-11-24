@@ -158,12 +158,32 @@ func TestARepeatCallAfterTheJobEndedRuns(t *testing.T) {
 		t.Fatalf("starting the run: %v", err)
 	}
 	<-tool.Started()
-	tool.Release()
-	waitFor(t, "the job's result to be held", func() bool {
-		return sink.count("input.held") == 1
-	})
 	if _, err := s.Wait(context.Background()); err != nil {
 		t.Fatalf("waiting for the run: %v", err)
+	}
+	// The run has settled before the job ends, so the result lands on
+	// an idle session: it is held for the next prompt, and OnIdleHold
+	// wakes no run of its own.
+	tool.Release()
+	waitFor(t, "the job's result to be held", func() bool {
+		return sink.count("input.held") >= 1
+	})
+	held := false
+	for _, rec := range sink.allRecords() {
+		r, ok := rec.(*poo.InputHeldRecord)
+		if !ok {
+			continue
+		}
+		if len(r.Jobs) != 1 || r.Jobs[0] != "j1" || r.Reason != poo.HeldOnIdle {
+			t.Errorf("the held record is %v for %q, want j1 held on idle", r.Jobs, r.Reason)
+		}
+		held = true
+	}
+	if !held {
+		t.Error("the log holds no input.held record")
+	}
+	if got := sink.count("run.started"); got != 1 {
+		t.Errorf("the log holds %d run.started records, want 1: the held result woke a run", got)
 	}
 	if got := sink.count("job.started"); got != 1 {
 		t.Fatalf("the log holds %d job.started records, want 1", got)
