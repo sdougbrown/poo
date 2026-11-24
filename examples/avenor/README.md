@@ -22,7 +22,7 @@ Use these manifests to delegate to child agents and receive their questions in t
    A settings file that sets `feeds.defaults: false` and
    `cli_registry.defaults: false` runs without them. A profile that turns
    the defaults off does the same.
-3. Run `poo` with a profile that offers `call_cli`. Ask it to delegate a task and have the child ask a question before finishing.
+3. Run `poo` with a profile that offers the registered tools: a profile with a side-effecting tool earns the catalog, and a catalog this short is offered entry by entry. Ask it to delegate a task and have the child ask a question before finishing.
 
 The [feed manifest](feeds.json) starts `avenor-inbox`. The [tool manifest](tools.json) registers `avenor_spawn`, `avenor_status`, `avenor_result`, and `avenor_message` (reply only). Poo resolves `session:id` to the same native session ID for the feed and every tool. Avenor starts a separate supervisor for each poo session and stops it when the feed exits. You do not need to start a service or export broker credentials.
 
