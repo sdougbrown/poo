@@ -194,13 +194,9 @@ func releaseJobAndWait(t *testing.T, s *poo.Session, sink *recordingSink, tool *
 	// The wake resolves a moment after the job's end: a woken run
 	// starts, or the result is held. The idle alone is not the
 	// signal, because it holds in the gap between the two.
-	deadline := time.Now().Add(5 * time.Second)
-	for sink.count("run.settled") <= settles && !s.Running() && sink.count("input.held") <= held {
-		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for the wake to resolve")
-		}
-		time.Sleep(time.Millisecond)
-	}
+	waitFor(t, "the wake to resolve", func() bool {
+		return sink.count("run.settled") > settles || s.Running() || sink.count("input.held") > held
+	})
 	if s.Running() {
 		// The woken run settles on its own.
 		waitRecords(t, sink, "run.settled", settles+1)
