@@ -15,6 +15,12 @@ import (
 // editor would; the repl waits for it to leave. Its stdio is the
 // repl's own, so an embedded or redirected session pages where it
 // reads and writes, not at the process's terminal.
+//
+// The transcript is already the final ANSI text, so the pager reads
+// the file itself: the LESSOPEN preprocessor is cleared from the
+// pager's environment, since a lesspipe hook re-colorizes the file
+// and a highlighter reads the escape sequences as code, leaving
+// their parameters as text on the screen.
 func (r *renderer) page(in io.Reader) error {
 	text := r.transcriptText()
 	if text == "" {
@@ -42,6 +48,7 @@ func (r *renderer) page(in io.Reader) error {
 		defer r.layout.resume()
 	}
 	cmd := exec.Command(less, "-R", f.Name())
+	cmd.Env = append(os.Environ(), "LESSOPEN=", "LESSCLOSE=")
 	cmd.Stdin = in
 	cmd.Stdout = r.out
 	cmd.Stderr = r.out
