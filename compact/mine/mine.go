@@ -64,8 +64,10 @@ const (
 	DefaultMaxTokens = 32768
 
 	// DefaultPointerMaxTokens is the output limit of the fork's pointer
-	// pass.
-	DefaultPointerMaxTokens = 1024
+	// pass. On a thinking model the reasoning tokens count against the
+	// limit, and a pass the limit cuts short is wasted: the pointers it
+	// would have named are what steers the reconstruction.
+	DefaultPointerMaxTokens = 16384
 
 	// markerVerb is what the replacement's marker line says the turns
 	// were replaced with.
@@ -129,7 +131,7 @@ func New(opts Options) *Compactor {
 	if c.files == nil {
 		c.files = cut.DefaultFileOp
 	}
-	c.trigger = cut.Trigger{Ratio: c.ratio, KeepRecent: c.keepRecent, MaxTokens: c.maxTokens, Files: c.files}
+	c.trigger = cut.Trigger{Ratio: c.ratio, KeepRecent: c.keepRecent, MaxTokens: c.maxTokens, ForkNeed: c.pointerMaxTokens, Files: c.files}
 	return c
 }
 
@@ -148,15 +150,19 @@ func (c *Compactor) PointerMaxTokens() int { return c.pointerMaxTokens }
 
 // ShouldCompact reports whether the view should be mined.
 //
-// The strategy acts when the window is nearly full and the view holds a
-// turn older than the newest one, and before the ratio when the room
-// left in the window is under the output limit and a compaction would
-// give the room back. It also acts when the conversation alone exceeds
-// the window: a run that starts over the window cannot wait for a turn,
-// because the ratio trigger needs a request behind it. The trigger is
-// the cut package's, shared with the other block strategies: the same
-// view under the same budget reconstructs at the same window fill,
-// whichever strategy runs.
+// The strategy acts when the next answer no longer fits and the view
+// holds a turn older than the newest one. The need is the larger of the
+// run's output limit and the pointer pass's, because the fork re-sends
+// the whole window and its limit is sent as it is.
+//
+// A configured ratio is an explicit override: when it is set, the
+// strategy also acts at that share of the prompt limit.
+//
+// It also acts when the conversation alone exceeds the window: a run
+// that starts over the window cannot wait for a turn, because the ratio
+// trigger needs a request behind it. The trigger is the cut package's,
+// shared with the other block strategies: the same view under the same
+// budget reconstructs at the same window fill, whichever strategy runs.
 func (c *Compactor) ShouldCompact(view poo.View, budget poo.ContextBudget) bool {
 	return c.trigger.ShouldCompact(view, budget)
 }
