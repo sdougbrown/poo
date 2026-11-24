@@ -387,7 +387,7 @@ const (
 // Jobs returns the session's jobs and feeds.
 //
 // The running jobs come first, in start order, the feeds follow them, in
-// configuration order, and the held results come last. An id is listed
+// the order their instances started, and the held results come last. An id is listed
 // once: a live feed is listed as itself, and a held input of that feed is
 // not listed again.
 func (s *Session) Jobs() []JobInfo {
