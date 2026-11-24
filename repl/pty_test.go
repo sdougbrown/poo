@@ -709,6 +709,9 @@ func TestAnArrowKeyIsNotAnEscape(t *testing.T) {
 	// more keys, and an arrow the moment its last byte lands, so a poll
 	// through the dispatch window is enough to tell them apart: an
 	// editor that reads the arrow's escape as Escape cancels inside it.
+	// The wait proves an absence — a correct editor closes no signal —
+	// so the window stays a bounded poll for a cancel that must not
+	// come.
 	term.press("\x1b[B")
 	deadline := time.Now().Add(500 * time.Millisecond)
 	for time.Now().Before(deadline) {
@@ -919,7 +922,9 @@ func TestARefusedPromptTakesTheHintBack(t *testing.T) {
 	term.press("go\r")
 	waitFor(t, term, "busy")
 	// The failure and the redraw the hint's removal drives settle in
-	// the drawn stream before the screen reads whole.
+	// the drawn stream before the screen reads whole: the stream has no
+	// end-of-redraw signal, so the settle stays a sleep, bounded by the
+	// window a redraw could need.
 	time.Sleep(200 * time.Millisecond)
 	emu := vt10x.New(vt10x.WithSize(80, 24))
 	emu.Write([]byte(term.String()))
