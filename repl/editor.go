@@ -153,6 +153,25 @@ func newEditor(m *machine) *editorInput {
 		sh.Config.Bind(keymapName, inputrc.Unescape(`\C-j`), "poo-newline", false)
 	}
 
+	// The Ctrl chords a shell prompt is expected to answer. Vim's
+	// insert keymap self-inserts Ctrl-E — the one chord the merged
+	// keymap does not answer — and answers the others with readline
+	// actions already. This table binds the whole set over the vim
+	// defaults, so a fork bump cannot quietly drop a chord.
+	ctrlChords := map[string]string{
+		`\C-a`: "beginning-of-line",
+		`\C-e`: "end-of-line",
+		`\C-b`: "backward-char",
+		`\C-f`: "forward-char",
+		`\C-k`: "kill-line",
+		`\C-t`: "transpose-chars",
+		`\C-u`: "unix-line-discard",
+		`\C-w`: "unix-word-rubout",
+	}
+	for seq, action := range ctrlChords {
+		sh.Config.Bind("vi-insert", inputrc.Unescape(seq), action, false)
+	}
+
 	// The editor reads the process's stdin; raw mode is on from
 	// construction, so keys typed before the first read wait in the
 	// terminal as typed instead of cooked. The state captured here is
