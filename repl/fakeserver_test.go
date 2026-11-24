@@ -56,7 +56,13 @@ type fakeServer struct {
 	messages []string
 	// refuseMessage makes run/message refuse, for the refusal tests.
 	refuseMessage bool
-	askSummary    string
+	// askSummary is the ask's summary the last tool.call named.
+	askSummary string
+	// changed is the server's signal: each record a wait reads — a
+	// prompt, a message, a cancel, a decision — closes it when it
+	// lands, so the wait ends on the record instead of a poll. Nil
+	// until a wait asks for it.
+	changedCh chan struct{}
 	// holdRun keeps the run open until the client cancels it, so a
 	// test has a run to stop.
 	holdRun bool
@@ -294,6 +300,7 @@ func (s *fakeServer) line(line []byte) {
 		json.Unmarshal(req.Params, &params)
 		s.mu.Lock()
 		s.prompts = append(s.prompts, params.Text)
+		s.signal()
 		s.mu.Unlock()
 		if s.refusePrompt {
 			s.fail(req.ID, "busy", "the session is busy")
@@ -314,6 +321,7 @@ func (s *fakeServer) line(line []byte) {
 		s.mu.Lock()
 		s.messages = append(s.messages, params.Text)
 		refuse := s.refuseMessage
+		s.signal()
 		s.mu.Unlock()
 		if refuse {
 			s.fail(req.ID, "not_running", "the session is not running")
@@ -325,6 +333,7 @@ func (s *fakeServer) line(line []byte) {
 		json.Unmarshal(req.Params, &params)
 		s.mu.Lock()
 		s.cancels = append(s.cancels, params.RunID)
+		s.signal()
 		s.mu.Unlock()
 		s.reply(req.ID, map[string]any{})
 	case protocol.MethodSessionClose:
@@ -533,6 +542,27 @@ func quietRun(hold chan struct{}) func(*fakeServer) {
 }
 
 // cancelCount is how many cancels the client has sent.
+// changed returns the server's signal: the next record closes it. A
+// wait takes the channel, then checks, then blocks: any record after
+// the check closes the channel the wait holds, so no record is
+// missed.
+func (s *fakeServer) changed() chan struct{} {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.changedCh == nil {
+		s.changedCh = make(chan struct{})
+	}
+	return s.changedCh
+}
+
+// signal closes the server's signal. The caller holds mu.
+func (s *fakeServer) signal() {
+	if s.changedCh != nil {
+		close(s.changedCh)
+		s.changedCh = nil
+	}
+}
+
 func (s *fakeServer) cancelCount() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -541,14 +571,21 @@ func (s *fakeServer) cancelCount() int {
 
 // waitCancel waits for want cancels. A run nobody cancels ends the wait
 // quietly: the test that wanted it fails on its own assertions, and a
-// late t.Error would land after the test.
+// late t.Error would land after the test. The wait blocks on the
+// server's own signal, so the wait ends on the cancel's arrival
+// instead of a poll.
 func (s *fakeServer) waitCancel(want int) {
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
+	deadline := time.After(10 * time.Second)
+	for {
+		changed := s.changed()
 		if s.cancelCount() >= want {
 			return
 		}
-		time.Sleep(5 * time.Millisecond)
+		select {
+		case <-changed:
+		case <-deadline:
+			return
+		}
 	}
 }
 
@@ -563,25 +600,24 @@ func (s *fakeServer) hangUp() {
 // waitDecision blocks until the client answers the ask, or gives up
 // after a wait no test could need: a goroutine that spins forever is a
 // leaked one, and the test that wanted the decision fails on its own
-// assertions anyway.
+// assertions anyway. The wait blocks on the server's own signal, so
+// the wait ends on the decision's arrival instead of a poll.
 func (s *fakeServer) waitDecision(askID json.RawMessage) {
 	deadline := time.After(10 * time.Second)
 	for {
-		select {
-		case <-deadline:
-			s.t.Error("the ask waited 10s with no decision")
-			return
-		default:
-		}
+		changed := s.changed()
 		s.mu.Lock()
 		n := len(s.decisions)
 		s.mu.Unlock()
 		if n > 0 {
 			return
 		}
-		// The client writes the answer on its own; a short sleep
-		// keeps the wait from spinning.
-		time.Sleep(5 * time.Millisecond)
+		select {
+		case <-changed:
+		case <-deadline:
+			s.t.Error("the ask waited 10s with no decision")
+			return
+		}
 	}
 }
 
@@ -654,6 +690,7 @@ func (s *fakeServer) answer(line []byte) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.decisions = append(s.decisions, msg.Result.Decision)
+	s.signal()
 }
 
 // methodsSoFar returns the request methods the client has sent, in
