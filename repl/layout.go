@@ -42,10 +42,9 @@ type layout struct {
 	mu  sync.Mutex
 	out io.Writer
 	fd  int
-	// getSize reads the terminal's size now. The layout paints rows at the
-	// size it last rebuilt the screen at, so a frame that lands after the
-	// terminal changed size asks here before it paints anything: a row
-	// wider than the terminal wraps, and the wrap scrolls the region.
+	// getSize reads the terminal's current size. The layout paints rows at
+	// the size it last rebuilt the screen at. A frame that lands after a
+	// resize checks here first, because a wide row wraps and scrolls.
 	getSize func() (int, int, bool)
 
 	// transcript records committed text in screen order, including stderr.
@@ -425,13 +424,11 @@ func (l *layout) commitPreview(body string) {
 // save and restore the cursor, so they interleave safely with the
 // anchored frame.
 //
-// A frame that lands after the terminal changed size and before the
-// resize rebuilt the screen paints nothing but the cursor. Every row it
-// would write is laid out at the old width: on a narrower terminal the
-// rule wraps, and the wrap scrolls the region — the standing preview and
-// the committed rows above it go with it — while a repainted preview
-// stacks a mangled copy of itself. The resize that follows paints the
-// screen at the new size and the editor frames again there.
+// A frame that lands after a terminal resize and before layout.resize
+// paints nothing but the cursor. Every row it would write uses the old
+// width. On a narrower pane the rule wraps and scrolls the region, and
+// a repainted preview stacks a mangled copy of itself. The resize that
+// follows rebuilds the screen at the new size.
 func (l *layout) prepare(footer int) {
 	l.mu.Lock()
 	defer l.mu.Unlock()

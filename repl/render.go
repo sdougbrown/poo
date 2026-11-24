@@ -148,10 +148,8 @@ type streamSegment struct {
 
 // newRenderer builds the renderer for out.
 //
-// A terminal gets the style its own palette asks for, resolved once here,
-// before anything reads the terminal; anything else gets plain text, so a
-// test or a pipe reads the same words without the escapes, and streams
-// nothing.
+// A terminal resolves its style once here, before anything reads stdin.
+// Non-terminal writers get plain text without escapes and do not stream.
 func newRenderer(out io.Writer) *renderer {
 	r := &renderer{out: out, wrap: 80}
 	r.term = termIsTerminal(out)
@@ -177,11 +175,10 @@ func newRenderer(out io.Writer) *renderer {
 // armPalette settles the style the markdown renders in, and builds the
 // builder every width change goes through.
 //
-// The question reaches the terminal itself — an OSC 11 query, then a
-// cursor-position report — and the reply arrives on the input the line
-// editor is reading. It is therefore asked once, when the renderer is
-// built, and a resize, a rewrap or a stalled stream's recovery reuses the
-// answer rather than asking again.
+// The query asks the terminal for OSC 11 and a cursor report. Those
+// replies arrive on stdin while the line editor reads it. Asking once at
+// construction lets resizes, rewraps, and stall recoveries reuse the
+// answer.
 func (r *renderer) armPalette(detect func() string) {
 	r.newTR = termRenderer(detect())
 }
@@ -333,10 +330,9 @@ func (r *renderer) hint() {
 	r.block.hint = true
 }
 
-// paintHintFrame advances the writing hint's braille spinner one
-// frame. It paints nothing when no hint stands, or when the terminal's
-// width moved under the rows the hint stands on: they wrap at the old
-// width until the resize lays the screen out again.
+// paintHintFrame advances the writing hint's braille spinner one frame.
+// It paints nothing without a hint or after a width change; the old row
+// wraps until the resize rebuilds the screen.
 func (r *renderer) paintHintFrame() {
 	if !r.streams() || !r.block.hint || r.block.stalled {
 		return
@@ -498,10 +494,9 @@ func (r *renderer) stalledNow() bool {
 	return true
 }
 
-// stallForResize stops the live rows painting until the screen is rebuilt
-// at the new size. The rows standing on the terminal wrap at the width
-// they were painted at, so a frame painted now would stack a second copy
-// of them there.
+// stallForResize pauses live row paints until the screen rebuilds at
+// the new size. Standing rows were wrapped at the old width, so another
+// paint would stack a duplicate.
 func (r *renderer) stallForResize() {
 	if r.block.hint || r.block.spinner != nil || r.live.kind != "" {
 		r.block.stalled = true

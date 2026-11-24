@@ -310,10 +310,8 @@ func (m *machine) run() int {
 			m.r.paintHintFrame()
 			m.r.paintSpinner()
 		case <-resizes:
-			// The burst's intermediate sizes are not worth painting: the
-			// rows that stand were painted at the size the terminal had,
-			// so painting stops until the screen is rebuilt at the size
-			// the drag settles on.
+			// Intermediate drag sizes are not worth painting. Standing rows
+			// used the old width, so pause painting until the drag settles.
 			m.r.stallForResize()
 			settle.Reset(resizeDebounce)
 		case <-settled:
