@@ -289,6 +289,10 @@ func TestAMalformedPointerReplyIsReformed(t *testing.T) {
 	if len(asks) != 2 {
 		t.Fatalf("the transport holds %d strategy requests, want the reform and the compose", len(asks))
 	}
+	// The reform reuses the pointer pass's limit, not the mining one.
+	if got := asks[0].MaxTokens; got != 16384 {
+		t.Errorf("the reform asked for %d tokens, want the pointer pass's 16384", got)
+	}
 	reform := asks[0].Messages[len(asks[0].Messages)-1].Text()
 	if !strings.Contains(reform, "TURN-ONE") || !strings.Contains(reform, "the deploy") {
 		t.Errorf("the reform request is %q, want the malformed reply in it", reform)
@@ -361,7 +365,7 @@ func TestAReconstructionThatCannotCompleteFallsBackToTheMine(t *testing.T) {
 		pootest.Turn{Text: `{"queries": ["TURN-ONE"]}`},
 		pootest.Turn{Text: "- the fallback pointers"},
 	)
-	s, sink := session(t, tr, pointer.Options{Ratio: 0.05, KeepRecentTokens: 1})
+	s, sink := session(t, tr, pointer.Options{Ratio: 0.05, KeepRecentTokens: 1, PointerMaxTokens: 32768})
 
 	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
 		t.Fatalf("starting the run: %v", err)
@@ -387,6 +391,11 @@ func TestAReconstructionThatCannotCompleteFallsBackToTheMine(t *testing.T) {
 	// record.
 	if got := len(tr.Forks()); got != 2 {
 		t.Errorf("the transport holds %d forks, want the selective pass and the fallback's", got)
+	}
+	// The fallback inherits the pointer pass's limit: its own default
+	// would ask for less.
+	if got := tr.Forks()[1].MaxTokens; got != 32768 {
+		t.Errorf("the fallback's fork asked for %d tokens, want the inherited 32768", got)
 	}
 }
 

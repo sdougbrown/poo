@@ -133,3 +133,60 @@ func TestALargerMineForkNeedMovesTheTriggerEarlier(t *testing.T) {
 		t.Errorf("the strategy declined on its line at %d input tokens", largeLine+1)
 	}
 }
+
+// TestTheMineNeedTakesTheRunLimit covers the other side of the need: a
+// run output limit larger than the fork's need draws the line at the
+// run's own limit, and the default fork need stays the pinned 16384.
+func TestTheMineNeedTakesTheRunLimit(t *testing.T) {
+	view := triggerView()
+	c := mine.New(mine.Options{KeepRecentTokens: 1})
+	if got := c.PointerMaxTokens(); got != 16384 {
+		t.Fatalf("the default fork need is %d, want the pinned 16384", got)
+	}
+	const window = 131072
+	const runLimit = 32768
+	// The run limit dominates the fork's need, so the line is the run
+	// limit's own: 131072 - 32768 - 256 = 98048.
+	line := window - runLimit - poo.OutputReserve
+	below := poo.ContextBudget{
+		ContextLimit:   window,
+		EstimatedInput: line,
+		OutputLimit:    runLimit,
+		CharsPerToken:  4,
+		Turns:          2,
+	}
+	if c.ShouldCompact(view, below) {
+		t.Errorf("the strategy compacted one token under the run limit's line at %d input tokens", line)
+	}
+	on := below
+	on.EstimatedInput = line + 1
+	if !c.ShouldCompact(view, on) {
+		t.Errorf("the strategy declined on the run limit's line at %d input tokens", line+1)
+	}
+}
+
+// TestTheMineStrategyDeclinesAReconstructionThatCannotPayForItself
+// covers the non-convergence guard: on a window too small for the
+// verbatim tail, the replacement and the need, a reconstruction gains
+// nothing, so the strategy leaves the run alone.
+func TestTheMineStrategyDeclinesAReconstructionThatCannotPayForItself(t *testing.T) {
+	view := poo.NewHistoryView([]poo.Message{
+		poo.NewTextMessage(poo.RoleSystem, "the system prompt"),
+		poo.NewTextMessage(poo.RoleAssistant, strings.Repeat("x", 4000)),
+		poo.NewTextMessage(poo.RoleAssistant, "the second answer"),
+	}, nil, []poo.TurnSummary{
+		{TurnIndex: 1, Start: 1, End: 2},
+		{TurnIndex: 2, Start: 2, End: 3},
+	})
+	c := mine.New(mine.Options{KeepRecentTokens: 1})
+	budget := poo.ContextBudget{
+		ContextLimit:   40000,
+		EstimatedInput: 30000,
+		OutputLimit:    8192,
+		CharsPerToken:  4,
+		Turns:          2,
+	}
+	if c.ShouldCompact(view, budget) {
+		t.Error("the strategy compacted a window no reconstruction can pay for")
+	}
+}
