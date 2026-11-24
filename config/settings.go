@@ -642,6 +642,14 @@ type Session struct {
 	// leaves them to the binary's default path, which UserPrompt
 	// reaches.
 	UserPromptFile *string `json:"user_prompt_file,omitempty"`
+	// ReplProfile is the name of the profile the repl runs under when
+	// its command names none. The key is the repl's own word, not the
+	// session's: run and serve keep the profile the command line or
+	// Profile names, so the conversation the operator opens and the
+	// sessions a consumer drives can follow different profiles. The
+	// name is one the binary links; a name it does not link is an
+	// error the repl refuses with.
+	ReplProfile *string `json:"repl_profile,omitempty"`
 	// Retention says which sessions a prune deletes.
 	Retention Retention `json:"retention,omitempty"`
 }

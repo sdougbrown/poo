@@ -55,6 +55,28 @@ func handleRepl(inv clicontract.Invocation, stdout, stderr io.Writer) exit {
 		fmt.Fprintf(stderr, "poo repl: %v\n", err)
 		return exit{usageExitCode}
 	}
+	// The repl runs the binary again as `poo serve`, so the flags it
+	// parsed are spelled a second time for the child.
+	serverArgs := append([]string{repl.ServeSubcommand}, renderFlags(inv, serverFlagSpecs())...)
+	// The profile the repl runs under is the settings' repl word, or
+	// the binary's own default for it, when the command named none. The
+	// flag wins over the setting the way it wins over the settings'
+	// profile everywhere else: the word is spelled for the serve child
+	// either way, because the settings' own profile — the one run and
+	// serve resolve — is the spawned children's default, and the
+	// conversation the operator opens is not that.
+	if !inv.Supplied["profile"] {
+		_, settings, err := frontDoorSettings(o.settingsFile, o.workingDir)
+		if err != nil {
+			fmt.Fprintf(stderr, "poo repl: %v\n", err)
+			return exit{usageExitCode}
+		}
+		name := defaultProfile
+		if settings.Session.ReplProfile != nil && *settings.Session.ReplProfile != "" {
+			name = *settings.Session.ReplProfile
+		}
+		serverArgs = append(serverArgs, "--profile="+name)
+	}
 	resumeID, err := o.resumeID(workingDir)
 	if err != nil {
 		fmt.Fprintf(stderr, "poo repl: %v\n", err)
@@ -71,9 +93,6 @@ func handleRepl(inv clicontract.Invocation, stdout, stderr io.Writer) exit {
 		fmt.Fprintf(stderr, "poo: no session to continue in %s\n", workingDir)
 		return exit{usageExitCode}
 	}
-	// The repl runs the binary again as `poo serve`, so the flags it
-	// parsed are spelled a second time for the child.
-	serverArgs := append([]string{repl.ServeSubcommand}, renderFlags(inv, serverFlagSpecs())...)
 	return exit{repl.Run(repl.Options{
 		ServerArgs:  serverArgs,
 		WorkingDir:  workingDir,
