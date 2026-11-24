@@ -4,7 +4,6 @@ import (
 	_ "embed"
 	"fmt"
 	"slices"
-	"sort"
 	"strings"
 )
 
@@ -42,18 +41,6 @@ func FamilyVariants() map[string]string {
 		"gpt-6":   familyGpt6,
 		"gpt-6.2": familyGpt62,
 	}
-}
-
-// FamilyNames returns the families the prompt ships texts for, in name
-// order.
-func FamilyNames() []string {
-	variants := FamilyVariants()
-	names := make([]string, 0, len(variants))
-	for name := range variants {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
 }
 
 // FamilyHolds reports whether the builder holds the family section: a
