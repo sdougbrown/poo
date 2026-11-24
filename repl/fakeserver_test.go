@@ -541,7 +541,6 @@ func quietRun(hold chan struct{}) func(*fakeServer) {
 	}
 }
 
-// cancelCount is how many cancels the client has sent.
 // changed returns the server's signal: the next record closes it. A
 // wait takes the channel, then checks, then blocks: any record after
 // the check closes the channel the wait holds, so no record is
@@ -563,6 +562,7 @@ func (s *fakeServer) signal() {
 	}
 }
 
+// cancelCount is how many cancels the client has sent.
 func (s *fakeServer) cancelCount() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
