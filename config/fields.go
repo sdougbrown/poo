@@ -19,6 +19,7 @@ func fieldsOf(s *Settings) SettingsFields {
 	f.PiAuthFile = text(s.PiAuthFile)
 	f.Profile = text(s.Profile)
 	f.ProfilesFiles = list(s.ProfilesFiles)
+	f.ReplProfile = pointer(s.ReplProfile)
 
 	f.RolesChat = text(s.Roles["chat"])
 	f.RolesDecider = text(s.Roles["decider"])

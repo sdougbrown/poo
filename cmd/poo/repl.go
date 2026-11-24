@@ -49,13 +49,29 @@ func handleRepl(inv clicontract.Invocation, stdout, stderr io.Writer) exit {
 	if !o.validate("poo repl", stderr) {
 		return exit{usageExitCode}
 	}
+	// The conflict is a refusal about the line itself, so it comes
+	// before the settings resolve: the front door refuses the same way,
+	// and a settings error would hide the conflict.
+	if o.cont && o.resume != "" {
+		fmt.Fprintf(stderr, "poo repl: %v\n", errContinueResume)
+		return exit{usageExitCode}
+	}
 
 	workingDir, err := workingDirectory(o.workingDir)
 	if err != nil {
 		fmt.Fprintf(stderr, "poo repl: %v\n", err)
 		return exit{usageExitCode}
 	}
-	resumeID, err := o.resumeID(workingDir)
+
+	// The repl resolves its settings once: the profile word and the
+	// session it opens read the same document.
+	settings, err := o.settings(workingDir)
+	if err != nil {
+		fmt.Fprintf(stderr, "poo repl: %v\n", err)
+		return exit{usageExitCode}
+	}
+	serverArgs := o.serverArgs(inv, settings)
+	resumeID, err := o.resumeID(workingDir, settings)
 	if err != nil {
 		fmt.Fprintf(stderr, "poo repl: %v\n", err)
 		// A store failure is operational: the line the person typed is
@@ -71,9 +87,6 @@ func handleRepl(inv clicontract.Invocation, stdout, stderr io.Writer) exit {
 		fmt.Fprintf(stderr, "poo: no session to continue in %s\n", workingDir)
 		return exit{usageExitCode}
 	}
-	// The repl runs the binary again as `poo serve`, so the flags it
-	// parsed are spelled a second time for the child.
-	serverArgs := append([]string{repl.ServeSubcommand}, renderFlags(inv, serverFlagSpecs())...)
 	return exit{repl.Run(repl.Options{
 		ServerArgs:  serverArgs,
 		WorkingDir:  workingDir,
@@ -82,10 +95,46 @@ func handleRepl(inv clicontract.Invocation, stdout, stderr io.Writer) exit {
 	})}
 }
 
-// errContinueResume is the refusal both doors share: the front door
-// checks it before the settings resolve, and the repl checks it before
-// the store opens.
+// errContinueResume is the refusal both doors share: each checks it
+// before its settings resolve, so a line that names both flags is
+// refused for the flags, whatever shape its settings are in.
 var errContinueResume = errors.New("--continue and --resume are alternatives: give one")
+
+// serverArgs returns the argv the repl hands its server: the serve
+// subcommand, the flags the line parsed spelled a second time for the
+// child, and the profile word the settings name.
+func (o *replOptions) serverArgs(inv clicontract.Invocation, settings *config.Settings) []string {
+	args := append([]string{repl.ServeSubcommand}, renderFlags(inv, serverFlagSpecs())...)
+	return append(args, o.profileArg(inv, settings)...)
+}
+
+// profileArg returns the --profile words the repl spells for the serve
+// child, and nothing when there are none.
+//
+// The settings name the profile the repl runs under, distinct from the
+// sessions a consumer drives: the settings' own profile is the spawned
+// children's default, and the conversation the operator opens is not
+// that. The flag wins over the setting the way it wins everywhere
+// else, so the word is spelled only when the command named none and
+// the setting holds one — an absent key leaves the child to resolve
+// the settings' profile, the way it did before this key existed.
+//
+// A reopened session is not that conversation either: it runs under
+// the profile its log records, so the word is spelled only for a
+// session the repl starts, and spelling it for a reopen would make
+// the child build a runtime the reopened session never runs.
+func (o *replOptions) profileArg(inv clicontract.Invocation, settings *config.Settings) []string {
+	if inv.Supplied["profile"] {
+		return nil
+	}
+	if o.cont || o.resume != "" {
+		return nil
+	}
+	if settings.ReplProfile != nil && *settings.ReplProfile != "" {
+		return []string{"--profile=" + *settings.ReplProfile}
+	}
+	return nil
+}
 
 // storeError marks a failure of the session store itself: the
 // directory the settings point at exists, but opening or reading it
@@ -111,16 +160,12 @@ func (e *storeError) Unwrap() error { return e.err }
 // --resume reads the session's own log, so a sibling that will not open is
 // not this session's failure. --continue reads the store's listing: which
 // session is the newest is only in the store's answer.
-func (o *replOptions) resumeID(workingDir string) (string, error) {
+func (o *replOptions) resumeID(workingDir string, settings *config.Settings) (string, error) {
 	if o.cont && o.resume != "" {
 		return "", errContinueResume
 	}
 	if !o.cont && o.resume == "" {
 		return "", nil
-	}
-	settings, err := o.settings(workingDir)
-	if err != nil {
-		return "", err
 	}
 	overrides, err := o.overrides()
 	if err != nil {

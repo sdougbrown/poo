@@ -56,6 +56,7 @@ type SettingsFields struct {
 	Profile                         *string  "json:\"profile,omitempty\""
 	ProfilesFiles                   []string "json:\"profiles_files,omitempty\""
 	ReasoningChat                   *string  "json:\"reasoning.chat,omitempty\""
+	ReplProfile                     *string  "json:\"repl_profile,omitempty\""
 	RolesChat                       *string  "json:\"roles.chat,omitempty\""
 	RolesCompaction                 *string  "json:\"roles.compaction,omitempty\""
 	RolesDecider                    *string  "json:\"roles.decider,omitempty\""
@@ -156,6 +157,7 @@ type SettingsAvailability struct {
 	Profile                         FieldStatus
 	ProfilesFiles                   FieldStatus
 	ReasoningChat                   FieldStatus
+	ReplProfile                     FieldStatus
 	RolesChat                       FieldStatus
 	RolesCompaction                 FieldStatus
 	RolesDecider                    FieldStatus
@@ -335,6 +337,8 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 	ProfilesFilesSatisfied := len(f.ProfilesFiles) > 0
 	ReasoningChatEnabled := true
 	ReasoningChatSatisfied := func() bool { v := f.ReasoningChat; return v != nil && *v != "" }()
+	ReplProfileEnabled := true
+	ReplProfileSatisfied := func() bool { v := f.ReplProfile; return v != nil && *v != "" }()
 	RolesChatEnabled := true
 	RolesChatSatisfied := func() bool { v := f.RolesChat; return v != nil && *v != "" }()
 	RolesCompactionEnabled := true
@@ -1675,6 +1679,28 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 			Valid: nil,
 			Error: "",
 		},
+		ReplProfile: FieldStatus{
+			Required:  ReplProfileEnabled && false,
+			Enabled:   ReplProfileEnabled,
+			Satisfied: ReplProfileSatisfied,
+			Fair:      true,
+			Reason: func() *string {
+				var reasons []string
+				if len(reasons) == 0 {
+					return nil
+				}
+				return &reasons[0]
+			}(),
+			Reasons: func() []string {
+				var reasons []string
+				if reasons == nil {
+					reasons = []string{}
+				}
+				return reasons
+			}(),
+			Valid: nil,
+			Error: "",
+		},
 		RolesChat: FieldStatus{
 			Required:  RolesChatEnabled && false,
 			Enabled:   RolesChatEnabled,
@@ -2790,6 +2816,9 @@ func depSatisfied(f SettingsFields, name string) bool {
 	case "ReasoningChat":
 		v := f.ReasoningChat
 		return v != nil && *v != ""
+	case "ReplProfile":
+		v := f.ReplProfile
+		return v != nil && *v != ""
 	case "RolesChat":
 		v := f.RolesChat
 		return v != nil && *v != ""
@@ -3384,6 +3413,12 @@ func Challenge(fieldName string, f SettingsFields, c SettingsConditions, prev Se
 			explanations = append(explanations, "* "+*status.Reason)
 		}
 		explanations = append(explanations, "* check: reasoning.chat must be off, minimal, low, medium, high, xhigh or a budget in tokens")
+	case "ReplProfile", "repl_profile":
+		found = true
+		status = avail.ReplProfile
+		if status.Reason != nil {
+			explanations = append(explanations, "* "+*status.Reason)
+		}
 	case "RolesChat", "roles.chat":
 		found = true
 		status = avail.RolesChat
