@@ -187,6 +187,11 @@ type lineResult struct {
 // token.
 const streamFrame = 33 * time.Millisecond
 
+// resizeDebounce is how long a size change settles before the screen is
+// rebuilt. Dragging a window's edge emits a burst of signals milliseconds
+// apart, and only the size the drag stopped at is worth painting at.
+const resizeDebounce = 35 * time.Millisecond
+
 // input reads the lines a person types. A terminal gets the readline
 // editor with its vi mode; anything else gets plain lines, so a pipe
 // or a test drives the repl too.
@@ -240,9 +245,15 @@ func (m *machine) run() int {
 	signal.Notify(interrupts, os.Interrupt)
 	defer signal.Stop(interrupts)
 	resizes := make(chan os.Signal, 1)
-	if m.r.layout != nil {
+	var settle *time.Timer
+	var settled <-chan time.Time
+	if m.r.layout != nil && hasResizeSignals {
 		resizeSignals(resizes)
 		defer signal.Stop(resizes)
+		settle = time.NewTimer(resizeDebounce)
+		settle.Stop()
+		defer settle.Stop()
+		settled = settle.C
 	}
 	// The handshake is done and Ctrl-C has a handler: the terminal can
 	// give up its bottom rows now, and every way out restores them.
@@ -299,6 +310,11 @@ func (m *machine) run() int {
 			m.r.paintHintFrame()
 			m.r.paintSpinner()
 		case <-resizes:
+			// Intermediate drag sizes are not worth painting. Standing rows
+			// used the old width, so pause painting until the drag settles.
+			m.r.stallForResize()
+			settle.Reset(resizeDebounce)
+		case <-settled:
 			if width, height, ok := m.r.layout.size(); ok {
 				footer := 0
 				if editor, ok := input.(*editorInput); ok {
@@ -306,6 +322,8 @@ func (m *machine) run() int {
 				}
 				m.r.resize(width, height, footer)
 				input.prompt(m.prompt())
+			} else {
+				m.r.clearStall()
 			}
 		case runID := <-m.esc:
 			m.cancelRun(runID)

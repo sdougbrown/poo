@@ -41,7 +41,10 @@ const footerChrome = 2
 type layout struct {
 	mu  sync.Mutex
 	out io.Writer
-	fd  int
+	// getSize reads the terminal's current size when resize tracking is
+	// active. A frame or write after a resize checks here first, because
+	// a wide row wraps and scrolls. Nil when no resize signals exist.
+	getSize func() (int, int, bool)
 
 	// transcript records committed text in screen order, including stderr.
 	transcript bytes.Buffer
@@ -70,6 +73,13 @@ type layout struct {
 	active bool
 }
 
+// termSize reads the terminal's dimensions and checks that they fit a
+// layout with a scroll region above the footer.
+func termSize(fd int) (int, int, bool) {
+	w, h, err := term.GetSize(fd)
+	return w, h, err == nil && w >= 2 && h >= 4
+}
+
 // newLayout builds the layout for a terminal. A writer that is not a
 // terminal has no layout: the transcript is a plain stream, and any
 // editor draws wherever the stream ends.
@@ -78,19 +88,26 @@ func newLayout(out io.Writer) *layout {
 	if !ok || !term.IsTerminal(int(f.Fd())) {
 		return nil
 	}
-	l := &layout{out: out, fd: int(f.Fd()), footer: 1 + footerChrome}
-	w, h, ok := l.size()
+	fd := int(f.Fd())
+	w, h, ok := termSize(fd)
 	if !ok {
 		return nil
 	}
-	l.width, l.height = w, h
+	l := &layout{out: out, width: w, height: h, footer: 1 + footerChrome}
+	if hasResizeSignals {
+		l.getSize = func() (int, int, bool) { return termSize(fd) }
+	}
 	l.last = l.regionBottom() - 1
 	return l
 }
 
+// size is the terminal's live size when resize tracking is active.
+// Without a reader, the layout keeps the size it started with.
 func (l *layout) size() (int, int, bool) {
-	w, h, err := term.GetSize(l.fd)
-	return w, h, err == nil && w >= 2 && h >= 4
+	if l.getSize == nil {
+		return 0, 0, false
+	}
+	return l.getSize()
 }
 
 // regionBottom is the region's last row, one above the footer.
@@ -177,6 +194,11 @@ func (l *layout) write(s string) {
 	l.transcript.WriteString(s)
 	if !l.active {
 		l.emit(terminalLF(s))
+		return
+	}
+	if _, _, changed := l.sizeChangedLocked(); changed {
+		// The text is already in l.transcript; defer painting until
+		// layout.resize rebuilds the viewport at the settled width.
 		return
 	}
 	rows := textRows(s, l.width)
@@ -399,6 +421,22 @@ func (l *layout) commitPreview(body string) {
 	}
 }
 
+// sizeChanged reports whether the terminal's live size differs from the
+// dimensions this layout last rebuilt at.
+func (l *layout) sizeChanged() (int, int, bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.sizeChangedLocked()
+}
+
+func (l *layout) sizeChangedLocked() (int, int, bool) {
+	w, h, ok := l.size()
+	if !ok || (w == l.width && h == l.height) {
+		return 0, 0, false
+	}
+	return w, h, true
+}
+
 // prepare gets the footer ready for the editor's frame: the rows the
 // draft fills plus its spare, no stray rows, and the cursor anchored at
 // the footer's first row — the origin the editor's frame renders from.
@@ -406,10 +444,21 @@ func (l *layout) commitPreview(body string) {
 // the only writer of cursor-geometry sequences there: transcript writes
 // save and restore the cursor, so they interleave safely with the
 // anchored frame.
+//
+// A frame that lands after a terminal resize and before layout.resize
+// paints nothing but the cursor. Every row it would write uses the old
+// width. On a narrower pane the rule wraps and scrolls the region, and
+// a repainted preview stacks a mangled copy of itself. The resize that
+// follows rebuilds the screen at the new size.
 func (l *layout) prepare(footer int) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if !l.active {
+		return
+	}
+	if _, h, changed := l.sizeChangedLocked(); changed {
+		l.chromeStale = true
+		l.emit(fmt.Sprintf("\x1b[%d;1H", min(l.footerTop(), h)))
 		return
 	}
 	l.ensureLocked(footer)
@@ -427,6 +476,10 @@ func (l *layout) setStatus(s string) {
 	}
 	l.status = s
 	if !l.active {
+		return
+	}
+	if _, _, changed := l.sizeChangedLocked(); changed {
+		l.chromeStale = true
 		return
 	}
 	var b strings.Builder

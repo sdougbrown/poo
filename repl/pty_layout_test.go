@@ -995,8 +995,124 @@ func TestAResizeDuringAHeldPreviewKeepsTheInputAtTheBottom(t *testing.T) {
 	}
 }
 
+// TestAResizeBurstDuringAThoughtKeepsTheStreamWhole covers a dragged
+// window while a thought streams: the pane narrows and widens seven
+// times milliseconds apart, and the rows painted for one intermediate
+// width are worth nothing at the next. The thought must survive whole —
+// no row painted again at a width it no longer has, wrapping and leaving
+// a mangled copy behind — the stream must resume at the size the drag
+// settled on, and the prompt must still take a line.
+func TestAResizeBurstDuringAThoughtKeepsTheStreamWhole(t *testing.T) {
+	// A 256-colour terminal is the one whose palette query writes to the
+	// prompt: the reply arrives on the input the editor is reading.
+	t.Setenv("TERM", "xterm-256color")
+	released := make(chan struct{})
+	// Each word of the thought ends in a bar, so a count of one word
+	// does not count another word's prefix, and no space splits one
+	// across a wrap. The thought arrives in chunks, so the stream keeps
+	// painting while the pane changes size under it.
+	var thought strings.Builder
+	var chunk []string
+	for i := 0; i < 24; i++ {
+		word := "thought" + itoa(i) + "| "
+		thought.WriteString(word)
+		if i%4 == 0 {
+			chunk = append(chunk, "")
+		}
+		chunk[len(chunk)-1] += word
+	}
+	server := &fakeServer{t: t}
+	server.script = func(s *fakeServer) {
+		s.mu.Lock()
+		n := len(s.prompts)
+		s.mu.Unlock()
+		if n > 1 {
+			s.event("message.delta", map[string]any{
+				"run_id": "r1", "message_id": "m2", "kind": "text", "text": "Still here.",
+			})
+			s.event("run.settled", map[string]any{"run_id": "r1", "reason": "end_turn"})
+			return
+		}
+		s.event("run.started", map[string]any{"run_id": "r1"})
+		for _, text := range chunk {
+			s.event("message.delta", map[string]any{
+				"run_id": "r1", "message_id": "m1", "kind": "thinking", "text": text,
+			})
+			time.Sleep(12 * time.Millisecond)
+		}
+		<-released
+		s.event("message.delta", map[string]any{
+			"run_id": "r1", "message_id": "m1", "kind": "thinking", "text": "and it settles.",
+		})
+		s.event("message.delta", map[string]any{
+			"run_id": "r1", "message_id": "m1", "kind": "text", "text": "Here it is.",
+		})
+		s.event("run.settled", map[string]any{"run_id": "r1", "reason": "end_turn"})
+	}
+	term, code := startTerminalRepl(t, server)
+	waitBottom(t, term)
+	afterStartup := len(term.String())
+	// The echo of the submitted line scrolls away as the thought paints,
+	// so the thought's own first row is what says the line was taken.
+	term.press("think hard\r")
+	waitScreen(t, term, "thought3|")
+
+	// The drag: the pane changes size faster than a screen can be
+	// rebuilt, and the thought streams on through the burst. It settles
+	// wide and tall, room for the whole thought.
+	for _, size := range [][2]int{{32, 12}, {24, 8}, {40, 12}, {26, 9}, {60, 20}, {24, 8}, {60, 20}} {
+		term.resize(size[0], size[1])
+		if err := syscall.Kill(os.Getpid(), syscall.SIGWINCH); err != nil {
+			t.Fatalf("signalling the resize: %v", err)
+		}
+		time.Sleep(6 * time.Millisecond)
+	}
+	close(released)
+	waitScreen(t, term, "Here it is.")
+	waitScreen(t, term, "✓ end_turn")
+	waitBottomRows(t, term, 20)
+
+	// No resize re-queried the terminal palette or cursor position after startup.
+	if after := term.String()[afterStartup:]; strings.Contains(after, "\x1b]11;") || strings.Contains(after, "\x1b[6n") {
+		t.Errorf("a resize queried the terminal after startup:\n%q", after)
+	}
+	// The thought reads whole and once: every word stands a single time,
+	// in the order it arrived.
+	screen := term.screen()
+	for i := 0; i < 24; i++ {
+		marker := "thought" + itoa(i) + "|"
+		if n := strings.Count(screen, marker); n != 1 {
+			t.Fatalf("%q shows %d time(s) after the burst:\n%s", marker, n, indexedRows(term))
+		}
+	}
+	if read := strings.Join(strings.Fields(screen), " "); !strings.Contains(read, strings.TrimSpace(thought.String())+" and it settles.") {
+		t.Fatalf("the thought reads out of order or mangled after the burst:\n%s", indexedRows(term))
+	}
+
+	// The prompt still takes a line, and the session leaves cleanly.
+	term.press("again\r")
+	if prompts := server.waitPrompts(t, 2); prompts[1] != "again" {
+		t.Fatalf("the line after the burst reads %q, want %q", prompts[1], "again")
+	}
+	waitScreen(t, term, "Still here.")
+	term.press("/quit\r")
+	select {
+	case got := <-code:
+		if got != 0 {
+			t.Fatalf("the repl exited %d, want 0", got)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatalf("the repl did not quit; it drew:\n%s", indexedRows(term))
+	}
+}
+
 func TestAStartupThatFailsLeavesTheTerminalWhole(t *testing.T) {
 	term := openTerminal(t)
+	// A non-stdout terminal still resolves a styled palette from its own
+	// writer rather than falling back to NoTTYStyle when os.Stdout is piped.
+	if got := detectGlamourStyle(term.slave); got != "dark" && got != "light" {
+		t.Fatalf("detectGlamourStyle(pty) = %q, want dark or light", got)
+	}
 	code := make(chan int, 1)
 	opts := Options{
 		WorkingDir: t.TempDir(),

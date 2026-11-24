@@ -9,7 +9,9 @@ import (
 	"unicode/utf8"
 
 	"github.com/charmbracelet/glamour"
+	"github.com/charmbracelet/glamour/styles"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/muesli/termenv"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
 	goldmarktext "github.com/yuin/goldmark/text"
@@ -146,14 +148,13 @@ type streamSegment struct {
 
 // newRenderer builds the renderer for out.
 //
-// A terminal gets the auto style, which picks the palette from the
-// terminal's own background, and the width it lays text out at;
-// anything else gets plain text, so a test or a pipe reads the same
-// words without the escapes, and streams nothing.
+// A terminal resolves its style once here, before anything reads stdin.
+// Non-terminal writers get plain text without escapes and do not stream.
 func newRenderer(out io.Writer) *renderer {
-	r := &renderer{out: out, wrap: 80, newTR: autoTermRenderer}
+	r := &renderer{out: out, wrap: 80}
 	r.term = termIsTerminal(out)
 	if r.term {
+		r.armPalette(func() string { return detectGlamourStyle(out) })
 		if f, ok := out.(interface{ Fd() uintptr }); ok {
 			// A terminal that will not say how wide it is keeps the
 			// width the markdown is wrapped at, so the streamed rows and
@@ -171,13 +172,39 @@ func newRenderer(out io.Writer) *renderer {
 	return r
 }
 
-// autoTermRenderer builds the markdown renderer for the terminal's own
-// palette.
-func autoTermRenderer(wrap int) (*glamour.TermRenderer, error) {
-	return glamour.NewTermRenderer(
-		glamour.WithAutoStyle(),
-		glamour.WithWordWrap(wrap),
-	)
+// armPalette settles the style the markdown renders in, and builds the
+// builder every width change goes through.
+//
+// The query asks the terminal for OSC 11 and a cursor report. Those
+// replies arrive on stdin while the line editor reads it. Asking once at
+// construction lets resizes, rewraps, and stall recoveries reuse the
+// answer.
+func (r *renderer) armPalette(detect func() string) {
+	r.newTR = termRenderer(detect())
+}
+
+// detectGlamourStyle resolves the standard style the transcript renders
+// in from the output terminal's own palette.
+func detectGlamourStyle(out io.Writer) string {
+	if !termIsTerminal(out) {
+		return styles.NoTTYStyle
+	}
+	if termenv.NewOutput(out).HasDarkBackground() {
+		return styles.DarkStyle
+	}
+	return styles.LightStyle
+}
+
+// termRenderer builds the markdown renderer at a wrap width in one
+// resolved style. It names the palette, never the question that picks
+// it, so rebuilding it asks the terminal for nothing.
+func termRenderer(style string) func(wrap int) (*glamour.TermRenderer, error) {
+	return func(wrap int) (*glamour.TermRenderer, error) {
+		return glamour.NewTermRenderer(
+			glamour.WithStandardStyle(style),
+			glamour.WithWordWrap(wrap),
+		)
+	}
 }
 
 // rewrap lays future messages out at the terminal's new width.
@@ -303,10 +330,11 @@ func (r *renderer) hint() {
 	r.block.hint = true
 }
 
-// paintHintFrame advances the writing hint's braille spinner one
-// frame. It paints nothing when no hint stands.
+// paintHintFrame advances the writing hint's braille spinner one frame.
+// It paints nothing without a hint or after a width change; the old row
+// wraps until the resize rebuilds the screen.
 func (r *renderer) paintHintFrame() {
-	if !r.streams() || !r.block.hint {
+	if !r.streams() || !r.block.hint || r.stallIfResized() {
 		return
 	}
 	r.block.hintFrame = (r.block.hintFrame + 1) % len(brailleFrames)
@@ -374,10 +402,7 @@ func (r *renderer) streamDelta(id, kind, text string) {
 		r.takeHint()
 		r.block.started = true
 	}
-	if !r.block.stalled && r.stalledNow() {
-		r.block.stalled = true
-	}
-	if r.block.stalled {
+	if r.stallIfResized() {
 		r.bufferDelta(kind, clean)
 		return
 	}
@@ -399,11 +424,7 @@ func (r *renderer) streamDelta(id, kind, text string) {
 // paintPending paints the source a delta left dirty, once. The run loop
 // calls it on its frame, and the flush calls it before it seals.
 func (r *renderer) paintPending() {
-	if !r.streams() || r.block.stalled || !r.live.dirty {
-		return
-	}
-	if r.stalledNow() {
-		r.block.stalled = true
+	if !r.streams() || !r.live.dirty || r.stallIfResized() {
 		return
 	}
 	r.paintStream()
@@ -421,10 +442,9 @@ func (r *renderer) contentWidth() int {
 	return r.width
 }
 
-// resize lays out the open stream before rebuilding the screen so that
-// replayed rows never have to scroll to make room for the preview.
-func (r *renderer) resize(width, height, footer int) {
-	r.rewrap(width)
+// drainStall clears the resize stall latch and assembles any parked
+// segments and live preview rows at width.
+func (r *renderer) drainStall(width int) (string, []string) {
 	var committed strings.Builder
 	for _, seg := range r.live.parked {
 		committed.WriteString(r.chunkBody(seg.kind, seg.source))
@@ -442,15 +462,52 @@ func (r *renderer) resize(width, height, footer int) {
 		committed.WriteString(body)
 		rows = textRows(preview, width)
 	}
-	r.layout.resize(width, height, footer, committed.String(), rows)
+	return committed.String(), rows
 }
 
-// stalledNow reports that the terminal's width has changed under a
-// block that is painting. The rows already painted wrap at the old
-// width, so painting stops until the flush lays them out again. The
-// width moves here, wrap and markdown renderer with it, so the resize
-// event's rewrap finds nothing left to do.
+// resize lays out the open stream before rebuilding the screen so that
+// replayed rows never have to scroll to make room for the preview.
+func (r *renderer) resize(width, height, footer int) {
+	r.rewrap(width)
+	committed, rows := r.drainStall(width)
+	r.layout.resize(width, height, footer, committed, rows)
+}
+
+// clearStall releases a resize stall when a settle cannot read a valid
+// terminal size. Any parked segments and live preview paint at the last
+// valid geometry so live updates do not stay frozen.
+func (r *renderer) clearStall() {
+	if !r.block.stalled {
+		return
+	}
+	if !r.streams() {
+		r.block.stalled = false
+		r.live.dirty = false
+		return
+	}
+	committed, rows := r.drainStall(r.width)
+	if len(rows) > 0 {
+		r.layout.paintStream(committed, rows)
+		return
+	}
+	if committed != "" {
+		r.layout.write(committed)
+	}
+}
+
+// stalledNow reports that the terminal's size has changed under a block
+// that is painting. The rows already painted match the old geometry, so
+// painting stops until the resize lays them out again. When the width
+// moves, wrap and markdown renderer move with it here.
 func (r *renderer) stalledNow() bool {
+	if r.layout != nil {
+		if w, _, changed := r.layout.sizeChanged(); changed {
+			if w > 4 && w != r.width {
+				r.setWidth(w)
+			}
+			return true
+		}
+	}
 	if r.liveWidth == nil {
 		return false
 	}
@@ -460,6 +517,29 @@ func (r *renderer) stalledNow() bool {
 	}
 	r.setWidth(width)
 	return true
+}
+
+// stallIfResized reports whether live paints are paused for a pending
+// resize, checking the terminal's current width and latching the stall
+// when it moved.
+func (r *renderer) stallIfResized() bool {
+	if r.block.stalled {
+		return true
+	}
+	if r.stalledNow() {
+		r.block.stalled = true
+		return true
+	}
+	return false
+}
+
+// stallForResize pauses live row paints until the screen rebuilds at
+// the new size. Standing rows were wrapped at the old width, so another
+// paint would stack a duplicate.
+func (r *renderer) stallForResize() {
+	if r.block.hint || r.block.spinner != nil || r.live.kind != "" {
+		r.block.stalled = true
+	}
 }
 
 // thinkingIntro opens a thinking segment. It is markdown in the
@@ -909,7 +989,7 @@ func (r *renderer) takeSpinner() {
 // resize.
 func (r *renderer) paintSpinner() {
 	s := r.block.spinner
-	if s == nil || !r.streams() || r.block.stalled || r.block.started || r.live.kind != "" {
+	if s == nil || !r.streams() || r.block.started || r.live.kind != "" || r.stallIfResized() {
 		return
 	}
 	elapsed := time.Since(s.started)

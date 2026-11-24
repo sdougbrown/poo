@@ -568,3 +568,98 @@ func TestFooterGrowthNeverScrollsPendingRows(t *testing.T) {
 		t.Errorf("the repaint after growth scrolled %d rows, want 0", got)
 	}
 }
+
+// TestAFrameDuringAResizePaintsNothingAtTheOldWidth covers the frame
+// that lands between the terminal's size change and the resize that
+// rebuilds the screen: readline's own watcher renders one from the
+// geometry the layout still holds. Everything such a frame would paint
+// is laid out at the old width, so a narrower pane wraps it — the rule
+// scrolls the region and takes the standing preview above it with it,
+// and a repainted preview stacks a mangled copy of itself. The frame
+// anchors the cursor inside the live screen and paints nothing else.
+func TestAFrameDuringAResizePaintsNothingAtTheOldWidth(t *testing.T) {
+	vt := vt10x.New(vt10x.WithSize(40, 12))
+	rec := &recordingScreen{vt: vt}
+	l := aLayout(t, rec, 40, 12)
+	showPrompt(l, promptMark)
+	l.write("committed row\n")
+	l.paintPreview(previewRows(3))
+
+	// The pane is dragged narrower and shorter; the resize the signal
+	// asks for has not landed, but the frame's own reader already says
+	// the size moved.
+	vt.Resize(24, 8)
+	l.getSize = func() (int, int, bool) { return 24, 8, true }
+	rec.take()
+
+	for frame := 0; frame < 3; frame++ {
+		l.prepare(2)
+		if painted := rec.take(); painted != "\x1b[8;1H" {
+			t.Fatalf("frame %d painted %q, want only the cursor anchored inside the live screen", frame, painted)
+		}
+	}
+	// A transcript write or status update landing before the resize
+	// records its state without painting old-width rows to the terminal.
+	l.write("arrived during resize\n")
+	l.setStatus("status during resize")
+	if painted := rec.take(); painted != "" {
+		t.Fatalf("write/status painted %q during resize mismatch, want nothing", painted)
+	}
+	shown := trimScreen(vt.String())
+	for _, row := range previewRows(3) {
+		if n := strings.Count(shown, row); n != 1 {
+			t.Fatalf("the standing row %q shows %d time(s) across the frames:\n%s", row, n, shown)
+		}
+	}
+
+	// The resize rebuilds the screen at the settled size, once: the
+	// transcript above, the preview over it, and the chrome at the new
+	// width.
+	l.resize(24, 8, 2, "", previewRows(3))
+	shown = trimScreen(vt.String())
+	if !strings.Contains(shown, "arrived during resize") {
+		t.Fatalf("the resize lost the write buffered during resize:\n%s", shown)
+	}
+	if !strings.Contains(shown, "status during resize") {
+		t.Fatalf("the resize lost the status updated during resize:\n%s", shown)
+	}
+	for _, row := range previewRows(3) {
+		if n := strings.Count(shown, row); n != 1 {
+			t.Fatalf("the row %q reads %d time(s) after the resize:\n%s", row, n, shown)
+		}
+	}
+	rule := lastRow(vt, "─")
+	if rule < 0 {
+		t.Fatalf("the resize did not paint the rule:\n%s", shown)
+	}
+	if got, want := screenRows(vt)[rule], strings.Repeat("─", 24); got != want {
+		t.Errorf("the rule reads %q, want the terminal's own width", got)
+	}
+	if l.preview != 3 || len(l.previewRows) != 3 {
+		t.Errorf("the preview cache is preview=%d rows=%d, want the three rows it stands on", l.preview, len(l.previewRows))
+	}
+}
+
+func TestALayoutWithoutResizeTrackingKeepsPainting(t *testing.T) {
+	vt := vt10x.New(vt10x.WithSize(40, 12))
+	rec := &recordingScreen{vt: vt}
+	l := aLayout(t, rec, 40, 12)
+	rec.take()
+
+	// Without a live size reader (as on platforms without resize signals),
+	// writes, frames, and status updates paint at the stored dimensions
+	// instead of deferring forever.
+	l.write("kept painting\n")
+	l.setStatus("still live")
+	l.prepare(2)
+	if painted := rec.take(); painted == "" {
+		t.Fatal("layout without resize tracking deferred all output")
+	}
+	shown := trimScreen(vt.String())
+	if !strings.Contains(shown, "kept painting") {
+		t.Errorf("transcript write was not painted:\n%s", shown)
+	}
+	if !strings.Contains(shown, "still live") {
+		t.Errorf("status update was not painted:\n%s", shown)
+	}
+}

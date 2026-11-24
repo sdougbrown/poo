@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sdougbrown/poo/wire/protocol"
 )
@@ -562,4 +563,64 @@ func TestTheFinishPaintsTheDirtyTailWithoutATick(t *testing.T) {
 	if got := plain(r.transcriptText()); strings.Count(got, "tail one tail two") != 1 {
 		t.Errorf("the transcript reads the tail %d time(s), want 1:\n%q", strings.Count(got, "tail one tail two"), got)
 	}
+}
+
+// TestTheLiveTicksPauseOnAWidthChangeBeforeTheResize covers the frames
+// the run loop paints on its own tick — the writing hint and the running
+// tool's row. Like the pending paint, they stop once the terminal's
+// width moves under the rows they stand on: a frame painted at the old
+// width wraps in the narrower pane and stacks a copy of itself.
+func TestTheLiveTicksPauseOnAWidthChangeBeforeTheResize(t *testing.T) {
+	t.Run("the writing hint", func(t *testing.T) {
+		var out bytes.Buffer
+		r := aTerminal(t, &out, 40)
+		width := 40
+		r.liveWidth = func() int { return width }
+		r.hint()
+		out.Reset()
+
+		width = 20
+		r.paintHintFrame()
+		if painted := out.String(); painted != "" {
+			t.Fatalf("the hint painted at the old width after the change:\n%q", painted)
+		}
+		if !r.block.stalled {
+			t.Fatal("the block did not stall on the width change")
+		}
+
+		// The resize lays the hint out at the settled width, and the
+		// next frame advances it there.
+		r.resize(20, 24, 1)
+		if painted := plain(out.String()); !strings.Contains(painted, "writing") {
+			t.Fatalf("the resize lost the hint:\n%q", painted)
+		}
+		out.Reset()
+		r.paintHintFrame()
+		if painted := plain(out.String()); !strings.Contains(painted, "writing") {
+			t.Errorf("the hint did not paint again after the resize:\n%q", painted)
+		}
+	})
+
+	t.Run("the tool row", func(t *testing.T) {
+		var out bytes.Buffer
+		r := aTerminal(t, &out, 40)
+		width := 40
+		r.liveWidth = func() int { return width }
+		// The call is past the delay that keeps a fast one off the
+		// screen, so its row is what the tick paints.
+		r.block.spinner = &toolSpinner{tool: "bash", summary: "ls -la", started: time.Now().Add(-2 * streamWriteDelay)}
+		out.Reset()
+
+		width = 20
+		r.paintSpinner()
+		if painted := out.String(); painted != "" {
+			t.Fatalf("the tool row painted at the old width after the change:\n%q", painted)
+		}
+		out.Reset()
+		r.resize(20, 24, 1)
+		r.paintSpinner()
+		if painted := plain(out.String()); !strings.Contains(painted, "bash") {
+			t.Errorf("the tool row did not paint again after the resize:\n%q", painted)
+		}
+	})
 }
