@@ -335,6 +335,13 @@ func TestOneSuspensionIsOneWakeAndCountsWhatJoinedIt(t *testing.T) {
 	opts.Tools = map[string]poo.Tool{gate.Spec().Name: gate}
 	opts.ToolOrder = []string{gate.Spec().Name}
 	s := newTestSession(t, opts, poo.WithFeeds(theOptionalFeedSpec(faultedFeed, poo.OnIdleHold)))
+	// The turn-end drain waits for the test: the second fault's fold
+	// runs while the first report is still queued, before the drain
+	// takes it for delivery, so the join the firebreak promises is not
+	// a race against the run's own turn end.
+	drainGate := make(chan struct{})
+	restore := s.SetJobRaceHooks(&poo.JobRaceHooks{BeforeDrain: func() { <-drainGate }})
+	defer restore()
 
 	// The run is open in a tool, so the report a fault queues waits for
 	// the next turn end.
@@ -369,8 +376,9 @@ func TestOneSuspensionIsOneWakeAndCountsWhatJoinedIt(t *testing.T) {
 		t.Fatalf("re-arming the feed: started=%v err=%v", started, err)
 	}
 	waitForSink(t, sink, "the second fault's end", func() bool { return len(feedEnds(sink)) >= 2 })
-
-	close(gate.release)
+	// The second fault folded into the queued report: the drain may take
+	// it for delivery now.
+	close(drainGate)
 	waitForSink(t, sink, "the joined report to reach the chat model", func() bool {
 		_, _, ok := deliveredMessage(sink)
 		return ok
