@@ -207,6 +207,12 @@ type FeedSpec struct {
 	// prompt the model would set on the instance has no place. A feed
 	// has one filter kind, and the session refuses the other.
 	ScriptFilter bool
+	// FilterQuestion is the question the manifest asks about each
+	// message, and empty when the manifest names no question filter.
+	// The model's filter prompt replaces it while the prompt is set, so
+	// the session names it when a subscription overrides the operator's
+	// question.
+	FilterQuestion string
 }
 
 // FeedScopeField is one field of a feed's scope: a value a subscription
@@ -1297,11 +1303,39 @@ func (s *Session) subscribeFeed(name string, scope map[string]string, prompt *Fe
 		f.filterPrompt = *change
 	}
 	f.started = true
+	instanceLabel := f.instance
 	s.mu.Unlock()
+	if change != nil && spec.FilterQuestion != "" {
+		// The prompt is the model's screening policy, and it replaces the
+		// one the operator configured. The tool's result says the same; the
+		// operator's log carries it too, because a feed's content may be
+		// what talked the model into the call.
+		s.logWarn("the subscribe call overrides the feed's manifest filter question",
+			slog.String("feed", instanceLabel),
+			slog.Bool("cleared", change.Question == ""))
+	}
 	if started {
 		go s.runFeed(f)
 	}
 	return id, started, nil
+}
+
+// filterOverrideNotice returns the sentence a subscribe call's result adds
+// when the call sets or clears a filter prompt on a feed whose manifest
+// configured a question, and the empty string otherwise.
+//
+// The manifest's question is the operator's screening policy, and the
+// prompt replaces it while it is set. The notice is visibility, not
+// prevention: the call still applies, but the model is told whose question
+// stopped applying.
+func filterOverrideNotice(spec FeedSpec, prompt *FeedFilterPrompt) string {
+	if prompt == nil || spec.FilterQuestion == "" {
+		return ""
+	}
+	if prompt.Question == "" {
+		return "The manifest's filter question is restored, and the operator's screening policy applies again."
+	}
+	return "The manifest's filter question was replaced by the prompt you set, and the operator's screening policy does not apply while it is set."
 }
 
 // checkFeedPrompt returns the filter prompt one call sets on a feed

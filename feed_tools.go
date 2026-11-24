@@ -138,6 +138,9 @@ func (t *SubscribeFeedTool) Call(ctx context.Context, in Prepared, env ToolEnv) 
 		} else {
 			text += " The filter prompt is set, and each message is asked that question."
 		}
+		if notice := filterOverrideNotice(t.session.optionalFeeds[p.feed], p.prompt); notice != "" {
+			text += " " + notice
+		}
 	}
 	return ToolResult{Text: text}, nil
 }

@@ -1735,6 +1735,10 @@ func (r *Runtime) resolveFeedRuns(opts BuildOptions) error {
 			}
 		}
 		run := feed.Runner(spec, r.executor, lookup)
+		filterQuestion := ""
+		if spec.Filter != nil {
+			filterQuestion = spec.Filter.Question
+		}
 		specs = append(specs, poo.FeedSpec{
 			Name:        spec.Name,
 			Description: spec.Description,
@@ -1745,8 +1749,11 @@ func (r *Runtime) resolveFeedRuns(opts BuildOptions) error {
 			Scope:       scopeFields(spec.Scope),
 			// A feed's filter is one of the two kinds, and the core
 			// refuses a filter prompt on a feed whose manifest runs the
-			// script kind.
-			ScriptFilter: spec.Filter.Script(),
+			// script kind. The question is carried beside it, so a
+			// subscription that replaces the operator's question is
+			// reported as one.
+			ScriptFilter:   spec.Filter.Script(),
+			FilterQuestion: filterQuestion,
 			// The session hands its own working directory to the run
 			// it calls, so a session created in another directory
 			// than the build's runs its feed there.

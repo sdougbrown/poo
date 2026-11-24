@@ -2,8 +2,11 @@ package poo_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"log/slog"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/sdougbrown/poo"
@@ -28,6 +31,100 @@ func thePromptedFeed(run poo.FeedRunner) poo.FeedSpec {
 // not read: the config layer is where a prompt's question reaches a record.
 func promptAnswer(context.Context, any, string, []decide.Question) ([]decide.Answer, error) {
 	return nil, decide.ErrDeferred
+}
+
+// subscribePromptCall is a subscribe_feed call that names a prompt, the
+// empty string being the clear.
+func subscribePromptCall(callID, feed, question string) poo.ToolCall {
+	raw, _ := json.Marshal(map[string]any{"feed": feed, "prompt": question})
+	return poo.ToolCall{CallID: callID, Name: poo.SubscribeFeedToolName, Arguments: raw}
+}
+
+// logBuffer is a writer a test can read while the session's log dispatcher
+// writes it.
+type logBuffer struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+// Write appends one log line.
+func (b *logBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.b.Write(p)
+}
+
+// String returns what the log holds.
+func (b *logBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.b.String()
+}
+
+// TestASubscribeThatOverridesTheManifestsQuestionSaysSo covers the
+// visibility the override gets: a call that sets or clears a prompt on a
+// feed whose manifest configured a question says in its result that the
+// operator's screening policy does or does not apply, and the session's log
+// carries the same warning. A feed whose manifest configured no question
+// takes the same calls without a notice.
+func TestASubscribeThatOverridesTheManifestsQuestionSaysSo(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{subscribePromptCall("c1", "audit", "Only the tests.")}},
+		{text: "the answer"},
+		{calls: []poo.ToolCall{subscribePromptCall("c2", "audit", "")}},
+		{text: "the answer"},
+		{calls: []poo.ToolCall{subscribePromptCall("c3", "scan", "Only the tests.")}},
+		{text: "the answer"},
+		{calls: []poo.ToolCall{subscribePromptCall("c4", "scan", "")}},
+		{text: "the answer"},
+	})
+	sink := &recordingSink{}
+	logs := &logBuffer{}
+	opts := testOptions(t, tr, &echoTool{}, sink)
+	opts.Logger = slog.New(slog.NewTextHandler(logs, nil))
+	audit := thePromptedFeed(waitingFeed)
+	audit.FilterQuestion = "Does the operator want this?"
+	scan := thePromptedFeed(waitingFeed)
+	scan.Name = "scan"
+	s := newTestSession(t, opts,
+		poo.WithDecider(poo.ModelInfo{}, decide.DeciderFunc(promptAnswer)),
+		poo.WithFeeds(audit, scan),
+	)
+
+	for _, prompt := range []string{
+		"screen the feed for me",
+		"stop screening it",
+		"screen the other feed",
+		"stop screening that one",
+	} {
+		runSession(t, s, prompt)
+	}
+
+	results := toolResults(sink, poo.SubscribeFeedToolName)
+	if len(results) != 4 {
+		t.Fatalf("the session recorded %d subscribe results, want 4", len(results))
+	}
+	// The first call replaced the operator's question.
+	if !strings.Contains(results[0].Text, "manifest's filter question was replaced") {
+		t.Errorf("the setting call says %q, want it to name the manifest's question it replaced", results[0].Text)
+	}
+	if !strings.Contains(results[0].Text, "operator's screening policy does not apply") {
+		t.Errorf("the setting call says %q, want it to say the operator's policy does not apply", results[0].Text)
+	}
+	// The second restored it.
+	if !strings.Contains(results[1].Text, "manifest's filter question is restored") {
+		t.Errorf("the clearing call says %q, want it to say the manifest's question is restored", results[1].Text)
+	}
+	// The unfiltered feed's calls carry no notice either way.
+	for _, result := range results[2:] {
+		if strings.Contains(result.Text, "manifest's filter question") || strings.Contains(result.Text, "operator's screening policy") {
+			t.Errorf("the call on an unfiltered feed says %q, want no override notice", result.Text)
+		}
+	}
+	// The operator's log carries the override, on the filtered feed alone.
+	waitFor(t, "the override warning in the log", func() bool {
+		return strings.Count(logs.String(), "overrides the feed's manifest filter question") == 2
+	})
 }
 
 // theFilteredFeed is a feed whose manifest screens its records through its
