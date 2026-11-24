@@ -131,7 +131,7 @@ func New(opts Options) *Compactor {
 	if c.files == nil {
 		c.files = cut.DefaultFileOp
 	}
-	c.trigger = cut.Trigger{Ratio: c.ratio, KeepRecent: c.keepRecent, MaxTokens: c.maxTokens, ForkNeed: c.pointerMaxTokens, Files: c.files}
+	c.trigger = cut.Trigger{Ratio: c.ratio, KeepRecent: c.keepRecent, MaxTokens: c.maxTokens, ForkNeed: c.pointerMaxTokens, Files: c.files, Marker: markerVerb, Retention: true}
 	return c
 }
 
