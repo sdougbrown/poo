@@ -1084,10 +1084,29 @@ func TestTheCtrlChordsMoveAndEditTheDraft(t *testing.T) {
 	waitScreen(t, term, "✓ end_turn")
 	waitBottom(t, term)
 
+	// Ctrl+B moves the cursor one character back: the letters typed
+	// after it land before the draft's last one, and the cursor rides
+	// forward with each insert.
+	term.press("ab\x02xy\r")
+	if prompts := server.waitPrompts(t, 6); prompts[5] != "axyb" {
+		t.Fatalf("the line after Ctrl+B reads %q, want axyb", prompts[5])
+	}
+	waitScreen(t, term, "✓ end_turn")
+	waitBottom(t, term)
+
+	// Ctrl+F moves the cursor one character forward, back onto the
+	// draft's end: the letter typed after it lands behind the draft.
+	term.press("ab\x02\x06c\r")
+	if prompts := server.waitPrompts(t, 7); prompts[6] != "abc" {
+		t.Fatalf("the line after Ctrl+F reads %q, want abc", prompts[6])
+	}
+	waitScreen(t, term, "✓ end_turn")
+	waitBottom(t, term)
+
 	// Ctrl+T transposes the two characters before the cursor.
 	term.press("ab\x14cd\r")
-	if prompts := server.waitPrompts(t, 6); prompts[5] != "bacd" {
-		t.Fatalf("the line after Ctrl+T reads %q, want bacd", prompts[5])
+	if prompts := server.waitPrompts(t, 8); prompts[7] != "bacd" {
+		t.Fatalf("the line after Ctrl+T reads %q, want bacd", prompts[7])
 	}
 	waitScreen(t, term, "✓ end_turn")
 	waitBottom(t, term)
