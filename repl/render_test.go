@@ -512,3 +512,44 @@ func TestAResizeKeepsThePaletteResolvedAtConstruction(t *testing.T) {
 		t.Errorf("the pipe's render carries escapes after a width change:\n%q", pipe.String())
 	}
 }
+
+func TestHeightOnlyResizeStallsLivePaint(t *testing.T) {
+	var out bytes.Buffer
+	l := aLayout(t, &out, 40, 12)
+	r := &renderer{out: &out, term: true, layout: l, width: 40, wrap: 38}
+	l.getSize = func() (int, int, bool) { return 40, 8, true }
+
+	if !r.stallIfResized() {
+		t.Fatal("height-only resize did not stall live paint")
+	}
+	if !r.block.stalled {
+		t.Fatal("height-only resize did not latch r.block.stalled")
+	}
+}
+
+func TestClearStallResumesPaintingAndFlushesParkedSegments(t *testing.T) {
+	var out bytes.Buffer
+	l := aLayout(t, &out, 40, 12)
+	r := &renderer{out: &out, term: true, layout: l, width: 40, wrap: 38}
+	r.streamDelta("m1", "thinking", "first thought")
+	r.stallForResize()
+	r.streamDelta("m1", "text", "reply after stall")
+	if !r.block.stalled {
+		t.Fatal("expected renderer to be stalled")
+	}
+	if len(r.live.parked) != 1 {
+		t.Fatalf("expected 1 parked segment while stalled, got %d", len(r.live.parked))
+	}
+
+	out.Reset()
+	r.clearStall()
+	if r.block.stalled {
+		t.Fatal("clearStall left r.block.stalled set")
+	}
+	if len(r.live.parked) != 0 {
+		t.Fatalf("clearStall left %d parked segment(s)", len(r.live.parked))
+	}
+	if got := l.transcriptText() + "\n" + strings.Join(l.previewRows, "\n"); !strings.Contains(got, "first thought") || !strings.Contains(got, "reply after stall") {
+		t.Fatalf("clearStall lost buffered stream text:\n%s", got)
+	}
+}

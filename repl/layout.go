@@ -434,6 +434,14 @@ func (l *layout) commitPreview(body string) {
 // width. On a narrower pane the rule wraps and scrolls the region, and
 // a repainted preview stacks a mangled copy of itself. The resize that
 // follows rebuilds the screen at the new size.
+// sizeChanged reports whether the terminal's live size differs from the
+// dimensions this layout last rebuilt at.
+func (l *layout) sizeChanged() (int, int, bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.sizeChangedLocked()
+}
+
 // sizeChangedLocked reports whether the terminal's live size differs from
 // the dimensions this layout last rebuilt at.
 func (l *layout) sizeChangedLocked() (int, int, bool) {

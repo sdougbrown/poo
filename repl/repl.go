@@ -322,6 +322,8 @@ func (m *machine) run() int {
 				}
 				m.r.resize(width, height, footer)
 				input.prompt(m.prompt())
+			} else {
+				m.r.clearStall()
 			}
 		case runID := <-m.esc:
 			m.cancelRun(runID)

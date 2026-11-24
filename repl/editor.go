@@ -195,8 +195,17 @@ func newEditor(m *machine) *editorInput {
 		if l := m.r.layout; l != nil {
 			readline.SetRenderOutput(l.raw())
 			sh.SetRefreshHook(i.refresh)
-		}
-		if hasResizeSignals {
+			if hasResizeSignals {
+				// Share the layout's live size reader so width checks
+				// and layout guards consult one GetSize source.
+				m.r.liveWidth = func() int {
+					if w, _, ok := l.size(); ok {
+						return w
+					}
+					return -1
+				}
+			}
+		} else if hasResizeSignals {
 			// The streamed rows and the editor's prompt wrap at the same
 			// width, so the renderer reads it from the same place, live.
 			m.r.liveWidth = func() int {

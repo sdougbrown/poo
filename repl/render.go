@@ -466,12 +466,47 @@ func (r *renderer) resize(width, height, footer int) {
 	r.layout.resize(width, height, footer, committed.String(), rows)
 }
 
-// stalledNow reports that the terminal's width has changed under a
-// block that is painting. The rows already painted wrap at the old
-// width, so painting stops until the flush lays them out again. The
-// width moves here, wrap and markdown renderer with it, so the resize
-// event's rewrap finds nothing left to do.
+// clearStall releases a resize stall when a settle cannot read a valid
+// terminal size. Any parked segments and live stream tail paint at the
+// last valid geometry so live updates do not stay frozen.
+func (r *renderer) clearStall() {
+	if !r.block.stalled {
+		return
+	}
+	r.block.stalled = false
+	r.live.dirty = false
+	if !r.streams() {
+		return
+	}
+	var committed strings.Builder
+	for _, seg := range r.live.parked {
+		committed.WriteString(r.chunkBody(seg.kind, seg.source))
+	}
+	r.live.parked = nil
+	if r.live.kind != "" {
+		body, preview := r.streamBodies()
+		committed.WriteString(body)
+		r.layout.paintStream(committed.String(), textRows(preview, r.width))
+		return
+	}
+	if committed.Len() > 0 {
+		r.layout.write(committed.String())
+	}
+}
+
+// stalledNow reports that the terminal's size has changed under a block
+// that is painting. The rows already painted match the old geometry, so
+// painting stops until the resize lays them out again. When the width
+// moves, wrap and markdown renderer move with it here.
 func (r *renderer) stalledNow() bool {
+	if r.layout != nil {
+		if w, _, changed := r.layout.sizeChanged(); changed {
+			if w > 4 && w != r.width {
+				r.setWidth(w)
+			}
+			return true
+		}
+	}
 	if r.liveWidth == nil {
 		return false
 	}
