@@ -55,28 +55,16 @@ func handleRepl(inv clicontract.Invocation, stdout, stderr io.Writer) exit {
 		fmt.Fprintf(stderr, "poo repl: %v\n", err)
 		return exit{usageExitCode}
 	}
+
 	// The repl runs the binary again as `poo serve`, so the flags it
 	// parsed are spelled a second time for the child.
 	serverArgs := append([]string{repl.ServeSubcommand}, renderFlags(inv, serverFlagSpecs())...)
-	// The profile the repl runs under is the settings' repl word, or
-	// the binary's own default for it, when the command named none. The
-	// flag wins over the setting the way it wins over the settings'
-	// profile everywhere else: the word is spelled for the serve child
-	// either way, because the settings' own profile — the one run and
-	// serve resolve — is the spawned children's default, and the
-	// conversation the operator opens is not that.
-	if !inv.Supplied["profile"] {
-		_, settings, err := frontDoorSettings(o.settingsFile, o.workingDir)
-		if err != nil {
-			fmt.Fprintf(stderr, "poo repl: %v\n", err)
-			return exit{usageExitCode}
-		}
-		name := defaultProfile
-		if settings.Session.ReplProfile != nil && *settings.Session.ReplProfile != "" {
-			name = *settings.Session.ReplProfile
-		}
-		serverArgs = append(serverArgs, "--profile="+name)
+	profileArg, err := o.profileArg(inv, workingDir)
+	if err != nil {
+		fmt.Fprintf(stderr, "poo repl: %v\n", err)
+		return exit{usageExitCode}
 	}
+	serverArgs = append(serverArgs, profileArg...)
 	resumeID, err := o.resumeID(workingDir)
 	if err != nil {
 		fmt.Fprintf(stderr, "poo repl: %v\n", err)
@@ -105,6 +93,30 @@ func handleRepl(inv clicontract.Invocation, stdout, stderr io.Writer) exit {
 // checks it before the settings resolve, and the repl checks it before
 // the store opens.
 var errContinueResume = errors.New("--continue and --resume are alternatives: give one")
+
+// profileArg returns the --profile words the repl spells for the serve
+// child, and nothing when there are none.
+//
+// The settings name the profile the repl runs under, distinct from the
+// sessions a consumer drives: the settings' own profile is the spawned
+// children's default, and the conversation the operator opens is not
+// that. The flag wins over the setting the way it wins everywhere
+// else, so the word is spelled only when the command named none and
+// the setting holds one — an absent key leaves the child to resolve
+// the settings' profile, the way it did before this key existed.
+func (o *replOptions) profileArg(inv clicontract.Invocation, workingDir string) ([]string, error) {
+	if inv.Supplied["profile"] {
+		return nil, nil
+	}
+	settings, err := o.settings(workingDir)
+	if err != nil {
+		return nil, err
+	}
+	if settings.Session.ReplProfile != nil && *settings.Session.ReplProfile != "" {
+		return []string{"--profile=" + *settings.Session.ReplProfile}, nil
+	}
+	return nil, nil
+}
 
 // storeError marks a failure of the session store itself: the
 // directory the settings point at exists, but opening or reading it

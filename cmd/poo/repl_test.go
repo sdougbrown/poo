@@ -531,3 +531,103 @@ func TestTheReplRefusesAnUnknownFlagBeforeTheServerStarts(t *testing.T) {
 		t.Errorf("the error is %q, want it to name --no-such-flag", stderr)
 	}
 }
+
+// TestTheReplNamesTheReplProfileForItsServer covers the repl's own profile
+// word: the settings' session.repl_profile is the profile the repl session
+// runs, distinct from the settings' profile the spawned children and one-shot
+// runs resolve. The word reaches the server the repl starts, spelled the way
+// every flag the repl parsed is spelled a second time.
+func TestTheReplNamesTheReplProfileForItsServer(t *testing.T) {
+	settings := func(t *testing.T, body string) string {
+		t.Helper()
+		dir := t.TempDir()
+		path := filepath.Join(dir, "settings.yaml")
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	const settingsBody = `version: 1
+profile: code
+session:
+  repl_profile: %s
+endpoints:
+  fake:
+    endpoint: "http://localhost:9/v1"
+    skip_probe: true
+models:
+  fake/gpt:
+    endpoint: fake
+    model_id: gpt
+    api: chat_completions
+    context_limit: 8192
+    max_output: 4096
+roles:
+  chat: fake/gpt
+`
+	cases := []struct {
+		name        string
+		replProfile string
+		flag        string
+		wantArg     string
+	}{{
+		name:        "the setting names the profile the server runs",
+		replProfile: "search",
+		wantArg:     "--profile=search",
+	}, {
+		name:        "an empty setting leaves the server the settings' profile",
+		replProfile: "",
+		wantArg:     "",
+	}, {
+		name:        "the flag wins over the setting",
+		replProfile: "search",
+		flag:        "code",
+		wantArg:     "",
+	}}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body := settingsBody
+			if tc.replProfile == "" {
+				body = strings.Replace(body, "  repl_profile: %s\n", "", 1)
+			} else {
+				body = strings.Replace(body, "%s", tc.replProfile, 1)
+			}
+			path := settings(t, body)
+
+			argv := []string{"repl", "--settings", path, "--working-dir", t.TempDir()}
+			if tc.flag != "" {
+				argv = append(argv, "--profile", tc.flag)
+			}
+			inv, err := clicontract.Parse(pooApp(io.Discard), argv)
+			if err != nil {
+				t.Fatalf("parsing the repl's flags: %v", err)
+			}
+			var o replOptions
+			o.bind(inv)
+			workingDir, err := workingDirectory(o.workingDir)
+			if err != nil {
+				t.Fatalf("resolving the working directory: %v", err)
+			}
+			args, err := o.profileArg(inv, workingDir)
+			if err != nil {
+				t.Fatalf("the repl profile word: %v", err)
+			}
+			if tc.wantArg == "" {
+				if len(args) != 0 {
+					t.Errorf("the profile words are %v, want none", args)
+				}
+				return
+			}
+			if !slices.Equal(args, []string{tc.wantArg}) {
+				t.Errorf("the profile words are %v, want [%s]", args, tc.wantArg)
+			}
+			// The word the repl spells is one the server accepts: the
+			// handoff is a argv the child parses, not a string pair.
+			server := append([]string{repl.ServeSubcommand}, "--settings", path, "--working-dir", workingDir)
+			server = append(server, args...)
+			if _, err := clicontract.Parse(pooApp(io.Discard), server); err != nil {
+				t.Fatalf("the server refused the profile word (%v): %v", server, err)
+			}
+		})
+	}
+}
