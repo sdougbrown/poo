@@ -70,11 +70,7 @@ func handleRepl(inv clicontract.Invocation, stdout, stderr io.Writer) exit {
 		fmt.Fprintf(stderr, "poo repl: %v\n", err)
 		return exit{usageExitCode}
 	}
-	serverArgs, err := o.serverArgs(inv, settings)
-	if err != nil {
-		fmt.Fprintf(stderr, "poo repl: %v\n", err)
-		return exit{usageExitCode}
-	}
+	serverArgs := o.serverArgs(inv, settings)
 	resumeID, err := o.resumeID(workingDir, settings)
 	if err != nil {
 		fmt.Fprintf(stderr, "poo repl: %v\n", err)
@@ -107,13 +103,9 @@ var errContinueResume = errors.New("--continue and --resume are alternatives: gi
 // serverArgs returns the argv the repl hands its server: the serve
 // subcommand, the flags the line parsed spelled a second time for the
 // child, and the profile word the settings name.
-func (o *replOptions) serverArgs(inv clicontract.Invocation, settings *config.Settings) ([]string, error) {
+func (o *replOptions) serverArgs(inv clicontract.Invocation, settings *config.Settings) []string {
 	args := append([]string{repl.ServeSubcommand}, renderFlags(inv, serverFlagSpecs())...)
-	words, err := o.profileArg(inv, settings)
-	if err != nil {
-		return nil, err
-	}
-	return append(args, words...), nil
+	return append(args, o.profileArg(inv, settings)...)
 }
 
 // profileArg returns the --profile words the repl spells for the serve
@@ -131,17 +123,17 @@ func (o *replOptions) serverArgs(inv clicontract.Invocation, settings *config.Se
 // the profile its log records, so the word is spelled only for a
 // session the repl starts, and spelling it for a reopen would make
 // the child build a runtime the reopened session never runs.
-func (o *replOptions) profileArg(inv clicontract.Invocation, settings *config.Settings) ([]string, error) {
+func (o *replOptions) profileArg(inv clicontract.Invocation, settings *config.Settings) []string {
 	if inv.Supplied["profile"] {
-		return nil, nil
+		return nil
 	}
 	if o.cont || o.resume != "" {
-		return nil, nil
+		return nil
 	}
 	if settings.Session.ReplProfile != nil && *settings.Session.ReplProfile != "" {
-		return []string{"--profile=" + *settings.Session.ReplProfile}, nil
+		return []string{"--profile=" + *settings.Session.ReplProfile}
 	}
-	return nil, nil
+	return nil
 }
 
 // storeError marks a failure of the session store itself: the

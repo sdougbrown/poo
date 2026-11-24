@@ -656,19 +656,26 @@ roles:
 			if err != nil {
 				t.Fatalf("loading the settings: %v", err)
 			}
-			server, err := o.serverArgs(inv, loaded)
-			if err != nil {
-				t.Fatalf("the repl's server argv: %v", err)
+			server := o.serverArgs(inv, loaded)
+			// The word the line carries is the one the precedence picks,
+			// and there is exactly one of it, or none: a flag and a
+			// setting must not both reach the child.
+			want := 0
+			if tc.wantArg != "" {
+				want = 1
 			}
-			if tc.wantArg == "" {
-				for _, arg := range server {
-					if strings.HasPrefix(arg, "--profile=") {
-						t.Errorf("the server argv %v spells a profile word, want none", server)
-						break
-					}
+			words := 0
+			for _, arg := range server {
+				if !strings.HasPrefix(arg, "--profile=") {
+					continue
 				}
-			} else if !slices.Contains(server, tc.wantArg) {
-				t.Errorf("the server argv is %v, want it to carry %s", server, tc.wantArg)
+				words++
+				if arg != tc.wantArg {
+					t.Errorf("the server argv %v spells %s, want %s", server, arg, tc.wantArg)
+				}
+			}
+			if words != want {
+				t.Errorf("the server argv %v spells %d profile words, want %d", server, words, want)
 			}
 			// The word the repl spells is one the server accepts: the
 			// handoff is an argv the child parses, not a string pair.

@@ -649,8 +649,8 @@ type Session struct {
 	// sessions a consumer drives can follow different profiles. The
 	// word reaches the repl's server only for a conversation the repl
 	// starts: a reopened session runs under the profile its log
-	// records. The name is one the binary links; a name it does not
-	// link is an error the repl refuses with.
+	// records. The name is one the binary links, and the build a
+	// session runs under refuses one it does not.
 	ReplProfile *string `json:"repl_profile,omitempty"`
 	// Retention says which sessions a prune deletes.
 	Retention Retention `json:"retention,omitempty"`
