@@ -1260,7 +1260,7 @@ func TestAStrayOSCReplyDoesNotLeakIntoThePrompt(t *testing.T) {
 		t.Fatalf("prompt after stray OSC replies reads %q, want %q", prompts[0], "hello")
 	}
 	waitScreen(t, term, "✓ end_turn")
-	if screen := term.screen(); strings.Contains(screen, "11;rgb:") || strings.Contains(screen, "rgb:") {
+	if screen := term.screen(); strings.Contains(screen, "rgb:") {
 		t.Errorf("stray OSC reply leaked onto screen:\n%s", screen)
 	}
 
