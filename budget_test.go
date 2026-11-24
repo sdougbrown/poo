@@ -14,6 +14,39 @@ import (
 // The context budget: the estimator with its calibration, the prompt limit,
 // and the computed max_tokens.
 
+// TestOverWindowReadsTheGateSOwnRule covers the band: the trigger fires
+// exactly when the gate would block the request - the room the window
+// leaves under the minimum output - and not in the room the gate would
+// still serve.
+func TestOverWindowReadsTheGateSOwnRule(t *testing.T) {
+	// The window leaves 100 tokens after the input and the reserve:
+	// under the minimum, so the gate blocks and the trigger fires.
+	blocked := poo.ContextBudget{ContextLimit: 20000, EstimatedInput: 20000 - poo.OutputReserve - 100}
+	if !blocked.OverWindow() {
+		t.Error("the trigger did not fire in the band the gate blocks")
+	}
+	// The window leaves 300 tokens: over the minimum, so the gate
+	// serves the request and the trigger stays off.
+	served := poo.ContextBudget{ContextLimit: 20000, EstimatedInput: 20000 - poo.OutputReserve - 300}
+	if served.OverWindow() {
+		t.Error("the trigger fired in the band the gate serves")
+	}
+	// No window, no trigger.
+	if (poo.ContextBudget{EstimatedInput: 5000}).OverWindow() {
+		t.Error("the trigger fired without a window")
+	}
+	// The input cap: over it, the gate refuses the prompt and the
+	// trigger fires; under it, the request goes out.
+	capped := poo.ContextBudget{ContextLimit: 20000, InputLimit: 8000, EstimatedInput: 8000 - poo.OutputReserve + 1}
+	if !capped.OverWindow() {
+		t.Error("the trigger did not fire over the input cap")
+	}
+	within := poo.ContextBudget{ContextLimit: 20000, InputLimit: 8000, EstimatedInput: 8000 - poo.OutputReserve - 100}
+	if within.OverWindow() {
+		t.Error("the trigger fired under the input cap")
+	}
+}
+
 // TestTheEstimateGrowsWithTheAppendedOutput covers the rule: the
 // estimate grows with what was appended between usage reports.
 func TestTheEstimateGrowsWithTheAppendedOutput(t *testing.T) {
