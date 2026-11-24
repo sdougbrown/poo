@@ -41,10 +41,9 @@ const footerChrome = 2
 type layout struct {
 	mu  sync.Mutex
 	out io.Writer
-	fd  int
-	// getSize reads the terminal's current size. The layout paints rows at
-	// the size it last rebuilt the screen at. A frame that lands after a
-	// resize checks here first, because a wide row wraps and scrolls.
+	// getSize reads the terminal's current size when resize tracking is
+	// active. A frame or write after a resize checks here first, because
+	// a wide row wraps and scrolls. Nil when no resize signals exist.
 	getSize func() (int, int, bool)
 
 	// transcript records committed text in screen order, including stderr.
@@ -74,6 +73,13 @@ type layout struct {
 	active bool
 }
 
+// termSize reads the terminal's dimensions and checks that they fit a
+// layout with a scroll region above the footer.
+func termSize(fd int) (int, int, bool) {
+	w, h, err := term.GetSize(fd)
+	return w, h, err == nil && w >= 2 && h >= 4
+}
+
 // newLayout builds the layout for a terminal. A writer that is not a
 // terminal has no layout: the transcript is a plain stream, and any
 // editor draws wherever the stream ends.
@@ -82,32 +88,26 @@ func newLayout(out io.Writer) *layout {
 	if !ok || !term.IsTerminal(int(f.Fd())) {
 		return nil
 	}
-	l := &layout{out: out, fd: int(f.Fd()), footer: 1 + footerChrome}
-	l.getSize = func() (int, int, bool) {
-		w, h, err := term.GetSize(l.fd)
-		return w, h, err == nil && w >= 2 && h >= 4
-	}
-	w, h, ok := l.size()
+	fd := int(f.Fd())
+	w, h, ok := termSize(fd)
 	if !ok {
 		return nil
 	}
-	l.width, l.height = w, h
+	l := &layout{out: out, width: w, height: h, footer: 1 + footerChrome}
+	if hasResizeSignals {
+		l.getSize = func() (int, int, bool) { return termSize(fd) }
+	}
 	l.last = l.regionBottom() - 1
 	return l
 }
 
-// size is the terminal's size: the reader's when the layout has one, the
-// descriptor's otherwise. A layout a test builds has neither, and keeps
-// the size it was given.
+// size is the terminal's live size when resize tracking is active.
+// Without a reader, the layout keeps the size it started with.
 func (l *layout) size() (int, int, bool) {
-	if l.getSize != nil {
-		return l.getSize()
-	}
-	if l.fd <= 0 {
+	if l.getSize == nil {
 		return 0, 0, false
 	}
-	w, h, err := term.GetSize(l.fd)
-	return w, h, err == nil && w >= 2 && h >= 4
+	return l.getSize()
 }
 
 // regionBottom is the region's last row, one above the footer.

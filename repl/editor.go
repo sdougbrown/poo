@@ -196,13 +196,15 @@ func newEditor(m *machine) *editorInput {
 			readline.SetRenderOutput(l.raw())
 			sh.SetRefreshHook(i.refresh)
 		}
-		// The streamed rows and the editor's prompt wrap at the same
-		// width, so the renderer reads it from the same place, live.
-		m.r.liveWidth = func() int {
-			if w, _, err := term.GetSize(fd); err == nil {
-				return w
+		if hasResizeSignals {
+			// The streamed rows and the editor's prompt wrap at the same
+			// width, so the renderer reads it from the same place, live.
+			m.r.liveWidth = func() int {
+				if w, _, err := term.GetSize(fd); err == nil {
+					return w
+				}
+				return -1
 			}
-			return -1
 		}
 	}
 

@@ -247,7 +247,7 @@ func (m *machine) run() int {
 	resizes := make(chan os.Signal, 1)
 	var settle *time.Timer
 	var settled <-chan time.Time
-	if m.r.layout != nil {
+	if m.r.layout != nil && hasResizeSignals {
 		resizeSignals(resizes)
 		defer signal.Stop(resizes)
 		settle = time.NewTimer(resizeDebounce)

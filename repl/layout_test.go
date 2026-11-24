@@ -639,3 +639,27 @@ func TestAFrameDuringAResizePaintsNothingAtTheOldWidth(t *testing.T) {
 		t.Errorf("the preview cache is preview=%d rows=%d, want the three rows it stands on", l.preview, len(l.previewRows))
 	}
 }
+
+func TestALayoutWithoutResizeTrackingKeepsPainting(t *testing.T) {
+	vt := vt10x.New(vt10x.WithSize(40, 12))
+	rec := &recordingScreen{vt: vt}
+	l := aLayout(t, rec, 40, 12)
+	rec.take()
+
+	// Without a live size reader (as on platforms without resize signals),
+	// writes, frames, and status updates paint at the stored dimensions
+	// instead of deferring forever.
+	l.write("kept painting\n")
+	l.setStatus("still live")
+	l.prepare(2)
+	if painted := rec.take(); painted == "" {
+		t.Fatal("layout without resize tracking deferred all output")
+	}
+	shown := trimScreen(vt.String())
+	if !strings.Contains(shown, "kept painting") {
+		t.Errorf("transcript write was not painted:\n%s", shown)
+	}
+	if !strings.Contains(shown, "still live") {
+		t.Errorf("status update was not painted:\n%s", shown)
+	}
+}

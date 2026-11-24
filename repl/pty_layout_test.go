@@ -996,7 +996,7 @@ func TestAResizeDuringAHeldPreviewKeepsTheInputAtTheBottom(t *testing.T) {
 }
 
 // TestAResizeBurstDuringAThoughtKeepsTheStreamWhole covers a dragged
-// window while a thought streams: the pane narrows and widens a dozen
+// window while a thought streams: the pane narrows and widens seven
 // times milliseconds apart, and the rows painted for one intermediate
 // width are worth nothing at the next. The thought must survive whole —
 // no row painted again at a width it no longer has, wrapping and leaving
