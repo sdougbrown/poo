@@ -118,7 +118,10 @@ func runHelper(mode string) int {
 			return 1
 		}
 		fmt.Println(helperReady)
-		waitForFile(os.Getenv(helperSignal))
+		if err := waitForFile(os.Getenv(helperSignal)); err != nil {
+			fmt.Fprintln(os.Stderr, "poo session helper:", err)
+			return 1
+		}
 		if _, err := store.Load(ctx, id); err != nil {
 			fmt.Println(helperGone)
 			return 0
@@ -174,11 +177,16 @@ func runHelper(mode string) int {
 	}
 }
 
-// waitForFile waits until the path exists.
-func waitForFile(path string) {
+// waitForFile waits until the path exists, on a deadline so a missing
+// file fails the helper instead of hanging it.
+func waitForFile(path string) error {
+	deadline := time.Now().Add(30 * time.Second)
 	for {
 		if _, err := os.Stat(path); err == nil {
-			return
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("the file %s did not appear", path)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
