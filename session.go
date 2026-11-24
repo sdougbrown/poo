@@ -1065,9 +1065,10 @@ func (s *Session) Events() []Event { return s.events.events() }
 // RepeatCounts returns the repeat counts of the call that ran last.
 //
 // The counts are the doom loop's: the exact count is how many times the
-// model made this exact call, and the near count is how many times it
-// made a call with the same primary argument. The policy slot reads
-// them when it is asked about a call.
+// model made this exact call consecutively, and the near count is how
+// many times it made a call with the same primary argument
+// consecutively. The policy slot reads them when it is asked about a
+// call.
 func (s *Session) RepeatCounts() RepeatCounts {
 	s.mu.Lock()
 	defer s.mu.Unlock()
