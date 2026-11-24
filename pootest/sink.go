@@ -42,6 +42,13 @@ func NewSink() *Sink {
 	return &Sink{}
 }
 
+// ReadRecords reads the sink's records back. It is the read side the
+// session's tools and strategies read through: a sink that only buffers
+// serves what it buffered.
+func (s *Sink) ReadRecords(ctx context.Context) ([]poo.Record, error) {
+	return s.Records(), nil
+}
+
 // FailAt makes the nth append fail, counting from one.
 //
 // The failure is the sink's own error unless one was set with SetError.

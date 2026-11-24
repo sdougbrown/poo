@@ -793,45 +793,63 @@ func (s *Session) seedCounters(records []Record) {
 // The turn count comes from the settle record, so the session's turn
 // numbers are the ones the records were written with.
 func scanRuns(records []Record, out *Restored) ([]string, map[string]int) {
-	var order []string
+	scan := scanRunsOf(records)
+	for _, id := range scan.order {
+		if scan.started[id] {
+			out.Runs = append(out.Runs, id)
+		}
+	}
+	return scan.order, scan.turns
+}
+
+// scanRunsOf scans a record chain for the runs it holds, in the order
+// they were first seen, with each run's turn count. It is the one scan
+// the session's numbering reads from: the restore's view and the
+// retained history number their turns from it, so the two agree about
+// what "turn 3" means. A run is a run its boundary records — the
+// started or the settled one — name; a turn's other records count
+// toward it.
+func scanRunsOf(records []Record) runScan {
+	var scan runScan
+	scan.turns = map[string]int{}
+	scan.started = map[string]bool{}
 	seen := map[string]bool{}
-	turns := map[string]int{}
 	note := func(id string) {
 		if id == "" || seen[id] {
 			return
 		}
 		seen[id] = true
-		order = append(order, id)
+		scan.order = append(scan.order, id)
 	}
 	for _, rec := range records {
 		switch r := rec.(type) {
 		case *RunStartedRecord:
 			note(r.RunID)
-			out.Runs = append(out.Runs, r.RunID)
+			scan.started[r.RunID] = true
 		case *RunSettledRecord:
 			note(r.RunID)
-			if r.Turns > turns[r.RunID] {
-				turns[r.RunID] = r.Turns
+			if r.Turns > scan.turns[r.RunID] {
+				scan.turns[r.RunID] = r.Turns
 			}
 		case *MessageRecord:
-			if r.Turn > turns[r.RunID] {
-				turns[r.RunID] = r.Turn
+			if r.Turn > scan.turns[r.RunID] {
+				scan.turns[r.RunID] = r.Turn
 			}
 		case *UsageRecord:
-			if r.Turn > turns[r.RunID] {
-				turns[r.RunID] = r.Turn
+			if r.Turn > scan.turns[r.RunID] {
+				scan.turns[r.RunID] = r.Turn
 			}
 		case *ToolCallRecord:
-			if r.Turn > turns[r.RunID] {
-				turns[r.RunID] = r.Turn
+			if r.Turn > scan.turns[r.RunID] {
+				scan.turns[r.RunID] = r.Turn
 			}
 		case *ToolResultRecord:
-			if r.Turn > turns[r.RunID] {
-				turns[r.RunID] = r.Turn
+			if r.Turn > scan.turns[r.RunID] {
+				scan.turns[r.RunID] = r.Turn
 			}
 		}
 	}
-	return order, turns
+	return scan
 }
 
 // placeTurn places the turn a message belongs to, and reports how many

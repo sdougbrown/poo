@@ -16,6 +16,7 @@ import (
 	"github.com/sdougbrown/poo/tool/fetch"
 	"github.com/sdougbrown/poo/tool/finish"
 	"github.com/sdougbrown/poo/tool/grep"
+	"github.com/sdougbrown/poo/tool/history"
 	"github.com/sdougbrown/poo/tool/read"
 )
 
@@ -78,9 +79,10 @@ func linkedTools() map[string]config.ToolFactory {
 		"bash": func(opts config.ToolOptions) poo.Tool {
 			return bash.New(bash.WithExecutor(opts.Executor), bash.WithScrub(opts.Scrub))
 		},
-		"read": func(opts config.ToolOptions) poo.Tool { return read.New(read.WithInputs(opts.Inputs...)) },
-		"grep": func(config.ToolOptions) poo.Tool { return grep.New() },
-		"edit": func(config.ToolOptions) poo.Tool { return edit.New() },
+		"read":    func(opts config.ToolOptions) poo.Tool { return read.New(read.WithInputs(opts.Inputs...)) },
+		"grep":    func(config.ToolOptions) poo.Tool { return grep.New() },
+		"history": func(config.ToolOptions) poo.Tool { return history.New() },
+		"edit":    func(opts config.ToolOptions) poo.Tool { return edit.New() },
 		"codemode": func(opts config.ToolOptions) poo.Tool {
 			// An unset engine is the settings' default one, the same
 			// value the settings check judges limits by. Starlark is the

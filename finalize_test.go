@@ -18,6 +18,20 @@ import (
 // The failure table is normative: most failures are not terminal, and
 // the ones that are end the run with exactly one settle record.
 
+// ReadRecords fails the way the appends do when the sink was told to
+// fail, and otherwise returns what was accepted: it is the read side
+// the session's history tool reads through.
+func (s *failingSink) ReadRecords(context.Context) ([]poo.Record, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]poo.Record, len(s.records))
+	copy(out, s.records)
+	return out, nil
+}
+
 // failingSink is a record sink that can be told to fail.
 type failingSink struct {
 	mu sync.Mutex

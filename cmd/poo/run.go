@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -496,6 +497,20 @@ type sink struct {
 	// keeps its own files beside. It is empty for a sink that writes
 	// nothing.
 	recordDir string
+	// mu guards records.
+	mu sync.Mutex
+	// records are the records this process wrote, in order, for the
+	// history tool's read side.
+	records []poo.Record
+}
+
+// recordsSnapshot returns the records this process wrote.
+func (s *sink) recordsSnapshot() []poo.Record {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]poo.Record, len(s.records))
+	copy(out, s.records)
+	return out
 }
 
 // sessionDir returns the directory the session's files are in.
@@ -503,14 +518,25 @@ func (s *sink) sessionDir() string { return s.recordDir }
 
 // Append writes one record.
 func (s *sink) Append(ctx context.Context, rec poo.Record) error {
+	// A log or a store owns the records: the write is the only copy.
+	// With neither, the fallback owns them itself and keeps them.
 	switch {
 	case s.log != nil:
 		return s.log.Append(ctx, rec)
 	case s.store != nil:
 		return s.store.Append(ctx, rec)
 	default:
+		s.keep(rec)
 		return nil
 	}
+}
+
+// keep holds a record in the fallback's own buffer. Nothing else owns
+// the records here, so the buffer is the read side's whole supply.
+func (s *sink) keep(rec poo.Record) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.records = append(s.records, rec)
 }
 
 // Flush pushes the buffered records out.
@@ -522,6 +548,28 @@ func (s *sink) Flush(ctx context.Context) error {
 		return s.store.Flush(ctx)
 	default:
 		return nil
+	}
+}
+
+// Records reads the session's records back, oldest first.
+//
+// It is the read side poo.RecordReader asks for: with it, the session's
+// history tool reads what the store retained. The log path reads its
+// file; the store path reads through the store's open session; with
+// neither, the fallback's own buffer is the whole supply.
+func (s *sink) ReadRecords(ctx context.Context) ([]poo.Record, error) {
+	switch {
+	case s.log != nil:
+		return s.log.ReadRecords(ctx)
+	case s.store != nil:
+		// The store is open under this process's authority and holds the
+		// whole retained chain, restored sessions included: the read goes
+		// through it, so the retention pointer's numbering is the one
+		// the session was built with.
+		return s.store.ReadRecords(ctx)
+	default:
+		// Nothing owns the records: the buffer is what there is.
+		return s.recordsSnapshot(), nil
 	}
 }
 

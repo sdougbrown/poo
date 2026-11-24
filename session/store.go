@@ -57,6 +57,11 @@ func CheckMode(mode Mode) error {
 type Store interface {
 	poo.RecordSink
 
+	// ReadRecords reads the current session's records back, oldest
+	// first. The read side is how the session's history tool and its
+	// strategies read what the store retained.
+	poo.RecordReader
+
 	// Create starts a session in the store and makes it the store's
 	// current session. It returns the session's id.
 	Create(ctx context.Context, created *poo.SessionCreatedRecord) (string, error)
@@ -1032,3 +1037,52 @@ func scanSummary(path string) (*scanned, error) {
 
 // errInjected is the failure a test injects.
 var errInjected = errors.New("session: the injected failure")
+
+// ReadRecords reads the open session's records back, oldest first.
+//
+// It is the read side poo.RecordReader asks for: the session's history
+// tool and its strategies read what the store retains through it. The
+// read goes through the open session's log, which syncs before it
+// reads, so the records a caller sees are whole.
+func (s *FileStore) ReadRecords(ctx context.Context) ([]poo.Record, error) {
+	s.mu.Lock()
+	if s.open == nil {
+		s.mu.Unlock()
+		return nil, &Error{Code: CodeStoreError, Message: "the store has no open session"}
+	}
+	if err := ctx.Err(); err != nil {
+		s.mu.Unlock()
+		return nil, &Error{Code: CodeStoreError, Message: "reading the retained chain", Err: err}
+	}
+	if err := s.open.log.Sync(ctx); err != nil {
+		s.mu.Unlock()
+		return nil, &Error{Code: CodeStoreError, Message: "syncing the retained chain", Err: err}
+	}
+	// The decode is the load's: the store's codec, and the migration a
+	// log in an older format needs, so the history reads the chain the
+	// session was restored from. The lock covers the sync and the file
+	// read; the decode runs outside it, so a reader of a long session
+	// does not stall the appends for the whole parse.
+	lines, _, err := s.readLog(s.open.path, false)
+	s.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	// An empty file holds no session, the way the load says so: a
+	// header is what makes a log a session.
+	if len(lines) == 0 {
+		return nil, &Error{Code: CodeCorruptLog, Message: "the log holds no session"}
+	}
+	format, err := logFormat(lines[0])
+	if err != nil {
+		return nil, err
+	}
+	if format != s.codec.Version() {
+		migrated, err := s.codec.Migrate(format, lines)
+		if err != nil {
+			return nil, err
+		}
+		lines = migrated
+	}
+	return s.decodeRecords(lines)
+}

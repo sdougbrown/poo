@@ -30,6 +30,9 @@ type CompactionEnv struct {
 	// what the store retains names it, so the model can say what to
 	// recover and from where.
 	SessionID string
+	// HistoryTool reports that the session's tools include the history
+	// tool the retention pointer points at.
+	HistoryTool bool
 	// Fork re-sends the last main request with messages appended. It is
 	// the cheapest way to ask the model something, and the only way to
 	// see what the model itself saw. A strategy that asks about the

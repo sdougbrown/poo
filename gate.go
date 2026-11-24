@@ -147,6 +147,17 @@ var errCompactionInterrupted = errors.New("poo: the compaction was interrupted")
 // candidate check.
 var errCompactionStore = errors.New("poo: the compaction record was refused")
 
+// offersHistoryTool reports that the session's tools include the
+// history tool: the recovery pointer names it only when the model can
+// call it.
+func (s *Session) offersHistoryTool() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, offered := s.opts.Tools["history"]
+	_, canRead := s.opts.Sink.(RecordReader)
+	return offered && canRead
+}
+
 // compact asks the compactor to compact the view and applies what it
 // produced.
 //
@@ -177,11 +188,12 @@ func (s *Session) compact(run *runState) (compactionOutcome, error) {
 
 	tokensBefore := s.estimatedInput()
 	env := CompactionEnv{
-		View:      s.view(),
-		Budget:    s.budget(),
-		SessionID: s.ID(),
-		Fork:      s.forkFunc(run),
-		Ask:       s.askFunc(run),
+		View:        s.view(),
+		Budget:      s.budget(),
+		SessionID:   s.ID(),
+		HistoryTool: s.offersHistoryTool(),
+		Fork:        s.forkFunc(run),
+		Ask:         s.askFunc(run),
 	}
 
 	// The compaction runs under the run's activity context, so an

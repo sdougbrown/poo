@@ -9,6 +9,7 @@ import (
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/compact/mine"
 	"github.com/sdougbrown/poo/pootest"
+	"github.com/sdougbrown/poo/tool/history"
 )
 
 // The mine strategy: a fork names what the history must preserve, a
@@ -250,7 +251,9 @@ func TestTheRunMinesAndCarriesOn(t *testing.T) {
 	}
 
 	// The model reads the reconstruction where the covered turns were,
-	// with the file list and the retention pointer after it.
+	// with the file list and the retention pointer after it. The
+	// session offers no history tool, so the pointer names the retained
+	// records without pointing at a call the model cannot make.
 	text := replacementText(t, sink)
 	for _, want := range []string{
 		"[Context compacted: turns 1-1 reconstructed below]",
@@ -473,5 +476,27 @@ func TestAMinedReconstructionTheLimitCutShortIsRefused(t *testing.T) {
 	view := requestText(last)
 	if !strings.Contains(view, "TURN-ONE") {
 		t.Errorf("the last request is %q, want the uncompacted turn still in it", view)
+	}
+}
+
+// TestThePointerNamesTheToolTheSessionOffers covers the recovery
+// pointer's wording: a session that offers the history tool gets the
+// pointer that names it, so the model can read the turns back.
+func TestThePointerNamesTheToolTheSessionOffers(t *testing.T) {
+	tr := pootest.NewTransport(
+		pootest.Turn{Text: long("TURN-ONE"), Calls: []pootest.Call{{Name: "echo", Arguments: json.RawMessage(`{"text":"one"}`)}}},
+		pootest.Turn{Text: long("TURN-TWO"), Calls: []pootest.Call{{Name: "echo", Arguments: json.RawMessage(`{"text":"two"}`)}}},
+		pootest.Turn{Text: "## Goal\nfinish the task\n\n## Next Steps\n1. answer"},
+		pootest.Turn{Text: "the final answer"},
+	)
+	tr.SetForkTurns(pootest.Turn{Text: "- the pointers"})
+	s, sink := session(t, tr, mine.Options{Ratio: 0.05, KeepRecentTokens: 1},
+		map[string]poo.Tool{"echo": &echoTool{}, "history": history.New()}, []string{"echo", "history"})
+
+	run(t, s)
+
+	text := replacementText(t, sink)
+	if !strings.Contains(text, "The history tool reads them") {
+		t.Errorf("the pointer does not name the history tool the session offers: %q", text)
 	}
 }

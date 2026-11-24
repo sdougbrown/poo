@@ -190,6 +190,50 @@ func (l *Log) Flush(ctx context.Context) error {
 	return nil
 }
 
+// ReadRecords reads the log's records back, oldest first.
+//
+// The log is flushed first, so a reader sees every record it wrote.
+// The read is the read side of poo.RecordSink: it is how a session's
+// history tool reads what the store retained.
+//
+// The lock covers the sync and the file read; the decode runs outside
+// it, so a reader of a long session does not stall the appends for the
+// whole parse.
+func (l *Log) ReadRecords(ctx context.Context) ([]poo.Record, error) {
+	l.mu.Lock()
+	if err := ctx.Err(); err != nil {
+		l.mu.Unlock()
+		return nil, fmt.Errorf("session: reading: %w", err)
+	}
+	if l.f != nil {
+		if err := l.f.Sync(); err != nil {
+			l.mu.Unlock()
+			return nil, fmt.Errorf("session: syncing %s: %w", l.path, err)
+		}
+	}
+	data, err := os.ReadFile(l.path)
+	l.mu.Unlock()
+	if err != nil {
+		return nil, fmt.Errorf("session: reading %s: %w", l.path, err)
+	}
+	codec := JSONLCodec{}
+	var recs []poo.Record
+	for _, line := range bytesLines(data) {
+		if len(line) == 0 {
+			continue
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("session: reading: %w", err)
+		}
+		rec, err := codec.Decode(line)
+		if err != nil {
+			return nil, fmt.Errorf("session: decoding %s: %w", l.path, err)
+		}
+		recs = append(recs, rec)
+	}
+	return recs, nil
+}
+
 // Sync puts the log's records on disk.
 //
 // The sync is what makes a record durable: the file's contents reach the
