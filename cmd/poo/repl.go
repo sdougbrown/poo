@@ -130,8 +130,8 @@ func (o *replOptions) profileArg(inv clicontract.Invocation, settings *config.Se
 	if o.cont || o.resume != "" {
 		return nil
 	}
-	if settings.Session.ReplProfile != nil && *settings.Session.ReplProfile != "" {
-		return []string{"--profile=" + *settings.Session.ReplProfile}
+	if settings.ReplProfile != nil && *settings.ReplProfile != "" {
+		return []string{"--profile=" + *settings.ReplProfile}
 	}
 	return nil
 }

@@ -559,7 +559,7 @@ func TestTheReplRefusesAnUnknownFlagBeforeTheServerStarts(t *testing.T) {
 }
 
 // TestTheReplNamesTheReplProfileForItsServer covers the repl's own profile
-// word: the settings' session.repl_profile is the profile the repl session
+// word: the settings' repl_profile is the profile the repl session
 // runs, distinct from the settings' profile the spawned children and one-shot
 // runs resolve. The word reaches the server the repl starts in the argv the
 // handoff spells, and it does not reach a line that reopens a logged
@@ -576,8 +576,7 @@ func TestTheReplNamesTheReplProfileForItsServer(t *testing.T) {
 	}
 	const settingsBody = `version: 1
 profile: code
-session:
-  repl_profile: %s
+repl_profile: %s
 endpoints:
   fake:
     endpoint: "http://localhost:9/v1"
@@ -641,7 +640,7 @@ roles:
 		t.Run(tc.name, func(t *testing.T) {
 			body := settingsBody
 			if tc.absent {
-				body = strings.Replace(body, "  repl_profile: %s\n", "", 1)
+				body = strings.Replace(body, "repl_profile: %s\n", "", 1)
 			} else {
 				body = strings.Replace(body, "%s", tc.replProfile, 1)
 			}

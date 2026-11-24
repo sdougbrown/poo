@@ -50,6 +50,16 @@ type Settings struct {
 	// settings file's own directory. A prompt_file inside a file answers
 	// to that file's own directory.
 	ProfilesFiles []string `json:"profiles_files,omitempty"`
+	// ReplProfile is the name of the profile the repl runs under when
+	// its command names none. The key is the repl's own word, not the
+	// session's: run and serve keep the profile the command line or
+	// Profile names, so the conversation the operator opens and the
+	// sessions a consumer drives can follow different profiles. The
+	// word reaches the repl's server only for a conversation the repl
+	// starts: a reopened session runs under the profile its log
+	// records. The name is one the binary links, and the build a
+	// session runs under refuses one it does not.
+	ReplProfile *string `json:"repl_profile,omitempty"`
 	// Permission are the permission policy's settings.
 	Permission Permission `json:"permission,omitempty"`
 	// SystemPrompt are the system prompt's settings.
@@ -642,16 +652,6 @@ type Session struct {
 	// leaves them to the binary's default path, which UserPrompt
 	// reaches.
 	UserPromptFile *string `json:"user_prompt_file,omitempty"`
-	// ReplProfile is the name of the profile the repl runs under when
-	// its command names none. The key is the repl's own word, not the
-	// session's: run and serve keep the profile the command line or
-	// Profile names, so the conversation the operator opens and the
-	// sessions a consumer drives can follow different profiles. The
-	// word reaches the repl's server only for a conversation the repl
-	// starts: a reopened session runs under the profile its log
-	// records. The name is one the binary links, and the build a
-	// session runs under refuses one it does not.
-	ReplProfile *string `json:"repl_profile,omitempty"`
 	// Retention says which sessions a prune deletes.
 	Retention Retention `json:"retention,omitempty"`
 }

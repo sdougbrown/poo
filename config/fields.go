@@ -19,6 +19,7 @@ func fieldsOf(s *Settings) SettingsFields {
 	f.PiAuthFile = text(s.PiAuthFile)
 	f.Profile = text(s.Profile)
 	f.ProfilesFiles = list(s.ProfilesFiles)
+	f.ReplProfile = pointer(s.ReplProfile)
 
 	f.RolesChat = text(s.Roles["chat"])
 	f.RolesDecider = text(s.Roles["decider"])
@@ -112,7 +113,6 @@ func fieldsOf(s *Settings) SettingsFields {
 	f.SessionProjectPrompt = flag(s.Session.ProjectPrompt)
 	f.SessionUserPrompt = flag(s.Session.UserPrompt)
 	f.SessionUserPromptFile = pointer(s.Session.UserPromptFile)
-	f.SessionReplProfile = pointer(s.Session.ReplProfile)
 	f.SessionRetentionMaxAgeDays = count(s.Session.Retention.MaxAgeDays)
 	f.SessionRetentionMaxSessions = count(s.Session.Retention.MaxSessions)
 
