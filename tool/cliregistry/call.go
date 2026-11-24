@@ -68,13 +68,13 @@ func (t *CallTool) Spec() poo.ToolSpec {
 		Schema: json.RawMessage(`{
   "type": "object",
   "properties": {
-    "name": {"type": "string", "description": "The registered tool's name."},
-    "args": {"type": "object", "additionalProperties": true, "description": "The tool's arguments, as its schema describes them."}
+    "command": {"type": "string", "description": "One line of the catalog: the registered command's name."},
+    "args": {"type": "object", "additionalProperties": true, "description": "The command's arguments, as the catalog line describes them."}
   },
-  "required": ["name"]
+  "required": ["command"]
 ,"additionalProperties":false}`),
 		Class:      poo.ClassSideEffecting,
-		PrimaryArg: "name",
+		PrimaryArg: "command",
 		// A registered tool runs where bash runs, so it leaves the turn
 		// the same way. Background true turns the call into a job, and
 		// the result arrives as a message.
@@ -91,24 +91,24 @@ func (t *CallTool) Spec() poo.ToolSpec {
 //go:embed call.md
 var callSectionText string
 
-var callSection = prompt.MustCompile("call_tool", callSectionText, nil)
+var callSection = prompt.MustCompile(CallToolName, callSectionText, nil)
 
 // PromptSection renders the tool's guidance.
 func (t *CallTool) PromptSection(env prompt.Env) string { return callSection.Render(env) }
 
 // callArgs are the tool's arguments.
 type callArgs struct {
-	// Name is the registered tool to run.
-	Name string `json:"name"`
-	// Args are the tool's arguments, as a JSON object.
+	// Command is the registered command to run.
+	Command string `json:"command"`
+	// Args are the command's arguments, as a JSON object.
 	Args json.RawMessage `json:"args,omitempty"`
 }
 
-// preparedCall is a validated call_tool call.
+// preparedCall is a validated call_cli call.
 type preparedCall struct {
-	// name is the registered tool.
-	name string
-	// args are the tool's arguments.
+	// command is the registered command.
+	command string
+	// args are the command's arguments.
 	args map[string]any
 	// plan is the command the call runs.
 	plan *registry.Plan
@@ -118,7 +118,7 @@ type preparedCall struct {
 
 // Summary describes the call for a human reader.
 func (p *preparedCall) Summary() string {
-	return strings.TrimSpace(p.name + " " + string(marshal(p.args)))
+	return strings.TrimSpace(p.command + " " + string(marshal(p.args)))
 }
 
 // CanonicalKey returns the call's prepared input.
@@ -129,8 +129,8 @@ func (p *preparedCall) EvidenceArguments() json.RawMessage { return p.key }
 
 // Prepare validates the arguments and plans the command.
 //
-// The name has to be in the catalog, and the arguments have to fit the
-// tool's schema, including the library's rule about a value a
+// The command has to be in the catalog, and the arguments have to fit the
+// command's schema, including the library's rule about a value a
 // separate-value binding would put where the command parses options.
 // Both are refused here, before a process exists, so a malformed call
 // never reaches a command and the model sees the reason instead of the
@@ -144,35 +144,35 @@ func (t *CallTool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepare
 	if err := decodeStrict(raw, &a); err != nil {
 		return nil, poo.InvalidArgsf("%s: %v", CallToolName, err)
 	}
-	entry, ok := t.catalog.Lookup(a.Name)
+	entry, ok := t.catalog.Lookup(a.Command)
 	if !ok {
 		if t.catalog.Len() == 0 {
 			return nil, poo.InvalidArgsf("%s: no tool is registered", CallToolName)
 		}
 		return nil, poo.InvalidArgsf("%s: no tool named %q; %s",
-			CallToolName, a.Name, t.catalog.NamesHint(t.search))
+			CallToolName, a.Command, t.catalog.NamesHint(t.search))
 	}
 	args := map[string]any{}
 	if len(a.Args) > 0 {
-		// An omitted args is an empty object, because a tool that takes
-		// no arguments is called with the name alone. An explicit null
+		// An omitted args is an empty object, because a command that takes
+		// no arguments is called with the command alone. An explicit null
 		// is not the same thing: the property's type is an object.
 		if string(a.Args) == "null" {
-			return nil, poo.InvalidArgsf("%s: %s: args must be an object, not null", CallToolName, a.Name)
+			return nil, poo.InvalidArgsf("%s: %s: args must be an object, not null", CallToolName, a.Command)
 		}
 		if err := json.Unmarshal(a.Args, &args); err != nil {
-			return nil, poo.InvalidArgsf("%s: %s: args must be an object: %v", CallToolName, a.Name, err)
+			return nil, poo.InvalidArgsf("%s: %s: args must be an object: %v", CallToolName, a.Command, err)
 		}
 	}
-	plan, err := t.catalog.Plan(a.Name, args)
+	plan, err := t.catalog.Plan(a.Command, args)
 	if err != nil {
-		return nil, planError(a.Name, entry.Schema, err)
+		return nil, planError(a.Command, entry.Schema, err)
 	}
 	key := marshal(struct {
-		Name string         `json:"name"`
-		Args map[string]any `json:"args"`
-	}{a.Name, args})
-	return &preparedCall{name: a.Name, args: args, plan: plan, key: key}, nil
+		Command string         `json:"command"`
+		Args    map[string]any `json:"args"`
+	}{a.Command, args})
+	return &preparedCall{command: a.Command, args: args, plan: plan, key: key}, nil
 }
 
 // planError reports a call the tool's own definition refused.
@@ -213,7 +213,7 @@ func (t *CallTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (
 		return poo.ToolResult{}, fmt.Errorf("%s: prepared value is not a %s call", CallToolName, CallToolName)
 	}
 	if p.plan == nil {
-		return poo.ToolResult{}, fmt.Errorf("%s: %s: the call has no plan", CallToolName, p.name)
+		return poo.ToolResult{}, fmt.Errorf("%s: %s: the call has no plan", CallToolName, p.command)
 	}
 
 	// A manifest's env:NAME is resolved against the session's scrubbed
@@ -223,7 +223,7 @@ func (t *CallTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (
 	// call, never when the settings loaded.
 	environ, err := p.plan.ResolveEnvScoped(exec.Lookup(env.Env), exec.SessionScope(env.SessionID))
 	if err != nil {
-		return poo.ToolResult{}, fmt.Errorf("%s: %s: %w", CallToolName, p.name, err)
+		return poo.ToolResult{}, fmt.Errorf("%s: %s: %w", CallToolName, p.command, err)
 	}
 
 	dir := p.plan.Dir
@@ -268,7 +268,7 @@ func (t *CallTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (
 		Stderr: stderr,
 	}, stdout)
 	if err != nil {
-		return poo.ToolResult{}, fmt.Errorf("%s: %s: %w", CallToolName, p.name, err)
+		return poo.ToolResult{}, fmt.Errorf("%s: %s: %w", CallToolName, p.command, err)
 	}
 	code, waitErr := proc.Wait()
 
@@ -296,7 +296,7 @@ func (t *CallTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (
 		return failed(err, cap)
 	}
 	if errors.Is(waitErr, exec.ErrStdinIncomplete) {
-		return poo.ToolResult{}, fmt.Errorf("%s: %s: %w", CallToolName, p.name, exec.ErrStdinIncomplete)
+		return poo.ToolResult{}, fmt.Errorf("%s: %s: %w", CallToolName, p.command, exec.ErrStdinIncomplete)
 	}
 	// A tool whose manifest decodes JSON returns that JSON as the
 	// result: the decoded value is the output, and the bash

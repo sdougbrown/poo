@@ -100,7 +100,7 @@ func TestABashObservationReadsAsItsOutput(t *testing.T) {
 func TestACallCliResultReadsAsItsOutput(t *testing.T) {
 	var out bytes.Buffer
 	r := newRenderer(&out)
-	r.toolResult("call_tool", "ok", aBashObservation(t, map[string]any{
+	r.toolResult("call_cli", "ok", aBashObservation(t, map[string]any{
 		"returncode": 0, "timed_out": false, "output": "listed\n",
 	}), 0)
 

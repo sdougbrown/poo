@@ -305,14 +305,14 @@ func TestAnEmptyDefaultManifestDirectoryIsNoRegistry(t *testing.T) {
 	}
 }
 
-// TestADefaultRegistryWithoutTheCallToolNamesTheSource covers the
+// TestADefaultRegistryWithoutTheCallCLINamesTheSource covers the
 // diagnostic: a default registry naming a tool the binary does not link
 // fails with the default directory as the source, and the remedy named.
-func TestADefaultRegistryWithoutTheCallToolNamesTheSource(t *testing.T) {
+func TestADefaultRegistryWithoutTheCallCLINamesTheSource(t *testing.T) {
 	pooDir := theDefaultsPooDir(t)
 	theDefaultRegistry(t, pooDir)
 	tools := theTools()
-	delete(tools, "call_tool")
+	delete(tools, "call_cli")
 	settings, err := config.Parse([]byte(theModelSettings), config.FormatYAML)
 	if err != nil {
 		t.Fatal(err)
@@ -322,7 +322,7 @@ func TestADefaultRegistryWithoutTheCallToolNamesTheSource(t *testing.T) {
 		DefaultProfile: "code", Tools: tools, Profiles: theProfiles(), Executors: theExecutors(),
 	})
 	if err == nil {
-		t.Fatal("the binary links no call_tool, and the build loaded the default registry anyway")
+		t.Fatal("the binary links no call_cli, and the build loaded the default registry anyway")
 	}
 	if !strings.Contains(err.Error(), "the default cli-registry directory") ||
 		!strings.Contains(err.Error(), "cli_registry.defaults") {
@@ -477,7 +477,7 @@ func TestAListingFollowsTheProfileWord(t *testing.T) {
 		t.Fatal("the listing holds no dumb profile")
 	}
 	for _, tool := range dumb.Tools {
-		if tool.Name == "call_tool" || tool.Name == "find_tool" {
+		if tool.Name == "call_cli" || tool.Name == "find_tool" {
 			t.Errorf("the dumb profile's listing offers %s, and its word turns the registry defaults off", tool.Name)
 		}
 	}
@@ -567,7 +567,7 @@ func TestAListingWarnsPastAVariantsBrokenManifest(t *testing.T) {
 		t.Fatal("the listing holds no eager profile")
 	}
 	for _, tool := range eager.Tools {
-		if tool.Name == "call_tool" || tool.Name == "find_tool" {
+		if tool.Name == "call_cli" || tool.Name == "find_tool" {
 			t.Errorf("the eager profile's listing offers %s, and the manifests its word selects do not load", tool.Name)
 		}
 	}

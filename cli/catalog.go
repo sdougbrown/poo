@@ -26,7 +26,7 @@ import (
 // The names the catalog and its tools answer to.
 const (
 	// CallToolName is the name of the tool that runs a catalog entry.
-	CallToolName = "call_tool"
+	CallToolName = "call_cli"
 	// FindToolName is the name of the tool that searches the catalog.
 	FindToolName = "find_tool"
 	// SectionName is the name of the prompt section that lists the

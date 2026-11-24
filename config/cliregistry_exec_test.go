@@ -53,14 +53,14 @@ func registryFile(t *testing.T, body map[string]any) string {
 	return dir
 }
 
-// callCLI runs the session's call_tool the way the core does.
+// callCLI runs the session's call_cli the way the core does.
 func callCLI(t *testing.T, runtime *config.Runtime) poo.ToolResult {
 	t.Helper()
 	tool, ok := runtime.Options.Tools[cliregistry.CallToolName]
 	if !ok {
 		t.Fatalf("the session offers %v", runtime.Options.ToolOrder)
 	}
-	prepared, err := tool.Prepare(json.RawMessage(`{"name":"probe","args":{}}`), poo.PrepareEnv{
+	prepared, err := tool.Prepare(json.RawMessage(`{"command":"probe","args":{}}`), poo.PrepareEnv{
 		WorkingDir:     runtime.Options.WorkingDir,
 		ProtectedPaths: runtime.Options.ProtectedPaths,
 	})
@@ -120,7 +120,7 @@ cli_registry:
 }
 
 // TestTheSettingsExecutorRunsTheCLI covers the wiring: the executor the
-// settings name is the one call_tool runs through, with the sandbox's
+// settings name is the one call_cli runs through, with the sandbox's
 // options and the protected paths the settings name.
 func TestTheSettingsExecutorRunsTheCLI(t *testing.T) {
 	dir := t.TempDir()
@@ -257,7 +257,7 @@ func preparedProbe(t *testing.T, runtime *config.Runtime, args string) poo.Prepa
 	if !ok {
 		t.Fatalf("the session offers %v", runtime.Options.ToolOrder)
 	}
-	prepared, err := tool.Prepare(json.RawMessage(`{"name":"probe","args":`+args+`}`), poo.PrepareEnv{
+	prepared, err := tool.Prepare(json.RawMessage(`{"command":"probe","args":`+args+`}`), poo.PrepareEnv{
 		WorkingDir:     runtime.Options.WorkingDir,
 		ProtectedPaths: runtime.Options.ProtectedPaths,
 	})

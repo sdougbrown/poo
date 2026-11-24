@@ -54,7 +54,7 @@ func TestARunReapsTheCLIsChildren(t *testing.T) {
 				t.Fatalf("writing the settings: %v", err)
 			}
 
-			call := "data: " + `{"choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"call_tool","arguments":"{\"name\":\"probe\"}"}}]},"finish_reason":"tool_calls"}]}` + "\n\ndata: [DONE]\n\n"
+			call := "data: " + `{"choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"call_cli","arguments":"{\"command\":\"probe\"}"}}]},"finish_reason":"tool_calls"}]}` + "\n\ndata: [DONE]\n\n"
 			answer := "data: " + `{"choices":[{"index":0,"delta":{"role":"assistant","content":"done"},"finish_reason":"stop"}]}` + "\n\ndata: [DONE]\n\n"
 			endpoint := newFakeEndpointSequence(t, []string{call, answer})
 

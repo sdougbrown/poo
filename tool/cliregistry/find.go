@@ -23,7 +23,7 @@ const DefaultTopK = 8
 // hundreds of entries is what the search was there to avoid, and a model
 // told "here is everything" learns nothing about which entry fits. The
 // model is told the search failed and how to go on without it.
-const UnavailableText = "tool search unavailable; call_tool with a known name"
+const UnavailableText = "tool search unavailable; " + CallToolName + " with a known command"
 
 // FindInstructions tell the decision model what the questions are.
 const FindInstructions = "Each question names one registered tool and asks whether that tool fits the intent. " +
@@ -76,7 +76,7 @@ func (t *FindTool) Spec() poo.ToolSpec {
 //go:embed find.md
 var findSectionText string
 
-var findSection = prompt.MustCompile("find_tool", findSectionText, nil)
+var findSection = prompt.MustCompile(FindToolName, findSectionText, nil)
 
 // PromptSection renders the tool's guidance.
 func (t *FindTool) PromptSection(env prompt.Env) string { return findSection.Render(env) }

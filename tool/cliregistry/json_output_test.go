@@ -46,7 +46,7 @@ func jsonTool(t *testing.T, script string) string {
 func TestACallCLIToolReturnsItsDecodedJSON(t *testing.T) {
 	tool := cliregistry.NewCall(load(t, jsonTool(t, `printf '%s' '{"sum":3,"op":"add"}'; cat > /dev/null`)))
 
-	res := call(t, tool, `{"name":"json","args":{"data":{"op":"add","a":1,"b":2}}}`, poo.ToolEnv{})
+	res := call(t, tool, `{"command":"json","args":{"data":{"op":"add","a":1,"b":2}}}`, poo.ToolEnv{})
 	if res.IsError {
 		t.Fatalf("the call is an error: %q", res.Text)
 	}
@@ -67,7 +67,7 @@ func TestACallCLIToolReturnsItsDecodedJSON(t *testing.T) {
 func TestACallCLIToolCarriesStderrOnTheDecodedPath(t *testing.T) {
 	tool := cliregistry.NewCall(load(t, jsonTool(t, `printf 'warning: the cache is cold\n' >&2; printf '%s' '{"sum":3,"op":"add&<>"}'; cat > /dev/null`)))
 
-	res := call(t, tool, `{"name":"json","args":{"data":{"op":"add","a":1,"b":2}}}`, poo.ToolEnv{
+	res := call(t, tool, `{"command":"json","args":{"data":{"op":"add","a":1,"b":2}}}`, poo.ToolEnv{
 		Settings: poo.ToolSettings{ObservationCapChars: 10000},
 	})
 	if res.IsError {
@@ -97,7 +97,7 @@ func TestACallCLIToolCarriesStderrOnTheDecodedPath(t *testing.T) {
 func TestACallCLIToolReportsADecodeFailure(t *testing.T) {
 	tool := cliregistry.NewCall(load(t, jsonTool(t, `echo not-json; cat > /dev/null`)))
 
-	prepared, err := prepare(t, tool, `{"name":"json","args":{"data":{"op":"add"}}}`)
+	prepared, err := prepare(t, tool, `{"command":"json","args":{"data":{"op":"add"}}}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +117,7 @@ func TestACallCLIToolReportsADecodeFailure(t *testing.T) {
 func TestACallCLIToolNullGoesThroughTheEnvelope(t *testing.T) {
 	tool := cliregistry.NewCall(load(t, jsonTool(t, `printf 'null'; cat > /dev/null`)))
 
-	res := call(t, tool, `{"name":"json","args":{"data":{"op":"add"}}}`, poo.ToolEnv{})
+	res := call(t, tool, `{"command":"json","args":{"data":{"op":"add"}}}`, poo.ToolEnv{})
 	if res.IsError {
 		t.Fatalf("the call is an error: %q", res.Text)
 	}
@@ -141,7 +141,7 @@ func TestACallCLIToolOverCapGoesThroughTheEnvelope(t *testing.T) {
 	long := strings.Repeat("a", 200)
 	tool := cliregistry.NewCall(load(t, jsonTool(t, `printf '%s' '{"key":"`+long+`"}'; cat > /dev/null`)))
 
-	res := call(t, tool, `{"name":"json","args":{"data":{"op":"add"}}}`, poo.ToolEnv{
+	res := call(t, tool, `{"command":"json","args":{"data":{"op":"add"}}}`, poo.ToolEnv{
 		Settings: poo.ToolSettings{ObservationCapChars: 40},
 	})
 	if res.IsError {
@@ -175,7 +175,7 @@ func TestACallCLIToolAtCapStaysDecoded(t *testing.T) {
 	val := strings.Repeat("a", 30)
 	tool := cliregistry.NewCall(load(t, jsonTool(t, `printf '%s' '{"key":"`+val+`"}'; cat > /dev/null`)))
 
-	res := call(t, tool, `{"name":"json","args":{"data":{"op":"add"}}}`, poo.ToolEnv{
+	res := call(t, tool, `{"command":"json","args":{"data":{"op":"add"}}}`, poo.ToolEnv{
 		Settings: poo.ToolSettings{ObservationCapChars: 40},
 	})
 	if res.IsError {
@@ -200,7 +200,7 @@ func TestACallCLIToolCapIsCountedInRunes(t *testing.T) {
 	val := strings.Repeat("雪", 13)
 	tool := cliregistry.NewCall(load(t, jsonTool(t, `printf '%s' '{"key":"`+val+`"}'; cat > /dev/null`)))
 
-	res := call(t, tool, `{"name":"json","args":{"data":{"op":"add"}}}`, poo.ToolEnv{
+	res := call(t, tool, `{"command":"json","args":{"data":{"op":"add"}}}`, poo.ToolEnv{
 		Settings: poo.ToolSettings{ObservationCapChars: 40},
 	})
 	if res.IsError {
@@ -222,7 +222,7 @@ func TestACallCLIToolCapIsCountedInRunes(t *testing.T) {
 func TestACallCLIToolSaysSoWhenTheCaptureIsCut(t *testing.T) {
 	tool := cliregistry.NewCall(load(t, jsonTool(t, `head -c 2000000 /dev/zero | tr '\0' a >&2; printf '%s' '{"ok":true}'; cat > /dev/null`)))
 
-	res := call(t, tool, `{"name":"json","args":{"data":{"op":"add"}}}`, poo.ToolEnv{
+	res := call(t, tool, `{"command":"json","args":{"data":{"op":"add"}}}`, poo.ToolEnv{
 		Settings: poo.ToolSettings{ObservationCapChars: poo.NestedOutputCapChars},
 	})
 	if res.IsError {
@@ -243,7 +243,7 @@ func TestACallCLIToolSaysSoWhenTheCaptureIsCut(t *testing.T) {
 func TestACallCLIToolCarriesJSONBoundArgsToTheChild(t *testing.T) {
 	tool := cliregistry.NewCall(load(t, jsonTool(t, `cat`)))
 
-	res := call(t, tool, `{"name":"json","args":{"data":{"op":"echo","msg":"雪","zeta":1,"alpha":2}}}`, poo.ToolEnv{})
+	res := call(t, tool, `{"command":"json","args":{"data":{"op":"echo","msg":"雪","zeta":1,"alpha":2}}}`, poo.ToolEnv{})
 	if res.IsError {
 		t.Fatalf("the call is an error: %q", res.Text)
 	}

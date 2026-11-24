@@ -16,7 +16,7 @@ import (
 //
 // A refused call is the model's to correct, so the text has to name the
 // argument it got wrong and what would have been accepted. The old text
-// was an RFC 6901 pointer and an empty message ("call_tool: deploy:
+// was an RFC 6901 pointer and an empty message ("call_cli: deploy:
 // /mode: "), which told the model nothing.
 
 // deployTool is a manifest body with a schema whose constraints the
@@ -59,7 +59,7 @@ func prepareDeploy(t *testing.T, args string) error {
 // connectivity-test failure: a property the schema does not declare is
 // refused with the names the schema does.
 func TestAnUnknownArgumentNamesItAndTheAcceptedArguments(t *testing.T) {
-	err := prepareDeploy(t, `{"name":"deploy","args":{"env":"staging","mode":"canary"}}`)
+	err := prepareDeploy(t, `{"command":"deploy","args":{"env":"staging","mode":"canary"}}`)
 	for _, want := range []string{`unknown argument "mode"`, "deploy accepts: env*, replicas"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("the refusal does not carry %q: %v", want, err)
@@ -70,7 +70,7 @@ func TestAnUnknownArgumentNamesItAndTheAcceptedArguments(t *testing.T) {
 // list names the arguments, it does not embed enum values — the values
 // belong to the refusal's own clause when the enum is the miss.
 func TestTheRefusalKeepsNamesOnly(t *testing.T) {
-	err := prepareDeploy(t, `{"name":"deploy","args":{"env":"canary","mode":"canary"}}`)
+	err := prepareDeploy(t, `{"command":"deploy","args":{"env":"canary","mode":"canary"}}`)
 	if !strings.Contains(err.Error(), "deploy accepts: env*, replicas") {
 		t.Errorf("the refusal's accepted list changed shape: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestTheRefusalKeepsNamesOnly(t *testing.T) {
 // TestABadTypeNamesTheType covers the type refusal and the article it
 // takes.
 func TestABadTypeNamesTheType(t *testing.T) {
-	err := prepareDeploy(t, `{"name":"deploy","args":{"env":"staging","replicas":"abc"}}`)
+	err := prepareDeploy(t, `{"command":"deploy","args":{"env":"staging","replicas":"abc"}}`)
 	if !strings.Contains(err.Error(), `"replicas" must be an integer`) {
 		t.Errorf("the refusal does not name the type: %v", err)
 	}
@@ -96,7 +96,7 @@ func TestABadConstNamesTheValue(t *testing.T) {
 		map[string]any{"property": "channel", "style": "equals", "flag": "--channel"})
 	path := writeManifest(t, t.TempDir(), "deploy.json", map[string]any{"deploy": tool})
 	tool2 := cliregistry.NewCall(load(t, path))
-	_, err := tool2.Prepare(json.RawMessage(`{"name":"deploy","args":{"env":"staging","channel":"other"}}`), poo.PrepareEnv{})
+	_, err := tool2.Prepare(json.RawMessage(`{"command":"deploy","args":{"env":"staging","channel":"other"}}`), poo.PrepareEnv{})
 	if err == nil {
 		t.Fatal("the off-const value was accepted")
 	}
@@ -107,7 +107,7 @@ func TestABadConstNamesTheValue(t *testing.T) {
 
 // TestAMissingRequiredArgumentIsNamed covers the required refusal.
 func TestAMissingRequiredArgumentIsNamed(t *testing.T) {
-	err := prepareDeploy(t, `{"name":"deploy","args":{"replicas":2}}`)
+	err := prepareDeploy(t, `{"command":"deploy","args":{"replicas":2}}`)
 	if !strings.Contains(err.Error(), `"env" is required`) {
 		t.Errorf("the refusal does not name the required argument: %v", err)
 	}
@@ -116,7 +116,7 @@ func TestAMissingRequiredArgumentIsNamed(t *testing.T) {
 // TestABadEnumNamesTheValues covers the enum refusal the connectivity
 // test's second probe hit: an action the tool does not offer.
 func TestABadEnumNamesTheValues(t *testing.T) {
-	err := prepareDeploy(t, `{"name":"deploy","args":{"env":"canary"}}`)
+	err := prepareDeploy(t, `{"command":"deploy","args":{"env":"canary"}}`)
 	if !strings.Contains(err.Error(), `"env" must be one of: "staging", "production"`) {
 		t.Errorf("the refusal does not name the enum's values: %v", err)
 	}
@@ -155,12 +155,12 @@ func TestABoundArgumentNamesTheBound(t *testing.T) {
 	path := writeManifest(t, t.TempDir(), "tune.json", map[string]any{"tune": tool})
 	tool2 := cliregistry.NewCall(load(t, path))
 	for _, tc := range []struct{ args, want string }{
-		{`{"name":"tune","args":{"env":"staging","rate":0}}`, `"rate" must be greater than 0`},
-		{`{"name":"tune","args":{"env":"staging","load":100}}`, `"load" must be less than 100`},
-		{`{"name":"tune","args":{"env":"staging","name":"a"}}`, `"name" is shorter than the minimum length of 2`},
-		{`{"name":"tune","args":{"env":"staging","note":"toolong"}}`, `"note" is longer than the maximum length of 5`},
-		{`{"name":"tune","args":{"env":"staging","tags":[]}}`, `"tags" has fewer than 1 items`},
-		{`{"name":"tune","args":{"env":"staging","ids":["a","b","c","d"]}}`, `"ids" has more than 3 items`},
+		{`{"command":"tune","args":{"env":"staging","rate":0}}`, `"rate" must be greater than 0`},
+		{`{"command":"tune","args":{"env":"staging","load":100}}`, `"load" must be less than 100`},
+		{`{"command":"tune","args":{"env":"staging","name":"a"}}`, `"name" is shorter than the minimum length of 2`},
+		{`{"command":"tune","args":{"env":"staging","note":"toolong"}}`, `"note" is longer than the maximum length of 5`},
+		{`{"command":"tune","args":{"env":"staging","tags":[]}}`, `"tags" has fewer than 1 items`},
+		{`{"command":"tune","args":{"env":"staging","ids":["a","b","c","d"]}}`, `"ids" has more than 3 items`},
 	} {
 		_, err := tool2.Prepare(json.RawMessage(tc.args), poo.PrepareEnv{})
 		if err == nil {
@@ -173,8 +173,8 @@ func TestABoundArgumentNamesTheBound(t *testing.T) {
 	}
 	// The minimum and maximum refusals keep their own names.
 	for _, tc := range []struct{ args, want string }{
-		{`{"name":"deploy","args":{"env":"staging","replicas":0}}`, `"replicas" is below the minimum of 1`},
-		{`{"name":"deploy","args":{"env":"staging","replicas":11}}`, `"replicas" is above the maximum of 10`},
+		{`{"command":"deploy","args":{"env":"staging","replicas":0}}`, `"replicas" is below the minimum of 1`},
+		{`{"command":"deploy","args":{"env":"staging","replicas":11}}`, `"replicas" is above the maximum of 10`},
 	} {
 		err := prepareDeploy(t, tc.args)
 		if !strings.Contains(err.Error(), tc.want) {
@@ -188,7 +188,7 @@ func TestABoundArgumentNamesTheBound(t *testing.T) {
 // check must not trim, because trimming is what hides the trailing
 // space the old renderer left behind.
 func TestTheRefusalNeverEndsInAnEmptyMessage(t *testing.T) {
-	err := prepareDeploy(t, `{"name":"deploy","args":{"mode":"canary"}}`)
+	err := prepareDeploy(t, `{"command":"deploy","args":{"mode":"canary"}}`)
 	if strings.HasSuffix(err.Error(), ": ") {
 		t.Errorf("the refusal ends in an empty message: %q", err.Error())
 	}
@@ -221,7 +221,7 @@ func TestABadDiscriminatorNamesTheBranchValues(t *testing.T) {
 	}
 	path := writeManifest(t, t.TempDir(), "send.json", map[string]any{"send": tool})
 	tool2 := cliregistry.NewCall(load(t, path))
-	_, err := tool2.Prepare(json.RawMessage(`{"name":"send","args":{"kind":"video"}}`), poo.PrepareEnv{})
+	_, err := tool2.Prepare(json.RawMessage(`{"command":"send","args":{"kind":"video"}}`), poo.PrepareEnv{})
 	if err == nil {
 		t.Fatal("the unmatched discriminator was accepted")
 	}
@@ -256,7 +256,7 @@ func TestANonObjectAgainstATaggedOneOfNamesTheType(t *testing.T) {
 	}
 	path := writeManifest(t, t.TempDir(), "ship.json", map[string]any{"ship": tool})
 	tool2 := cliregistry.NewCall(load(t, path))
-	_, err := tool2.Prepare(json.RawMessage(`{"name":"ship","args":{"build":7}}`), poo.PrepareEnv{})
+	_, err := tool2.Prepare(json.RawMessage(`{"command":"ship","args":{"build":7}}`), poo.PrepareEnv{})
 	if err == nil {
 		t.Fatal("the non-object value was accepted")
 	}
@@ -299,7 +299,7 @@ func TestATypelessOneOfNamesTheType(t *testing.T) {
 	}
 	path := writeManifest(t, t.TempDir(), "send.json", map[string]any{"send": tool})
 	tool2 := cliregistry.NewCall(load(t, path))
-	_, err := tool2.Prepare(json.RawMessage(`{"name":"send","args":{"build":7}}`), poo.PrepareEnv{})
+	_, err := tool2.Prepare(json.RawMessage(`{"command":"send","args":{"build":7}}`), poo.PrepareEnv{})
 	if err == nil {
 		t.Fatal("the non-object value was accepted")
 	}
@@ -344,7 +344,7 @@ func TestATypeSiblingBesideAOneOfRendersTheObjectSemantics(t *testing.T) {
 	}
 	path := writeManifest(t, t.TempDir(), "send.json", map[string]any{"send": tool})
 	tool2 := cliregistry.NewCall(load(t, path))
-	_, err := tool2.Prepare(json.RawMessage(`{"name":"send","args":{"build":7}}`), poo.PrepareEnv{})
+	_, err := tool2.Prepare(json.RawMessage(`{"command":"send","args":{"build":7}}`), poo.PrepareEnv{})
 	if err == nil {
 		t.Fatal("the non-object value was accepted")
 	}
@@ -380,7 +380,7 @@ func TestARefPropertyRendersThroughTheDefinition(t *testing.T) {
 	}
 	path := writeManifest(t, t.TempDir(), "label.json", map[string]any{"label": tool})
 	tool2 := cliregistry.NewCall(load(t, path))
-	_, err := tool2.Prepare(json.RawMessage(`{"name":"label","args":{"color":"blue"}}`), poo.PrepareEnv{})
+	_, err := tool2.Prepare(json.RawMessage(`{"command":"label","args":{"color":"blue"}}`), poo.PrepareEnv{})
 	if err == nil {
 		t.Fatal("the off-enum value was accepted")
 	}
@@ -414,7 +414,7 @@ func TestATwoHopReferenceDegradesToThePath(t *testing.T) {
 	}
 	path := writeManifest(t, t.TempDir(), "label.json", map[string]any{"label": tool})
 	tool2 := cliregistry.NewCall(load(t, path))
-	_, err := tool2.Prepare(json.RawMessage(`{"name":"label","args":{"color":"blue"}}`), poo.PrepareEnv{})
+	_, err := tool2.Prepare(json.RawMessage(`{"command":"label","args":{"color":"blue"}}`), poo.PrepareEnv{})
 	if err == nil {
 		t.Fatal("the off-enum value was accepted")
 	}
@@ -453,7 +453,7 @@ func TestANestedUnknownArgumentScopesTheParent(t *testing.T) {
 	}
 	path := writeManifest(t, t.TempDir(), "ship.json", map[string]any{"ship": tool})
 	tool2 := cliregistry.NewCall(load(t, path))
-	_, err := tool2.Prepare(json.RawMessage(`{"name":"ship","args":{"build":{"targit":"x"}}}`), poo.PrepareEnv{})
+	_, err := tool2.Prepare(json.RawMessage(`{"command":"ship","args":{"build":{"targit":"x"}}}`), poo.PrepareEnv{})
 	if err == nil {
 		t.Fatal("the nested unknown argument was accepted")
 	}
@@ -487,7 +487,7 @@ func TestAnArrayItemConstraintNamesTheItem(t *testing.T) {
 	}
 	path := writeManifest(t, t.TempDir(), "tag.json", map[string]any{"tag": tool})
 	tool2 := cliregistry.NewCall(load(t, path))
-	_, err := tool2.Prepare(json.RawMessage(`{"name":"tag","args":{"tags":["red","blue"]}}`), poo.PrepareEnv{})
+	_, err := tool2.Prepare(json.RawMessage(`{"command":"tag","args":{"tags":["red","blue"]}}`), poo.PrepareEnv{})
 	if err == nil {
 		t.Fatal("the off-enum item was accepted")
 	}
@@ -579,7 +579,7 @@ func TestTheAcceptedArgumentsListKeepsNameOrder(t *testing.T) {
 	}
 	path := writeManifest(t, t.TempDir(), "order.json", map[string]any{"order": tool})
 	tool2 := cliregistry.NewCall(load(t, path))
-	_, err := tool2.Prepare(json.RawMessage(`{"name":"order","args":{"zzz":1}}`), poo.PrepareEnv{})
+	_, err := tool2.Prepare(json.RawMessage(`{"command":"order","args":{"zzz":1}}`), poo.PrepareEnv{})
 	if err == nil {
 		t.Fatal("the unknown argument was accepted")
 	}

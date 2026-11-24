@@ -63,7 +63,7 @@ func TestCallRunsTheCLI(t *testing.T) {
 	catalog := fixtureCatalog(t)
 	tool := cliregistry.NewCall(catalog)
 
-	res := call(t, tool, `{"name":"say","args":{"name":"ada"}}`, poo.ToolEnv{
+	res := call(t, tool, `{"command":"say","args":{"name":"ada"}}`, poo.ToolEnv{
 		Settings: poo.ToolSettings{ObservationCapChars: bash.ObservationCapMax},
 	})
 	if res.IsError {
@@ -79,7 +79,7 @@ func TestCallRunsTheCLI(t *testing.T) {
 	}
 
 	// The array argument becomes the command's positional arguments.
-	res = call(t, tool, `{"name":"list","args":{"words":["one","two"]}}`, poo.ToolEnv{})
+	res = call(t, tool, `{"command":"list","args":{"words":["one","two"]}}`, poo.ToolEnv{})
 	obs = observation(t, res)
 	output, _ = obs[bash.EnvelopeOutput].(string)
 	if output != "one\ntwo\n" {
@@ -88,7 +88,7 @@ func TestCallRunsTheCLI(t *testing.T) {
 
 	// A tool that takes no arguments is called without the args
 	// property: an omitted args is an empty object.
-	res = call(t, tool, `{"name":"list"}`, poo.ToolEnv{})
+	res = call(t, tool, `{"command":"list"}`, poo.ToolEnv{})
 	if res.IsError {
 		t.Errorf("a call with no args is an error: %q", res.Text)
 	}
@@ -100,7 +100,7 @@ func TestCallRunsTheCLI(t *testing.T) {
 func TestAKilledCLIReportsNoReturncode(t *testing.T) {
 	tool := cliregistry.NewCall(load(t, suicideManifest(t)))
 
-	res := call(t, tool, `{"name":"suicide","args":{}}`, poo.ToolEnv{})
+	res := call(t, tool, `{"command":"suicide","args":{}}`, poo.ToolEnv{})
 	if !res.IsError {
 		t.Errorf("a tool that died by a signal is not an error: %q", res.Text)
 	}
@@ -136,7 +136,7 @@ func TestCallReportsAFailedExit(t *testing.T) {
 	catalog := fixtureCatalog(t)
 	tool := cliregistry.NewCall(catalog)
 
-	res := call(t, tool, `{"name":"say","args":{"name":"nobody"}}`, poo.ToolEnv{})
+	res := call(t, tool, `{"command":"say","args":{"name":"nobody"}}`, poo.ToolEnv{})
 	if !res.IsError {
 		t.Error("a call that exited 3 is not an error")
 	}
@@ -162,7 +162,7 @@ func TestPrepareRefusesBadArgumentsBeforeAnyProcess(t *testing.T) {
 	t.Setenv(markerEnv, marker)
 
 	// The record works: a call that prepares and runs wrote to it.
-	call(t, tool, `{"name":"say","args":{}}`, poo.ToolEnv{})
+	call(t, tool, `{"command":"say","args":{}}`, poo.ToolEnv{})
 	if got := markerLines(t, marker); got != 1 {
 		t.Fatalf("the fixture ran %d times, want 1", got)
 	}
@@ -171,13 +171,13 @@ func TestPrepareRefusesBadArgumentsBeforeAnyProcess(t *testing.T) {
 		name string
 		args string
 	}{
-		{"an unknown name", `{"name":"nope","args":{}}`},
+		{"an unknown name", `{"command":"nope","args":{}}`},
 		{"a missing name", `{"args":{}}`},
-		{"an argument of the wrong type", `{"name":"say","args":{"name":5}}`},
-		{"an argument the schema does not have", `{"name":"say","args":{"colour":"red"}}`},
-		{"args that are not an object", `{"name":"say","args":["ada"]}`},
-		{"an explicit null", `{"name":"say","args":null}`},
-		{"a malformed call", `{"name":"say"} {}`},
+		{"an argument of the wrong type", `{"command":"say","args":{"command":5}}`},
+		{"an argument the schema does not have", `{"command":"say","args":{"colour":"red"}}`},
+		{"args that are not an object", `{"command":"say","args":["ada"]}`},
+		{"an explicit null", `{"command":"say","args":null}`},
+		{"a malformed call", `{"command":"say"} {}`},
 	}
 	for _, c := range bad {
 		prepared, err := prepare(t, tool, c.args)
@@ -199,7 +199,7 @@ func TestPrepareRefusesBadArgumentsBeforeAnyProcess(t *testing.T) {
 func TestTheObservationIsElided(t *testing.T) {
 	tool := cliregistry.NewCall(load(t, floodManifest(t)))
 
-	res := call(t, tool, `{"name":"flood","args":{}}`, poo.ToolEnv{
+	res := call(t, tool, `{"command":"flood","args":{}}`, poo.ToolEnv{
 		Settings: poo.ToolSettings{ObservationCapChars: 40},
 	})
 	obs := observation(t, res)
