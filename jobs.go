@@ -1633,6 +1633,12 @@ func (s *Session) deliverTrackedJobResult(run *runState, item jobQueueItem) bool
 		return false
 	}
 	s.mu.Unlock()
+	if result.fault != nil {
+		// The report re-renders at the delivery: a fault that folded in
+		// after the acceptance counts in what the model reads, while the
+		// record keeps the text the acceptance knew.
+		result.text = result.fault.render()
+	}
 
 	msg := NewTextMessage(RoleUser, jobResultText(result))
 	msg.Data = cloneRaw(result.data)
@@ -1839,6 +1845,7 @@ func publicJobResults(results []jobResult) []JobResult {
 // interrupted or fails to write leaves the results queued, in order. A
 // held result waits for the next client prompt, so it is skipped here.
 func (s *Session) drainJobQueue(run *runState) bool {
+	s.raceHook("drain")
 	delivered := false
 	for {
 		s.mu.Lock()

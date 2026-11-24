@@ -39,6 +39,9 @@ type JobRaceHooks struct {
 	// BeforeRunStart is called after a run has taken the session's
 	// reservation and before the run is installed.
 	BeforeRunStart func()
+	// BeforeDrain is called at a turn's end, before the queued results
+	// are delivered to the open run.
+	BeforeDrain func()
 }
 
 // WaitForResult blocks until a job result is queued, and reports that
@@ -96,6 +99,10 @@ func (s *Session) raceHook(name string) {
 	case "start":
 		if hooks.BeforeRunStart != nil {
 			hooks.BeforeRunStart()
+		}
+	case "drain":
+		if hooks.BeforeDrain != nil {
+			hooks.BeforeDrain()
 		}
 	}
 }
