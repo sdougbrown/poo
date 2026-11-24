@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/config"
@@ -229,12 +229,18 @@ func subscribeResults(sink *pootest.Sink) []*poo.ToolResultRecord {
 // for when the messages are what it asserts about.
 func waitForQueued(t *testing.T, sink *pootest.Sink, want int) []string {
 	t.Helper()
-	var got []string
-	waitUntil(t, fmt.Sprintf("the feed to queue %d messages", want), func() bool {
-		got = queuedFeedTexts(sink)
-		return len(got) == want
-	})
-	return got
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := sink.WaitRecords(ctx, "input.queued", want); err != nil {
+		have := 0
+		for _, rec := range sink.Records() {
+			if _, ok := rec.(*poo.InputQueuedRecord); ok {
+				have++
+			}
+		}
+		t.Fatalf("timed out waiting for the feed to queue %d messages (the sink holds %d)", want, have)
+	}
+	return queuedFeedTexts(sink)
 }
 
 // The questions the prompt tests put to the decider.
