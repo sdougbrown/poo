@@ -141,7 +141,7 @@ func (p *promptScript) Stream(ctx context.Context, req poo.ChatRequest) (poo.Str
 }
 
 // Fork refuses: the prompt tests never compact.
-func (p *promptScript) Fork(context.Context, poo.Rendered, []poo.Message, int) (poo.StreamReader, error) {
+func (p *promptScript) Fork(context.Context, poo.Rendered, []poo.Message, int, poo.ForkOptions) (poo.StreamReader, error) {
 	return nil, errNoFork
 }
 
