@@ -39,8 +39,9 @@ type JobRaceHooks struct {
 	// BeforeRunStart is called after a run has taken the session's
 	// reservation and before the run is installed.
 	BeforeRunStart func()
-	// AfterFaultFold is called after a fault joined a queued report,
-	// while the report still waits for its delivery.
+	// AfterFaultFold is called after a fault joined an existing report —
+	// one the queue holds, one the delivery holds in flight, or one
+	// still reserved — before that report is delivered.
 	AfterFaultFold func()
 }
 

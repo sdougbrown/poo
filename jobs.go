@@ -1632,13 +1632,13 @@ func (s *Session) deliverTrackedJobResult(run *runState, item jobQueueItem) bool
 		s.mu.Unlock()
 		return false
 	}
-	s.mu.Unlock()
 	if result.fault != nil {
-		// The report re-renders at the delivery: a fault that folded in
+		// The report re-renders under the lock: a fault that folded in
 		// after the acceptance counts in what the model reads, while the
 		// record keeps the text the acceptance knew.
 		result.text = result.fault.render()
 	}
+	s.mu.Unlock()
 
 	msg := NewTextMessage(RoleUser, jobResultText(result))
 	msg.Data = cloneRaw(result.data)
