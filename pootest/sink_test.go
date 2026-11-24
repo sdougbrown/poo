@@ -71,6 +71,36 @@ func TestTheSinkTakesTheFailureError(t *testing.T) {
 	}
 }
 
+// TestTheSinkWaitsOnTheRecordCount covers the record wait: a count the
+// sink already holds returns at once, the append that reaches the
+// count ends the wait, and a cancel ends it with the context's error.
+func TestTheSinkWaitsOnTheRecordCount(t *testing.T) {
+	sink := pootest.NewSink()
+	ctx := context.Background()
+
+	if err := sink.Append(ctx, &poo.RunStartedRecord{RecordMeta: poo.NewRecordMeta("run.started")}); err != nil {
+		t.Fatalf("appending: %v", err)
+	}
+	if err := sink.WaitRecords(ctx, "run.started", 1); err != nil {
+		t.Fatalf("the wait for a count the sink already holds returned %v", err)
+	}
+
+	go func() {
+		_ = sink.Append(ctx, &poo.RunSettledRecord{RecordMeta: poo.NewRecordMeta("run.settled")})
+	}()
+	if err := sink.WaitRecords(ctx, "run.settled", 1); err != nil {
+		t.Fatalf("the wait for the appended record returned %v", err)
+	}
+
+	cancelCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go cancel()
+	err := sink.WaitRecords(cancelCtx, "run.settled", 2)
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("the cancelled wait returned %v, want the context's error", err)
+	}
+}
+
 // TestTheSinkSerializesConcurrentAppends covers the sink's concurrency
 // contract: many writers, and no record lost or interleaved.
 func TestTheSinkSerializesConcurrentAppends(t *testing.T) {
