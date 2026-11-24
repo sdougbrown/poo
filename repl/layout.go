@@ -196,6 +196,11 @@ func (l *layout) write(s string) {
 		l.emit(terminalLF(s))
 		return
 	}
+	if _, _, changed := l.sizeChangedLocked(); changed {
+		// The text is already in l.transcript; defer painting until
+		// layout.resize rebuilds the viewport at the settled width.
+		return
+	}
 	rows := textRows(s, l.width)
 	if len(rows) == 0 {
 		return
@@ -429,13 +434,23 @@ func (l *layout) commitPreview(body string) {
 // width. On a narrower pane the rule wraps and scrolls the region, and
 // a repainted preview stacks a mangled copy of itself. The resize that
 // follows rebuilds the screen at the new size.
+// sizeChangedLocked reports whether the terminal's live size differs from
+// the dimensions this layout last rebuilt at.
+func (l *layout) sizeChangedLocked() (int, int, bool) {
+	w, h, ok := l.size()
+	if !ok || (w == l.width && h == l.height) {
+		return 0, 0, false
+	}
+	return w, h, true
+}
+
 func (l *layout) prepare(footer int) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if !l.active {
 		return
 	}
-	if w, h, ok := l.size(); ok && (w != l.width || h != l.height) {
+	if _, h, changed := l.sizeChangedLocked(); changed {
 		l.chromeStale = true
 		l.emit(fmt.Sprintf("\x1b[%d;1H", min(l.footerTop(), h)))
 		return
@@ -455,6 +470,10 @@ func (l *layout) setStatus(s string) {
 	}
 	l.status = s
 	if !l.active {
+		return
+	}
+	if _, _, changed := l.sizeChangedLocked(); changed {
+		l.chromeStale = true
 		return
 	}
 	var b strings.Builder

@@ -598,6 +598,13 @@ func TestAFrameDuringAResizePaintsNothingAtTheOldWidth(t *testing.T) {
 			t.Fatalf("frame %d painted %q, want only the cursor anchored inside the live screen", frame, painted)
 		}
 	}
+	// A transcript write or status update landing before the resize
+	// records its state without painting old-width rows to the terminal.
+	l.write("arrived during resize\n")
+	l.setStatus("status during resize")
+	if painted := rec.take(); painted != "" {
+		t.Fatalf("write/status painted %q during resize mismatch, want nothing", painted)
+	}
 	shown := trimScreen(vt.String())
 	for _, row := range previewRows(3) {
 		if n := strings.Count(shown, row); n != 1 {
@@ -610,8 +617,11 @@ func TestAFrameDuringAResizePaintsNothingAtTheOldWidth(t *testing.T) {
 	// width.
 	l.resize(24, 8, 2, "", previewRows(3))
 	shown = trimScreen(vt.String())
-	if !strings.Contains(shown, "committed row") {
-		t.Fatalf("the resize lost the transcript:\n%s", shown)
+	if !strings.Contains(shown, "arrived during resize") {
+		t.Fatalf("the resize lost the write buffered during resize:\n%s", shown)
+	}
+	if !strings.Contains(shown, "status during resize") {
+		t.Fatalf("the resize lost the status updated during resize:\n%s", shown)
 	}
 	for _, row := range previewRows(3) {
 		if n := strings.Count(shown, row); n != 1 {

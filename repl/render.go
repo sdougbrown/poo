@@ -334,11 +334,7 @@ func (r *renderer) hint() {
 // It paints nothing without a hint or after a width change; the old row
 // wraps until the resize rebuilds the screen.
 func (r *renderer) paintHintFrame() {
-	if !r.streams() || !r.block.hint || r.block.stalled {
-		return
-	}
-	if r.stalledNow() {
-		r.block.stalled = true
+	if !r.streams() || !r.block.hint || r.stallIfResized() {
 		return
 	}
 	r.block.hintFrame = (r.block.hintFrame + 1) % len(brailleFrames)
@@ -406,10 +402,7 @@ func (r *renderer) streamDelta(id, kind, text string) {
 		r.takeHint()
 		r.block.started = true
 	}
-	if !r.block.stalled && r.stalledNow() {
-		r.block.stalled = true
-	}
-	if r.block.stalled {
+	if r.stallIfResized() {
 		r.bufferDelta(kind, clean)
 		return
 	}
@@ -431,11 +424,7 @@ func (r *renderer) streamDelta(id, kind, text string) {
 // paintPending paints the source a delta left dirty, once. The run loop
 // calls it on its frame, and the flush calls it before it seals.
 func (r *renderer) paintPending() {
-	if !r.streams() || r.block.stalled || !r.live.dirty {
-		return
-	}
-	if r.stalledNow() {
-		r.block.stalled = true
+	if !r.streams() || !r.live.dirty || r.stallIfResized() {
 		return
 	}
 	r.paintStream()
@@ -492,6 +481,20 @@ func (r *renderer) stalledNow() bool {
 	}
 	r.setWidth(width)
 	return true
+}
+
+// stallIfResized reports whether live paints are paused for a pending
+// resize, checking the terminal's current width and latching the stall
+// when it moved.
+func (r *renderer) stallIfResized() bool {
+	if r.block.stalled {
+		return true
+	}
+	if r.stalledNow() {
+		r.block.stalled = true
+		return true
+	}
+	return false
 }
 
 // stallForResize pauses live row paints until the screen rebuilds at
@@ -950,11 +953,7 @@ func (r *renderer) takeSpinner() {
 // resize.
 func (r *renderer) paintSpinner() {
 	s := r.block.spinner
-	if s == nil || !r.streams() || r.block.stalled || r.block.started || r.live.kind != "" {
-		return
-	}
-	if r.stalledNow() {
-		r.block.stalled = true
+	if s == nil || !r.streams() || r.block.started || r.live.kind != "" || r.stallIfResized() {
 		return
 	}
 	elapsed := time.Since(s.started)

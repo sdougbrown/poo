@@ -1051,6 +1051,7 @@ func TestAResizeBurstDuringAThoughtKeepsTheStreamWhole(t *testing.T) {
 	}
 	term, code := startTerminalRepl(t, server)
 	waitBottom(t, term)
+	afterStartup := len(term.String())
 	// The echo of the submitted line scrolls away as the thought paints,
 	// so the thought's own first row is what says the line was taken.
 	term.press("think hard\r")
@@ -1071,13 +1072,9 @@ func TestAResizeBurstDuringAThoughtKeepsTheStreamWhole(t *testing.T) {
 	waitScreen(t, term, "✓ end_turn")
 	waitBottomRows(t, term, 20)
 
-	// None of the resize reached the prompt: a palette query's reply
-	// used to land there and drive the editor.
-	if screen := term.screen(); strings.Contains(screen, "rgb:") || strings.Contains(screen, "11;") {
-		t.Errorf("a resize's query reply reached the screen:\n%s", screen)
-	}
-	if raw := term.String(); strings.Contains(raw, "11;rgb:") {
-		t.Errorf("a resize asked the terminal for its palette:\n%q", raw)
+	// No resize re-queried the terminal palette or cursor position after startup.
+	if after := term.String()[afterStartup:]; strings.Contains(after, "\x1b]11;") || strings.Contains(after, "\x1b[6n") {
+		t.Errorf("a resize queried the terminal after startup:\n%q", after)
 	}
 	// The thought reads whole and once: every word stands a single time,
 	// in the order it arrived.
