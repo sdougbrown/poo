@@ -68,10 +68,6 @@ const (
 	// limit, and a pass the limit cuts short is wasted: the pointers it
 	// would have named are what steers the reconstruction.
 	DefaultPointerMaxTokens = 16384
-
-	// markerVerb is what the replacement's marker line says the turns
-	// were replaced with.
-	markerVerb = "reconstructed"
 )
 
 // Options configure the strategy.
@@ -131,7 +127,7 @@ func New(opts Options) *Compactor {
 	if c.files == nil {
 		c.files = cut.DefaultFileOp
 	}
-	c.trigger = cut.Trigger{Ratio: c.ratio, KeepRecent: c.keepRecent, MaxTokens: c.maxTokens, ForkNeed: c.pointerMaxTokens, Files: c.files, Marker: markerVerb, Retention: true}
+	c.trigger = cut.Trigger{Ratio: c.ratio, KeepRecent: c.keepRecent, MaxTokens: c.maxTokens, ForkNeed: c.pointerMaxTokens, Files: c.files, Marker: "reconstructed", Retention: true}
 	return c
 }
 
@@ -227,11 +223,13 @@ func (c *Compactor) Compact(ctx context.Context, in poo.CompactionEnv) (poo.Comp
 	if text == "" {
 		return poo.Compaction{}, errors.New("mine: the model wrote no reconstruction")
 	}
-	replacement := cut.Marker(r, markerVerb) + "\n\n" + text
+	replacement := cut.Marker(r, c.trigger.Marker) + "\n\n" + text
 	if files := cut.FileList(c.files, covered); files != "" {
 		replacement += "\n\n" + files
 	}
-	replacement += "\n\n" + cut.Retention(r.Cut, in.SessionID, in.HistoryTool)
+	if c.trigger.Retention {
+		replacement += "\n\n" + cut.Retention(r.Cut, in.SessionID, in.HistoryTool)
+	}
 	return poo.Compaction{
 		Strategy: Strategy,
 		Replace: &poo.RangeReplacement{

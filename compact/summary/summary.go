@@ -46,10 +46,6 @@ const (
 
 	// DefaultMaxTokens is the output limit of the summarization request.
 	DefaultMaxTokens = 4096
-
-	// markerVerb is what the replacement's marker line says the turns
-	// were replaced with.
-	markerVerb = "summarized"
 )
 
 // Options configure the strategy.
@@ -103,7 +99,7 @@ func New(opts Options) *Compactor {
 	// The summary makes no fork, so the fork's own need is zero and the
 	// run's output limit is the whole need. The replacement carries no
 	// retention pointer: the summary itself is the checkpoint.
-	c.trigger = cut.Trigger{Ratio: c.ratio, KeepRecent: c.keepRecent, MaxTokens: c.maxTokens, Files: c.files, Marker: markerVerb}
+	c.trigger = cut.Trigger{Ratio: c.ratio, KeepRecent: c.keepRecent, MaxTokens: c.maxTokens, Files: c.files, Marker: "summarized"}
 	return c
 }
 
@@ -174,7 +170,7 @@ func (c *Compactor) Compact(ctx context.Context, in poo.CompactionEnv) (poo.Comp
 	if text == "" {
 		return poo.Compaction{}, errors.New("summary: the model wrote no summary")
 	}
-	replacement := cut.Marker(r, markerVerb) + "\n\n" + text
+	replacement := cut.Marker(r, c.trigger.Marker) + "\n\n" + text
 	if files := cut.FileList(c.files, covered); files != "" {
 		replacement += "\n\n" + files
 	}
