@@ -7,6 +7,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/pootest"
@@ -127,6 +128,46 @@ func TestTheScriptedTransportRecordsTheRequests(t *testing.T) {
 	}
 	if requests[0].MaxTokens != 512 {
 		t.Errorf("the request's ceiling is %d, want 512", requests[0].MaxTokens)
+	}
+}
+
+// TestTheTransportWaitsOnTheRequestCount covers the request wait: a
+// count the transport already holds returns at once, the request that
+// reaches the count ends the wait, and a cancel ends it with the
+// context's error.
+func TestTheTransportWaitsOnTheRequestCount(t *testing.T) {
+	tr := pootest.NewTransport(pootest.Turn{Text: "ok"})
+	ctx := context.Background()
+
+	if _, _, err := tr.Stream(ctx, poo.ChatRequest{Model: "m"}); err != nil {
+		t.Fatalf("starting the request: %v", err)
+	}
+	if err := tr.WaitRequests(ctx, 1); err != nil {
+		t.Fatalf("the wait for a count the transport already holds returned %v", err)
+	}
+
+	gate := make(chan struct{})
+	go func() {
+		<-gate
+		_, _, _ = tr.Stream(ctx, poo.ChatRequest{Model: "m"})
+	}()
+	waitCtx, waitCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer waitCancel()
+	waitDone := make(chan error, 1)
+	go func() {
+		waitDone <- tr.WaitRequests(waitCtx, 2)
+	}()
+	close(gate)
+	if err := <-waitDone; err != nil {
+		t.Fatalf("the wait for the appended request returned %v", err)
+	}
+
+	cancelCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go cancel()
+	err := tr.WaitRequests(cancelCtx, 3)
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("the cancelled wait returned %v, want the context's error", err)
 	}
 }
 
