@@ -282,6 +282,12 @@ func TestTheReplRefusesTwoWaysToReopenAtOnce(t *testing.T) {
 			want:     "no_such_key",
 			settings: broken,
 		},
+		{
+			name:     "continue and resume beats settings that will not load",
+			args:     []string{"repl", "--continue", "--resume", "s1"},
+			want:     "alternatives",
+			settings: broken,
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

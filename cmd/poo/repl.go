@@ -49,6 +49,13 @@ func handleRepl(inv clicontract.Invocation, stdout, stderr io.Writer) exit {
 	if !o.validate("poo repl", stderr) {
 		return exit{usageExitCode}
 	}
+	// The conflict is a refusal about the line itself, so it comes
+	// before the settings resolve: the front door refuses the same way,
+	// and a settings error would hide the conflict.
+	if o.cont && o.resume != "" {
+		fmt.Fprintf(stderr, "poo repl: %v\n", errContinueResume)
+		return exit{usageExitCode}
+	}
 
 	workingDir, err := workingDirectory(o.workingDir)
 	if err != nil {
@@ -89,9 +96,9 @@ func handleRepl(inv clicontract.Invocation, stdout, stderr io.Writer) exit {
 	})}
 }
 
-// errContinueResume is the refusal both doors share: the front door
-// checks it before the settings resolve, and the repl checks it before
-// the store opens.
+// errContinueResume is the refusal both doors share: each checks it
+// before its settings resolve, so a line that names both flags is
+// refused for the flags, whatever shape its settings are in.
 var errContinueResume = errors.New("--continue and --resume are alternatives: give one")
 
 // profileArg returns the --profile words the repl spells for the serve
