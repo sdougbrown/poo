@@ -84,6 +84,8 @@ type Compactor struct {
 	maxTokens int
 	// files reports the file a tool call names.
 	files FileOp
+	// trigger is the reconstruction trigger the block strategies share.
+	trigger cut.Trigger
 }
 
 // New returns the summary strategy.
@@ -98,6 +100,10 @@ func New(opts Options) *Compactor {
 	if c.files == nil {
 		c.files = cut.DefaultFileOp
 	}
+	// The summary makes no fork, so the fork's own need is zero and the
+	// run's output limit is the whole need. The replacement carries no
+	// retention pointer: the summary itself is the checkpoint.
+	c.trigger = cut.Trigger{Ratio: c.ratio, KeepRecent: c.keepRecent, MaxTokens: c.maxTokens, Files: c.files, Marker: markerVerb}
 	return c
 }
 
@@ -110,6 +116,10 @@ func (c *Compactor) KeepRecentTokens() int { return c.keepRecent }
 
 // MaxTokens returns the output limit of the summarization request.
 func (c *Compactor) MaxTokens() int { return c.maxTokens }
+
+// PointerMaxTokens returns the output limit of the fork's pointer
+// pass. The summary makes no fork, so it is zero.
+func (c *Compactor) PointerMaxTokens() int { return 0 }
 
 // ShouldCompact reports whether the view should be summarized.
 //
@@ -130,50 +140,7 @@ func (c *Compactor) MaxTokens() int { return c.maxTokens }
 // a window so small that the verbatim tail and the summary alone leave less
 // room than the output limit, a summary on every turn would gain nothing.
 func (c *Compactor) ShouldCompact(view poo.View, budget poo.ContextBudget) bool {
-	if len(cut.LiveTurns(view.Turns())) < 2 {
-		return false
-	}
-	if budget.OverWindow() {
-		return true
-	}
-	if c.ratio > 0 && budget.Reached(c.ratio) {
-		return true
-	}
-	return c.restoresRoom(view, budget)
-}
-
-// restoresRoom reports that the next answer does not fit and a summary
-// would end the shortage.
-//
-// The input a compaction would leave is the input now, less the turns the
-// cut replaces, plus a summary as long as the strategy allows.
-func (c *Compactor) restoresRoom(view poo.View, budget poo.ContextBudget) bool {
-	if !budget.RoomShort(budget.OutputLimit) {
-		return false
-	}
-	messages := view.Messages()
-	r, ok := cut.Select(messages, view.Turns(), budget, c.keepRecent)
-	if !ok {
-		return false
-	}
-	covered := messages[r.Start:r.End]
-	after := cut.RoomAfter(budget, cut.TurnTokens(covered, budget),
-		c.maxTokens+c.replacementCarriageTokens(r, covered, budget))
-	return !after.RoomShort(after.OutputLimit)
-}
-
-// replacementCarriageTokens estimates what the replacement carries besides
-// the summary text: the marker line and the file list.
-//
-// The estimate is the one the replacement itself gets, through the same
-// builder, so a file list the summary would add is not missing from the
-// room the compaction promises to give back.
-func (c *Compactor) replacementCarriageTokens(r cut.Range, covered []poo.Message, budget poo.ContextBudget) int {
-	text := cut.Marker(r, markerVerb)
-	if files := cut.FileList(c.files, covered); files != "" {
-		text += "\n\n" + files
-	}
-	return cut.TurnTokens([]poo.Message{poo.NewTextMessage(poo.RoleUser, text)}, budget)
+	return c.trigger.ShouldCompact(view, budget)
 }
 
 // Compact summarizes the turns the view can spare and replaces them with

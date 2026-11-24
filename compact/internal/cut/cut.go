@@ -256,8 +256,9 @@ func Retention(turns poo.TurnRange, sessionID string, historyTool bool) string {
 // Trigger is the reconstruction trigger the block strategies share:
 // the optional ratio at which the view acts, the verbatim tail the
 // replacement keeps, the compose limit the reconstruction may use, the
-// fork's own output need, and the file reporter the replacement's file
-// list reads.
+// fork's own output need, the file reporter the replacement's file
+// list reads, and the marker verb and retention pointer the
+// replacement carries.
 //
 // The strategies live separately, but they trigger together: the same
 // view under the same budget reconstructs at the same window fill,
@@ -278,6 +279,13 @@ type Trigger struct {
 	// strategy makes no fork, and the run's output limit is the whole
 	// need.
 	ForkNeed int
+	// Marker is the verb the replacement's marker line names the turns
+	// with. The carriage estimate counts the line the replacement
+	// builder writes.
+	Marker string
+	// Retention says the replacement carries the retention pointer that
+	// names the session and the turns to recover the cut from.
+	Retention bool
 	// Files reports the file a tool call names, for the file list.
 	Files FileOp
 }
@@ -337,10 +345,15 @@ func (t Trigger) restoresOutputRoom(view poo.View, budget poo.ContextBudget) boo
 
 // replacementCarriageTokens estimates what the replacement carries
 // besides the reconstruction: the marker line, the retention pointer
-// and the file list.
+// when the replacement carries one, and the file list.
 func (t Trigger) replacementCarriageTokens(r Range, covered []poo.Message, budget poo.ContextBudget) int {
-	text := Marker(r, "reconstructed") + "\n\n" + Retention(r.Cut, "", true) +
-		"\n\n" + FileList(t.Files, covered)
+	text := Marker(r, t.Marker)
+	if t.Retention {
+		text += "\n\n" + Retention(r.Cut, "", true)
+	}
+	if files := FileList(t.Files, covered); files != "" {
+		text += "\n\n" + files
+	}
 	return TurnTokens([]poo.Message{poo.NewTextMessage(poo.RoleUser, text)}, budget)
 }
 

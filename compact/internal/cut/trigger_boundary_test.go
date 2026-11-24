@@ -14,6 +14,7 @@ import (
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/compact/mine"
 	"github.com/sdougbrown/poo/compact/pointer"
+	"github.com/sdougbrown/poo/compact/summary"
 )
 
 // subject is the surface the boundary tests read on a strategy.
@@ -24,8 +25,11 @@ type subject interface {
 }
 
 // factory builds one strategy under the configurations the tests use.
+// A strategy with a fork sets hasFork and builds under a pointer limit;
+// the summary makes no fork, so its need is the run's output limit.
 type factory struct {
 	name        string
+	hasFork     bool
 	defaulted   func() subject
 	withRatio   func(ratio float64) subject
 	pointerNeed func(limit int) subject
@@ -34,17 +38,24 @@ type factory struct {
 var factories = []factory{
 	{
 		name:        "mine",
+		hasFork:     true,
 		defaulted:   func() subject { return mine.New(mine.Options{KeepRecentTokens: 1}) },
 		withRatio:   func(ratio float64) subject { return mine.New(mine.Options{Ratio: ratio, KeepRecentTokens: 1}) },
 		pointerNeed: func(limit int) subject { return mine.New(mine.Options{KeepRecentTokens: 1, PointerMaxTokens: limit}) },
 	},
 	{
 		name:      "pointer",
+		hasFork:   true,
 		defaulted: func() subject { return pointer.New(pointer.Options{KeepRecentTokens: 1}) },
 		withRatio: func(ratio float64) subject { return pointer.New(pointer.Options{Ratio: ratio, KeepRecentTokens: 1}) },
 		pointerNeed: func(limit int) subject {
 			return pointer.New(pointer.Options{KeepRecentTokens: 1, PointerMaxTokens: limit})
 		},
+	},
+	{
+		name:      "summary",
+		defaulted: func() subject { return summary.New(summary.Options{KeepRecentTokens: 1}) },
+		withRatio: func(ratio float64) subject { return summary.New(summary.Options{Ratio: ratio, KeepRecentTokens: 1}) },
 	},
 }
 
@@ -84,7 +95,11 @@ func TestTheStrategyCompactsWhenTheNextAnswerDoesNotFit(t *testing.T) {
 				{"a 1M window", 1048576},
 			} {
 				t.Run(test.name, func(t *testing.T) {
-					line := test.window - max(limit, s.PointerMaxTokens()) - poo.OutputReserve
+					need := limit
+					if f.hasFork {
+						need = max(limit, s.PointerMaxTokens())
+					}
+					line := test.window - need - poo.OutputReserve
 					below := poo.ContextBudget{
 						ContextLimit:   test.window,
 						EstimatedInput: line,
@@ -157,6 +172,9 @@ func TestALargerForkNeedMovesTheTriggerEarlier(t *testing.T) {
 	const window = 131072
 	const limit = 8192
 	for _, f := range factories {
+		if !f.hasFork {
+			continue
+		}
 		t.Run(f.name, func(t *testing.T) {
 			small := f.pointerNeed(16384)
 			large := f.pointerNeed(32768)
@@ -197,6 +215,9 @@ func TestTheNeedTakesTheRunLimit(t *testing.T) {
 	// limit's own: 131072 - 32768 - 256 = 98048.
 	line := window - runLimit - poo.OutputReserve
 	for _, f := range factories {
+		if !f.hasFork {
+			continue
+		}
 		t.Run(f.name, func(t *testing.T) {
 			s := f.defaulted()
 			if got := s.PointerMaxTokens(); got != 16384 {
