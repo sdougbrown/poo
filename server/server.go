@@ -589,6 +589,10 @@ func (f *Server) Load(ctx context.Context, params protocol.LoadParams, env wire.
 	if warning := perm.WireClientWarning(runtime.Policy, runtime.Askers, env.Client); warning != "" {
 		info.Warnings = append(info.Warnings, warning)
 	}
+	// A restored session rebuilt its prompt from the build's options, so
+	// it carries the same start warnings a newly built one does: opening
+	// the session says what creating it did.
+	info.Warnings = append(info.Warnings, resumed.Session.StartWarnings()...)
 	return resumed.Session, info, nil
 }
 
