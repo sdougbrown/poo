@@ -85,6 +85,11 @@ func newEditor(m *machine) *editorInput {
 	// itself and the probe stays off.
 	sh.Config.Set("cursor-position-probe", false)
 
+	// The run loop debounces SIGWINCH and rebuilds the layout and editor
+	// together once a drag settles. Keep readline's resize watcher off so
+	// it does not race the layout mid-drag.
+	sh.Config.Set("watch-resize", false)
+
 	if m.opts.HistoryFile != "" {
 		// AddFromFile registers the source even when the file is new:
 		// the first accepted line creates it, and an unreadable one

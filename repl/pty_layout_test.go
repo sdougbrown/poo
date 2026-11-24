@@ -1234,3 +1234,43 @@ func TestTheCtrlChordsMoveAndEditTheDraft(t *testing.T) {
 		t.Fatalf("the repl did not quit; it drew:\n%s", term.screen())
 	}
 }
+
+func TestNewEditorDisablesReadlineResizeWatcher(t *testing.T) {
+	ed := newEditor(&machine{in: strings.NewReader("")})
+	if ed.rl.Config.GetBool("watch-resize") {
+		t.Fatal("watch-resize is enabled; want false so the run loop owns SIGWINCH")
+	}
+}
+
+// TestAStrayOSCReplyDoesNotLeakIntoThePrompt checks that stray palette
+// replies on stdin are discarded. None of the reply bytes enter the
+// draft or switch the editor to vi command mode.
+func TestAStrayOSCReplyDoesNotLeakIntoThePrompt(t *testing.T) {
+	server := &fakeServer{t: t}
+	server.script = func(s *fakeServer) {
+		s.event("run.settled", map[string]any{"run_id": "r1", "reason": "end_turn"})
+	}
+	term, code := startTerminalRepl(t, server)
+	waitFor(t, term, promptMark)
+	waitBottom(t, term)
+
+	// Send ST-terminated and BEL-terminated replies before a normal line.
+	term.press("\x1b]11;rgb:2424/2323/2323\x1b\\\x1b]10;rgb:ffff/ffff/ffff\x07hello\r")
+	if prompts := server.waitPrompts(t, 1); prompts[0] != "hello" {
+		t.Fatalf("prompt after stray OSC replies reads %q, want %q", prompts[0], "hello")
+	}
+	waitScreen(t, term, "✓ end_turn")
+	if screen := term.screen(); strings.Contains(screen, "11;rgb:") || strings.Contains(screen, "rgb:") {
+		t.Errorf("stray OSC reply leaked onto screen:\n%s", screen)
+	}
+
+	term.press("/quit\r")
+	select {
+	case got := <-code:
+		if got != 0 {
+			t.Fatalf("the repl exited %d, want 0", got)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatalf("the repl did not quit; it drew:\n%s", term.screen())
+	}
+}
