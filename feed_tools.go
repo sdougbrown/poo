@@ -17,8 +17,15 @@ var subscribeFeedSectionText string
 //
 // The section names the feeds the session loads and does not start: they
 // run only once the model subscribes to one, so the model has to know what
-// it may ask for and what each feed's scope means.
-var subscribeFeedSection = prompt.MustCompile(SubscribeFeedToolName, subscribeFeedSectionText, nil)
+// it may ask for and what each feed's scope means. Its data carries the
+// instance cap beside the feeds, so the prose names the cap the
+// refusal renders.
+var subscribeFeedSection = prompt.MustCompile(SubscribeFeedToolName, subscribeFeedSectionText, func(e prompt.Env) any {
+	return struct {
+		MaxInstances  int
+		OptionalFeeds []prompt.Feed
+	}{MaxFeedInstances, e.OptionalFeeds}
+})
 
 // SubscribeFeedToolName is the name of the core's tool for starting a feed
 // the session does not start itself.
