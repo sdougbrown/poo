@@ -1140,6 +1140,20 @@ func (s *Session) foldFeedFaultLocked(f *feedState, attempt int) bool {
 		item.result.text = item.result.fault.render()
 		return true
 	}
+	if s.run != nil {
+		// The delivery holds the report between the turn-end drain and
+		// the message's write: a fault that arrives in that window joins
+		// the one in flight, or the suspension would wake the session
+		// twice for one feed.
+		for i := range s.run.deliveringJobs {
+			item := &s.run.deliveringJobs[i]
+			if item.result.origin != f.origin || item.result.fault == nil {
+				continue
+			}
+			item.result.fault.more++
+			return true
+		}
+	}
 	if pending, ok := s.pendingFaultReports[f.origin]; ok && pending.attempt == attempt {
 		pending.report.more++
 		return true
