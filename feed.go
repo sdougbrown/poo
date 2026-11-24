@@ -1023,6 +1023,7 @@ func (s *Session) reportFeedFault(f *feedState, attempt int, startedAt time.Time
 	}
 	if s.foldFeedFaultLocked(f, attempt) {
 		s.mu.Unlock()
+		s.raceHook("folded")
 		return
 	}
 	s.pendingFaultReports[f.origin] = pendingFaultReport{attempt: attempt, report: report}

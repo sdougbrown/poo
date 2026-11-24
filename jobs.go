@@ -1845,7 +1845,6 @@ func publicJobResults(results []jobResult) []JobResult {
 // interrupted or fails to write leaves the results queued, in order. A
 // held result waits for the next client prompt, so it is skipped here.
 func (s *Session) drainJobQueue(run *runState) bool {
-	s.raceHook("drain")
 	delivered := false
 	for {
 		s.mu.Lock()
