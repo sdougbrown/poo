@@ -241,6 +241,11 @@ type Runtime struct {
 	// An error that would say "the settings" names the real source.
 	registryFromDefaults bool
 	feedsFromDefaults    bool
+	// chatModelResolved reports whether the build resolved a chat
+	// model: a build that runs without one says so when a profile's
+	// opt-in cannot render, instead of naming a model that is not
+	// there.
+	chatModelResolved bool
 	// Feeds are the feed manifests the settings name, or nil when the
 	// settings name none.
 	Feeds *feed.Set
@@ -1423,6 +1428,7 @@ func (s *Settings) CatalogSettings() catalog.Settings {
 			MaxOutput:       model.MaxOutput,
 			Reasoning:       model.Reasoning,
 			ReasoningLevels: model.ReasoningLevels,
+			PromptVariant:   model.PromptVariant,
 			Quirks:          model.Quirks,
 			Sampling:        sampling(s.Sampling[name]),
 		}
@@ -2065,7 +2071,12 @@ func (r *Runtime) resolveSession(opts BuildOptions, workingDir string) error {
 			return err
 		}
 	} else {
+		r.chatModelResolved = true
 		r.Options.Model = model
+		// The prompt renders in the chat model's own variant: the model
+		// family's section among them. A switch to another model
+		// re-renders with that model's variant.
+		r.Options.PromptVariant = model.PromptVariant
 		// The session talks to the chat model, so the transport is
 		// part of the runtime's options. A consumer that changes the
 		// model builds its own transport for it.
@@ -2279,6 +2290,13 @@ func (r *Runtime) resolvePrompt(opts BuildOptions, workingDir string) error {
 			}
 		})
 	}
+	// The family section follows the model's prompt variant, and poo's
+	// own default leaves it out: the profile's word turns it on. Unlike
+	// the manifest defaults, absent means off — the family guidance is
+	// an opt-in.
+	if family := r.chosenProfile(opts).ModelFamily; family != nil && *family {
+		r.Options.ModelFamily = true
+	}
 	if baseFile != "" {
 		text, err := os.ReadFile(baseFile)
 		if err != nil {
@@ -2340,6 +2358,25 @@ func (r *Runtime) resolvePrompt(opts BuildOptions, workingDir string) error {
 	// changes are the session's own, and a command's own changes come
 	// after them.
 	r.Options.Prompt = append(r.Options.Prompt, r.Prompt...)
+
+	// The profile that opted in hears why when the guidance cannot
+	// render: the family's own warning, prefixed with the profile the
+	// word belongs to. The chat model's own variant picks the text, and
+	// a prompt directory that ships a family section renders its own; a
+	// session that renders in another variant decides at its own start.
+	if r.Options.ModelFamily {
+		if !r.chatModelResolved {
+			r.warn(fmt.Sprintf("profiles.%s: the build has no chat model, so the model family's guidance does not render", r.profileName(opts)))
+		} else if warning, ok := prompt.FamilyWarning(poo.PromptBuilder(r.Options), r.Options.PromptVariant); ok {
+			// A served session carries the note on its own start, so
+			// the process does not announce the same guidance gap
+			// twice. The other commands have no session surface to
+			// print it with, and the build says it here.
+			if opts.Wire == nil {
+				r.warn(fmt.Sprintf("profiles.%s: %s", r.profileName(opts), warning))
+			}
+		}
+	}
 	return nil
 }
 
@@ -2360,6 +2397,7 @@ func promptSources(opts BuildOptions, r *Runtime) prompt.Sources {
 		"persona":      nil,
 		"base":         nil,
 		"profile":      nil,
+		"family":       nil,
 		"environment":  nil,
 		"skills":       nil,
 		UserSection:    nil,

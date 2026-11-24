@@ -317,3 +317,43 @@ func TestADirectoryBringsASectionOfItsOwn(t *testing.T) {
 		t.Errorf("the prompt does not hold the project section:\n%s", text)
 	}
 }
+
+// TestABinarysPromptDirectoryReplacesTheFamilyVariant covers the family
+// section in the prompt directory: a binary that ships the family's
+// variant file renders its own rails where the shipped text would be.
+func TestABinarysPromptDirectoryReplacesTheFamilyVariant(t *testing.T) {
+	runtime, err := buildWithPrompt(t, `version: 1
+endpoints:
+  test:
+    endpoint: http://localhost:4000/v1
+    api_key_env: POO_TEST_KEY
+models:
+  test-model:
+    endpoint: test
+    model_id: test-model
+    api: chat_completions
+    tools_mode: native
+    ops: [chat]
+    context_limit: 32768
+    prompt_variant: gpt-6.2
+roles:
+  chat: test-model
+profile: codex
+profiles:
+  codex:
+    base: code
+    model_family: true
+`, fstest.MapFS{
+		"family.gpt-6.2.md": {Data: []byte("the binary's family rails\n")},
+	})
+	if err != nil {
+		t.Fatalf("building the runtime: %v", err)
+	}
+	render := theSessionPrompt(t, runtime, t.TempDir())
+	if !strings.Contains(render, "the binary's family rails") {
+		t.Errorf("the prompt does not hold the directory's family rails:\n%s", render)
+	}
+	if strings.Contains(render, "the user's first look at your work") {
+		t.Errorf("the prompt still holds the shipped family text:\n%s", render)
+	}
+}

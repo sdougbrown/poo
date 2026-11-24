@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/sdougbrown/poo/decide"
+	"github.com/sdougbrown/poo/prompt"
 )
 
 // ModelSwitch is the outcome of a model switch.
@@ -100,11 +101,22 @@ func (s *Session) SetModel(info ModelInfo, transport ...ChatTransport) (ModelSwi
 			"the model %q declares no context limit, so the session keeps the %d-token window",
 			name, limit))
 	}
-	prompt := PromptLimitOf(limit, info.InputLimit)
+	promptLimit := PromptLimitOf(limit, info.InputLimit)
 	if exhausted, reason := s.contextExhaustedLocked(info, limit); exhausted {
 		warnings = append(warnings, fmt.Sprintf(
 			"the current view does not fit the %d-token prompt limit of %q: %s; the next run settles context_exhausted",
-			prompt, name, reason))
+			promptLimit, name, reason))
+	}
+
+	// The family guidance is a profile's opt-in, and the section rides
+	// the variant: the family's own warning says when it cannot follow
+	// the model the session is switching to. A prompt without the
+	// section — a raw one, or a profile that never opted in — stays
+	// unmentioned. The note joins the warnings before the outcome is
+	// built, so the result, the record, and the event carry the same
+	// list.
+	if warning, ok := prompt.FamilyWarning(s.promptBuilder, info.PromptVariant); ok {
+		warnings = append(warnings, warning)
 	}
 
 	from := modelLabel(s.opts.Model)
@@ -115,6 +127,7 @@ func (s *Session) SetModel(info ModelInfo, transport ...ChatTransport) (ModelSwi
 	// environment. A prompt that cannot render there refuses the switch,
 	// and the session keeps the model and the prompt it had.
 	modelID := modelIdentifier(info)
+
 	env := s.promptBuilder.Env()
 	env.Model = modelID
 	env.Variant = info.PromptVariant

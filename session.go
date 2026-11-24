@@ -230,6 +230,10 @@ type Session struct {
 	// from. The session is built with one, and a change to the prompt is
 	// applied to a copy of it.
 	promptBuilder *prompt.Builder
+	// startWarnings are the warnings the session's own start carried:
+	// state the session settled at construction that the caller should
+	// know about. They are fixed for the session's life.
+	startWarnings []string
 	// promptVariant is the variant the prompt renders in.
 	//
 	// It may change between the runs, and the prompt renders again when
@@ -584,6 +588,11 @@ type Options struct {
 	// It is the variant the session starts in. The session's own
 	// variant may change between the runs.
 	PromptVariant string
+	// ModelFamily says whether the prompt carries the model family's
+	// section: a text per family, keyed by the model's prompt variant.
+	// It is off unless the profile's word turned it on, so a session a
+	// consumer builds directly carries no guidance nobody asked for.
+	ModelFamily bool
 	// WorkingDir is the directory the tools work in.
 	WorkingDir string
 	// SessionDir is the directory the session's own files are in: the
@@ -831,6 +840,13 @@ func New(opts Options, fns ...Option) (*Session, error) {
 	s.promptVariant = s.opts.PromptVariant
 	if err := s.renderPromptLocked(); err != nil {
 		return nil, &ErrSessionInit{Cause: err}
+	}
+	// The family guidance is a profile's opt-in, and the section rides
+	// the variant the session starts in: the family's own warning says
+	// when it cannot follow, and the session carries it for the caller
+	// that presents the session.
+	if warning, ok := prompt.FamilyWarning(s.promptBuilder, s.promptVariant); ok {
+		s.startWarnings = []string{warning}
 	}
 
 	// The observers start before anything can emit an event, and the

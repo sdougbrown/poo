@@ -508,6 +508,10 @@ func (f *Server) Create(ctx context.Context, params protocol.CreateParams, env w
 	if warning := perm.WireClientWarning(runtime.Policy, runtime.Askers, env.Client); warning != "" {
 		info.Warnings = append(info.Warnings, warning)
 	}
+	// The session's own start may carry warnings of its own: the family
+	// guidance a profile opted into rides the variant the session
+	// renders in, and the session knows whether it does.
+	info.Warnings = append(info.Warnings, sess.StartWarnings()...)
 	if mode == string(session.ModeLogged) {
 		info.SessionDir = session.StoreDir(store)
 	}
@@ -585,6 +589,11 @@ func (f *Server) Load(ctx context.Context, params protocol.LoadParams, env wire.
 	if warning := perm.WireClientWarning(runtime.Policy, runtime.Askers, env.Client); warning != "" {
 		info.Warnings = append(info.Warnings, warning)
 	}
+	// A session that has run renders its recorded prompt and carries no
+	// start warnings: nothing re-renders it, so there is nothing to
+	// warn about again. A session that never ran is still on the
+	// build's prompt, and opening it says what creating it did.
+	info.Warnings = append(info.Warnings, resumed.Session.StartWarnings()...)
 	return resumed.Session, info, nil
 }
 

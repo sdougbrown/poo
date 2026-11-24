@@ -201,7 +201,7 @@ const PersonaSection = "persona"
 //
 // The slice is read-only: a consumer that changes it changes the prompt
 // for everybody.
-var DefaultOrder = []string{"persona", "base", "profile", "tools", "catalog", "skills", "environment", "user", "project"}
+var DefaultOrder = []string{"persona", "base", "profile", "family", "tools", "catalog", "skills", "environment", "user", "project"}
 
 // Order returns the order the sections render in.
 //

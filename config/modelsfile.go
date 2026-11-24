@@ -155,9 +155,6 @@ func (s *Settings) resolveNamedFiles(dir string) error {
 		*named.path = resolved
 	}
 	for name, profile := range s.Profiles {
-		if profile.PromptFile == "" {
-			continue
-		}
 		// A profile a profiles file declared answers to that file's own
 		// directory, which the import recorded; the settings' own answer
 		// to the settings file's directory. One pass resolves both, so a
@@ -166,11 +163,22 @@ func (s *Settings) resolveNamedFiles(dir string) error {
 		if fileDir, fromFile := s.profilesFileDirs[name]; fromFile {
 			base = fileDir
 		}
-		resolved, err := resolveBeside(profile.PromptFile, base)
-		if err != nil {
-			return &Error{Code: CodeInvalid, Field: "profiles." + name + ".prompt_file", Err: err}
+		for _, named := range []struct {
+			field string
+			path  *string
+		}{
+			{"prompt_file", &profile.PromptFile},
+			{"prompt_append_file", &profile.PromptAppendFile},
+		} {
+			if *named.path == "" {
+				continue
+			}
+			resolved, err := resolveBeside(*named.path, base)
+			if err != nil {
+				return &Error{Code: CodeInvalid, Field: "profiles." + name + "." + named.field, Err: err}
+			}
+			*named.path = resolved
 		}
-		profile.PromptFile = resolved
 		s.Profiles[name] = profile
 	}
 	return nil
@@ -490,6 +498,9 @@ type modelsModel struct {
 	ReasoningLevels []string `json:"reasoning_levels,omitempty"`
 	// ToolsMode is how the run asks for tool calls.
 	ToolsMode poo.ToolsMode `json:"tools_mode,omitempty"`
+	// PromptVariant selects the prompt sections' variant text the model
+	// renders: the model family's section keys on it.
+	PromptVariant string `json:"prompt_variant,omitempty"`
 	// Quirks are the transport's named adaptations this model needs.
 	Quirks []string `json:"quirks,omitempty"`
 	// Sampling are the model's own sampling defaults.
@@ -574,6 +585,7 @@ func (f modelsFile) layer() (catalog.FileSettings, error) {
 				MaxOutput:       model.MaxOutput,
 				Reasoning:       model.Reasoning,
 				ReasoningLevels: model.ReasoningLevels,
+				PromptVariant:   model.PromptVariant,
 				Quirks:          model.Quirks,
 				Sampling:        model.Sampling,
 			}

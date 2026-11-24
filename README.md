@@ -433,9 +433,17 @@ file. Poo reads it when opening a new session, not when listing profiles.
 It replaces the `profile` section without replacing the base or tool
 instructions. `prompt_append` composes instead: its text rides after the
 prose already there — the linked base's own, or the file's when the
-profile names both. An explicit `system_prompt` replacement, or a
-setting that sets or removes the `profile` section, takes precedence
+profile names both. `prompt_append_file` is the append's file form, and
+the two are mutually exclusive. An explicit `system_prompt` replacement,
+or a setting that sets or removes the `profile` section, takes precedence
 over both. A resumed session uses its recorded prompt once it has run.
+
+`model_family` turns on the prompt's model-family section. The section
+carries one text per family, keyed by the model's `prompt_variant`:
+`gpt-6.2`, `gpt-6` and `gpt-5.6` ship with the prompt. A model whose
+variant names no family leaves the prompt unchanged. The section is off
+unless the profile names true. A model that covers an earlier one names
+that family's variant: a GPT-6.1 model sets `prompt_variant: gpt-6`.
 
 `feeds` names the feeds the profile needs, by manifest name:
 

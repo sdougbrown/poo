@@ -35,6 +35,13 @@ func (r *Runtime) resolveProfileDefinitions(opts BuildOptions) ([]profile.Profil
 		if err := validateDisabledTools(opts, field+".tools.disabled", definition.Tools.Disabled); err != nil {
 			return nil, err
 		}
+		if definition.PromptAppend != "" && definition.PromptAppendFile != "" {
+			return nil, &Error{
+				Code:    CodeInvalid,
+				Field:   field + ".prompt_append_file",
+				Message: "prompt_append and prompt_append_file are mutually exclusive: the append is the inline text or the file's, never both",
+			}
+		}
 		base.Name = name
 		// The base's feeds belong to the linked profile, so the
 		// variant's additions grow a copy: a base whose slice has
@@ -85,6 +92,22 @@ func (r *Runtime) profilePromptFile() string {
 	return r.Settings.Profiles[r.Profile.Name].PromptFile
 }
 
+// profilePromptAppend returns the text the profile appends to the
+// profile section: the file's when the profile names one, the inline
+// text otherwise. The caller has checked that the settings name only
+// one of the two.
+func (r *Runtime) profilePromptAppend() (string, error) {
+	definition := r.Settings.Profiles[r.Profile.Name]
+	if definition.PromptAppendFile != "" {
+		text, err := os.ReadFile(definition.PromptAppendFile)
+		if err != nil {
+			return "", &Error{Code: CodeInvalid, Field: "profiles." + r.Profile.Name + ".prompt_append_file", Err: err}
+		}
+		return string(text), nil
+	}
+	return definition.PromptAppend, nil
+}
+
 // profilePrompt returns the edits a new session's profile section
 // carries: the file's text in place of the section, and the append's
 // text after whatever the section holds. Both compose with the linked
@@ -103,7 +126,11 @@ func (r *Runtime) profilePrompt() ([]func(*prompt.Builder), error) {
 		}
 		edits = append(edits, func(b *prompt.Builder) { b.Set(prompt.ProfileSection, string(text)) })
 	}
-	if text := r.Settings.Profiles[r.Profile.Name].PromptAppend; text != "" {
+	text, err := r.profilePromptAppend()
+	if err != nil {
+		return nil, err
+	}
+	if text != "" {
 		edits = append(edits, func(b *prompt.Builder) { b.Append(prompt.ProfileSection, text) })
 	}
 	return edits, nil

@@ -25,7 +25,9 @@
 # writes to the named file.
 version: 1
 
-profile: code
+# The session runs under the codex profile, defined below: the code
+# base's tools and prose, with the model family's guidance on.
+profile: codex
 
 roles:
   chat: openai-codex/gpt-6.1-sol
@@ -41,6 +43,10 @@ models:
     model_id: gpt-6.1-sol
     api: responses
     ops: [chat, compact]
+    # The family section keys on the variant a model names: a GPT-6.1
+    # model covers the gpt-6 family, so it says so here. A model that
+    # names no variant leaves the prompt unchanged.
+    prompt_variant: gpt-6
 
 # The context window's strategy. `native` asks the provider to compact
 # its own conversation; a model must declare the `compact` operation for
@@ -49,6 +55,25 @@ models:
 # the oldest turns.
 context:
   strategy: native
+
+# The codex profile: the code base's tools and prose, plus the model
+# family's section. The section carries one text per family; gpt-6.2,
+# gpt-6 and gpt-5.6 ship with the prompt. A model whose variant names
+# none leaves the prompt unchanged: the profile stays honest for
+# whatever model the credential brings in. An explicit system_prompt
+# replacement takes precedence over a profile's prompt edits, whatever
+# they are.
+#
+# The append composes instead of replacing: its text rides after the
+# prose already there — the base's own, or a prompt file's. A line of
+# the person's own rides beside the family's:
+#
+#     prompt_append: |
+#       Prefer the smallest change that closes the task.
+profiles:
+  codex:
+    base: code
+    model_family: true
 
 # The skills the person keeps, and the instructions. `default: true`
 # reads ~/.agents/skills — the directory the rest of the family uses —

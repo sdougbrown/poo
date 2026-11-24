@@ -97,8 +97,8 @@ var personaSection = prompt.Persona()
 // with it.
 //
 // A raw system prompt is the whole prompt: it is the builder's base
-// section, and neither the core's own section nor the tools' are added.
-// A later edit still has the base to change.
+// section, and neither the core's own section, the tools', nor the
+// model family's are added. A later edit still has the base to change.
 //
 // The consumer's own changes come last, so they win over the core's.
 func buildPrompt(opts *Options) *prompt.Builder {
@@ -123,6 +123,16 @@ func buildPrompt(opts *Options) *prompt.Builder {
 			if variantContributor, ok := tool.(PromptVariantContributor); ok {
 				setPromptVariants(b, prompt.ToolSection(name), variantContributor.PromptVariants(env))
 			}
+		}
+		// The family section holds a text per model family, keyed by
+		// the prompt variant the model names, and the session's own
+		// switch turns it on: the guidance is an opt-in, so a session
+		// a consumer builds directly carries none. It has no default
+		// text, so it renders nothing until the variant names one. A
+		// raw prompt carries none of it: the raw text comes back as
+		// supplied.
+		if opts.ModelFamily {
+			setPromptVariants(b, prompt.FamilySection, prompt.FamilyVariants())
 		}
 	}
 	for _, edit := range opts.Prompt {
@@ -275,16 +285,37 @@ func (s *Session) PromptState() PromptState {
 // alternative for it renders that one and a section that does not renders
 // its default text. A prompt that cannot render in the variant refuses the
 // change, and the session keeps the variant and the prompt it had.
-func (s *Session) SetPromptVariant(name string) error {
+//
+// The warnings name what the caller should know about the run that
+// follows: the family guidance a profile opted into rides the variant,
+// and a variant no family the prompt ships covers renders none of it.
+func (s *Session) SetPromptVariant(name string) ([]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	variant := s.promptVariant
 	s.promptVariant = name
 	if err := s.renderPromptLocked(); err != nil {
 		s.promptVariant = variant
-		return err
+		return nil, err
 	}
-	return nil
+	// The family guidance is a profile's opt-in, and the section rides
+	// the variant: the family's own warning says when it cannot follow
+	// the variant the session is changing to.
+	var warnings []string
+	warning, ok := prompt.FamilyWarning(s.promptBuilder, name)
+	if ok {
+		warnings = append(warnings, warning)
+	}
+	return warnings, nil
+}
+
+// StartWarnings returns the warnings the session's own start carried:
+// state the session settled at construction that the caller should know
+// about. They are fixed for the session's life.
+func (s *Session) StartWarnings() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.startWarnings)
 }
 
 // SetPrompt applies prompt changes to the session.

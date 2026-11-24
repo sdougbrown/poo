@@ -2,11 +2,13 @@ package poo_test
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/prompt"
+	"github.com/sdougbrown/poo/provider/openai"
 )
 
 // The prompt is rendered in a variant: a section that offers an
@@ -52,6 +54,92 @@ func variantOptions(t *testing.T, tr poo.ChatTransport, tool poo.Tool) poo.Optio
 func withVariantSections(b *prompt.Builder) {
 	b.Set("base", "the default base")
 	b.SetVariant("base", "small-local", "the small local base")
+}
+
+// TestAWarningRidesTheVariantChange covers the session's own variant
+// change: a session that carries the family section warns when the
+// variant it changes to renders none of the guidance, and says the
+// same when it names no variant at all.
+func TestAWarningRidesTheVariantChange(t *testing.T) {
+	first := poo.ModelInfo{
+		Name:          "m",
+		ModelID:       "m",
+		API:           poo.APIChatCompletions,
+		Ops:           []poo.Op{poo.OpChat},
+		ContextLimit:  32768,
+		PromptVariant: "gpt-6.2",
+		Tools:         poo.ToolCalling{Mode: poo.ToolsNative},
+	}
+	oldServer := newBodyServer(t)
+	tr := openai.New(openai.Options{Endpoint: oldServer.URL, Model: first.ModelID, ModelInfo: first})
+	s := newTestSession(t, poo.Options{
+		Transport:   tr,
+		Tools:       map[string]poo.Tool{"echo": &echoTool{}},
+		ToolOrder:   []string{"echo"},
+		SessionID:   "s1",
+		Model:       first,
+		ModelFamily: true,
+		WorkingDir:  t.TempDir(),
+	})
+	warnings, err := s.SetPromptVariant("made-up-family")
+	if err != nil {
+		t.Fatalf("setting the variant: %v", err)
+	}
+	if !slices.Contains(warnings, `the prompt variant "made-up-family" names no family the prompt ships, so the model family's guidance does not render in a session that keeps it`) {
+		t.Errorf("the change's warnings are %v, want the family note", warnings)
+	}
+	warnings, err = s.SetPromptVariant("")
+	if err != nil {
+		t.Fatalf("setting the variant: %v", err)
+	}
+	if !slices.Contains(warnings, "the prompt renders with no variant, so the model family's guidance does not render") {
+		t.Errorf("the change's warnings are %v, want the no-variant note", warnings)
+	}
+}
+
+// TestASessionCarriesItsStartWarning covers the session's own start: a
+// session pinned to a variant that renders no family guidance carries
+// the family's note from its first moment, the way a variant change
+// would say it later, and a session that renders in the model's own
+// variant carries none.
+func TestASessionCarriesItsStartWarning(t *testing.T) {
+	first := poo.ModelInfo{
+		Name:          "m",
+		ModelID:       "m",
+		API:           poo.APIChatCompletions,
+		Ops:           []poo.Op{poo.OpChat},
+		ContextLimit:  32768,
+		PromptVariant: "gpt-6.2",
+		Tools:         poo.ToolCalling{Mode: poo.ToolsNative},
+	}
+	oldServer := newBodyServer(t)
+	tr := openai.New(openai.Options{Endpoint: oldServer.URL, Model: first.ModelID, ModelInfo: first})
+	s := newTestSession(t, poo.Options{
+		Transport:   tr,
+		Tools:       map[string]poo.Tool{"echo": &echoTool{}},
+		ToolOrder:   []string{"echo"},
+		SessionID:   "s1",
+		Model:       first,
+		ModelFamily: true,
+		WorkingDir:  t.TempDir(),
+	}, poo.WithPromptVariant("made-up-family"))
+	warnings := s.StartWarnings()
+	if !slices.Contains(warnings, `the prompt variant "made-up-family" names no family the prompt ships, so the model family's guidance does not render in a session that keeps it`) {
+		t.Errorf("the session's start warnings are %v, want the family note", warnings)
+	}
+	plain := newTestSession(t, poo.Options{
+		Transport:     tr,
+		Tools:         map[string]poo.Tool{"echo": &echoTool{}},
+		ToolOrder:     []string{"echo"},
+		SessionID:     "s2",
+		Model:         first,
+		ModelFamily:   true,
+		PromptVariant: "gpt-6.2",
+		WorkingDir:    t.TempDir(),
+	})
+	if got := plain.StartWarnings(); len(got) != 0 {
+		t.Errorf("the session's start warnings are %v, want none", got)
+	}
 }
 
 // TestTheVariantRendersTheSectionsAlternative covers the rule that the
@@ -173,7 +261,7 @@ func TestTheVariantIsFixedForTheRun(t *testing.T) {
 	})
 	var s *poo.Session
 	tool := &echoTool{result: "echoed", call: func(ctx context.Context) (poo.ToolResult, error) {
-		if err := s.SetPromptVariant("other"); err != nil {
+		if _, err := s.SetPromptVariant("other"); err != nil {
 			return poo.ToolResult{}, err
 		}
 		return poo.ToolResult{Text: "echoed"}, nil
@@ -207,7 +295,7 @@ func TestTheVariantChangesBetweenTheRuns(t *testing.T) {
 		poo.WithPromptVariant("small-local"))
 	runSession(t, s, "do the thing")
 
-	if err := s.SetPromptVariant(""); err != nil {
+	if _, err := s.SetPromptVariant(""); err != nil {
 		t.Fatalf("changing the variant: %v", err)
 	}
 	runSession(t, s, "do the thing again")

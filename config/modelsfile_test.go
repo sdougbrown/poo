@@ -932,6 +932,7 @@ const pooModels = `endpoints:
         context_limit: 32768
         max_output: 4096
         inputs: [text, image]
+        prompt_variant: gpt-6
         sampling:
           temperature: 0.3
 `
@@ -976,6 +977,9 @@ roles:
 	}
 	if model.Source["context_limit"] != catalog.LayerModelsFile {
 		t.Errorf("the context limit comes from %q, want models_file", model.Source["context_limit"])
+	}
+	if model.PromptVariant != "gpt-6" {
+		t.Errorf("the model's prompt variant is %q, want the file's gpt-6", model.PromptVariant)
 	}
 }
 

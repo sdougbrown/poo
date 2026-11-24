@@ -411,7 +411,7 @@ func TestAVariantThatDoesNotRenderIsRefused(t *testing.T) {
 	s := newTestSession(t, opts)
 	before := s.PromptState()
 
-	if err := s.SetPromptVariant("small-local"); err == nil {
+	if _, err := s.SetPromptVariant("small-local"); err == nil {
 		t.Fatal("the variant the prompt cannot render in was accepted")
 	}
 	after := s.PromptState()
