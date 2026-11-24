@@ -256,9 +256,8 @@ func Retention(turns poo.TurnRange, sessionID string, historyTool bool) string {
 // Trigger is the reconstruction trigger the block strategies share:
 // the optional ratio at which the view acts, the verbatim tail the
 // replacement keeps, the compose limit the reconstruction may use, the
-// fork's own output need, the file reporter the replacement's file
-// list reads, and the marker verb and retention pointer the
-// replacement carries.
+// fork's own output need, and the file reporter the replacement's file
+// list reads.
 //
 // The strategies live separately, but they trigger together: the same
 // view under the same budget reconstructs at the same window fill,
@@ -273,19 +272,12 @@ type Trigger struct {
 	// MaxTokens is the replacement request's output limit.
 	MaxTokens int
 	// ForkNeed is the output the strategy's fork asks for. The fork
-	// re-sends the whole window with that limit, clamped to the room the
-	// window leaves; when the trigger fires the room is under the need,
-	// so the pass's limit can land below the ask, and the strategies
-	// treat the pass as advisory. Zero means the strategy makes no fork,
-	// and the run's output limit is the whole need.
+	// re-sends the whole window with that limit, and the transport sends
+	// it as it is rather than clamping it to the room the window leaves,
+	// so the trigger has to make the fork fit as well. Zero means the
+	// strategy makes no fork, and the run's output limit is the whole
+	// need.
 	ForkNeed int
-	// Marker is the verb the replacement's marker line names the turns
-	// with. The carriage estimate counts the line the replacement
-	// builder writes.
-	Marker string
-	// Retention says the replacement carries the retention pointer that
-	// names the session and the turns to recover the cut from.
-	Retention bool
 	// Files reports the file a tool call names, for the file list.
 	Files FileOp
 }
