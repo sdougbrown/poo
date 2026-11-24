@@ -203,6 +203,10 @@ func handleRun(parent context.Context, inv clicontract.Invocation, stdout, stder
 		deciderModel = session.LoggedModel(deciderModel)
 		created.Roles.Decider = &deciderModel
 	}
+	if runtime.Options.SideModel.ModelID != "" {
+		sideModel := session.LoggedModel(runtime.Options.SideModel)
+		created.Roles.Compaction = &sideModel
+	}
 
 	sink, err := openSink(ctx, runtime, created, o.logPath, workDir)
 	if err != nil {

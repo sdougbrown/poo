@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -114,6 +115,11 @@ func TestTheForkSendsTheSamePrefix(t *testing.T) {
 	if forked["stream"] != true {
 		t.Errorf("the fork's stream flag is %v, want true", forked["stream"])
 	}
+	// A body without tools is returned as it was: the rewrite has
+	// nothing to forbid.
+	if _, ok := forked["tool_choice"]; ok {
+		t.Errorf("the fork of a body without tools carries a tool choice: %s", second)
+	}
 }
 
 // TestTheForkWithoutASnapshotIsRefused covers the error: a fork needs a
@@ -209,68 +215,8 @@ func newFix1BodyServer(t *testing.T) *openaiBodyServer {
 	return s
 }
 
-// stripField removes one top-level field's value from a body, leaving
-// the rest of the bytes alone.
-func stripField(t *testing.T, body, field string) string {
-	t.Helper()
-	key := `"` + field + `":`
-	i := strings.Index(body, key)
-	if i < 0 {
-		t.Fatalf("the body has no %s: %s", field, body)
-	}
-	rest := body[i+len(key):]
-	depth := 0
-	inString := false
-	escaped := false
-	end := -1
-	if rest[0] == '[' || rest[0] == '{' {
-		for j := 0; j < len(rest); j++ {
-			c := rest[j]
-			if inString {
-				if escaped {
-					escaped = false
-					continue
-				}
-				if c == '\\' {
-					escaped = true
-					continue
-				}
-				if c == '"' {
-					inString = false
-				}
-				continue
-			}
-			switch c {
-			case '"':
-				inString = true
-			case '[', '{':
-				depth++
-			case ']', '}':
-				depth--
-				if depth == 0 {
-					end = j + 1
-				}
-			}
-			if end >= 0 {
-				break
-			}
-		}
-	} else {
-		for j := 0; j < len(rest); j++ {
-			if rest[j] == ',' || rest[j] == '}' {
-				end = j
-				break
-			}
-		}
-	}
-	if end < 0 {
-		t.Fatalf("the field %s does not end: %s", field, body)
-	}
-	return body[:i] + rest[end:]
-}
-
-// TestTheForkDiffersOnlyInTheMessagesAndTheCeiling covers the fork item exactly: "The bodies are byte-identical except for
-// the appended messages and max_tokens."
+// TestTheForkDiffersOnlyInTheMessagesAndTheCeiling covers the fork item exactly: the bodies are identical apart from the
+// appended messages, the output limit and the tool choice.
 //
 // The shipped test compares the prefix up to the messages array, which
 // says nothing about the rest of the body. This one removes the two
@@ -307,10 +253,34 @@ func TestTheForkDiffersOnlyInTheMessagesAndTheCeiling(t *testing.T) {
 	if len(srv.bodies) != 2 {
 		t.Fatalf("the server got %d bodies, want 2", len(srv.bodies))
 	}
-	first := stripField(t, stripField(t, srv.bodies[0], "messages"), "max_tokens")
-	second := stripField(t, stripField(t, srv.bodies[1], "messages"), "max_tokens")
-	if first != second {
-		t.Errorf("the bodies differ outside messages and max_tokens:\n%s\n%s", first, second)
+	// The fork's ask cannot be answered with work: the tools stay in
+	// the request, and the choice forbids them. Everything else is the
+	// snapshot's, so the comparison drops only the fields the fork owns.
+	var bodies [2]map[string]any
+	for i, body := range srv.bodies {
+		if err := json.Unmarshal([]byte(body), &bodies[i]); err != nil {
+			t.Fatalf("decoding body %d: %v", i, err)
+		}
+		for _, field := range []string{"messages", "max_tokens", "tool_choice"} {
+			delete(bodies[i], field)
+		}
+	}
+	if !reflect.DeepEqual(bodies[0], bodies[1]) {
+		t.Errorf("the bodies differ outside messages, max_tokens and tool_choice:\n%s\n%s", srv.bodies[0], srv.bodies[1])
+	}
+	if bodies[1]["tool_choice"] != nil {
+		t.Errorf("the comparison left the tool choice in: %v", bodies[1]["tool_choice"])
+	}
+	forked := map[string]any{}
+	if err := json.Unmarshal([]byte(srv.bodies[1]), &forked); err != nil {
+		t.Fatalf("decoding the fork's body: %v", err)
+	}
+	if forked["tool_choice"] != "none" {
+		t.Errorf("the fork's tool choice is %v, want none", forked["tool_choice"])
+	}
+	tools, ok := forked["tools"].([]any)
+	if !ok || len(tools) != 1 {
+		t.Errorf("the fork carries the tools %v, want the one it was offered", forked["tools"])
 	}
 }
 

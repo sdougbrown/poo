@@ -210,24 +210,31 @@ const (
 // ModelRoles are the models a session talks to.
 //
 // The roles are the effective ones: the chat model the session's turns
-// go to, and the decision model it asks when it has one. A role that is
-// not set is a role the session does not have.
+// go to, the decision model it asks when it has one, and the compaction
+// model its strategies reconstruct with. A role that is not set is a
+// role the session does not have.
 type ModelRoles struct {
 	// Chat is the chat model, or nil when the session has none.
 	Chat *ModelInfo `json:"chat,omitempty"`
 	// Decider is the decision model, or nil when the session has none.
 	Decider *ModelInfo `json:"decider,omitempty"`
+	// Compaction is the model the strategies reconstruct with, or nil
+	// when the session has none.
+	Compaction *ModelInfo `json:"compaction,omitempty"`
 }
 
 // Models returns the roles' models, in a fixed order: the chat model
-// first, then the decision model.
+// first, then the decision model, then the compaction model.
 func (r ModelRoles) Models() []*ModelInfo {
-	out := make([]*ModelInfo, 0, 2)
+	out := make([]*ModelInfo, 0, 3)
 	if r.Chat != nil {
 		out = append(out, r.Chat)
 	}
 	if r.Decider != nil {
 		out = append(out, r.Decider)
+	}
+	if r.Compaction != nil {
+		out = append(out, r.Compaction)
 	}
 	return out
 }

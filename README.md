@@ -327,6 +327,22 @@ override that adds an earlier trigger at that share of the prompt limit. The
 removed `context.notice_ratio` and `context.hard_ratio` have no effect; a
 settings file that still sets them loads with a warning.
 
+**The compaction role.** `roles.compaction` gives a compaction strategy's own
+requests a model of their own: the summary `summary` writes or the
+reconstruction `mine` writes can be another model's work, defaulting to the chat
+model when the role names none. The fork a strategy makes stays on the chat
+model, because it re-sends the last main request and only the chat model's
+transport can stand in for that:
+
+```yaml
+roles:
+  chat: openai-codex/gpt-6.1-sol
+  compaction: opencode-go/glm-5.3
+```
+
+The role's model must serve the `chat` operation, and it is built with the same
+catalog and transport machinery the other roles use.
+
 **Native compaction.** `context.strategy: native` asks the provider to compact
 its own conversation and gives the model the provider's compacted state back.
 It is opt-in: the default stays `summary`, which writes its own summary of the
@@ -356,6 +372,32 @@ refuses the settings and names the missing capability. A model switch is
 checked when a compaction happens: a session that moved to a model without the
 `compact` operation refuses to compact natively rather than asking a provider
 that cannot serve it.
+
+**Mined compaction.** `context.strategy: mine` replaces the oldest turns with a
+context two fresh requests construct: a fork of the last main request asks the
+model what its history must preserve, and a request of the strategy's own reads
+the covered transcript and writes the working context a fresh start continues
+from. The fork pass is best-effort: it fails into mining without pointers,
+because the transcript holds what the pass would have named. The default
+`summary` carries the conversation forward as one checkpoint; `mine`
+reconstructs the work, so what replaces the cut is shaped by the task rather
+than by the order it happened in. The replacement ends with a pointer at what
+the store retains — the cut's turns are recoverable from the session's records,
+and the pointer names the session and the turns to recover them from. Its own
+keys sit under `context.mine`:
+
+```yaml
+context:
+  strategy: mine
+  mine:
+    ratio: 0.85
+    keep_recent_tokens: 12000
+    max_tokens: 32768
+    pointer_max_tokens: 1024
+```
+
+The strategy's own requests run inside the run that is compaction, so a model
+that cannot answer two side requests cannot mine; the default stays `summary`.
 
 **The repl.** `poo repl [flags]` takes the serve flags, starts a `poo
 serve` with them, and renders the session in the terminal: replies as

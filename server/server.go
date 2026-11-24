@@ -400,12 +400,20 @@ func rolesOf(sess *poo.Session, runtime *config.Runtime) protocol.ModelRoles {
 		if model, ok := sess.DeciderModel(); ok {
 			roles.Decider = model.Name
 		}
+		if model, ok := sess.CompactionModel(); ok {
+			roles.Compaction = model.Name
+		}
 	} else if model, err := runtime.ChatModel(); err == nil {
 		roles.Chat = model.Name
 	}
 	if roles.Decider == "" {
 		if model, err := runtime.DeciderModel(); err == nil {
 			roles.Decider = model.Name
+		}
+	}
+	if roles.Compaction == "" {
+		if model, err := runtime.CompactionModel(); err == nil {
+			roles.Compaction = model.Name
 		}
 	}
 	return roles
@@ -781,8 +789,9 @@ func (f *Server) Settings(ctx context.Context) (map[string]any, error) {
 // created returns the header record a session starts with.
 //
 // The roles are the models the session runs with: the chat model the
-// runtime was built for, and the decision model the caller resolved. A
-// model with no name is no model, so the header records no decider.
+// runtime was built for, the decision model the caller resolved, and
+// the compaction model the strategies reconstruct with. A model with no
+// name is no model, so the header records no such role.
 func (f *Server) created(runtime *config.Runtime, mode, workDir string, decider poo.ModelInfo) (*poo.SessionCreatedRecord, error) {
 	model := runtime.Options.Model
 	chat := session.LoggedModel(model)
@@ -790,6 +799,10 @@ func (f *Server) created(runtime *config.Runtime, mode, workDir string, decider 
 	if decider.Name != "" {
 		logged := session.LoggedModel(decider)
 		roles.Decider = &logged
+	}
+	if runtime.Options.SideModel.ModelID != "" {
+		side := session.LoggedModel(runtime.Options.SideModel)
+		roles.Compaction = &side
 	}
 	return &poo.SessionCreatedRecord{
 		RecordMeta: poo.NewRecordMeta("session.created"),

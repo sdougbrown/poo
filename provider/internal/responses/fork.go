@@ -72,3 +72,10 @@ func AppendInput(body []byte, appended []poo.Message, reads Modalities) ([]byte,
 	order = transport.WithKeys(order, payload, []string{"input"})
 	return transport.EncodeObject(payload, order), nil
 }
+
+// WithoutTools rewrites the body's tool choice to none, so the fork's
+// ask cannot be answered with work. A body that carries no tools is
+// returned unchanged.
+func WithoutTools(body []byte) ([]byte, error) {
+	return transport.SetToolChoice(body, json.RawMessage(`"none"`))
+}

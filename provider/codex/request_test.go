@@ -496,6 +496,43 @@ func canonical(t *testing.T, value any) string {
 // TestAForkKeepsTheSessionsCacheKey covers the fork's session: a fork is
 // the same session's next request, so it names the same cache key and the
 // same session headers the snapshot was sent with.
+// TestAForkWithToolsForbidsTheirUse covers the fork's tool choice: the
+// tools stay in the request, so the prefix the endpoint cached is
+// intact, and the choice forbids their use.
+func TestAForkWithToolsForbidsTheirUse(t *testing.T) {
+	srv := newServer(t, completedStream, completedStream)
+	tr := newTransport(srv.URL, func(o *codex.Options) { o.SessionID = "s1" })
+
+	reader, rendered, err := tr.Stream(context.Background(), poo.ChatRequest{
+		Model:     "gpt-6.1-sol",
+		Messages:  []poo.Message{poo.NewTextMessage(poo.RoleUser, "hi")},
+		MaxTokens: 512,
+		Tools:     []poo.ToolSpec{{Name: "echo", Description: "echo", Schema: []byte(`{"type":"object"}`)}},
+	})
+	if err != nil {
+		t.Fatalf("starting the request: %v", err)
+	}
+	read(t, reader)
+	reader.Close()
+
+	forked, err := tr.Fork(context.Background(), rendered, []poo.Message{
+		poo.NewTextMessage(poo.RoleUser, "carry on"),
+	}, 99)
+	if err != nil {
+		t.Fatalf("forking: %v", err)
+	}
+	defer forked.Close()
+	read(t, forked)
+
+	second := srv.request(t, 1)
+	if got := string(second.fields["tool_choice"]); got != `"none"` {
+		t.Errorf("the fork's tool choice is %s, want none: %s", got, second.body)
+	}
+	if got := string(second.fields["tools"]); !strings.Contains(got, `"echo"`) {
+		t.Errorf("the fork carries the tools %s, want the one it was offered", got)
+	}
+}
+
 func TestAForkKeepsTheSessionsCacheKey(t *testing.T) {
 	srv := newServer(t, completedStream, completedStream)
 	tr := newTransport(srv.URL)
