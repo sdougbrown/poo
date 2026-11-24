@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -41,6 +40,10 @@ type terminal struct {
 	// vt reads the same bytes the terminal is sent, so a test asserts
 	// the screen the person sees instead of the stream that drew it.
 	vt vt10x.Terminal
+	// changed is the draw signal: the next batch of drawn bytes closes
+	// it, so a wait ends on the draw instead of a poll. Nil until a
+	// wait asks for it.
+	changedCh chan struct{}
 }
 
 // openTerminal opens a terminal pair and drains what is drawn on it.
@@ -86,6 +89,9 @@ func (term *terminal) resize(cols, rows int) {
 	// screen.
 	if term.vt != nil {
 		term.vt.Resize(cols, rows)
+		term.mu.Lock()
+		term.signalChanged()
+		term.mu.Unlock()
 	}
 	ws := struct {
 		Row, Col, Xpixel, Ypixel uint16
@@ -106,11 +112,33 @@ func (term *terminal) drain() {
 			if term.vt != nil {
 				term.vt.Write(buf[:n])
 			}
+			term.signalChanged()
 			term.mu.Unlock()
 		}
 		if err != nil {
 			return
 		}
+	}
+}
+
+// changed returns the draw signal: the next batch of drawn bytes
+// closes it. A wait takes the channel, then checks, then blocks: any
+// draw after the check closes the channel the wait holds, so no draw
+// is missed.
+func (term *terminal) changed() chan struct{} {
+	term.mu.Lock()
+	defer term.mu.Unlock()
+	if term.changedCh == nil {
+		term.changedCh = make(chan struct{})
+	}
+	return term.changedCh
+}
+
+// signalChanged closes the draw signal. The caller holds mu.
+func (term *terminal) signalChanged() {
+	if term.changedCh != nil {
+		close(term.changedCh)
+		term.changedCh = nil
 	}
 }
 
@@ -509,10 +537,10 @@ func TestTwoClosesWaitTheSameReadOut(t *testing.T) {
 			}
 		}
 	})
-	var waiters atomic.Int32
+	waits := make(chan struct{}, 2)
 	i.SetEditorRaceHooks(&editorRaceHooks{
 		AfterReadline: func() { close(parked); <-release },
-		BeforeWait:    func() { waiters.Add(1) },
+		BeforeWait:    func() { waits <- struct{}{} },
 	})
 	go func() { i.read() }()
 	// The prompt on the terminal says the read holds it.
@@ -521,14 +549,14 @@ func TestTwoClosesWaitTheSameReadOut(t *testing.T) {
 	go func() { i.close(); close(first) }()
 	go func() { i.close(); close(second) }()
 	// Both closes must be parked in the handshake's wait before the
-	// read leaves — the count under readMu is the receipt — or the
+	// read leaves — the hook's own signal is the receipt — or the
 	// wake this test exists to pin races past the wait entirely.
-	deadline := time.Now().Add(10 * time.Second)
-	for waiters.Load() < 2 && time.Now().Before(deadline) {
-		time.Sleep(5 * time.Millisecond)
-	}
-	if got := waiters.Load(); got < 2 {
-		t.Fatalf("only %d of two closes reached the wait", got)
+	for n := 0; n < 2; n++ {
+		select {
+		case <-waits:
+		case <-time.After(10 * time.Second):
+			t.Fatalf("only %d of two closes reached the wait", n)
+		}
 	}
 	// The read may leave now; both closes behind it must return.
 	releaseOnce.Do(func() { close(release) })
@@ -572,10 +600,10 @@ func TestAReadThatHasNotEnteredStillLeavesOnTheClose(t *testing.T) {
 			}
 		}
 	})
-	var waiters atomic.Int32
+	waits := make(chan struct{}, 1)
 	i.SetEditorRaceHooks(&editorRaceHooks{
 		BeforeReadline: func() { close(claimed); <-release },
-		BeforeWait:     func() { waiters.Add(1) },
+		BeforeWait:     func() { waits <- struct{}{} },
 	})
 	go func() { i.read() }()
 	// The read has claimed the handshake but not entered the editor.
@@ -583,12 +611,12 @@ func TestAReadThatHasNotEnteredStillLeavesOnTheClose(t *testing.T) {
 
 	go func() { i.close(); close(closed) }()
 	// The close must be parked in the handshake's wait — its abort is
-	// out — before the read enters the editor behind it.
-	deadline := time.Now().Add(10 * time.Second)
-	for waiters.Load() < 1 && time.Now().Before(deadline) {
-		time.Sleep(5 * time.Millisecond)
-	}
-	if waiters.Load() < 1 {
+	// out — before the read enters the editor behind it. The hook's
+	// own signal is the receipt, so the wait ends on the close instead
+	// of a poll.
+	select {
+	case <-waits:
+	case <-time.After(10 * time.Second):
 		t.Fatal("the close never reached the wait")
 	}
 	// The read enters behind the abort now, and must leave on its own.

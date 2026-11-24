@@ -39,11 +39,14 @@ func cursorRow(term *terminal) int {
 // waitBottom waits for the input cursor on the prompt's own row, with
 // an empty line being read: exactly one live prompt, the cursor on it,
 // no stranded copy below. Wrapped drafts read their cursor elsewhere;
-// those tests assert the draft's own position instead.
+// those tests assert the draft's own position instead. The wait blocks
+// on the terminal's draw signal, so the wait ends on the draw that
+// landed the state instead of a poll.
 func waitBottom(t *testing.T, term *terminal) {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
+	for {
+		changed := term.changed()
 		screen := physicalRows(term)
 		promptRow := -1
 		for i, r := range screen {
@@ -54,9 +57,12 @@ func waitBottom(t *testing.T, term *terminal) {
 		if promptRow >= 0 && cursorRow(term) == promptRow {
 			return
 		}
-		time.Sleep(5 * time.Millisecond)
+		select {
+		case <-changed:
+		case <-time.After(time.Until(deadline)):
+			t.Fatalf("the input cursor is not on the prompt's row; rows:\n%s", indexedRows(term))
+		}
 	}
-	t.Fatalf("the input cursor is not on the prompt's row; rows:\n%s", indexedRows(term))
 }
 
 // indexedRows is the terminal's rows with their numbers, for a failure
@@ -70,17 +76,42 @@ func indexedRows(term *terminal) string {
 }
 
 // waitScreen waits for the terminal's screen to show want on a row.
+// The wait blocks on the terminal's draw signal, so the wait ends on
+// the draw that landed the text instead of a poll.
 func waitScreen(t *testing.T, term *terminal, want string) {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
+	for {
+		changed := term.changed()
 		if term.rowOf(want) >= 0 {
 			return
 		}
-		time.Sleep(5 * time.Millisecond)
+		select {
+		case <-changed:
+		case <-time.After(time.Until(deadline)):
+			fmt.Fprintf(os.Stderr, "DECODED\n%s\nRAW\n%q\n", term.screen(), term.String())
+			t.Fatalf("the screen never showed %q", want)
+		}
 	}
-	fmt.Fprintf(os.Stderr, "DECODED\n%s\nRAW\n%q\n", term.screen(), term.String())
-	t.Fatalf("the screen never showed %q", want)
+}
+
+// waitScreenWithout waits for the screen to stop showing gone: an
+// erase the editor drew lands only through a draw, so the wait blocks
+// on the terminal's draw signal.
+func waitScreenWithout(t *testing.T, term *terminal, gone string) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		changed := term.changed()
+		if term.rowOf(gone) < 0 {
+			return
+		}
+		select {
+		case <-changed:
+		case <-time.After(time.Until(deadline)):
+			t.Fatalf("the screen still shows %s; rows:\n%s", gone, indexedRows(term))
+		}
+	}
 }
 
 func TestTheInputHoldsTheBottomRowThroughARun(t *testing.T) {
@@ -378,13 +409,7 @@ func TestHeldReplySurvivesFirstDraftKeyAndBackspace(t *testing.T) {
 			waitScreen(t, term, "💩❯ x")
 			if backspace {
 				term.press("\x7f")
-				deadline := time.Now().Add(10 * time.Second)
-				for strings.Contains(term.screen(), "💩❯ x") && time.Now().Before(deadline) {
-					time.Sleep(5 * time.Millisecond)
-				}
-				if strings.Contains(term.screen(), "💩❯ x") {
-					t.Fatal("backspace did not clear the draft")
-				}
+				waitScreenWithout(t, term, "💩❯ x")
 			}
 			close(finish)
 			waitScreen(t, term, "held reply")
@@ -494,17 +519,24 @@ func echoOnScreen(term *terminal, text string) bool {
 // Enter that lands mid-winch-redraw can clear the draft without
 // submitting, so the echo says whether the line was taken; until it
 // shows, the line is typed again — the cleared draft is empty, so the
-// retyped line is whole.
+// retyped line is whole. The wait blocks on the terminal's draw
+// signal, so the wait ends on the draw that landed the echo.
 func pressSubmitted(t *testing.T, term *terminal, text string) {
 	t.Helper()
 	for attempt := 0; attempt < 3; attempt++ {
 		term.press(text + "\r")
 		deadline := time.Now().Add(time.Second)
-		for time.Now().Before(deadline) {
+	wait:
+		for {
+			changed := term.changed()
 			if echoOnScreen(term, text) {
 				return
 			}
-			time.Sleep(5 * time.Millisecond)
+			select {
+			case <-changed:
+			case <-time.After(time.Until(deadline)):
+				break wait
+			}
 		}
 	}
 	t.Fatalf("the line %q never took; the screen reads:\n%s", text, term.screen())
@@ -512,11 +544,13 @@ func pressSubmitted(t *testing.T, term *terminal, text string) {
 
 // waitBottomRows waits for the prompt to stand on the footer's line row
 // of a terminal that is rows tall: the bottom row holds the spare the
-// editor's erases spend.
+// editor's erases spend. The wait blocks on the terminal's draw
+// signal, so the wait ends on the draw that landed the state.
 func waitBottomRows(t *testing.T, term *terminal, rowsWant int) {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
+	for {
+		changed := term.changed()
 		_, rows := term.vt.Size()
 		// The input cursor reads on the prompt's row, inside the footer's
 		// own rows above the chrome: the rule and the statusline's row
@@ -524,9 +558,12 @@ func waitBottomRows(t *testing.T, term *terminal, rowsWant int) {
 		if rows == rowsWant && cursorRow(term) >= rowsWant-4 {
 			return
 		}
-		time.Sleep(5 * time.Millisecond)
+		select {
+		case <-changed:
+		case <-time.After(time.Until(deadline)):
+			t.Fatalf("the input cursor is not on the footer's rows above row %d; rows:\n%s", rowsWant, indexedRows(term))
+		}
 	}
-	t.Fatalf("the input cursor is not on the footer's rows above row %d; rows:\n%s", rowsWant, indexedRows(term))
 }
 
 // TestAnInactiveLayoutDoesNotDoubleTheCarriageReturns covers the
@@ -606,10 +643,7 @@ func TestThePagerTakesAndReturnsTheTerminal(t *testing.T) {
 	term.press("q")
 	// The statusline is not in the transcript the pager shows: its
 	// return says the pager left and the session's own screen is back.
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) && term.rowOf("⌂") < 0 {
-		time.Sleep(5 * time.Millisecond)
-	}
+	waitScreen(t, term, "⌂")
 	waitBottom(t, term)
 
 	// The region came off before the pager drew, and went back after:
@@ -657,18 +691,24 @@ func TestTheLayoutRestoresTheTerminalOnExit(t *testing.T) {
 	}
 
 	// The shell's turn: a line at the cursor scrolls the whole screen.
+	// The writes land through the drain, so the wait blocks on the
+	// terminal's draw signal.
 	if _, err := term.slave.WriteString(strings.Repeat("\n", 12) + "after the repl\n"); err != nil {
 		t.Fatalf("writing after the repl: %v", err)
 	}
 	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
+	for {
+		changed := term.changed()
 		screen := term.screen()
 		if strings.Contains(screen, "after the repl") && !strings.Contains(screen, "poo repl") {
-			return
+			break
 		}
-		time.Sleep(5 * time.Millisecond)
+		select {
+		case <-changed:
+		case <-time.After(time.Until(deadline)):
+			t.Fatalf("the screen did not scroll after the repl:\n%s", term.screen())
+		}
 	}
-	t.Fatalf("the screen did not scroll after the repl:\n%s", term.screen())
 }
 
 var _ = protocol.MethodRunCancel
@@ -686,13 +726,7 @@ func TestAMultilineDraftStaysInTheFooter(t *testing.T) {
 	waitScreen(t, term, "💩❯ draft")
 	// The draft wraps within the footer's rows, and its tail stands
 	// above the chrome's rule, never below the footer's own rows.
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		if strings.Contains(term.screen(), strings.Repeat("x", 20)) {
-			break
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+	waitScreen(t, term, strings.Repeat("x", 20))
 	rows := strings.Split(term.screen(), "\n")
 	rule, tail := -1, -1
 	for i, row := range rows {
@@ -770,7 +804,9 @@ func TestAPipedInputKeepsThePlainTranscript(t *testing.T) {
 	waitScreen(t, term, "❯ say hello")
 	<-sent
 	// A run held open: a stream shows the words now; a pipe waits for
-	// the settle.
+	// the settle. The wait proves an absence — nothing the repl does
+	// for a correct pipe closes a signal — so the settle window stays
+	// a sleep, bounded here by the window the test grants it.
 	time.Sleep(150 * time.Millisecond)
 	streamed := strings.Contains(term.screen(), "Hello, world.")
 	close(release)
@@ -814,14 +850,19 @@ func TestAPromptChangeKeepsATypedDraft(t *testing.T) {
 	// The draft and its cursor settle together: the frame that shows
 	// the tail also lands the cursor under it, and a read between the
 	// two sees the cursor still on the prompt's row, inside the
-	// footer's rows above the chrome.
+	// footer's rows above the chrome. The wait blocks on the
+	// terminal's draw signal, so the settled frame is what it reads.
 	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		screen := term.screen()
-		if strings.Contains(screen, strings.Repeat("d", 20)) && cursorRow(term) >= len(physicalRows(term))-4 {
+	for {
+		changed := term.changed()
+		if strings.Contains(term.screen(), strings.Repeat("d", 20)) && cursorRow(term) >= len(physicalRows(term))-4 {
 			break
 		}
-		time.Sleep(5 * time.Millisecond)
+		select {
+		case <-changed:
+		case <-time.After(time.Until(deadline)):
+			t.Fatalf("the prompt change lost the draft:\n%s", indexedRows(term))
+		}
 	}
 	if !strings.Contains(term.screen(), strings.Repeat("d", 20)) {
 		t.Fatalf("the prompt change lost the draft:\n%s", indexedRows(term))
@@ -888,7 +929,9 @@ func TestARecalledHistoryLineTakesTheFooter(t *testing.T) {
 	waitBottom(t, term)
 
 	// vim's normal mode recalls the last line with k: the Escape lands
-	// first, so the command keymap is the one the k reads in.
+	// first, so the command keymap is the one the k reads in. The
+	// keymap switch is the editor's own state — it draws nothing — so
+	// the settle between the two keys stays a sleep.
 	term.press("\x1b")
 	time.Sleep(50 * time.Millisecond)
 	term.press("k")
@@ -1038,6 +1081,8 @@ func TestAResizeBurstDuringAThoughtKeepsTheStreamWhole(t *testing.T) {
 			s.event("message.delta", map[string]any{
 				"run_id": "r1", "message_id": "m1", "kind": "thinking", "text": text,
 			})
+			// The gaps pace the stream, so the resize storm below races
+			// deltas that are still arriving.
 			time.Sleep(12 * time.Millisecond)
 		}
 		<-released
@@ -1065,6 +1110,8 @@ func TestAResizeBurstDuringAThoughtKeepsTheStreamWhole(t *testing.T) {
 		if err := syscall.Kill(os.Getpid(), syscall.SIGWINCH); err != nil {
 			t.Fatalf("signalling the resize: %v", err)
 		}
+		// The gaps pace the storm, so each winch lands before the next:
+		// the drag is the burst, not a single instant.
 		time.Sleep(6 * time.Millisecond)
 	}
 	close(released)
