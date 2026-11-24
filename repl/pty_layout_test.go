@@ -1023,3 +1023,98 @@ func TestAStartupThatFailsLeavesTheTerminalWhole(t *testing.T) {
 		t.Errorf("a handshake that never opened drew a prompt:\n%s", term.screen())
 	}
 }
+
+// The Ctrl chords the readline bindings answer. The editor's main
+// keymap is vim's insert mode, whose defaults insert the control
+// character itself and ride completion on Ctrl-P and Ctrl-N; a shell
+// prompt reads better with the chords a bash prompt answers.
+
+func TestTheCtrlChordsMoveAndEditTheDraft(t *testing.T) {
+	server := &fakeServer{t: t}
+	server.script = func(s *fakeServer) {
+		s.event("run.settled", map[string]any{"run_id": "r1", "reason": "end_turn"})
+	}
+	term, code := startTerminalRepl(t, server)
+	waitFor(t, term, promptMark)
+	waitBottom(t, term)
+
+	// Ctrl+A moves to the head of the draft: the letters typed after it
+	// land before what the draft already held.
+	term.press("llo")
+	waitScreen(t, term, "llo")
+	term.press("\x01he\r")
+	if prompts := server.waitPrompts(t, 1); prompts[0] != "hello" {
+		t.Fatalf("the line after Ctrl+A reads %q, want hello", prompts[0])
+	}
+	waitScreen(t, term, "✓ end_turn")
+	waitBottom(t, term)
+
+	// Ctrl+E moves to the end of the draft, from wherever the cursor
+	// stood: the letters typed after it land behind the draft.
+	term.press("he\x05llo\r")
+	if prompts := server.waitPrompts(t, 2); prompts[1] != "hello" {
+		t.Fatalf("the line after Ctrl+E reads %q, want hello", prompts[1])
+	}
+	waitScreen(t, term, "✓ end_turn")
+	waitBottom(t, term)
+
+	// Ctrl+U clears the draft before the cursor: what the draft held is
+	// gone, and the line submits with only what came after.
+	term.press("hello\x15world\r")
+	if prompts := server.waitPrompts(t, 3); prompts[2] != "world" {
+		t.Fatalf("the line after Ctrl+U reads %q, want world", prompts[2])
+	}
+	waitScreen(t, term, "✓ end_turn")
+	waitBottom(t, term)
+
+	// Ctrl+K kills from the cursor to the end of the draft: the cursor
+	// sits at the head after Ctrl+A, so the kill takes the whole line.
+	term.press("hello\x01\x0bworld\r")
+	if prompts := server.waitPrompts(t, 4); prompts[3] != "world" {
+		t.Fatalf("the line after Ctrl+K reads %q, want world", prompts[3])
+	}
+	waitScreen(t, term, "✓ end_turn")
+	waitBottom(t, term)
+
+	// Ctrl+W cuts the word before the cursor, the trailing space kept.
+	term.press("hello world\x17x\r")
+	if prompts := server.waitPrompts(t, 5); prompts[4] != "hello x" {
+		t.Fatalf("the line after Ctrl+W reads %q, want %q", prompts[4], "hello x")
+	}
+	waitScreen(t, term, "✓ end_turn")
+	waitBottom(t, term)
+
+	// Ctrl+B moves the cursor one character back: the letters typed
+	// after it land before the draft's last one, and the cursor rides
+	// forward with each insert.
+	term.press("ab\x02xy\r")
+	if prompts := server.waitPrompts(t, 6); prompts[5] != "axyb" {
+		t.Fatalf("the line after Ctrl+B reads %q, want axyb", prompts[5])
+	}
+	waitScreen(t, term, "✓ end_turn")
+	waitBottom(t, term)
+
+	// Ctrl+F moves the cursor one character forward, back onto the
+	// draft's end: the letter typed after it lands behind the draft.
+	term.press("ab\x02\x06c\r")
+	if prompts := server.waitPrompts(t, 7); prompts[6] != "abc" {
+		t.Fatalf("the line after Ctrl+F reads %q, want abc", prompts[6])
+	}
+	waitScreen(t, term, "✓ end_turn")
+	waitBottom(t, term)
+
+	// Ctrl+T transposes the two characters before the cursor.
+	term.press("ab\x14cd\r")
+	if prompts := server.waitPrompts(t, 8); prompts[7] != "bacd" {
+		t.Fatalf("the line after Ctrl+T reads %q, want bacd", prompts[7])
+	}
+	waitScreen(t, term, "✓ end_turn")
+	waitBottom(t, term)
+
+	term.press("\x03")
+	select {
+	case <-code:
+	case <-time.After(10 * time.Second):
+		t.Fatalf("the repl did not quit; it drew:\n%s", term.screen())
+	}
+}

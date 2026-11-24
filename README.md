@@ -427,7 +427,11 @@ decorated blocks, and a statusline with the folder, git branch, model,
 reasoning level, and context fill. Input reads with vi keys at a terminal.
 Press Esc to stop a turn; Ctrl-C clears typed input or exits when the
 prompt is empty. Ctrl-J breaks the draft across lines; Enter submits
-the draft whole. `/less` shows the transcript through `less -R`, and
+the draft whole. The bash Ctrl chords edit the draft. Ctrl-A and Ctrl-E
+jump to its head and end. Ctrl-B and Ctrl-F move the cursor, and Ctrl-T
+transposes the two characters before it. Ctrl-K kills to the end, Ctrl-U
+clears before the cursor, and Ctrl-W cuts the word behind it.
+`/less` shows the transcript through `less -R`, and
 permission asks use `y/n`. `/model` lists models, and `/model <name>`
 switches the chat model between runs. `/thinking` or Shift+Tab cycles
 reasoning levels; `/thinking <level>` selects one. The repl is a wire
