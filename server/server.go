@@ -508,6 +508,10 @@ func (f *Server) Create(ctx context.Context, params protocol.CreateParams, env w
 	if warning := perm.WireClientWarning(runtime.Policy, runtime.Askers, env.Client); warning != "" {
 		info.Warnings = append(info.Warnings, warning)
 	}
+	// The session's own start may carry warnings of its own: the family
+	// guidance a profile opted into rides the variant the session
+	// renders in, and the session knows whether it does.
+	info.Warnings = append(info.Warnings, sess.StartWarnings()...)
 	if mode == string(session.ModeLogged) {
 		info.SessionDir = storeDir(store)
 	}

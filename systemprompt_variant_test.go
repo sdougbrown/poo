@@ -97,6 +97,51 @@ func TestAWarningRidesTheVariantChange(t *testing.T) {
 	}
 }
 
+// TestASessionCarriesItsStartWarning covers the session's own start: a
+// session pinned to a variant that renders no family guidance carries
+// the family's note from its first moment, the way a variant change
+// would say it later, and a session that renders in the model's own
+// variant carries none.
+func TestASessionCarriesItsStartWarning(t *testing.T) {
+	first := poo.ModelInfo{
+		Name:          "m",
+		ModelID:       "m",
+		API:           poo.APIChatCompletions,
+		Ops:           []poo.Op{poo.OpChat},
+		ContextLimit:  32768,
+		PromptVariant: "gpt-6.2",
+		Tools:         poo.ToolCalling{Mode: poo.ToolsNative},
+	}
+	oldServer := newBodyServer(t)
+	tr := openai.New(openai.Options{Endpoint: oldServer.URL, Model: first.ModelID, ModelInfo: first})
+	s := newTestSession(t, poo.Options{
+		Transport:   tr,
+		Tools:       map[string]poo.Tool{"echo": &echoTool{}},
+		ToolOrder:   []string{"echo"},
+		SessionID:   "s1",
+		Model:       first,
+		ModelFamily: true,
+		WorkingDir:  t.TempDir(),
+	}, poo.WithPromptVariant("made-up-family"))
+	warnings := s.StartWarnings()
+	if !slices.Contains(warnings, `the prompt variant "made-up-family" names no family the prompt ships, so the model family's guidance does not render in a session that keeps it`) {
+		t.Errorf("the session's start warnings are %v, want the family note", warnings)
+	}
+	plain := newTestSession(t, poo.Options{
+		Transport:     tr,
+		Tools:         map[string]poo.Tool{"echo": &echoTool{}},
+		ToolOrder:     []string{"echo"},
+		SessionID:     "s2",
+		Model:         first,
+		ModelFamily:   true,
+		PromptVariant: "gpt-6.2",
+		WorkingDir:    t.TempDir(),
+	})
+	if got := plain.StartWarnings(); len(got) != 0 {
+		t.Errorf("the session's start warnings are %v, want none", got)
+	}
+}
+
 // TestTheVariantRendersTheSectionsAlternative covers the rule that the
 // session's variant picks the alternative text of the sections that
 // offer one.

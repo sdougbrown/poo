@@ -298,6 +298,15 @@ func (s *Session) SetPromptVariant(name string) ([]string, error) {
 	return warnings, nil
 }
 
+// StartWarnings returns the warnings the session's own start carried:
+// state the session settled at construction that the caller should know
+// about. They are fixed for the session's life.
+func (s *Session) StartWarnings() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.startWarnings)
+}
+
 // SetPrompt applies prompt changes to the session.
 //
 // The changes are applied in the order they are given, and a later one
