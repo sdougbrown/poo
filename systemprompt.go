@@ -40,8 +40,18 @@ func systemPromptEnv(opts *Options) prompt.Env {
 	tools := make([]string, 0, len(opts.ToolOrder))
 	tools = append(tools, opts.ToolOrder...)
 	feeds := make([]prompt.Feed, 0, len(opts.Feeds))
+	var optionalFeeds []prompt.Feed
 	for _, spec := range opts.Feeds {
-		feeds = append(feeds, prompt.Feed{Name: spec.Name, Description: spec.Description})
+		fields := make([]prompt.FeedScope, 0, len(spec.Scope))
+		for _, field := range spec.Scope {
+			fields = append(fields, prompt.FeedScope{Name: field.Name, Pattern: field.Pattern})
+		}
+		feed := prompt.Feed{Name: spec.Name, Description: spec.Description, Scope: fields}
+		if spec.Optional {
+			optionalFeeds = append(optionalFeeds, feed)
+			continue
+		}
+		feeds = append(feeds, feed)
 	}
 	return prompt.Env{
 		Cwd:   opts.WorkingDir,
@@ -49,10 +59,11 @@ func systemPromptEnv(opts *Options) prompt.Env {
 		Date:  time.Now().UTC().Format("2006-01-02"),
 		Model: opts.Model.ModelID,
 		// Profile is the name of the profile the session was built with.
-		Profile: opts.Profile,
-		Tools:   tools,
-		Feeds:   feeds,
-		Variant: opts.PromptVariant,
+		Profile:       opts.Profile,
+		Tools:         tools,
+		Feeds:         feeds,
+		OptionalFeeds: optionalFeeds,
+		Variant:       opts.PromptVariant,
 	}
 }
 

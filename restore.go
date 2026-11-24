@@ -474,9 +474,16 @@ func hasProfile(profiles []Profile, name string) bool {
 // A tool that is gone, that changed its class or that changed its
 // background mode is a difference: the session was made under a tool
 // set this build does not have.
+//
+// The core's subscribe_feed is not: it exists to serve optional feeds, so
+// its absence means the feed set changed, which missingFeedWarnings
+// reports. Failing the restore here would make that warning unreachable.
 func toolDifferences(recorded []ToolInfo, current map[string]Tool) []string {
 	var diffs []string
 	for _, info := range recorded {
+		if info.Name == SubscribeFeedToolName {
+			continue
+		}
 		tool, ok := current[info.Name]
 		if !ok || tool == nil {
 			diffs = append(diffs, fmt.Sprintf("the tool %q is no longer linked", info.Name))
@@ -562,6 +569,7 @@ func pendingJobResults(records []Record) []jobResult {
 				tool:        FeedToolName,
 				outcome:     OutcomeOK,
 				text:        r.Text,
+				data:        cloneRaw(r.Data),
 				attachments: r.Attachments,
 				origin:      r.Origin,
 			})
@@ -641,6 +649,7 @@ func (s *Session) rebuild(records []Record, out *Restored) error {
 			msg := Message{
 				Role:         r.Role,
 				Content:      r.Content,
+				Data:         cloneRaw(r.Data),
 				ID:           r.MessageID,
 				Origin:       r.Origin,
 				DeliveryNote: r.DeliveryNote,
@@ -769,7 +778,10 @@ func (s *Session) seedCounters(records []Record) {
 	s.jobSeq = jobs
 	s.messageIDs.Set(messages)
 	for name, attempt := range attempts {
-		if f, ok := s.feeds[name]; ok && attempt > f.attempt {
+		// A feed's records carry its name, and the state a restored
+		// session keeps is the instance's: a feed the session starts
+		// itself is the one that answers to FeedOrigin.
+		if f, ok := s.feeds[string(FeedOrigin(name))]; ok && attempt > f.attempt {
 			f.attempt = attempt
 		}
 	}

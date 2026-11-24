@@ -12,11 +12,11 @@ import (
 )
 
 // TestRepoImports checks the poo module itself: the core package may import
-// the standard library plus poo/prompt and poo/decide, poo/prompt,
-// poo/prompt/agentsmd, poo/decide and poo/wire/protocol may import the
-// standard library only, and poo/provider/catalog may import the standard
-// library and the core package. perm may add protect, the shared path
-// resolver.
+// the standard library plus poo/prompt, poo/decide and poo/scopeschema,
+// poo/prompt, poo/prompt/agentsmd, poo/decide and poo/wire/protocol may
+// import the standard library only, and poo/provider/catalog may import the
+// standard library and the core package. perm may add protect, the shared
+// path resolver.
 func TestRepoImports(t *testing.T) {
 	root := moduleRoot(t)
 	modulePath := modulePathOf(t, root)
@@ -174,6 +174,7 @@ func wantSkipped(m string, extra ...string) []string {
 		m + "/provider/internal/responses (does not exist yet)",
 		m + "/provider/internal/support (does not exist yet)",
 		m + "/provider/internal/transport (does not exist yet)",
+		m + "/scopeschema (does not exist yet)",
 		m + "/server (does not exist yet)",
 		m + "/session (does not exist yet)",
 		m + "/skill (does not exist yet)",

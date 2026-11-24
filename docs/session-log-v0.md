@@ -72,7 +72,7 @@ A record that someone produced also carries an `origin`:
 
 | Field | Type | Meaning |
 |---|---|---|
-| `origin` | string | Who produced the record: `"user"`, `"model"`, `"tool"`, `"system"`, `"job"`, `"steer"`, `"interrupt"`, `"follow_up"`, `"compaction"`, `"feed:<name>"` or `"hook:<name>"`. **Absent** on the records that no one produced: the session's own header, a run's boundaries, the usage accounting. |
+| `origin` | string | Who produced the record: `"user"`, `"model"`, `"tool"`, `"system"`, `"job"`, `"steer"`, `"interrupt"`, `"follow_up"`, `"compaction"`, `"feed:<name>"`, `"feed:<name>[<field>=<value>]"` or `"hook:<name>"`. **Absent** on the records that no one produced: the session's own header, a run's boundaries, the usage accounting. |
 
 ## Record names
 
@@ -186,7 +186,7 @@ Each entry of `tools` holds:
 | `reasoning_effort` | string | The `reasoning_effort` the run sends. Absent when it sends none. |
 | `trigger` | string | What started the run: `"prompt"`, `"job"` or `"feed"`. Absent on a log written before the field existed. |
 | `jobs` | array of objects | The job results that started a job run. Absent on a prompt run. |
-| `feeds` | array of strings | The feeds whose inputs started the run, by name, in queue order. Absent when no feed's input started the run. A wake that carried both a job's result and a feed's input has the trigger `"job"` and names the feeds too. |
+| `feeds` | array of strings | The feed instances whose inputs started the run, by label (`feed.started` names the form), in queue order. Absent when no feed's input started the run. A wake that carried both a job's result and a feed's input has the trigger `"job"` and names the feeds too. |
 
 A `jobs` entry holds:
 
@@ -207,7 +207,7 @@ list the model sees: nothing is trimmed, rewritten or summarised.
 |---|---|---|
 | `run_id` | string | The run the message belongs to. |
 | `turn` | integer | The turn the message belongs to. `0` for the run's input. |
-| `origin` | string | Who produced the message: `"user"`, `"model"`, `"tool"`, `"system"`, `"job"`, `"steer"`, `"interrupt"`, `"follow_up"`, `"compaction"`, `"feed:<name>"` or `"hook:<name>"`. |
+| `origin` | string | Who produced the message: `"user"`, `"model"`, `"tool"`, `"system"`, `"job"`, `"steer"`, `"interrupt"`, `"follow_up"`, `"compaction"`, `"feed:<name>"`, `"feed:<name>[<field>=<value>]"` or `"hook:<name>"`. |
 | `role` | string | The message's role: `"system"`, `"user"`, `"assistant"` or `"tool"`. |
 | `content` | array of objects | The message's content blocks. |
 | `message_id` | string | The message's session-monotonic id, e.g. `"m7"`. Absent when the message has none. |
@@ -215,6 +215,7 @@ list the model sees: nothing is trimmed, rewritten or summarised.
 | `partial` | boolean | `true` when the message was cut short. Absent when it was not. |
 | `cause` | string | Why the message was cut short: `"interrupt"` or `"provider_error"`. Absent unless the message is partial. |
 | `delivery_note` | object | How much of the previous reply the user had seen. Absent when the message carries none. |
+| `data` | object | The object a feed's filter wrote beside the message's text: the structured record. Absent unless a filter produced one. |
 
 A partial message is the text a cut-short response carried. The
 assistant's own tool calls in a partial response did not run, and the
@@ -381,6 +382,7 @@ fate is in the records.
 | `text` | string | The message text. |
 | `attachments` | array of objects | The files the input carries, each holding `modality`, `media_type` and `data` (base64), so a held input survives a restart with what it carried. Absent when the input carries none. A feed's input carries its image this way. |
 | `delivery_note` | object | How much of the previous reply the user had seen. Absent when the input carries none. Its `text` is empty when the reply was still streaming at acceptance; the delivered message carries the note rendered at delivery. |
+| `data` | object | The object a feed's filter wrote beside the text, kept so a held input is still a structured record after a restart. Absent unless a filter produced one. |
 | `queued_at` | string | RFC 3339, UTC. |
 
 ## `input.delivered`
@@ -470,14 +472,16 @@ One attempt of a feed started. A feed is a long-lived source that pushes
 messages into a session, and the session owns its lifecycle: this record
 names the attempt.
 
-A feed's attempts never overlap, so the attempt's end is the next
-`feed.ended` of the same feed. The `origin` is the feed's, `"feed:<name>"`.
+One instance's attempts never overlap, so the attempt's end is the next
+`feed.ended` of the same origin. The `origin` is the instance's: the feed's
+own `"feed:<name>"`, or `"feed:<name>[<field>=<value>]"` for an instance the
+model started with `subscribe_feed`.
 
 | Field | Type | Meaning |
 |---|---|---|
 | `session_id` | string | The session's identifier. |
-| `feed` | string | The feed's name, e.g. `"inbox"`. |
-| `attempt` | integer | The attempt's number within the session, counting from 1. A loaded session carries on past the numbers the log holds. |
+| `feed` | string | The feed's name, e.g. `"inbox"`. The `origin` names the instance. |
+| `attempt` | integer | The attempt's number within the session and the instance, counting from 1. A loaded session carries on past the numbers the log holds, except an optional feed a subscription started: a restored session holds no optional instances, so a re-subscribed one restarts at attempt 1. |
 | `started_at` | string | RFC 3339, UTC. |
 
 ## `feed.ended`
@@ -485,14 +489,15 @@ A feed's attempts never overlap, so the attempt's end is the next
 One attempt of a feed ended. The record is terminal: the attempt is
 never resumed, and a feed's failure reaches the model through the record
 and the event, never as a message. A loaded session starts the feed's
-next attempt under the next number.
+next attempt under the next number, and a subscription's instance does not
+start again on its own.
 
 | Field | Type | Meaning |
 |---|---|---|
 | `session_id` | string | The session's identifier. |
 | `feed` | string | The feed's name. |
 | `attempt` | integer | The attempt's number within the session. |
-| `outcome` | string | How the attempt ended: `"exited"`, `"failed"`, `"cancelled"`, `"session_closed"` or `"interrupted"`. |
+| `outcome` | string | How the attempt ended: `"exited"`, `"failed"`, `"cancelled"`, `"suspended"`, `"session_closed"` or `"interrupted"`. |
 | `error` | string | The runner's error, when it returned one. Absent when it did not. |
 | `restart_in_ms` | integer | How long the session waits before the next attempt, in whole milliseconds, rounded up. Absent when no restart is scheduled. |
 | `ended_at` | string | RFC 3339, UTC. |
@@ -502,6 +507,19 @@ it returned an error or panicked. `cancelled` means `cancel_job` stopped
 the attempt, and `session_closed` means the session closed under it, or
 its store broke. `interrupted` is written by a load, never by a live
 session: the process stopped during the attempt.
+
+`suspended` means the feed's filter failed closed: the filter exited
+nonzero, or wrote something other than a record, so the attempt ended and
+the feed did not restart, whatever its restart policy says. The `error`
+names the fault.
+
+A suspension wakes the session with a `feed` input of its own, and that
+input is the report of how the feed went down. Its text is the feed's
+`<feed>` element with `fault` and `log` attributes beside `name`: the
+fault's code, and the path of a file beside the session's own that holds
+the filter's diagnostics for the attempt. Those diagnostics never ride the
+input. One suspension is one wake: a further fault that arrives before the
+report is delivered joins it, and the report counts it.
 
 ## `observer.dropped`
 
@@ -791,9 +809,9 @@ say".
 
 The order of the records is the order of the events. A `tool.call` is
 always followed by its `tool.result`, and a `run.started` is always
-followed by a `run.settled`. A feed's attempts never overlap, so a
-`feed.started` is followed by its `feed.ended` before the feed's next
-`feed.started`. The core writes the settle record itself, so
+followed by a `run.settled`. One feed instance's attempts never overlap, so
+a `feed.started` is followed by its `feed.ended` before that instance's
+next `feed.started`. The core writes the settle record itself, so
 a run that was cancelled, or whose provider failed, still ends with one.
 Every record is written under a context of its own, bounded at 5 s, so a
 cancelled run still records what it did. A `usage` record the store

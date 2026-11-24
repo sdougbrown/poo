@@ -751,6 +751,32 @@ func TestTheRestoreRejectsAToolThatIsNoLongerLinked(t *testing.T) {
 	}
 }
 
+// TestTheRestoreKeepsASessionWhoseOptionalFeedIsGone covers the
+// subscribe_feed tool's absence: it is the core's tool for starting
+// optional feeds, so a build that links no optional feed does not link it.
+// The session restores, and the changed feed set is a warning.
+func TestTheRestoreKeepsASessionWhoseOptionalFeedIsGone(t *testing.T) {
+	created := header("s1")
+	created.Tools = append(created.Tools, poo.ToolInfo{Name: poo.SubscribeFeedToolName, Class: poo.ClassReadOnly, Background: poo.BackgroundNever})
+	opts := restoreOptions(t, scripted(nil), &recordingSink{})
+	opts.Profiles = []poo.Profile{{Name: "code", Feeds: []string{"chat"}}}
+	opts.Feeds = nil
+	_, restored, err := poo.Restore(opts, []poo.Record{created})
+	if err != nil {
+		t.Fatalf("the restore refused a session whose optional feed is gone: %v", err)
+	}
+	want := poo.MissingFeedWarning("code", "chat")
+	found := false
+	for _, warning := range restored.Warnings {
+		if warning == want {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("the warnings are %v, want %q", restored.Warnings, want)
+	}
+}
+
 // TestTheRestoreSendsTheRecordedToolsModeAndReasoning covers the
 // request's shape: the recorded tools mode and reasoning effort are what
 // the restored session sends, not the caller's defaults.

@@ -634,7 +634,7 @@ func TestTheSettingsExecutorRunsTheFeedCommand(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	err = runtime.Options.Feeds[0].Run(ctx, poo.FeedIO{
-		Emit: func(string, string, *poo.FeedImage) error {
+		Emit: func(string, string, *poo.FeedImage, json.RawMessage) error {
 			cancel()
 			return nil
 		},
@@ -726,7 +726,7 @@ func TestAFeedCannotReachAScrubbedVariable(t *testing.T) {
 
 	emitted := 0
 	err = runtime.Options.Feeds[0].Run(context.Background(), poo.FeedIO{
-		Emit: func(string, string, *poo.FeedImage) error {
+		Emit: func(string, string, *poo.FeedImage, json.RawMessage) error {
 			emitted++
 			return nil
 		},
@@ -794,7 +794,7 @@ func TestAFeedReachesADeclaredCredential(t *testing.T) {
 	// The fixture prints once and exits, so the runner's own supervision of a
 	// finished command is not what this test is about.
 	err = runtime.Options.Feeds[0].Run(ctx, poo.FeedIO{
-		Emit: func(_, text string, _ *poo.FeedImage) error {
+		Emit: func(_, text string, _ *poo.FeedImage, _ json.RawMessage) error {
 			emitted = append(emitted, text)
 			return nil
 		},

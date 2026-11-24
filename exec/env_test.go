@@ -87,9 +87,39 @@ func TestTheSessionScopeResolvesOnlyTheSessionID(t *testing.T) {
 		t.Errorf("a second resolution gave %q, %v", id, err)
 	}
 	if _, err := resolve("session", "run_id"); err == nil || !strings.Contains(err.Error(), `"session:run_id"`) {
-		t.Errorf("session:run_id resolved: err = %v, want one naming the reference", err)
+		t.Errorf("session:run_id resolved, want an error naming the reference: %v", err)
 	}
 	if _, err := exec.SessionScope("")("session", "id"); err == nil {
 		t.Error("an empty session ID resolved")
+	}
+}
+
+// TestTheScopedResolverCarriesTheSubscriptionValues covers the resolver a
+// feed instance runs with: `scope:NAME` resolves to the value the
+// subscription supplied for that field, `session:id` still resolves to the
+// session's own ID, and a name neither scope carries fails.
+func TestTheScopedResolverCarriesTheSubscriptionValues(t *testing.T) {
+	resolve := exec.ScopedResolver("sess-01", map[string]string{"url": "https://example.test/repo"})
+	url, err := resolve("scope", "url")
+	if err != nil || url != "https://example.test/repo" {
+		t.Errorf("scope:url resolved to %q, %v; want the subscription's value", url, err)
+	}
+	id, err := resolve("session", "id")
+	if err != nil || id != "sess-01" {
+		t.Errorf("session:id resolved to %q, %v beside a scope", id, err)
+	}
+	if _, err := resolve("scope", "repo"); err == nil || !strings.Contains(err.Error(), `"scope:repo"`) {
+		t.Errorf("scope:repo resolved, want an error naming the reference: %v", err)
+	}
+	// A session reference keeps its own refusals, so the two scopes do
+	// not blur into one.
+	if _, err := resolve("session", "run_id"); err == nil || !strings.Contains(err.Error(), `"session:run_id"`) {
+		t.Errorf("session:run_id resolved, want an error naming the reference: %v", err)
+	}
+	if _, err := exec.ScopedResolver("", nil)("scope", "url"); err == nil {
+		t.Error("a scope value resolved with no scope at all")
+	}
+	if _, err := resolve("", "url"); err == nil {
+		t.Error("a reference with no scope resolved")
 	}
 }

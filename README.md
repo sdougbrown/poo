@@ -658,7 +658,10 @@ manifests sit in poo's default feeds directory, the session runs a
 long-lived command beside itself and delivers the messages
 it prints as input. A feed is listed as `feed:<name>` and stopped with
 `cancel_job`. Its manifest names the command, the environment, the restart
-policy and whether it may wake an idle session. The code is in `poo/feed`;
+policy and whether it may wake an idle session. A feed marked `optional`
+does not run until the model starts it with `subscribe_feed`, and its
+records may pass through a filter — a question put to the decision model,
+or a command that screens each record — before delivery. The code is in `poo/feed`;
 [docs/build-your-own-binary.md](docs/build-your-own-binary.md#feeds) has
 the manifest and the protocol. The [Avenor example](examples/avenor/README.md)
 uses a feed and the CLI registry to delegate and reply through a local supervisor.

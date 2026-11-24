@@ -120,6 +120,35 @@ func TestSpecsAreACopy(t *testing.T) {
 	}
 }
 
+// TestAScriptFilterLoadsWithItsCommand covers the manifest's second filter
+// kind: the command an operator names is the spec's, and a copy of the spec
+// does not share it.
+func TestAScriptFilterLoadsWithItsCommand(t *testing.T) {
+	set, err := feed.Load(writeManifest(t, map[string]any{
+		"broker": map[string]any{"command": []string{"true"}, "filter": map[string]any{"command": []string{"sh", "-c", "cat"}}},
+	}))
+	if err != nil {
+		t.Fatalf("loading the manifest: %v", err)
+	}
+	specs := set.Specs()
+	filter := specs[0].Filter
+	if filter == nil || !filter.Script() {
+		t.Fatalf("the spec's filter is %+v, want a command filter", filter)
+	}
+	if got := strings.Join(filter.Command, " "); got != "sh -c cat" {
+		t.Errorf("the filter's command is %q, want the manifest's", got)
+	}
+	if filter.Question != "" || filter.MinNoProbability != 0 {
+		t.Errorf("the command filter carries a question (%q, %v)", filter.Question, filter.MinNoProbability)
+	}
+	// A copy of the spec owns its argv, so a consumer that changes one
+	// cannot change what the next run starts.
+	specs[0].Filter.Command[0] = "changed"
+	if set.Specs()[0].Filter.Command[0] != "sh" {
+		t.Error("changing a copy's filter command changed the set")
+	}
+}
+
 // TestResolveEnvCoversLiteralsReferencesAndBenignNames covers the
 // resolution: the benign names come from the lookup, the manifest's
 // literals pass through, and its references resolve against it.
@@ -292,6 +321,34 @@ func TestALoadRefusesBrokenManifests(t *testing.T) {
 				"broker": map[string]any{"command": []string{"true"}, "filter": map[string]any{"question": "Deliver this?", "min_no_probability": 0.5}},
 			},
 			want: []string{"broker", "filter.min_no_probability"},
+		},
+		{
+			name: "both filter kinds",
+			feeds: map[string]any{
+				"broker": map[string]any{"command": []string{"true"}, "filter": map[string]any{"command": []string{"jq"}, "question": "Deliver this?", "min_no_probability": 0.9}},
+			},
+			want: []string{"broker", "filter.command", "filter.question"},
+		},
+		{
+			name: "filter threshold on a command filter",
+			feeds: map[string]any{
+				"broker": map[string]any{"command": []string{"true"}, "filter": map[string]any{"command": []string{"jq"}, "min_no_probability": 0.9}},
+			},
+			want: []string{"broker", "filter.min_no_probability"},
+		},
+		{
+			name: "empty filter command",
+			feeds: map[string]any{
+				"broker": map[string]any{"command": []string{"true"}, "filter": map[string]any{"command": []string{""}}},
+			},
+			want: []string{"broker", "filter", "command"},
+		},
+		{
+			name: "empty filter",
+			feeds: map[string]any{
+				"broker": map[string]any{"command": []string{"true"}, "filter": map[string]any{}},
+			},
+			want: []string{"broker", "filter.command"},
 		},
 		{
 			name:  "invalid name",

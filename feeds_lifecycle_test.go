@@ -40,7 +40,7 @@ func TestAFeedDeliversItsInputs(t *testing.T) {
 	newTestSession(t, testOptions(t, tr, &echoTool{}, sink), poo.WithFeeds(poo.FeedSpec{
 		Name: "inbox",
 		Run: func(ctx context.Context, io poo.FeedIO) error {
-			if err := io.Emit("alice", "the message", nil); err != nil {
+			if err := io.Emit("alice", "the message", nil, nil); err != nil {
 				return err
 			}
 			<-ctx.Done()
@@ -372,7 +372,7 @@ func TestAFeedsHoldOverridesTheSessionsWake(t *testing.T) {
 		Name:   "inbox",
 		OnIdle: poo.OnIdleHold,
 		Run: func(ctx context.Context, io poo.FeedIO) error {
-			if err := io.Emit("", "the message", nil); err != nil {
+			if err := io.Emit("", "the message", nil, nil); err != nil {
 				return err
 			}
 			<-ctx.Done()
@@ -411,7 +411,7 @@ func TestAFeedsWakeOverridesTheSessionsHold(t *testing.T) {
 		Name:   "inbox",
 		OnIdle: poo.OnIdleWake,
 		Run: func(ctx context.Context, io poo.FeedIO) error {
-			if err := io.Emit("", "the message", nil); err != nil {
+			if err := io.Emit("", "the message", nil, nil); err != nil {
 				return err
 			}
 			<-ctx.Done()
@@ -557,7 +557,7 @@ func TestTheRestoreStartsFeedsAfterThePendingInputs(t *testing.T) {
 		Name:   "inbox",
 		OnIdle: poo.OnIdleHold,
 		Run: func(ctx context.Context, io poo.FeedIO) error {
-			if err := io.Emit("", "the second", nil); err != nil {
+			if err := io.Emit("", "the second", nil, nil); err != nil {
 				return err
 			}
 			<-ctx.Done()
@@ -651,11 +651,11 @@ func TestARefusedFeedInputBreaksTheFeed(t *testing.T) {
 		OnIdle:  poo.OnIdleHold,
 		Run: func(ctx context.Context, io poo.FeedIO) error {
 			attempts.Add(1)
-			if err := io.Emit("", "the first", nil); err != nil {
+			if err := io.Emit("", "the first", nil, nil); err != nil {
 				reported <- refused{err: err, ctxLive: ctx.Err() == nil}
 				return err
 			}
-			err := io.Emit("", "the second", nil)
+			err := io.Emit("", "the second", nil, nil)
 			// The session breaks the feed with the refused write, so the
 			// runner's context has ended by the time the emit returns.
 			reported <- refused{err: err, ctxLive: ctx.Err() == nil}
@@ -724,7 +724,7 @@ func TestARefusedFeedInputBreaksTheFeed(t *testing.T) {
 func TestAnEmitAfterTheAttemptEndedIsRefused(t *testing.T) {
 	tr := scripted([]fakeResponse{{text: "the answer"}})
 	sink := &recordingSink{}
-	emits := make(chan func(from, text string, image *poo.FeedImage) error, 1)
+	emits := make(chan func(from, text string, image *poo.FeedImage, data json.RawMessage) error, 1)
 	s := newTestSession(t, testOptions(t, tr, &echoTool{}, sink), poo.WithFeeds(poo.FeedSpec{
 		Name: "inbox",
 		Run: func(ctx context.Context, io poo.FeedIO) error {
@@ -740,7 +740,7 @@ func TestAnEmitAfterTheAttemptEndedIsRefused(t *testing.T) {
 	waitFor(t, "the attempt to end", func() bool {
 		return sink.count("feed.ended") == 1
 	})
-	err := emit("alice", "the late message", nil)
+	err := emit("alice", "the late message", nil, nil)
 	if !errors.Is(err, poo.ErrSessionClosed) {
 		t.Errorf("the late emit returned %v, want ErrSessionClosed", err)
 	}

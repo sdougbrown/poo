@@ -1,7 +1,7 @@
 // Package depcheck enforces the poo dependency rules on non-test imports.
 //
-//   - the core package may import the standard library, plus the prompt and
-//     decide packages
+//   - the core package may import the standard library, plus the prompt,
+//     decide and scopeschema packages
 //   - the prompt, prompt/agentsmd, decide and wire/protocol packages may
 //     import the standard library only
 //   - the skill package may import the standard library, the prompt package
@@ -25,10 +25,13 @@
 //     registry
 //   - the cli package may import the standard library, the prompt package
 //     and the packages outside the module that hold a cli registry
-//   - the feed package may import the standard library, the exec package
-//     and the packages outside the module that hold a cli registry, and no
-//     other package of this module: the manifests are the feed package's,
-//     and the types a session runs are the core's
+//   - the feed package may import the standard library, the exec package,
+//     the scopeschema package and the packages outside the module that
+//     hold a cli registry, and no other package of this module: the
+//     manifests are the feed package's, and the types a session runs are
+//     the core's
+//   - the scopeschema package may import the standard library only, for it
+//     holds the rules a feed's scope schema answers to
 //   - the server package may import the packages it composes: the core,
 //     the settings, the profiles, the executors, the permission policy,
 //     the sessions, the catalogs, the feeds and the wire
@@ -101,7 +104,7 @@ type rule struct {
 func (c Checker) rules() []rule {
 	m := c.ModulePath
 	return []rule{
-		{path: m, allowed: []string{m + "/prompt", m + "/decide", m + "/internal/schematext", "github.com/sdougbrown/cli-registry/schema"}},
+		{path: m, allowed: []string{m + "/prompt", m + "/decide", m + "/internal/schematext", m + "/scopeschema", "github.com/sdougbrown/cli-registry/schema"}},
 		{path: m + "/prompt"},
 		{path: m + "/prompt/agentsmd"},
 		{path: m + "/skill", allowed: []string{m + "/prompt"}, external: true},
@@ -135,7 +138,8 @@ func (c Checker) rules() []rule {
 		{path: m + "/internal/caps"},
 		{path: m + "/internal/schematext", allowed: []string{"github.com/sdougbrown/cli-registry/schema"}},
 		{path: m + "/cli", allowed: []string{m + "/prompt", m + "/internal/schematext"}, external: true},
-		{path: m + "/feed", allowed: []string{m + "/exec"}, external: true},
+		{path: m + "/feed", allowed: []string{m + "/exec", m + "/scopeschema"}, external: true},
+		{path: m + "/scopeschema"},
 		{
 			path: m + "/server",
 			allowed: []string{

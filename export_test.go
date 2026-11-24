@@ -74,7 +74,7 @@ func SessionChatModel(s *Session) ModelInfo { return s.opts.Model }
 // reaches the acceptance through this. The input belongs to no attempt,
 // so no attempt bounds it.
 func QueueFeedInput(s *Session, feed, from, text string) error {
-	return s.queueFeedInput(feed, from, text, nil, "", nil)
+	return s.queueFeedInput(feedInput{instance: feed, from: from, text: text})
 }
 
 // QueueFeedImageInput queues one feed's input that carries an image,
@@ -84,7 +84,7 @@ func QueueFeedImageInput(s *Session, feed, from, text string, image *FeedImage) 
 	if err != nil {
 		return err
 	}
-	return s.queueFeedInput(feed, from, text, attachments, "", nil)
+	return s.queueFeedInput(feedInput{instance: feed, from: from, text: text, attachments: attachments})
 }
 
 // SetFeedRestartDelay replaces how long the session's feeds wait before
@@ -113,4 +113,51 @@ func RequeueAtFront(s *Session, inputID string) {
 		s.jobQueue = append([]jobQueueItem{item}, s.jobQueue...)
 		return
 	}
+}
+
+// SubscribeFeed starts one instance of an optional feed, the way the
+// subscribe_feed tool does, and reports the instance and whether this call
+// started it.
+func SubscribeFeed(s *Session, feed string, scope map[string]string) (string, bool, error) {
+	return s.subscribeFeed(feed, scope, nil, false)
+}
+
+// SubscribeFeedWithPrompt starts one instance of an optional feed and sets
+// the filter prompt the call names, the way the subscribe_feed tool does.
+func SubscribeFeedWithPrompt(s *Session, feed string, scope map[string]string, prompt *FeedFilterPrompt) (string, bool, error) {
+	hasMinNoProbability := prompt != nil && prompt.MinNoProbability != 0
+	return s.subscribeFeed(feed, scope, prompt, hasMinNoProbability)
+}
+
+// ReportFeedFault reports one attempt's fault the way the attempt's
+// supervisor does, so a test can drive the path for an attempt that is no
+// longer the instance's current one.
+func ReportFeedFault(s *Session, instance string, attempt int, fault *FeedFault) {
+	s.mu.Lock()
+	f, ok := s.feeds[instance]
+	s.mu.Unlock()
+	if !ok {
+		return
+	}
+	s.reportFeedFault(f, attempt, time.Now(), fault)
+}
+
+// PendingFaultReportAttempt returns the attempt whose fault report is
+// accepted and not yet queued, and whether one is.
+func PendingFaultReportAttempt(s *Session, instance string) (int, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	pending, ok := s.pendingFaultReports[Origin(instance)]
+	if !ok {
+		return 0, false
+	}
+	return pending.attempt, true
+}
+
+// RetireFaultReport retires the fault report reservation an attempt took,
+// the way the report path does once its report is queued.
+func RetireFaultReport(s *Session, instance string, attempt int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.retireFaultReportLocked(Origin(instance), attempt)
 }

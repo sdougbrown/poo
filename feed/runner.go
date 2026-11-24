@@ -13,11 +13,12 @@ import (
 
 // The limits one attempt reads under.
 const (
-	// maxLineBytes is the longest line a feed's stdout may carry. A
-	// line is one message, so a longer one is a feed printing
+	// MaxLineBytes is the longest line a feed's stdout may carry, and
+	// the longest record a filter's stdout may carry. A line is one
+	// message, so a longer one is a feed or a filter printing
 	// something that is not a message: the attempt fails rather than
 	// the session holding it in memory.
-	maxLineBytes = 1 << 20
+	MaxLineBytes = 1 << 20
 	// maxStderrBytes is how much of a command's stderr one attempt
 	// logs. A feed that floods its diagnostics loses the rest: the log
 	// is not the feed's output.
@@ -30,11 +31,11 @@ var silentLogger = slog.New(slog.DiscardHandler)
 // Run is one attempt of a feed's process.
 //
 // dir is the directory the command runs in, and session resolves the
-// manifest's session references — exec.SessionScope over the ID of the
-// session the feed runs beside. Both are the session's to hand over: a
-// feed follows the session it runs beside rather than the directory the
-// binary was built in, and its session references resolve to that
-// session's ID.
+// manifest's scoped references: `session:id` resolves to the ID of the
+// session the feed runs beside, and `scope:NAME` to the value the
+// subscription named. Both are the session's to hand over: a feed follows
+// the session it runs beside rather than the directory the binary was
+// built in, and its scoped references resolve beside that session.
 type Run func(ctx context.Context, dir string, session func(scope, name string) (string, error), emit func(from, text string, image *Image) error, log *slog.Logger) error
 
 // Image is the image a feed's message names, by its path.
@@ -90,9 +91,9 @@ type Image struct {
 // The environment follows a registered tool's rules: the benign names,
 // then the manifest's own entries, resolved through env. An `env:NAME`
 // reference resolves against the session's scrubbed environment, and a
-// `session:id` reference resolves through the session the caller hands
-// over. A reference that does not resolve fails the attempt, and the
-// command does not start.
+// scoped reference — `session:id` or `scope:NAME` — resolves through the
+// resolver the caller hands over. A reference that does not resolve fails
+// the attempt, and the command does not start.
 func Runner(spec Spec, ex exec.Executor, env func(string) (string, bool)) Run {
 	return func(ctx context.Context, dir string, session func(scope, name string) (string, error), emit func(from, text string, image *Image) error, log *slog.Logger) error {
 		resolved, err := spec.ResolveEnvScoped(env, session)
@@ -199,8 +200,8 @@ func (r *lineReader) Write(p []byte) (int, error) {
 			return n, nil
 		}
 	}
-	if len(r.pending) > maxLineBytes {
-		r.fail(fmt.Errorf("a line is longer than %d bytes", maxLineBytes))
+	if len(r.pending) > MaxLineBytes {
+		r.fail(fmt.Errorf("a line is longer than %d bytes", MaxLineBytes))
 	}
 	return n, nil
 }
@@ -232,8 +233,8 @@ func (r *lineReader) failure() error {
 // the limit is the attempt's failure before anything decodes it, so a
 // complete line is held to the same limit as one still arriving.
 func (r *lineReader) accept(line string) error {
-	if len(line) > maxLineBytes {
-		return r.fail(fmt.Errorf("a line is longer than %d bytes", maxLineBytes))
+	if len(line) > MaxLineBytes {
+		return r.fail(fmt.Errorf("a line is longer than %d bytes", MaxLineBytes))
 	}
 	if strings.TrimSpace(line) == "" {
 		return nil

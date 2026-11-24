@@ -102,7 +102,7 @@ func TestARefusedDeliveryWriteBreaksTheFeeds(t *testing.T) {
 
 	// The feed stops with the session that broke under it.
 	s.mu.Lock()
-	f := s.feeds["inbox"]
+	f := s.feeds[string(FeedOrigin("inbox"))]
 	s.mu.Unlock()
 	if f == nil {
 		t.Fatal("the session holds no inbox feed")

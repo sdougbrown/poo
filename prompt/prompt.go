@@ -41,6 +41,12 @@ type Env struct {
 	// A section that names them tells the model what may arrive beside
 	// the user's turn.
 	Feeds []Feed
+	// OptionalFeeds are the feeds a subscription starts, in declaration
+	// order.
+	//
+	// A section that names them tells the model what it may ask for, and
+	// what each feed's scope means.
+	OptionalFeeds []Feed
 	// Variant is the name of the prompt variant the prompt renders in.
 	//
 	// A section that offers an alternative for that name renders the
@@ -55,12 +61,26 @@ type Env struct {
 // what the prompt renders when no other variant is named.
 const DefaultVariant = "default"
 
-// Feed is a feed the session runs, as a prompt section names it.
+// Feed is a feed the session runs or may start, as a prompt section names
+// it.
 type Feed struct {
 	// Name is the feed's name.
 	Name string
 	// Description is what the feed is for.
 	Description string
+	// Scope are the values a subscription must supply, in name order, and
+	// empty for a feed that takes none.
+	Scope []FeedScope
+}
+
+// FeedScope is one value a subscription must supply for a feed, as a
+// prompt section names it.
+type FeedScope struct {
+	// Name is the field's name, which the call passes its value under.
+	Name string
+	// Pattern is the expression the whole value must match, or "" when
+	// any string is accepted.
+	Pattern string
 }
 
 // Sections is the surface a named section list is edited through.

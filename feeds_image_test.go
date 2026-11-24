@@ -42,7 +42,7 @@ func imageFeedSession(t *testing.T, opts poo.Options, path, media, from, text st
 		OnIdle: poo.OnIdleWake,
 		Run: func(ctx context.Context, io poo.FeedIO) error {
 			<-emit
-			if err := io.Emit(from, text, &poo.FeedImage{Path: path, MediaType: media}); err != nil {
+			if err := io.Emit(from, text, &poo.FeedImage{Path: path, MediaType: media}, nil); err != nil {
 				return err
 			}
 			<-ctx.Done()

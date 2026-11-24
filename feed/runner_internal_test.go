@@ -95,7 +95,7 @@ func TestTheLineLimitIsOnCompleteLines(t *testing.T) {
 	// {"text":""} is the shortest line the object describes, so the
 	// padding is the limit less what the line must carry.
 	lineWith := func(extra int) string {
-		return `{"text":"` + strings.Repeat("x", maxLineBytes-len(`{"text":""}`)+extra) + `"}`
+		return `{"text":"` + strings.Repeat("x", MaxLineBytes-len(`{"text":""}`)+extra) + `"}`
 	}
 	for _, c := range []struct {
 		name  string
@@ -114,8 +114,8 @@ func TestTheLineLimitIsOnCompleteLines(t *testing.T) {
 				cancel: func() {},
 			}
 			line := lineWith(c.extra)
-			if len(line) != maxLineBytes+c.extra {
-				t.Fatalf("the line is %d bytes, want %d", len(line), maxLineBytes+c.extra)
+			if len(line) != MaxLineBytes+c.extra {
+				t.Fatalf("the line is %d bytes, want %d", len(line), MaxLineBytes+c.extra)
 			}
 			if _, err := reader.Write([]byte(line + "\n")); err != nil {
 				t.Fatalf("the writer failed: %v", err)

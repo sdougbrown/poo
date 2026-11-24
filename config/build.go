@@ -547,8 +547,10 @@ func (r *Runtime) resolveProfile(opts BuildOptions, workingDir string) error {
 	}
 	// The core adds the job tools on its own whenever a linked tool may
 	// run in the background or the session runs feeds, and the profile
-	// offers them with it.
+	// offers them with it; the tool that starts an optional feed comes
+	// with them.
 	r.Profile.Tools = withJobTools(r.Profile.Tools, r.hasFeeds())
+	r.Profile.Tools = withSubscribeTool(r.Profile.Tools, r.hasOptionalFeeds())
 	profiles, err := r.resolveProfiles(opts, definitions, workingDir)
 	if err != nil {
 		return err
@@ -560,6 +562,17 @@ func (r *Runtime) resolveProfile(opts BuildOptions, workingDir string) error {
 // hasFeeds reports whether the session runs feeds.
 func (r *Runtime) hasFeeds() bool {
 	return r.Feeds.Len() > 0
+}
+
+// hasOptionalFeeds reports whether the session loads a feed the model may
+// start.
+func (r *Runtime) hasOptionalFeeds() bool {
+	for _, spec := range r.Feeds.Specs() {
+		if spec.Optional {
+			return true
+		}
+	}
+	return false
 }
 
 // resolveSkills loads the skills the settings name.
@@ -1165,7 +1178,7 @@ func toolInfo(factory ToolFactory) poo.ToolInfo {
 //
 // They are not the profile's to give up, so the settings cannot disable
 // one.
-var coreToolNames = []string{profile.JobsToolName, profile.CancelJobToolName, poo.FinishToolName}
+var coreToolNames = []string{profile.JobsToolName, profile.CancelJobToolName, poo.SubscribeFeedToolName, poo.FinishToolName}
 
 // withJobTools adds the core's job tools to a profile's tools.
 //
@@ -1185,6 +1198,17 @@ func withJobTools(tools []poo.ToolInfo, feeds bool) []poo.ToolInfo {
 	return append(tools,
 		poo.ToolInfo{Name: profile.JobsToolName, Class: poo.ClassReadOnly, Background: poo.BackgroundNever},
 		poo.ToolInfo{Name: profile.CancelJobToolName, Class: poo.ClassReadOnly, Background: poo.BackgroundNever})
+}
+
+// withSubscribeTool adds the core's subscribe tool to a profile's tools.
+//
+// The core adds the tool when the session loads a feed the model may
+// start, so the profile offers it with the tool it takes.
+func withSubscribeTool(tools []poo.ToolInfo, optionalFeed bool) []poo.ToolInfo {
+	if !optionalFeed {
+		return tools
+	}
+	return append(tools, poo.ToolInfo{Name: poo.SubscribeFeedToolName, Class: poo.ClassReadOnly, Background: poo.BackgroundNever})
 }
 
 // disableTools removes the tools the settings disable.
@@ -1296,6 +1320,13 @@ func (r *Runtime) resolveProfiles(opts BuildOptions, definitions []profile.Profi
 			pair = manifestPair{}
 		}
 		feeds := pair.feeds.Len() > 0
+		optionalFeed := false
+		for _, spec := range pair.feeds.Specs() {
+			if spec.Optional {
+				optionalFeed = true
+				break
+			}
+		}
 		disabled := r.disabledTools(definition.Name)
 		resolved := poo.Profile{Name: definition.Name, Unmatched: definition.Unmatched, Feeds: slices.Clone(definition.Feeds)}
 		for _, tool := range definition.Tools {
@@ -1324,6 +1355,7 @@ func (r *Runtime) resolveProfiles(opts BuildOptions, definitions []profile.Profi
 			}
 		}
 		resolved.Tools = withJobTools(resolved.Tools, feeds)
+		resolved.Tools = withSubscribeTool(resolved.Tools, optionalFeed)
 		out = append(out, resolved)
 	}
 	return out, nil
@@ -1439,10 +1471,10 @@ func linksTool(opts BuildOptions, name string) bool {
 
 // linkedTool reports whether a settings rule may name a tool.
 //
-// The core's own job tools are linked by the core, so a rule may name
-// them.
+// The core's own job and feed tools are linked by the core, so a rule may
+// name them.
 func linkedTool(opts BuildOptions, name string) bool {
-	if name == profile.JobsToolName || name == profile.CancelJobToolName {
+	if name == profile.JobsToolName || name == profile.CancelJobToolName || name == poo.SubscribeFeedToolName {
 		return true
 	}
 	return linksTool(opts, name)
@@ -1703,38 +1735,70 @@ func (r *Runtime) resolveFeedRuns(opts BuildOptions) error {
 			}
 		}
 		run := feed.Runner(spec, r.executor, lookup)
+		filterQuestion := ""
+		if spec.Filter != nil {
+			filterQuestion = spec.Filter.Question
+		}
 		specs = append(specs, poo.FeedSpec{
 			Name:        spec.Name,
 			Description: spec.Description,
 			Restart:     spec.Restart,
 			OnIdle:      onIdle,
 			MaxPending:  spec.MaxPending,
+			Optional:    spec.Optional,
+			Scope:       scopeFields(spec.Scope),
+			// A feed's filter is one of the two kinds, and the core
+			// refuses a filter prompt on a feed whose manifest runs the
+			// script kind. The question is carried beside it, so a
+			// subscription that replaces the operator's question is
+			// reported as one.
+			ScriptFilter:   spec.Filter.Script(),
+			FilterQuestion: filterQuestion,
 			// The session hands its own working directory to the run
 			// it calls, so a session created in another directory
 			// than the build's runs its feed there.
 			Run: func(ctx context.Context, io poo.FeedIO) error {
-				emit := io.Emit
-				if spec.Filter != nil {
-					emit = filterEmit(ctx, io, spec.Name, *spec.Filter)
-				}
+				// The scoped resolver carries the session's own values and
+				// the ones the subscription named, so a manifest's
+				// `session:id` and `scope:NAME` references both resolve
+				// beside the session the instance runs beside. A filter
+				// resolves the feed's own entries through it, so the
+				// filter reaches what the feed reaches.
+				session := exec.ScopedResolver(io.SessionID, io.Scope)
+				emit := filterEmitter(ctx, io, spec, r.executor, lookup, session)
 				// The feed package's image is the envelope's own shape;
 				// the session's is the seam's. The two differ in the
 				// JSON tags alone: a field added to one is added to the
 				// other, and copied here. A nil image is a text-only
 				// message — the conversion would name an image with no
 				// path — so it passes through as nil.
-				session := exec.SessionScope(io.SessionID)
 				return run(ctx, io.Dir, session, func(from, text string, image *feed.Image) error {
 					if image == nil {
-						return emit(from, text, nil)
+						return emit(from, text, nil, nil)
 					}
-					return emit(from, text, &poo.FeedImage{Path: image.Path, MediaType: image.MediaType})
+					return emit(from, text, &poo.FeedImage{Path: image.Path, MediaType: image.MediaType}, nil)
 				}, io.Log)
 			},
 		})
 	}
 	r.Options.Feeds = specs
 	return nil
+}
+
+// scopeFields maps a manifest's scope schema onto the core's.
+//
+// The values are the loader's and the core's are its own, so the mapping
+// is here: a field either side gains without the other fails the build
+// rather than being passed along or dropped.
+func scopeFields(fields []feed.ScopeField) []poo.FeedScopeField {
+	if len(fields) == 0 {
+		return nil
+	}
+	out := make([]poo.FeedScopeField, 0, len(fields))
+	for _, field := range fields {
+		out = append(out, poo.FeedScopeField{Name: field.Name, Type: field.Type, Pattern: field.Pattern})
+	}
+	return out
 }
 
 // onIdleOf maps a manifest's on_idle onto the core's idle policy.
@@ -2309,6 +2373,7 @@ func promptSources(opts BuildOptions, r *Runtime) prompt.Sources {
 	}
 	sources[prompt.ToolSection(profile.JobsToolName)] = nil
 	sources[prompt.ToolSection(profile.CancelJobToolName)] = nil
+	sources[prompt.ToolSection(poo.SubscribeFeedToolName)] = nil
 	linksCall := linksTool(opts, cli.CallToolName)
 	if r.Registry != nil || linksCall {
 		sources[prompt.ToolSection(cli.CallToolName)] = nil
@@ -2464,6 +2529,11 @@ func (r *Runtime) CreateSession(ctx context.Context, store session.Store, create
 		}
 	}
 	opts := r.Options
+	// The feed fault logs live beside the session's files, so the
+	// session's directory is the store's own.
+	if dir := session.StoreDir(store); dir != "" {
+		opts.SessionDir = dir
+	}
 	// The session works in the directory its header names: the tools
 	// work there, and the prompt names it.
 	if created.WorkingDir != "" {
@@ -2512,6 +2582,11 @@ func (r *Runtime) ResumeSession(ctx context.Context, store session.Store, id str
 		}
 	}
 	opts := r.Options
+	// The feed fault logs live beside the session's files, so the
+	// session's directory is the store's own.
+	if dir := session.StoreDir(store); dir != "" {
+		opts.SessionDir = dir
+	}
 	// A restored session continues in the directory it was recorded
 	// in: the core takes the recorded directory when the options name
 	// none.
