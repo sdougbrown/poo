@@ -2,6 +2,7 @@ package prompt
 
 import (
 	_ "embed"
+	"fmt"
 	"slices"
 	"sort"
 	"strings"
@@ -80,4 +81,21 @@ func FamilyRenders(b *Builder, variant string) bool {
 		}
 	}
 	return false
+}
+
+// FamilyWarning returns the warning a caller surfaces when the family
+// section the builder holds renders no guidance for the variant named.
+// The rule and its wording are the family's own, so every path that
+// explains an empty section — a model switch, a variant change, the
+// build — says the same thing. The second result reports whether there
+// is something to say: a prompt without the section, or one whose
+// section renders, stays unmentioned.
+func FamilyWarning(b *Builder, variant string) (string, bool) {
+	if !FamilyHolds(b) || FamilyRenders(b, variant) {
+		return "", false
+	}
+	if variant == "" {
+		return "the prompt renders with no variant, so the model family's guidance does not render", true
+	}
+	return fmt.Sprintf("the prompt variant %q names no family the prompt ships, so the model family's guidance does not render in a session that keeps it", variant), true
 }

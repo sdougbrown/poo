@@ -287,18 +287,13 @@ func (s *Session) SetPromptVariant(name string) ([]string, error) {
 		s.promptVariant = variant
 		return nil, err
 	}
-	var warnings []string
 	// The family guidance is a profile's opt-in, and the section rides
-	// the variant: a variant no family the prompt ships covers renders
-	// none of it, and the change says so instead of dropping the
-	// guidance silently. A prompt without the section — a raw one, or a
-	// session that never opted in — stays unmentioned.
-	if prompt.FamilyHolds(s.promptBuilder) && !prompt.FamilyRenders(s.promptBuilder, name) {
-		if name == "" {
-			warnings = append(warnings, "the prompt renders with no variant, so the model family's guidance does not render")
-		} else {
-			warnings = append(warnings, fmt.Sprintf("the prompt variant %q names no family the prompt ships, so the model family's guidance does not render", name))
-		}
+	// the variant: the family's own warning says when it cannot follow
+	// the variant the session is changing to.
+	var warnings []string
+	warning, ok := prompt.FamilyWarning(s.promptBuilder, name)
+	if ok {
+		warnings = append(warnings, warning)
 	}
 	return warnings, nil
 }

@@ -85,7 +85,7 @@ func TestAWarningRidesTheVariantChange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("setting the variant: %v", err)
 	}
-	if !slices.Contains(warnings, `the prompt variant "made-up-family" names no family the prompt ships, so the model family's guidance does not render`) {
+	if !slices.Contains(warnings, `the prompt variant "made-up-family" names no family the prompt ships, so the model family's guidance does not render in a session that keeps it`) {
 		t.Errorf("the change's warnings are %v, want the family note", warnings)
 	}
 	warnings, err = s.SetPromptVariant("")

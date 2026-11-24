@@ -109,18 +109,14 @@ func (s *Session) SetModel(info ModelInfo, transport ...ChatTransport) (ModelSwi
 	}
 
 	// The family guidance is a profile's opt-in, and the section rides
-	// the variant: a model whose variant names no family the prompt
-	// ships renders none, and the switch says so instead of dropping
-	// the guidance silently. A prompt without the section — a raw one,
-	// or a profile that never opted in — stays unmentioned. The note
-	// joins the warnings before the outcome is built, so the result,
-	// the record, and the event carry the same list.
-	if prompt.FamilyHolds(s.promptBuilder) && !prompt.FamilyRenders(s.promptBuilder, info.PromptVariant) {
-		if info.PromptVariant == "" {
-			warnings = append(warnings, "the model names no prompt variant, so the model family's guidance does not render")
-		} else {
-			warnings = append(warnings, fmt.Sprintf("the prompt variant %q names no family the prompt ships, so the model family's guidance does not render", info.PromptVariant))
-		}
+	// the variant: the family's own warning says when it cannot follow
+	// the model the session is switching to. A prompt without the
+	// section — a raw one, or a profile that never opted in — stays
+	// unmentioned. The note joins the warnings before the outcome is
+	// built, so the result, the record, and the event carry the same
+	// list.
+	if warning, ok := prompt.FamilyWarning(s.promptBuilder, info.PromptVariant); ok {
+		warnings = append(warnings, warning)
 	}
 
 	from := modelLabel(s.opts.Model)

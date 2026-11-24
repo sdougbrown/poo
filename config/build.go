@@ -2296,14 +2296,15 @@ func (r *Runtime) resolvePrompt(opts BuildOptions, workingDir string) error {
 	r.Options.Prompt = append(r.Options.Prompt, r.Prompt...)
 
 	// The profile that opted in hears why when the guidance cannot
-	// render. The chat model's own variant picks the text, and a prompt
-	// directory that ships a family section renders its own; a session
-	// that renders in another variant decides at its own start.
+	// render: the family's own warning, prefixed with the profile the
+	// word belongs to. The chat model's own variant picks the text, and
+	// a prompt directory that ships a family section renders its own; a
+	// session that renders in another variant decides at its own start.
 	if r.Options.ModelFamily {
 		if !r.chatModelResolved {
 			r.warn(fmt.Sprintf("profiles.%s: the build has no chat model, so the model family's guidance does not render", r.profileName(opts)))
-		} else if !prompt.FamilyRenders(poo.PromptBuilder(r.Options), r.Options.PromptVariant) {
-			r.warn(fmt.Sprintf("profiles.%s: the chat model's prompt variant %q names no family the prompt ships, so the model family's guidance does not render in a session that keeps it", r.profileName(opts), r.Options.PromptVariant))
+		} else if warning, ok := prompt.FamilyWarning(poo.PromptBuilder(r.Options), r.Options.PromptVariant); ok {
+			r.warn(fmt.Sprintf("profiles.%s: %s", r.profileName(opts), warning))
 		}
 	}
 	return nil

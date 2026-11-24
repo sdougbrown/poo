@@ -748,7 +748,7 @@ func TestASwitchWarnsWhenTheFamilyGuidanceCannotFollow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("switching the model: %v", err)
 	}
-	if !slices.Contains(outcome.Warnings, `the prompt variant "made-up-family" names no family the prompt ships, so the model family's guidance does not render`) {
+	if !slices.Contains(outcome.Warnings, `the prompt variant "made-up-family" names no family the prompt ships, so the model family's guidance does not render in a session that keeps it`) {
 		t.Errorf("the switch's warnings are %v, want the family note", outcome.Warnings)
 	}
 
@@ -765,7 +765,7 @@ func TestASwitchWarnsWhenTheFamilyGuidanceCannotFollow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("switching the model: %v", err)
 	}
-	if !slices.Contains(outcome.Warnings, "the model names no prompt variant, so the model family's guidance does not render") {
+	if !slices.Contains(outcome.Warnings, "the prompt renders with no variant, so the model family's guidance does not render") {
 		t.Errorf("the switch's warnings are %v, want the variantless note", outcome.Warnings)
 	}
 }
