@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/charmbracelet/glamour"
+	"github.com/charmbracelet/glamour/styles"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/sdougbrown/poo/wire/protocol"
@@ -453,5 +454,61 @@ func TestTheStyledRenderKeepsItsStyling(t *testing.T) {
 	}
 	if !strings.Contains(out, "\x1b[") {
 		t.Errorf("the render lost its styling:\n%q", out)
+	}
+}
+
+// TestAResizeKeepsThePaletteResolvedAtConstruction covers the style's
+// one resolution. The terminal's own palette is the answer to a question
+// asked of the terminal — an OSC 11 query and a cursor report — and the
+// reply arrives on the input the line editor is reading. The renderer
+// therefore resolves the style once, when it is built, and every width
+// change afterwards rebuilds the markdown renderer in that same style.
+func TestAResizeKeepsThePaletteResolvedAtConstruction(t *testing.T) {
+	var out bytes.Buffer
+	l := aLayout(t, &out, 40, 12)
+	r := &renderer{out: &out, term: true, layout: l, width: 40, wrap: 38}
+	asked := 0
+	r.armPalette(func() string { asked++; return styles.DarkStyle })
+	tr, err := r.newTR(r.wrap)
+	if err != nil {
+		t.Fatalf("building the markdown renderer: %v", err)
+	}
+	r.tr = tr
+	live := 40
+	r.liveWidth = func() int { return live }
+
+	out.Reset()
+	for _, width := range []int{20, 30, 41, 40} {
+		r.rewrap(width)
+		// The stream sees the width first and rebuilds the renderer
+		// itself; the resize then finds nothing left to lay out.
+		live = width + 1
+		r.stalledNow()
+		r.resize(width, 12, 1)
+	}
+	if asked != 1 {
+		t.Errorf("the palette was asked for %d time(s) across the width changes, want once at construction", asked)
+	}
+	drawn := out.String()
+	for _, query := range []string{"\x1b]11;", "\x1b[6n"} {
+		if strings.Contains(drawn, query) {
+			t.Fatalf("a width change asked the terminal %q again:\n%q", query, drawn)
+		}
+	}
+	// The markdown still renders in the style the renderer was built
+	// with: a style resolved against a writer that is no terminal comes
+	// back plain, and the resized renderer would have lost its styling.
+	if painted := r.markdown("a **bold** word"); !strings.Contains(painted, "\x1b[") {
+		t.Errorf("the resized renderer lost its palette:\n%q", painted)
+	}
+
+	// A writer that is not a terminal has no palette to ask about: it
+	// resolves none, and a width change keeps its text plain.
+	var pipe bytes.Buffer
+	pr := newRenderer(&pipe)
+	pr.rewrap(40)
+	pr.write(pr.markdown("# Heading\n\nBody text.\n"))
+	if strings.Contains(pipe.String(), "\x1b[") {
+		t.Errorf("the pipe's render carries escapes after a width change:\n%q", pipe.String())
 	}
 }

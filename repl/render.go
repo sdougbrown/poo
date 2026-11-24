@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"time"
 	"unicode/utf8"
 
 	"github.com/charmbracelet/glamour"
+	"github.com/charmbracelet/glamour/styles"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/muesli/termenv"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
 	goldmarktext "github.com/yuin/goldmark/text"
@@ -146,14 +149,15 @@ type streamSegment struct {
 
 // newRenderer builds the renderer for out.
 //
-// A terminal gets the auto style, which picks the palette from the
-// terminal's own background, and the width it lays text out at;
-// anything else gets plain text, so a test or a pipe reads the same
-// words without the escapes, and streams nothing.
+// A terminal gets the style its own palette asks for, resolved once here,
+// before anything reads the terminal; anything else gets plain text, so a
+// test or a pipe reads the same words without the escapes, and streams
+// nothing.
 func newRenderer(out io.Writer) *renderer {
-	r := &renderer{out: out, wrap: 80, newTR: autoTermRenderer}
+	r := &renderer{out: out, wrap: 80}
 	r.term = termIsTerminal(out)
 	if r.term {
+		r.armPalette(detectGlamourStyle)
 		if f, ok := out.(interface{ Fd() uintptr }); ok {
 			// A terminal that will not say how wide it is keeps the
 			// width the markdown is wrapped at, so the streamed rows and
@@ -171,13 +175,40 @@ func newRenderer(out io.Writer) *renderer {
 	return r
 }
 
-// autoTermRenderer builds the markdown renderer for the terminal's own
-// palette.
-func autoTermRenderer(wrap int) (*glamour.TermRenderer, error) {
-	return glamour.NewTermRenderer(
-		glamour.WithAutoStyle(),
-		glamour.WithWordWrap(wrap),
-	)
+// armPalette settles the style the markdown renders in, and builds the
+// builder every width change goes through.
+//
+// The question reaches the terminal itself — an OSC 11 query, then a
+// cursor-position report — and the reply arrives on the input the line
+// editor is reading. It is therefore asked once, when the renderer is
+// built, and a resize, a rewrap or a stalled stream's recovery reuses the
+// answer rather than asking again.
+func (r *renderer) armPalette(detect func() string) {
+	r.newTR = termRenderer(detect())
+}
+
+// detectGlamourStyle resolves the standard style the transcript renders
+// in, the way glamour's auto style picks it: the terminal's own palette.
+func detectGlamourStyle() string {
+	if !term.IsTerminal(int(os.Stdout.Fd())) {
+		return styles.NoTTYStyle
+	}
+	if termenv.HasDarkBackground() {
+		return styles.DarkStyle
+	}
+	return styles.LightStyle
+}
+
+// termRenderer builds the markdown renderer at a wrap width in one
+// resolved style. It names the palette, never the question that picks
+// it, so rebuilding it asks the terminal for nothing.
+func termRenderer(style string) func(wrap int) (*glamour.TermRenderer, error) {
+	return func(wrap int) (*glamour.TermRenderer, error) {
+		return glamour.NewTermRenderer(
+			glamour.WithStandardStyle(style),
+			glamour.WithWordWrap(wrap),
+		)
+	}
 }
 
 // rewrap lays future messages out at the terminal's new width.
@@ -304,9 +335,15 @@ func (r *renderer) hint() {
 }
 
 // paintHintFrame advances the writing hint's braille spinner one
-// frame. It paints nothing when no hint stands.
+// frame. It paints nothing when no hint stands, or when the terminal's
+// width moved under the rows the hint stands on: they wrap at the old
+// width until the resize lays the screen out again.
 func (r *renderer) paintHintFrame() {
-	if !r.streams() || !r.block.hint {
+	if !r.streams() || !r.block.hint || r.block.stalled {
+		return
+	}
+	if r.stalledNow() {
+		r.block.stalled = true
 		return
 	}
 	r.block.hintFrame = (r.block.hintFrame + 1) % len(brailleFrames)
@@ -460,6 +497,16 @@ func (r *renderer) stalledNow() bool {
 	}
 	r.setWidth(width)
 	return true
+}
+
+// stallForResize stops the live rows painting until the screen is rebuilt
+// at the new size. The rows standing on the terminal wrap at the width
+// they were painted at, so a frame painted now would stack a second copy
+// of them there.
+func (r *renderer) stallForResize() {
+	if r.block.hint || r.block.spinner != nil || r.live.kind != "" {
+		r.block.stalled = true
+	}
 }
 
 // thinkingIntro opens a thinking segment. It is markdown in the
@@ -910,6 +957,10 @@ func (r *renderer) takeSpinner() {
 func (r *renderer) paintSpinner() {
 	s := r.block.spinner
 	if s == nil || !r.streams() || r.block.stalled || r.block.started || r.live.kind != "" {
+		return
+	}
+	if r.stalledNow() {
+		r.block.stalled = true
 		return
 	}
 	elapsed := time.Since(s.started)

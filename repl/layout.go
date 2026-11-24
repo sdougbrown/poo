@@ -42,6 +42,11 @@ type layout struct {
 	mu  sync.Mutex
 	out io.Writer
 	fd  int
+	// getSize reads the terminal's size now. The layout paints rows at the
+	// size it last rebuilt the screen at, so a frame that lands after the
+	// terminal changed size asks here before it paints anything: a row
+	// wider than the terminal wraps, and the wrap scrolls the region.
+	getSize func() (int, int, bool)
 
 	// transcript records committed text in screen order, including stderr.
 	transcript bytes.Buffer
@@ -79,6 +84,10 @@ func newLayout(out io.Writer) *layout {
 		return nil
 	}
 	l := &layout{out: out, fd: int(f.Fd()), footer: 1 + footerChrome}
+	l.getSize = func() (int, int, bool) {
+		w, h, err := term.GetSize(l.fd)
+		return w, h, err == nil && w >= 2 && h >= 4
+	}
 	w, h, ok := l.size()
 	if !ok {
 		return nil
@@ -88,7 +97,16 @@ func newLayout(out io.Writer) *layout {
 	return l
 }
 
+// size is the terminal's size: the reader's when the layout has one, the
+// descriptor's otherwise. A layout a test builds has neither, and keeps
+// the size it was given.
 func (l *layout) size() (int, int, bool) {
+	if l.getSize != nil {
+		return l.getSize()
+	}
+	if l.fd <= 0 {
+		return 0, 0, false
+	}
 	w, h, err := term.GetSize(l.fd)
 	return w, h, err == nil && w >= 2 && h >= 4
 }
@@ -406,10 +424,23 @@ func (l *layout) commitPreview(body string) {
 // the only writer of cursor-geometry sequences there: transcript writes
 // save and restore the cursor, so they interleave safely with the
 // anchored frame.
+//
+// A frame that lands after the terminal changed size and before the
+// resize rebuilt the screen paints nothing but the cursor. Every row it
+// would write is laid out at the old width: on a narrower terminal the
+// rule wraps, and the wrap scrolls the region — the standing preview and
+// the committed rows above it go with it — while a repainted preview
+// stacks a mangled copy of itself. The resize that follows paints the
+// screen at the new size and the editor frames again there.
 func (l *layout) prepare(footer int) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if !l.active {
+		return
+	}
+	if w, h, ok := l.size(); ok && (w != l.width || h != l.height) {
+		l.chromeStale = true
+		l.emit(fmt.Sprintf("\x1b[%d;1H", min(l.footerTop(), h)))
 		return
 	}
 	l.ensureLocked(footer)
