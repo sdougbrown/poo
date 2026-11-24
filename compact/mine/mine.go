@@ -68,6 +68,10 @@ const (
 	// limit, and a pass the limit cuts short is wasted: the pointers it
 	// would have named are what steers the reconstruction.
 	DefaultPointerMaxTokens = 16384
+
+	// markerVerb is what the replacement's marker line says the turns
+	// were replaced with.
+	markerVerb = "reconstructed"
 )
 
 // Options configure the strategy.
@@ -127,7 +131,7 @@ func New(opts Options) *Compactor {
 	if c.files == nil {
 		c.files = cut.DefaultFileOp
 	}
-	c.trigger = cut.Trigger{Ratio: c.ratio, KeepRecent: c.keepRecent, MaxTokens: c.maxTokens, ForkNeed: c.pointerMaxTokens, Files: c.files, Marker: "reconstructed", Retention: true}
+	c.trigger = cut.Trigger{Ratio: c.ratio, KeepRecent: c.keepRecent, MaxTokens: c.maxTokens, ForkNeed: c.pointerMaxTokens, Files: c.files}
 	return c
 }
 
