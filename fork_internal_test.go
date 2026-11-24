@@ -2,29 +2,15 @@ package poo
 
 import "testing"
 
-// The fork's output limit: the fork re-sends the whole window plus the
-// messages it appends, so a limit over the room they leave is a refusal
-// at the provider. The limit is the budget's own OutputRoomFor.
+// The fork's output limit: the fork re-sends the whole window, so a
+// limit over the room the window leaves is a refusal at the provider.
 
 // TestAForkLimitWithinTheRoomStays covers a fork whose ask fits: the
 // limit goes out as the strategy asked it.
 func TestAForkLimitWithinTheRoomStays(t *testing.T) {
 	budget := ContextBudget{ContextLimit: 128000, EstimatedInput: 100000}
-	if got := budget.OutputRoomFor(0, 16384); got != 16384 {
+	if got := forkOutputLimit(budget, 16384); got != 16384 {
 		t.Errorf("the fork's limit is %d, want 16384", got)
-	}
-}
-
-// TestAForkLimitCountsTheAppendedInput covers the appended messages:
-// the fork re-sends them after the window, so their input narrows the
-// room the limit may claim.
-func TestAForkLimitCountsTheAppendedInput(t *testing.T) {
-	budget := ContextBudget{ContextLimit: 128000, EstimatedInput: 110000}
-	// CharsPerToken is not read by OutputRoomFor: the appended input
-	// arrives in tokens, converted by the fork's wrapper. The room is
-	// 128000 - 110000 - 500 - 256 = 17244.
-	if got := budget.OutputRoomFor(500, 20000); got != 17244 {
-		t.Errorf("the fork's limit is %d, want the room of 17244", got)
 	}
 }
 
@@ -33,7 +19,7 @@ func TestAForkLimitCountsTheAppendedInput(t *testing.T) {
 func TestAForkLimitOverTheRoomClampsToTheRoom(t *testing.T) {
 	budget := ContextBudget{ContextLimit: 128000, EstimatedInput: 110000}
 	// The room is 128000 - 110000 - 256 = 17744.
-	if got := budget.OutputRoomFor(0, 20000); got != 17744 {
+	if got := forkOutputLimit(budget, 20000); got != 17744 {
 		t.Errorf("the fork's limit is %d, want the room of 17744", got)
 	}
 }
@@ -44,7 +30,7 @@ func TestAForkLimitOverTheRoomClampsToTheRoom(t *testing.T) {
 // anyway, and a well-formed request fails with a readable error.
 func TestAForkLimitOverATinyRoomFloorsAtTheMinimum(t *testing.T) {
 	budget := ContextBudget{ContextLimit: 1000, EstimatedInput: 900}
-	if got := budget.OutputRoomFor(0, 20000); got != MinOutputTokens {
+	if got := forkOutputLimit(budget, 20000); got != MinOutputTokens {
 		t.Errorf("the fork's limit is %d, want the %d-token minimum", got, MinOutputTokens)
 	}
 }
@@ -53,7 +39,7 @@ func TestAForkLimitOverATinyRoomFloorsAtTheMinimum(t *testing.T) {
 // window: there is nothing to clamp against.
 func TestAForkLimitWithoutAWindowStays(t *testing.T) {
 	budget := ContextBudget{EstimatedInput: 100000}
-	if got := budget.OutputRoomFor(0, 16384); got != 16384 {
+	if got := forkOutputLimit(budget, 16384); got != 16384 {
 		t.Errorf("the fork's limit is %d, want 16384", got)
 	}
 }
@@ -63,7 +49,7 @@ func TestAForkLimitWithoutAWindowStays(t *testing.T) {
 // max_tokens key to replace.
 func TestAForkLimitWithoutAnAskStays(t *testing.T) {
 	budget := ContextBudget{ContextLimit: 1000, EstimatedInput: 900}
-	if got := budget.OutputRoomFor(0, 0); got != 0 {
+	if got := forkOutputLimit(budget, 0); got != 0 {
 		t.Errorf("the fork's limit is %d, want 0", got)
 	}
 }
