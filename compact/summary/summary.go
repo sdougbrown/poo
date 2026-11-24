@@ -99,7 +99,7 @@ func New(opts Options) *Compactor {
 	// The summary makes no fork, so the fork's own need is zero and the
 	// run's output limit is the whole need. The replacement carries no
 	// retention pointer: the summary itself is the checkpoint.
-	c.trigger = cut.Trigger{Ratio: c.ratio, KeepRecent: c.keepRecent, MaxTokens: c.maxTokens, Files: c.files, Marker: markerVerb}
+	c.trigger = cut.Trigger{Ratio: c.ratio, KeepRecent: c.keepRecent, MaxTokens: c.maxTokens, Files: c.files, Marker: "summarized"}
 	return c
 }
 
