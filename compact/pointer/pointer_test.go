@@ -365,7 +365,7 @@ func TestAReconstructionThatCannotCompleteFallsBackToTheMine(t *testing.T) {
 		pootest.Turn{Text: `{"queries": ["TURN-ONE"]}`},
 		pootest.Turn{Text: "- the fallback pointers"},
 	)
-	s, sink := session(t, tr, pointer.Options{Ratio: 0.05, KeepRecentTokens: 1, PointerMaxTokens: 512})
+	s, sink := session(t, tr, pointer.Options{Ratio: 0.05, KeepRecentTokens: 1, PointerMaxTokens: 32768})
 
 	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
 		t.Fatalf("starting the run: %v", err)
@@ -392,10 +392,10 @@ func TestAReconstructionThatCannotCompleteFallsBackToTheMine(t *testing.T) {
 	if got := len(tr.Forks()); got != 2 {
 		t.Errorf("the transport holds %d forks, want the selective pass and the fallback's", got)
 	}
-	// The fallback inherits the pointer pass's limit: the mine
-	// strategy's own default is the constant 16384.
-	if got := tr.Forks()[1].MaxTokens; got != 512 {
-		t.Errorf("the fallback's fork asked for %d tokens, want the inherited 512", got)
+	// The fallback inherits the pointer pass's limit: its own default
+	// would ask for less.
+	if got := tr.Forks()[1].MaxTokens; got != 32768 {
+		t.Errorf("the fallback's fork asked for %d tokens, want the inherited 32768", got)
 	}
 }
 
