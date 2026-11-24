@@ -111,6 +111,45 @@ func TestTheSinkWaitsOnTheRecordCount(t *testing.T) {
 	}
 }
 
+// TestTheSinkWaitsOnTheCondition covers the condition wait: a cond the
+// sink already holds returns at once, the append that makes the cond
+// true ends the wait, and a cancel ends it with the context's error.
+func TestTheSinkWaitsOnTheCondition(t *testing.T) {
+	sink := pootest.NewSink()
+	ctx := context.Background()
+
+	if err := sink.Append(ctx, &poo.RunStartedRecord{RecordMeta: poo.NewRecordMeta("run.started")}); err != nil {
+		t.Fatalf("appending: %v", err)
+	}
+	if err := sink.WaitFunc(ctx, func() bool { return len(sink.Records()) >= 1 }); err != nil {
+		t.Fatalf("the wait for a cond the sink already holds returned %v", err)
+	}
+
+	gate := make(chan struct{})
+	go func() {
+		<-gate
+		_ = sink.Append(ctx, &poo.RunSettledRecord{RecordMeta: poo.NewRecordMeta("run.settled")})
+	}()
+	waitCtx, waitCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer waitCancel()
+	waitDone := make(chan error, 1)
+	go func() {
+		waitDone <- sink.WaitFunc(waitCtx, func() bool { return len(sink.Records()) >= 2 })
+	}()
+	close(gate)
+	if err := <-waitDone; err != nil {
+		t.Fatalf("the wait for the appended record returned %v", err)
+	}
+
+	cancelCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go cancel()
+	err := sink.WaitFunc(cancelCtx, func() bool { return len(sink.Records()) >= 3 })
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("the cancelled wait returned %v, want the context's error", err)
+	}
+}
+
 // TestTheSinkSerializesConcurrentAppends covers the sink's concurrency
 // contract: many writers, and no record lost or interleaved.
 func TestTheSinkSerializesConcurrentAppends(t *testing.T) {

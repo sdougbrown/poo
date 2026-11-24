@@ -125,6 +125,28 @@ func (s *Sink) WaitRecords(ctx context.Context, name string, n int) error {
 	}
 }
 
+// WaitFunc blocks until cond holds or the context ends. The sink wakes
+// the wait on every append, so a condition the appends drive ends on
+// the event instead of a poll.
+func (s *Sink) WaitFunc(ctx context.Context, cond func() bool) error {
+	for {
+		s.mu.Lock()
+		if s.changed == nil {
+			s.changed = make(chan struct{})
+		}
+		changed := s.changed
+		s.mu.Unlock()
+		if cond() {
+			return nil
+		}
+		select {
+		case <-changed:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
 // Flush does nothing: the records are already in memory.
 func (s *Sink) Flush(ctx context.Context) error {
 	s.mu.Lock()
