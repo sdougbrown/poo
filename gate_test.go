@@ -632,6 +632,102 @@ func TestACompactorsForkCountsTowardTheRunBudget(t *testing.T) {
 	}
 }
 
+// forkLimitCompactor forks once with a fixed output limit and replaces
+// the first turn with the handoff, so the session accepts the
+// compaction. ShouldCompact compacts on the run's second gate.
+type forkLimitCompactor struct {
+	gates int
+	limit int
+}
+
+func (c *forkLimitCompactor) ShouldCompact(view poo.View, budget poo.ContextBudget) bool {
+	c.gates++
+	return c.gates == 2
+}
+
+func (c *forkLimitCompactor) Compact(ctx context.Context, in poo.CompactionEnv) (poo.Compaction, error) {
+	_, err := in.Fork(ctx, []poo.Message{{Role: poo.RoleUser, Content: []poo.ContentBlock{{Kind: poo.ContentText, Text: "write the handoff"}}}}, c.limit, poo.ForkOptions{})
+	if err != nil {
+		return poo.Compaction{}, err
+	}
+	return poo.Compaction{
+		Strategy: "forky",
+		Replace: &poo.RangeReplacement{
+			Cut:      poo.TurnRange{First: 1, Last: 1},
+			Messages: []poo.Message{{Role: poo.RoleUser, Content: []poo.ContentBlock{{Kind: poo.ContentText, Text: "the handoff"}}}},
+		},
+	}, nil
+}
+
+// TestAForkOverTheRoomClampsToTheRoom covers the rule that a fork's
+// output limit never exceeds the room the window leaves: the fork
+// re-sends the whole window, so a limit over the room is a refusal at
+// the provider. The clamped limit stays inside the room the main
+// request's own clamp computed.
+func TestAForkOverTheRoomClampsToTheRoom(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{text: "the answer"},
+		{text: "the second answer"},
+	})
+	tr.SetForkTurns(pootest.Turn{Text: "the handoff"})
+	compactor := &forkLimitCompactor{limit: 20000}
+
+	opts := testOptions(t, tr, &echoTool{result: "echoed"}, &recordingSink{})
+	opts.Compactor = compactor
+	opts.Model.ContextLimit = 4096
+	opts.BeforeSettle = []poo.BeforeSettleHook{&continuingBeforeSettle{stopAfter: 1}}
+
+	s := newTestSession(t, opts)
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	if _, err := s.Wait(context.Background()); err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+
+	forks := tr.Forks()
+	if len(forks) != 1 {
+		t.Fatalf("the transport served %d forks, want 1", len(forks))
+	}
+	if forks[0].MaxTokens >= compactor.limit {
+		t.Errorf("the fork asked for %d tokens, want a limit clamped under the %d ask", forks[0].MaxTokens, compactor.limit)
+	}
+	if room := tr.Requests()[0].MaxTokens; forks[0].MaxTokens > room {
+		t.Errorf("the fork asked for %d tokens, want at most the %d the main request's own clamp computed", forks[0].MaxTokens, room)
+	}
+}
+
+// TestAForkWithinTheRoomKeepsItsLimit covers a fork whose ask fits the
+// window: the limit goes out as the strategy asked it.
+func TestAForkWithinTheRoomKeepsItsLimit(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{text: "the answer"},
+		{text: "the second answer"},
+	})
+	tr.SetForkTurns(pootest.Turn{Text: "the handoff"})
+	compactor := &forkLimitCompactor{limit: 2048}
+
+	opts := testOptions(t, tr, &echoTool{result: "echoed"}, &recordingSink{})
+	opts.Compactor = compactor
+	opts.BeforeSettle = []poo.BeforeSettleHook{&continuingBeforeSettle{stopAfter: 1}}
+
+	s := newTestSession(t, opts)
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	if _, err := s.Wait(context.Background()); err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+
+	forks := tr.Forks()
+	if len(forks) != 1 {
+		t.Fatalf("the transport served %d forks, want 1", len(forks))
+	}
+	if forks[0].MaxTokens != compactor.limit {
+		t.Errorf("the fork asked for %d tokens, want the %d it asked for", forks[0].MaxTokens, compactor.limit)
+	}
+}
+
 // failingGateCompactor fails the compaction once, on the run's second
 // gate: the first one opens the run's first request.
 type failingGateCompactor struct {
