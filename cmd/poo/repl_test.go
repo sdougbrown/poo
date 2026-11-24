@@ -601,7 +601,10 @@ roles:
 		flag   string
 		// reopen runs the line with --resume, which reads the session
 		// the log records, not the repl's own word.
-		reopen  bool
+		reopen bool
+		// cont is the other reopen: the newest session of the
+		// directory, whose recorded profile rules it all the same.
+		cont    bool
 		wantArg string
 	}{
 		{
@@ -628,6 +631,11 @@ roles:
 			replProfile: "search",
 			reopen:      true,
 			wantArg:     "",
+		}, {
+			name:        "a continued session runs under its recorded profile",
+			replProfile: "search",
+			cont:        true,
+			wantArg:     "",
 		}}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -645,6 +653,9 @@ roles:
 			}
 			if tc.reopen {
 				argv = append(argv, "--resume", "s1")
+			}
+			if tc.cont {
+				argv = append(argv, "--continue")
 			}
 			inv, err := clicontract.Parse(pooApp(io.Discard), argv)
 			if err != nil {
