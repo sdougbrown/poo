@@ -43,6 +43,9 @@ type JobRaceHooks struct {
 	// one the queue holds, one the delivery holds in flight, or one
 	// still reserved — before that report is delivered.
 	AfterFaultFold func()
+	// BeforeFaultDelivery is called when a fault report is taken for
+	// delivery, before the report is re-rendered and written.
+	BeforeFaultDelivery func()
 }
 
 // WaitForResult blocks until a job result is queued, and reports that
@@ -104,6 +107,10 @@ func (s *Session) raceHook(name string) {
 	case "folded":
 		if hooks.AfterFaultFold != nil {
 			hooks.AfterFaultFold()
+		}
+	case "fault-delivery":
+		if hooks.BeforeFaultDelivery != nil {
+			hooks.BeforeFaultDelivery()
 		}
 	}
 }

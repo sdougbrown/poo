@@ -335,11 +335,17 @@ func TestOneSuspensionIsOneWakeAndCountsWhatJoinedIt(t *testing.T) {
 	opts.Tools = map[string]poo.Tool{gate.Spec().Name: gate}
 	opts.ToolOrder = []string{gate.Spec().Name}
 	s := newTestSession(t, opts, poo.WithFeeds(theOptionalFeedSpec(faultedFeed, poo.OnIdleHold)))
-	// The firebreak's fold signals the test: the second fault joined
-	// the queued report, so the run can be released and the joined
-	// report delivered without racing the fold.
+	// The firebreak's two seams choreograph the race the fold covers:
+	// the first report's delivery waits for the test, the second fault
+	// folds into the report in flight, and the delivery writes the
+	// joined count.
 	folded := make(chan struct{})
-	restore := s.SetJobRaceHooks(&poo.JobRaceHooks{AfterFaultFold: func() { close(folded) }})
+	deliveryHold := make(chan struct{})
+	deliveryReleased := make(chan struct{})
+	restore := s.SetJobRaceHooks(&poo.JobRaceHooks{
+		AfterFaultFold:      func() { close(folded) },
+		BeforeFaultDelivery: func() { close(deliveryHold); <-deliveryReleased },
+	})
 	defer restore()
 
 	// The run is open in a tool, so the report a fault queues waits for
@@ -369,16 +375,21 @@ func TestOneSuspensionIsOneWakeAndCountsWhatJoinedIt(t *testing.T) {
 	waitFor(t, "the first report to join the job queue", func() bool {
 		return s.QueuedJobResults() >= 1
 	})
-	// A second arm fails again while the first report is still queued: it
+	// The run can be released now: the drain takes the queued report
+	// for delivery and waits, so the second fault folds into the report
+	// in flight rather than racing it.
+	close(gate.release)
+	<-deliveryHold
+	// A second arm fails again while the first report is in flight: it
 	// joins that report rather than queueing one of its own.
 	if _, started, err := poo.SubscribeFeed(s, "git-feedback", map[string]string{"url": "https://example.test/repo"}); err != nil || !started {
 		t.Fatalf("re-arming the feed: started=%v err=%v", started, err)
 	}
 	waitForSink(t, sink, "the second fault's end", func() bool { return len(feedEnds(sink)) >= 2 })
-	// The fold ran, so the queued report counts the second fault: the
-	// run can be released and the joined report delivered.
+	// The fold ran, so the in-flight report counts the second fault:
+	// the delivery can write the joined report now.
 	<-folded
-	close(gate.release)
+	close(deliveryReleased)
 	waitForSink(t, sink, "the joined report to reach the chat model", func() bool {
 		_, _, ok := deliveredMessage(sink)
 		return ok

@@ -1632,13 +1632,19 @@ func (s *Session) deliverTrackedJobResult(run *runState, item jobQueueItem) bool
 		s.mu.Unlock()
 		return false
 	}
-	if result.fault != nil {
+	fault := result.fault
+	s.mu.Unlock()
+	if fault != nil {
+		// The fault report's delivery waits for the test here: a fold a
+		// later fault runs sees the report in flight, not the queue.
+		s.raceHook("fault-delivery")
 		// The report re-renders under the lock: a fault that folded in
 		// after the acceptance counts in what the model reads, while the
 		// record keeps the text the acceptance knew.
-		result.text = result.fault.render()
+		s.mu.Lock()
+		result.text = fault.render()
+		s.mu.Unlock()
 	}
-	s.mu.Unlock()
 
 	msg := NewTextMessage(RoleUser, jobResultText(result))
 	msg.Data = cloneRaw(result.data)
