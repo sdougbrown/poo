@@ -2,6 +2,7 @@ package config_test
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -150,8 +151,16 @@ func TestTheReplaceSettingWinsOverABinarysPromptDirectory(t *testing.T) {
 // TestTheReplaceSettingKeepsTheCatalog covers the catalog's place in the
 // precedence. The replacement supplies the base text. The embedded catalog
 // is restored so the model can see the offered registry entries.
+//
+// The catalog is one the session lists behind the call tool: a short catalog
+// is offered entry by entry, and its section is not the build's to restore.
 func TestTheReplaceSettingKeepsTheCatalog(t *testing.T) {
-	dir := registry(t, "deploy")
+	names := make([]string, 0, 200)
+	names = append(names, "deploy")
+	for i := 0; i < 199; i++ {
+		names = append(names, fmt.Sprintf("entry-%03d", i))
+	}
+	dir := registry(t, names...)
 	body := registrySettings(dir) + "system_prompt:\n  replace: the operator's whole prompt\n"
 	runtime, err := buildWithPrompt(t, body, fstest.MapFS{
 		"base.md": {Data: []byte("the binary's base\n")},

@@ -1778,9 +1778,9 @@ func TestABashSettingWithoutTheBashToolIsRefused(t *testing.T) {
 }
 
 // TestACLIRegistryWithoutTheBashToolBuildsAnExecutor covers the executor's
-// other caller: call_cli runs a command too, so a binary that offers it
-// gets the session's executor, and a binary that carries no executor at
-// all is told so rather than left without one.
+// other caller: a registered tool runs a command too, so a binary that offers
+// the catalog gets the session's executor, and a binary that carries no
+// executor at all is told so rather than left without one.
 func TestACLIRegistryWithoutTheBashToolBuildsAnExecutor(t *testing.T) {
 	dir := registry(t, "deploy")
 	settings, err := config.Parse([]byte(registrySettings(dir)), config.FormatYAML)
@@ -1810,11 +1810,16 @@ func TestACLIRegistryWithoutTheBashToolBuildsAnExecutor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("building a runtime with call_cli and no bash: %v", err)
 	}
-	if !hasTool(runtime.Options.ToolOrder, "call_cli") {
-		t.Errorf("the session offers %v, and not call_cli", runtime.Options.ToolOrder)
+	// One entry is short enough to show, so the session offers it as a tool of
+	// its own and keeps the call tool out of the list.
+	if !hasTool(runtime.Options.ToolOrder, "deploy") {
+		t.Errorf("the session offers %v, and not the catalog's entry", runtime.Options.ToolOrder)
+	}
+	if hasTool(runtime.Options.ToolOrder, cliregistry.CallToolName) {
+		t.Errorf("the session offers call_cli beside the entry it offers directly: %v", runtime.Options.ToolOrder)
 	}
 	if got == nil {
-		t.Error("call_cli was built with no executor")
+		t.Error("the tool over the catalog was built with no executor")
 	}
 
 	_, err = build(nil)
@@ -2116,7 +2121,8 @@ func TestAProfileTheSettingsDisableEveryToolOfCannotRun(t *testing.T) {
 // TestADisabledRegistryToolIsNotOffered covers a registry tool the
 // settings disable: call_cli comes back from the registry rather than from
 // the profile, so the disabled list still takes it off the session that
-// builds.
+// builds. Disabling it disables the whole offering, the entries offered
+// directly along with it.
 func TestADisabledRegistryToolIsNotOffered(t *testing.T) {
 	dir := registry(t, "deploy")
 	settings, err := config.Parse([]byte(registrySettings(dir)+`tools:
@@ -2129,6 +2135,9 @@ func TestADisabledRegistryToolIsNotOffered(t *testing.T) {
 
 	if hasTool(runtime.Options.ToolOrder, "call_cli") {
 		t.Errorf("the session offers %v", runtime.Options.ToolOrder)
+	}
+	if hasTool(runtime.Options.ToolOrder, "deploy") {
+		t.Errorf("the session offers the catalog's entry, and the settings disable the registry: %v", runtime.Options.ToolOrder)
 	}
 	if slices.ContainsFunc(runtime.Profile.Tools, func(tool poo.ToolInfo) bool { return tool.Name == "call_cli" }) {
 		t.Error("the profile still offers the disabled registry tool")
@@ -2154,6 +2163,9 @@ func TestDisablingRetiredCallToolAliasDisablesCallCLI(t *testing.T) {
 
 	if hasTool(runtime.Options.ToolOrder, "call_cli") {
 		t.Errorf("the session still offers %v when call_tool is disabled", runtime.Options.ToolOrder)
+	}
+	if hasTool(runtime.Options.ToolOrder, "deploy") {
+		t.Errorf("the session offers the catalog's entry when call_tool is disabled: %v", runtime.Options.ToolOrder)
 	}
 }
 

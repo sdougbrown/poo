@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -127,9 +128,12 @@ func hasTool(order []string, name string) bool {
 }
 
 // TestARegistryReachesTheSessionAndItsPrompt covers the settings block: a
-// registry the settings name is loaded when the session is built, the
-// profile offers the tool that calls it, and the prompt carries the
-// catalog.
+// registry the settings name is loaded when the session is built, and its
+// entries become tools of their own, in name order.
+//
+// Two entries are short enough to show, so each one is offered directly: the
+// model reads the tool's own name and arguments instead of a catalog line, and
+// the call tool and the catalog's section would only say the same thing twice.
 func TestARegistryReachesTheSessionAndItsPrompt(t *testing.T) {
 	dir := registry(t, "deploy", "logs")
 	settings, err := config.Parse([]byte(registrySettings(dir)), config.FormatYAML)
@@ -144,19 +148,51 @@ func TestARegistryReachesTheSessionAndItsPrompt(t *testing.T) {
 	if runtime.Registry.Len() != 2 {
 		t.Errorf("the registry holds %d entries, want 2", runtime.Registry.Len())
 	}
-	if !hasTool(runtime.Options.ToolOrder, "call_cli") {
-		t.Errorf("the session offers %v, and not call_cli", runtime.Options.ToolOrder)
+	order := runtime.Options.ToolOrder
+	for _, name := range []string{"deploy", "logs"} {
+		if !hasTool(order, name) {
+			t.Errorf("the session offers %v, and not the %q entry", order, name)
+		}
+		tool := runtime.Options.Tools[name]
+		if tool == nil {
+			t.Fatalf("the session offers %q and holds no tool for it", name)
+		}
+		spec := tool.Spec()
+		if spec.Description != "The "+name+" command" {
+			t.Errorf("the %q tool describes itself as %q", name, spec.Description)
+		}
+		if spec.Class != poo.ClassSideEffecting {
+			t.Errorf("the %q tool is %q, want side-effecting", name, spec.Class)
+		}
+		if spec.Background != poo.BackgroundAllowed {
+			t.Errorf("the %q tool may run in the background: %q", name, spec.Background)
+		}
 	}
-	// Two entries are short enough to list, so nothing searches them and
-	// no decision model is configured.
-	if hasTool(runtime.Options.ToolOrder, "find_tool") {
-		t.Errorf("the session offers find_tool over a catalog of two entries")
+	deploy, logs := slices.Index(order, "deploy"), slices.Index(order, "logs")
+	if deploy < 0 || logs < 0 || deploy > logs {
+		t.Errorf("the session offers the entries in the order %v, want deploy before logs", order)
+	}
+	if hasTool(order, cliregistry.CallToolName) {
+		t.Errorf("the session offers call_cli beside the entries it offers directly: %v", order)
+	}
+	if hasTool(order, "find_tool") {
+		t.Errorf("the session offers find_tool over a catalog of two entries: %v", order)
+	}
+	// The profile the listing shows carries the same tools the session does.
+	var listed []string
+	for _, tool := range runtime.Profile.Tools {
+		listed = append(listed, tool.Name)
+	}
+	for _, name := range []string{"deploy", "logs"} {
+		if !hasTool(listed, name) {
+			t.Errorf("the profile offers %v, and not the %q entry", listed, name)
+		}
 	}
 
 	text := poo.PromptBuilder(runtime.Options).Render()
-	for _, want := range []string{"deploy: The deploy command", "logs: The logs command"} {
-		if !strings.Contains(text, want) {
-			t.Errorf("the prompt %q does not carry %q", text, want)
+	for _, unwanted := range []string{"Registered tools:", "deploy: The deploy command"} {
+		if strings.Contains(text, unwanted) {
+			t.Errorf("the prompt carries %q, and the model reads the tools themselves: %q", unwanted, text)
 		}
 	}
 }
@@ -297,10 +333,13 @@ func TestAReadOnlyProfileStaysReadOnly(t *testing.T) {
 			offered[p.Name] = append(offered[p.Name], tool.Name)
 		}
 	}
-	if !hasTool(offered["code"], "call_cli") {
-		t.Errorf("the code profile offers %v, and not call_cli", offered["code"])
+	if !hasTool(offered["code"], "deploy") {
+		t.Errorf("the code profile offers %v, and not the catalog's entry", offered["code"])
 	}
-	if hasTool(offered["search"], "call_cli") {
+	if hasTool(offered["code"], cliregistry.CallToolName) {
+		t.Errorf("the code profile offers call_cli beside the entry it offers directly: %v", offered["code"])
+	}
+	if hasTool(offered["search"], "deploy") {
 		t.Errorf("the search profile offers %v", offered["search"])
 	}
 	// A session that cannot call a registered tool says nothing about the
@@ -313,9 +352,17 @@ func TestAReadOnlyProfileStaysReadOnly(t *testing.T) {
 // TestAResumedSessionKeepsOneCatalog covers the resume: a session that
 // recorded its prompt keeps that prompt whole, so the sections the build
 // installs are not applied a second time on top of it.
+//
+// The catalog here is one the session searches, because that is the shape
+// whose section the build installs; an elevated catalog has no section to
+// apply twice.
 func TestAResumedSessionKeepsOneCatalog(t *testing.T) {
-	dir := registry(t, "deploy", "logs")
-	settings, err := config.Parse([]byte(registrySettings(dir)+"session:\n  mode: logged\n  dir: "+t.TempDir()+"\n"), config.FormatYAML)
+	names := make([]string, 0, 200)
+	for i := 0; i < 200; i++ {
+		names = append(names, fmt.Sprintf("entry-%03d", i))
+	}
+	dir := registry(t, names...)
+	settings, err := config.Parse([]byte(withDecider+"cli_registry:\n  paths: [\""+dir+"\"]\nsession:\n  mode: logged\n  dir: "+t.TempDir()+"\n"), config.FormatYAML)
 	if err != nil {
 		t.Fatalf("decoding the settings: %v", err)
 	}
@@ -381,8 +428,9 @@ func TestTheOperatorsCatalogSectionWins(t *testing.T) {
 	}
 }
 
-// TestTheFindThresholdIsThirtyEntries covers the boundary: a catalog the
-// prompt can show whole is listed, and one entry more is searched.
+// TestTheFindThresholdIsThirtyEntries covers the boundary: a catalog of thirty
+// entries is short enough to offer entry by entry, and one entry more is
+// searched instead.
 func TestTheFindThresholdIsThirtyEntries(t *testing.T) {
 	tests := []struct {
 		entries int
@@ -403,15 +451,23 @@ func TestTheFindThresholdIsThirtyEntries(t *testing.T) {
 			}
 			runtime := build(t, settings, config.Overrides{})
 
-			if got := hasTool(runtime.Options.ToolOrder, "find_tool"); got != tt.search {
+			order := runtime.Options.ToolOrder
+			if got := hasTool(order, "find_tool"); got != tt.search {
 				t.Errorf("the session offers find_tool: %v, want %v", got, tt.search)
 			}
-			text := poo.PromptBuilder(runtime.Options).Render()
-			if listed := strings.Contains(text, "entry-000:"); listed == tt.search {
-				t.Errorf("the prompt lists the catalog: %v, and the session searches it: %v", listed, tt.search)
+			// The count decides the shape: at the threshold the entries are
+			// tools of their own, and past it the catalog is behind the call.
+			if got := hasTool(order, "entry-000"); got == tt.search {
+				t.Errorf("the session offers the first entry: %v, want %v", got, !tt.search)
 			}
-			if got := strings.Count(text, "Registered tools:"); got != 1 {
-				t.Errorf("the prompt carries the catalog %d times, want once", got)
+			if got := hasTool(order, cliregistry.CallToolName); got != tt.search {
+				t.Errorf("the session offers call_cli: %v, want %v", got, tt.search)
+			}
+			// Neither shape lists the entries in the prompt: the elevated one
+			// reads them from the tool list, and the searched one asks for them.
+			text := poo.PromptBuilder(runtime.Options).Render()
+			if strings.Contains(text, "entry-000:") {
+				t.Errorf("the prompt lists the catalog: %q", text)
 			}
 		})
 	}
@@ -440,8 +496,8 @@ func TestARegistryPathIsRelativeToTheWorkingDirectory(t *testing.T) {
 	if runtime.Registry == nil || runtime.Registry.Len() != 1 {
 		t.Fatalf("the build loaded %v, want the one entry beside the working directory", runtime.Registry)
 	}
-	if !hasTool(runtime.Options.ToolOrder, "call_cli") {
-		t.Errorf("the session offers %v, and not call_cli", runtime.Options.ToolOrder)
+	if !hasTool(runtime.Options.ToolOrder, "deploy") {
+		t.Errorf("the session offers %v, and not the catalog's entry", runtime.Options.ToolOrder)
 	}
 }
 
@@ -483,8 +539,8 @@ func TestARegistryPathMayNameTheHomeDirectory(t *testing.T) {
 	if runtime.Registry == nil || runtime.Registry.Len() != 1 {
 		t.Fatalf("the build loaded %v, want the one entry under the home directory", runtime.Registry)
 	}
-	if !hasTool(runtime.Options.ToolOrder, "call_cli") {
-		t.Errorf("the session offers %v, and not call_cli", runtime.Options.ToolOrder)
+	if !hasTool(runtime.Options.ToolOrder, "deploy") {
+		t.Errorf("the session offers %v, and not the catalog's entry", runtime.Options.ToolOrder)
 	}
 }
 
@@ -573,9 +629,15 @@ func TestARegistryWithoutCallCLIIsRefused(t *testing.T) {
 
 // TestAPromptDirectoriesCatalogFollowsTheSession covers the catalog a
 // directory supplies: the file loads for one directory, and its text
-// applies only when the session offers a tool that reads the catalog.
+// applies only when the session lists the catalog the file describes.
 func TestAPromptDirectoriesCatalogFollowsTheSession(t *testing.T) {
-	dir := registry(t, "deploy")
+	// The catalog is longer than a prompt shows, and the session has no
+	// decision model, so it lists the whole catalog behind the call tool.
+	names := make([]string, 0, 200)
+	for i := 0; i < 200; i++ {
+		names = append(names, fmt.Sprintf("entry-%03d", i))
+	}
+	dir := registry(t, names...)
 	prompts := fstest.MapFS{
 		"catalog.md": {Data: []byte("Call {{.Call}} with the registered tools.\n")},
 	}
@@ -733,18 +795,30 @@ func TestAReadOnlyProfileSearchesOnlyWhatItsRulesLeave(t *testing.T) {
 	if runtime.Registry == nil || runtime.Registry.Len() != 5 {
 		t.Fatalf("the read-only session offers %v, want the five entries the rules leave", runtime.Registry)
 	}
-	if !hasTool(runtime.Options.ToolOrder, cliregistry.CallToolName) {
-		t.Errorf("the read-only session offers %v, and not call_cli", runtime.Options.ToolOrder)
+	// The listing's search is the entries' own: the read-only profile is left
+	// with five of them, which is short enough to offer entry by entry.
+	if !hasTool(runtime.Options.ToolOrder, "entry-035") {
+		t.Errorf("the read-only session offers %v, and not the entries the rules leave", runtime.Options.ToolOrder)
+	}
+	if hasTool(runtime.Options.ToolOrder, cliregistry.CallToolName) {
+		t.Errorf("the read-only session offers call_cli beside the entries it offers directly: %v", runtime.Options.ToolOrder)
 	}
 	if hasTool(runtime.Options.ToolOrder, "find_tool") {
 		t.Errorf("the session searches a catalog narrowed to five entries: %v", runtime.Options.ToolOrder)
 	}
-	text := poo.PromptBuilder(runtime.Options).Render()
-	if !strings.Contains(text, "entry-035: The entry-035 command") {
-		t.Errorf("the prompt does not list the entries the rules leave: %q", text)
+	for i := 35; i < 40; i++ {
+		if name := fmt.Sprintf("entry-%03d", i); !hasTool(runtime.Options.ToolOrder, name) {
+			t.Errorf("the session offers %v, and not the entry the rules leave: %s", runtime.Options.ToolOrder, name)
+		}
 	}
-	if strings.Contains(text, "entry-000:") {
-		t.Errorf("the prompt lists an entry the rules withhold: %q", text)
+	for i := 0; i < 35; i++ {
+		if name := fmt.Sprintf("entry-%03d", i); hasTool(runtime.Options.ToolOrder, name) {
+			t.Errorf("the session offers the entry %s the rules withhold: %v", name, runtime.Options.ToolOrder)
+		}
+	}
+	text := poo.PromptBuilder(runtime.Options).Render()
+	if strings.Contains(text, "Registered tools:") {
+		t.Errorf("the prompt lists a catalog the session offers natively: %q", text)
 	}
 
 	// The listing decides the search the same way the session does: the
@@ -785,8 +859,11 @@ func TestASearchIsRequiredOnlyOverAWholeCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a binary linking call_cli alone was refused a registry narrowed to five entries: %v", err)
 	}
-	if !hasTool(runtime.Options.ToolOrder, cliregistry.CallToolName) {
-		t.Errorf("the session offers %v, and not call_cli", runtime.Options.ToolOrder)
+	if !hasTool(runtime.Options.ToolOrder, "entry-035") {
+		t.Errorf("the session offers %v, and not the entries the rules leave", runtime.Options.ToolOrder)
+	}
+	if hasTool(runtime.Options.ToolOrder, cliregistry.CallToolName) {
+		t.Errorf("the session offers call_cli beside the entries it offers directly: %v", runtime.Options.ToolOrder)
 	}
 	if hasTool(runtime.Options.ToolOrder, "find_tool") {
 		t.Errorf("the session offers a search the binary does not link: %v", runtime.Options.ToolOrder)
@@ -895,32 +972,31 @@ func TestAReadOnlyProfileIsOfferedTheEntriesItsRulesLeave(t *testing.T) {
 	if got := strings.Join(runtime.Registry.Names(), ","); got != "pr-view" {
 		t.Errorf("the read-only session offers %q, want pr-view alone", got)
 	}
-	if !hasTool(runtime.Options.ToolOrder, cliregistry.CallToolName) {
-		t.Errorf("the read-only session offers %v, and not call_cli", runtime.Options.ToolOrder)
+	// One entry is short enough to show, so it is a tool of its own: the entry
+	// the rules withhold is not registered at all, and the one they leave is.
+	if !hasTool(runtime.Options.ToolOrder, "pr-view") {
+		t.Errorf("the read-only session offers %v, and not the entry the rules leave", runtime.Options.ToolOrder)
+	}
+	if hasTool(runtime.Options.ToolOrder, "pr-edit") {
+		t.Errorf("the read-only session offers the entry the rules withhold: %v", runtime.Options.ToolOrder)
+	}
+	if hasTool(runtime.Options.ToolOrder, cliregistry.CallToolName) {
+		t.Errorf("the read-only session offers call_cli beside the entry it offers directly: %v", runtime.Options.ToolOrder)
 	}
 	if _, ok := runtime.Registry.Lookup("pr-edit"); ok {
 		t.Error("the read-only session can still name the gated entry")
 	}
 	// The tool the session builds reads the narrowed catalog, not the one the
-	// manifests loaded: the withheld entry cannot be prepared through it
-	// either, and a kept one can. The same options build the search, so this
-	// pins where both tools read the catalog.
-	call := runtime.Options.Tools[cliregistry.CallToolName]
-	if call == nil {
-		t.Fatal("the read-only session has no call_cli tool")
+	// manifests loaded: the withheld entry has no tool, and the kept one does.
+	if runtime.Options.Tools["pr-edit"] != nil {
+		t.Error("the built catalog offered the entry the rules withhold")
 	}
-	if _, err := call.Prepare(json.RawMessage(`{"command":"pr-edit"}`), poo.PrepareEnv{}); err == nil {
-		t.Error("the built call_cli prepared the entry the rules withhold")
+	if runtime.Options.Tools["pr-view"] == nil {
+		t.Error("the built catalog offered no tool for the entry the rules leave")
 	}
-	if _, err := call.Prepare(json.RawMessage(`{"command":"pr-view"}`), poo.PrepareEnv{}); err != nil {
-		t.Errorf("the built call_cli refused the entry the rules leave: %v", err)
-	}
-	text := poo.PromptBuilder(runtime.Options).Render()
-	if !strings.Contains(text, "pr-view") {
-		t.Errorf("the prompt %q does not list the entry the rules leave", text)
-	}
-	if strings.Contains(text, "pr-edit") {
-		t.Errorf("the prompt %q lists the entry the rules withhold", text)
+	// The prompt says nothing about a catalog: the model reads the tools.
+	if text := poo.PromptBuilder(runtime.Options).Render(); strings.Contains(text, "Registered tools:") {
+		t.Errorf("the prompt lists a catalog the session offers natively: %q", text)
 	}
 
 	// The listing the binary offers says what the session does: the same
@@ -939,8 +1015,11 @@ func TestAReadOnlyProfileIsOfferedTheEntriesItsRulesLeave(t *testing.T) {
 	for _, tool := range listed.Tools {
 		names = append(names, tool.Name)
 	}
-	if !hasTool(names, cliregistry.CallToolName) {
-		t.Errorf("the listing offers the %q profile %v, and its session offers call_cli", listed.Name, names)
+	if !hasTool(names, "pr-view") {
+		t.Errorf("the listing offers the %q profile %v, and its session offers the entry pr-view", listed.Name, names)
+	}
+	if hasTool(names, "pr-edit") {
+		t.Errorf("the listing offers the %q profile %v, and its session withholds pr-edit", listed.Name, names)
 	}
 	// A profile that offers no tools earns no command runner, whatever the
 	// rules leave for the profiles beside it.
@@ -952,7 +1031,7 @@ func TestAReadOnlyProfileIsOfferedTheEntriesItsRulesLeave(t *testing.T) {
 		for _, tool := range listed.Tools {
 			listedNames = append(listedNames, tool.Name)
 		}
-		if hasTool(listedNames, cliregistry.CallToolName) {
+		if hasTool(listedNames, "pr-view") || hasTool(listedNames, cliregistry.CallToolName) {
 			t.Errorf("the listing offers the %q profile %v", listed.Name, listedNames)
 		}
 	}
@@ -1091,6 +1170,62 @@ func countTool(names []string, name string) int {
 		}
 	}
 	return count
+}
+
+// TestAnEntryNamedLikeAToolTheSessionOffersKeepsTheCallTool covers the
+// collision: a manifest that names a tool the session already has keeps the
+// call tool for the whole catalog, so the entry never shadows the tool the
+// model was already offered.
+func TestAnEntryNamedLikeAToolTheSessionOffersKeepsTheCallTool(t *testing.T) {
+	dir := registry(t, "bash")
+	settings, err := config.Parse([]byte(registrySettings(dir)), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+
+	if !hasTool(runtime.Options.ToolOrder, cliregistry.CallToolName) {
+		t.Errorf("the session offers %v, and not call_cli", runtime.Options.ToolOrder)
+	}
+	bash := runtime.Options.Tools["bash"]
+	if bash == nil {
+		t.Fatal("the session offers no bash tool")
+	}
+	if spec := bash.Spec(); spec.Description == "The bash command" {
+		t.Errorf("the catalog entry shadowed the bash tool the profile offers: %q", spec.Description)
+	}
+	if text := poo.PromptBuilder(runtime.Options).Render(); !strings.Contains(text, "Registered tools:") {
+		t.Errorf("a session that keeps the call tool does not list the catalog: %q", text)
+	}
+}
+
+// TestAnEntryNamedLikeAReservedToolKeepsTheCallTool covers the reserved names
+// a profile need not offer: a manifest may not take a name poo's own tools
+// answer to, even under a profile that links none of them.
+func TestAnEntryNamedLikeAReservedToolKeepsTheCallTool(t *testing.T) {
+	dir := registry(t, "fetch")
+	settings, err := config.Parse([]byte(registrySettings(dir)+"profile: files\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	files := profile.Profile{Name: "files", Tools: []string{"edit"}}
+	runtime, err := config.Build(config.BuildOptions{
+		Settings:       settings,
+		WorkingDir:     t.TempDir(),
+		DefaultProfile: files.Name,
+		Tools:          theTools(),
+		Profiles:       []profile.Profile{base.Profile(), code.Profile(), files},
+		Executors:      theExecutors(),
+	})
+	if err != nil {
+		t.Fatalf("building the runtime: %v", err)
+	}
+	if runtime.Options.Tools["fetch"] != nil {
+		t.Error("the session registered a catalog entry under a reserved name")
+	}
+	if !hasTool(runtime.Options.ToolOrder, cliregistry.CallToolName) {
+		t.Errorf("the session offers %v, and not call_cli", runtime.Options.ToolOrder)
+	}
 }
 
 // TestARegistryThatWithholdsEveryEntryIsOfferedWhole covers the empty result of
