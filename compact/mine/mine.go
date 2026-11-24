@@ -62,12 +62,6 @@ const (
 	// a reconstruction the limit cut short is refused, so the room has
 	// to be there.
 	DefaultMaxTokens = 32768
-
-	// DefaultPointerMaxTokens is the output limit of the fork's pointer
-	// pass. On a thinking model the reasoning tokens count against the
-	// limit, and a pass the limit cuts short is wasted: the pointers it
-	// would have named are what steers the reconstruction.
-	DefaultPointerMaxTokens = 16384
 )
 
 // Options configure the strategy.
@@ -83,7 +77,8 @@ type Options struct {
 	// to DefaultMaxTokens.
 	MaxTokens int
 	// PointerMaxTokens is the output limit of the fork's pointer pass.
-	// It defaults to DefaultPointerMaxTokens.
+	// It defaults to the window-scaled default: the run output limit's
+	// own scale, 8192 under a 64k window, 16384 to 128k, 32768 above.
 	PointerMaxTokens int
 	// Files reports the file a tool call names. It defaults to the two
 	// file tools poo ships, read and edit, with the path in a "path"
@@ -121,13 +116,10 @@ func New(opts Options) *Compactor {
 	if c.maxTokens <= 0 {
 		c.maxTokens = DefaultMaxTokens
 	}
-	if c.pointerMaxTokens <= 0 {
-		c.pointerMaxTokens = DefaultPointerMaxTokens
-	}
 	if c.files == nil {
 		c.files = cut.DefaultFileOp
 	}
-	c.trigger = cut.Trigger{Ratio: c.ratio, KeepRecent: c.keepRecent, MaxTokens: c.maxTokens, ForkNeed: c.pointerMaxTokens, Files: c.files, Marker: "reconstructed", Retention: true}
+	c.trigger = cut.Trigger{Ratio: c.ratio, KeepRecent: c.keepRecent, MaxTokens: c.maxTokens, Files: c.files, Marker: "reconstructed", Retention: true}
 	return c
 }
 
@@ -141,15 +133,38 @@ func (c *Compactor) KeepRecentTokens() int { return c.keepRecent }
 // MaxTokens returns the output limit of the mining request.
 func (c *Compactor) MaxTokens() int { return c.maxTokens }
 
-// PointerMaxTokens returns the output limit of the pointer pass.
+// PointerMaxTokens returns the configured output limit of the pointer
+// pass. Zero means the window-scaled default.
 func (c *Compactor) PointerMaxTokens() int { return c.pointerMaxTokens }
+
+// forkNeed returns the output limit the fork's pointer pass asks for:
+// the configured one, or the window-scaled default when none is set.
+// The scale is the run output limit's own, so a small window asks its
+// fork for less.
+func (c *Compactor) forkNeed(budget poo.ContextBudget) int {
+	if c.pointerMaxTokens > 0 {
+		return c.pointerMaxTokens
+	}
+	return poo.DefaultMaxOutputFor(budget.ContextLimit)
+}
+
+// triggerFor returns the reconstruction trigger the budget acts under:
+// the trigger the strategy was built with, with the fork's need scaled
+// to the budget's window.
+func (c *Compactor) triggerFor(budget poo.ContextBudget) cut.Trigger {
+	t := c.trigger
+	t.ForkNeed = c.forkNeed(budget)
+	return t
+}
 
 // ShouldCompact reports whether the view should be mined.
 //
 // The strategy acts when the next answer no longer fits and the view
 // holds a turn older than the newest one. The need is the larger of the
 // run's output limit and the pointer pass's, because the fork re-sends
-// the whole window and its limit is sent as it is.
+// the whole window; the session clamps the fork's limit to the room the
+// window leaves, and the fit rule keeps the need inside that room so
+// the pass is never cut short.
 //
 // A configured ratio is an explicit override: when it is set, the
 // strategy also acts at that share of the prompt limit.
@@ -160,7 +175,7 @@ func (c *Compactor) PointerMaxTokens() int { return c.pointerMaxTokens }
 // shared with the other block strategies: the same view under the same
 // budget reconstructs at the same window fill, whichever strategy runs.
 func (c *Compactor) ShouldCompact(view poo.View, budget poo.ContextBudget) bool {
-	return c.trigger.ShouldCompact(view, budget)
+	return c.triggerFor(budget).ShouldCompact(view, budget)
 }
 
 // Compact reconstructs the turns the view can spare and replaces them
@@ -187,7 +202,7 @@ func (c *Compactor) Compact(ctx context.Context, in poo.CompactionEnv) (poo.Comp
 	pointers := ""
 	var fork *poo.ForkSide
 	if in.Fork != nil {
-		reply, err := in.Fork(ctx, pointerRequest(), c.pointerMaxTokens, poo.ForkOptions{})
+		reply, err := in.Fork(ctx, pointerRequest(), c.forkNeed(in.Budget), poo.ForkOptions{})
 		// The pass is advisory, so a fork that fails mines without it.
 		// A tool call is not pointers either: a model that answers with
 		// one has not read the ask, and the transcript holds what its

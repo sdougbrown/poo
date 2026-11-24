@@ -220,8 +220,10 @@ func TestTheRunMinesAndCarriesOn(t *testing.T) {
 	if appended := forks[0].Appended[0].Text(); !strings.Contains(appended, "reconstructed working context") {
 		t.Errorf("the fork appends %q, want the pointer prompt", appended)
 	}
-	if forks[0].MaxTokens != mine.New(mine.Options{}).PointerMaxTokens() {
-		t.Errorf("the fork's output limit is %d, want the pointer limit", forks[0].MaxTokens)
+	// The session's window is 20000, so the scaled default is the run
+	// output limit's own 8192.
+	if got := forks[0].MaxTokens; got != poo.DefaultMaxOutputFor(20000) {
+		t.Errorf("the fork's output limit is %d, want the window-scaled %d", got, poo.DefaultMaxOutputFor(20000))
 	}
 
 	// The mining request reads the transcript and the pointers, and it

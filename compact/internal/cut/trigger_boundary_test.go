@@ -76,7 +76,7 @@ func triggerView() poo.View {
 // TestTheStrategyCompactsWhenTheNextAnswerDoesNotFit covers the
 // computed rule: with no ratio configured, the strategy acts one token
 // after the prompt is at the line the window, the larger of the run's
-// output limit and the pointer pass, and the reserve draw.
+// output limit and the scaled pointer pass, and the reserve draw.
 func TestTheStrategyCompactsWhenTheNextAnswerDoesNotFit(t *testing.T) {
 	view := triggerView()
 	const limit = 8192
@@ -90,14 +90,14 @@ func TestTheStrategyCompactsWhenTheNextAnswerDoesNotFit(t *testing.T) {
 				name   string
 				window int
 			}{
+				{"a 64k window", 65536},
 				{"a 128k window", 131072},
-				{"a 200k window", 200000},
 				{"a 1M window", 1048576},
 			} {
 				t.Run(test.name, func(t *testing.T) {
 					need := limit
 					if f.hasFork {
-						need = max(limit, s.PointerMaxTokens())
+						need = max(limit, poo.DefaultMaxOutputFor(test.window))
 					}
 					line := test.window - need - poo.OutputReserve
 					below := poo.ContextBudget{
@@ -206,23 +206,20 @@ func TestALargerForkNeedMovesTheTriggerEarlier(t *testing.T) {
 
 // TestTheNeedTakesTheRunLimit covers the other side of the need: a run
 // output limit larger than the fork's need draws the line at the run's
-// own limit, and the default fork need stays the pinned 16384.
+// own limit.
 func TestTheNeedTakesTheRunLimit(t *testing.T) {
 	view := triggerView()
 	const window = 131072
 	const runLimit = 32768
-	// The run limit dominates the fork's need, so the line is the run
-	// limit's own: 131072 - 32768 - 256 = 98048.
+	// The run limit dominates the fork's configured 16384 need, so the
+	// line is the run limit's own: 131072 - 32768 - 256 = 98048.
 	line := window - runLimit - poo.OutputReserve
 	for _, f := range factories {
 		if !f.hasFork {
 			continue
 		}
 		t.Run(f.name, func(t *testing.T) {
-			s := f.defaulted()
-			if got := s.PointerMaxTokens(); got != 16384 {
-				t.Fatalf("the default fork need is %d, want the pinned 16384", got)
-			}
+			s := f.pointerNeed(16384)
 			below := poo.ContextBudget{
 				ContextLimit:   window,
 				EstimatedInput: line,
@@ -242,6 +239,39 @@ func TestTheNeedTakesTheRunLimit(t *testing.T) {
 	}
 }
 
+// TestTheForkNeedScalesWithTheWindow covers the scaled default: an
+// unset pointer limit asks for the run output limit's own scale, so a
+// 128k window's fork asks for 32768 and the line sits at 98048. A
+// default frozen at 16384 would draw the line 16384 tokens later.
+func TestTheForkNeedScalesWithTheWindow(t *testing.T) {
+	view := triggerView()
+	const window = 131072
+	// The fork's scaled need dominates the 8192 run limit: 131072 -
+	// 32768 - 256 = 98048.
+	const line = 98048
+	below := poo.ContextBudget{
+		ContextLimit:   window,
+		EstimatedInput: line,
+		OutputLimit:    8192,
+		CharsPerToken:  4,
+		Turns:          2,
+	}
+	for _, f := range factories {
+		if !f.hasFork {
+			continue
+		}
+		s := f.defaulted()
+		if s.ShouldCompact(view, below) {
+			t.Errorf("the %s strategy compacted one token under the scaled fork's line at %d input tokens", f.name, line)
+		}
+		on := below
+		on.EstimatedInput = line + 1
+		if !s.ShouldCompact(view, on) {
+			t.Errorf("the %s strategy declined on the scaled fork's line at %d input tokens", f.name, line+1)
+		}
+	}
+}
+
 // TestTheStrategyDeclinesAReconstructionThatCannotPayForItself covers
 // the non-convergence guard: on a window too small for the verbatim
 // tail, the replacement and the need, a reconstruction gains nothing,
@@ -255,9 +285,11 @@ func TestTheStrategyDeclinesAReconstructionThatCannotPayForItself(t *testing.T) 
 		{TurnIndex: 1, Start: 1, End: 2},
 		{TurnIndex: 2, Start: 2, End: 3},
 	})
+	// The scaled need at this window is 8192, so the input sits where
+	// the room is short but the request is not over the window.
 	budget := poo.ContextBudget{
 		ContextLimit:   40000,
-		EstimatedInput: 30000,
+		EstimatedInput: 33000,
 		OutputLimit:    8192,
 		CharsPerToken:  4,
 		Turns:          2,
