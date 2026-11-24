@@ -690,7 +690,11 @@ func TestAnInstanceKeepsItsOwnBacklogCap(t *testing.T) {
 	runSession(t, s, "subscribe")
 	close(emitNow)
 
-	waitRecords(t, sink, "input.dropped", 1)
+	// The drop's record is written before the acceptance (the fate is
+	// recorded first, so a restore reads it), so the wait is on the
+	// acceptance: at the cap of one, a second queued input means the
+	// first one was dropped.
+	waitRecords(t, sink, "input.queued", 2)
 	if queued := sink.count("input.queued"); queued != 2 {
 		t.Errorf("the instance accepted %d inputs, want 2", queued)
 	}
