@@ -63,16 +63,19 @@ func handleRepl(inv clicontract.Invocation, stdout, stderr io.Writer) exit {
 		return exit{usageExitCode}
 	}
 
-	// The repl runs the binary again as `poo serve`, so the flags it
-	// parsed are spelled a second time for the child.
-	serverArgs := append([]string{repl.ServeSubcommand}, renderFlags(inv, serverFlagSpecs())...)
-	profileArg, err := o.profileArg(inv, workingDir)
+	// The repl resolves its settings once: the profile word and the
+	// session it opens read the same document.
+	settings, err := o.settings(workingDir)
 	if err != nil {
 		fmt.Fprintf(stderr, "poo repl: %v\n", err)
 		return exit{usageExitCode}
 	}
-	serverArgs = append(serverArgs, profileArg...)
-	resumeID, err := o.resumeID(workingDir)
+	serverArgs, err := o.serverArgs(inv, settings)
+	if err != nil {
+		fmt.Fprintf(stderr, "poo repl: %v\n", err)
+		return exit{usageExitCode}
+	}
+	resumeID, err := o.resumeID(workingDir, settings)
 	if err != nil {
 		fmt.Fprintf(stderr, "poo repl: %v\n", err)
 		// A store failure is operational: the line the person typed is
@@ -101,6 +104,18 @@ func handleRepl(inv clicontract.Invocation, stdout, stderr io.Writer) exit {
 // refused for the flags, whatever shape its settings are in.
 var errContinueResume = errors.New("--continue and --resume are alternatives: give one")
 
+// serverArgs returns the argv the repl hands its server: the serve
+// subcommand, the flags the line parsed spelled a second time for the
+// child, and the profile word the settings name.
+func (o *replOptions) serverArgs(inv clicontract.Invocation, settings *config.Settings) ([]string, error) {
+	args := append([]string{repl.ServeSubcommand}, renderFlags(inv, serverFlagSpecs())...)
+	words, err := o.profileArg(inv, settings)
+	if err != nil {
+		return nil, err
+	}
+	return append(args, words...), nil
+}
+
 // profileArg returns the --profile words the repl spells for the serve
 // child, and nothing when there are none.
 //
@@ -111,13 +126,17 @@ var errContinueResume = errors.New("--continue and --resume are alternatives: gi
 // else, so the word is spelled only when the command named none and
 // the setting holds one — an absent key leaves the child to resolve
 // the settings' profile, the way it did before this key existed.
-func (o *replOptions) profileArg(inv clicontract.Invocation, workingDir string) ([]string, error) {
+//
+// A reopened session is not that conversation either: it runs under
+// the profile its log records, so the word is spelled only for a
+// session the repl starts, and spelling it for a reopen would make
+// the child build a runtime the reopened session never runs.
+func (o *replOptions) profileArg(inv clicontract.Invocation, settings *config.Settings) ([]string, error) {
 	if inv.Supplied["profile"] {
 		return nil, nil
 	}
-	settings, err := o.settings(workingDir)
-	if err != nil {
-		return nil, err
+	if o.cont || o.resume != "" {
+		return nil, nil
 	}
 	if settings.Session.ReplProfile != nil && *settings.Session.ReplProfile != "" {
 		return []string{"--profile=" + *settings.Session.ReplProfile}, nil
@@ -149,16 +168,12 @@ func (e *storeError) Unwrap() error { return e.err }
 // --resume reads the session's own log, so a sibling that will not open is
 // not this session's failure. --continue reads the store's listing: which
 // session is the newest is only in the store's answer.
-func (o *replOptions) resumeID(workingDir string) (string, error) {
+func (o *replOptions) resumeID(workingDir string, settings *config.Settings) (string, error) {
 	if o.cont && o.resume != "" {
 		return "", errContinueResume
 	}
 	if !o.cont && o.resume == "" {
 		return "", nil
-	}
-	settings, err := o.settings(workingDir)
-	if err != nil {
-		return "", err
 	}
 	overrides, err := o.overrides()
 	if err != nil {
