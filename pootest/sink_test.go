@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/pootest"
@@ -85,10 +86,19 @@ func TestTheSinkWaitsOnTheRecordCount(t *testing.T) {
 		t.Fatalf("the wait for a count the sink already holds returned %v", err)
 	}
 
+	gate := make(chan struct{})
 	go func() {
+		<-gate
 		_ = sink.Append(ctx, &poo.RunSettledRecord{RecordMeta: poo.NewRecordMeta("run.settled")})
 	}()
-	if err := sink.WaitRecords(ctx, "run.settled", 1); err != nil {
+	waitCtx, waitCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer waitCancel()
+	waitDone := make(chan error, 1)
+	go func() {
+		waitDone <- sink.WaitRecords(waitCtx, "run.settled", 1)
+	}()
+	close(gate)
+	if err := <-waitDone; err != nil {
 		t.Fatalf("the wait for the appended record returned %v", err)
 	}
 
