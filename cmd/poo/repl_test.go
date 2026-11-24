@@ -613,9 +613,9 @@ roles:
 			replProfile: `""`,
 			wantArg:     "",
 		}, {
-			name:        "an absent setting leaves the server the settings' profile",
-			absent:      true,
-			wantArg:     "",
+			name:    "an absent setting leaves the server the settings' profile",
+			absent:  true,
+			wantArg: "",
 		}, {
 			name:        "the flag wins over the setting",
 			replProfile: "search",
