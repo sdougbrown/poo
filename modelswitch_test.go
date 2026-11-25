@@ -708,7 +708,7 @@ func TestAModelSwitchKeepsTheCompactedInputItStillMeasures(t *testing.T) {
 // section's ride: a session whose prompt carries the section switches
 // to a model whose variant names no family the prompt ships, and the
 // switch warns instead of dropping the guidance silently. A model that
-// names no variant at all draws the same note.
+// names no variant at all stays quiet unless POO_DEBUG is enabled.
 func TestASwitchWarnsWhenTheFamilyGuidanceCannotFollow(t *testing.T) {
 	oldServer := newBodyServer(t)
 	nextServer := newBodyServer(t)
@@ -765,7 +765,16 @@ func TestASwitchWarnsWhenTheFamilyGuidanceCannotFollow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("switching the model: %v", err)
 	}
+	if slices.Contains(outcome.Warnings, "the prompt renders with no variant, so the model family's guidance does not render") {
+		t.Errorf("the switch warned %v without POO_DEBUG; want no variantless warning by default", outcome.Warnings)
+	}
+
+	t.Setenv("POO_DEBUG", "true")
+	outcome, err = s.SetModel(variantless, openai.New(openai.Options{Endpoint: nextServer.URL, Model: variantless.ModelID, ModelInfo: variantless}))
+	if err != nil {
+		t.Fatalf("switching the model under POO_DEBUG: %v", err)
+	}
 	if !slices.Contains(outcome.Warnings, "the prompt renders with no variant, so the model family's guidance does not render") {
-		t.Errorf("the switch's warnings are %v, want the variantless note", outcome.Warnings)
+		t.Errorf("the switch's warnings under POO_DEBUG are %v, want the variantless note", outcome.Warnings)
 	}
 }

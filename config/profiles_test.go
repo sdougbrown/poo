@@ -407,3 +407,284 @@ func TestTheFamilyGuidanceSaysWhenNoChatModelRuns(t *testing.T) {
 		t.Errorf("the build warned %q, want the no-chat-model note", runtime.Warning)
 	}
 }
+
+func TestCompositionalProfileInheritance(t *testing.T) {
+	dir := t.TempDir()
+	coderAppend := filepath.Join(dir, "coder.md")
+	if err := os.WriteFile(coderAppend, []byte("Coder discipline."), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	settings, err := config.Parse([]byte(`
+version: 1
+endpoints:
+  test:
+    endpoint: http://localhost:4000/v1
+models:
+  gpt-model:
+    endpoint: test
+    model_id: gpt-6.2
+    prompt_variant: gpt-6.2
+    ops: [chat]
+    context_limit: 32768
+roles:
+  chat: gpt-model
+profiles:
+  coder:
+    base: code
+    model_family: true
+    feeds: [alpha]
+    feeds_defaults: false
+    cli_registry_defaults: false
+    prompt_append_file: `+coderAppend+`
+    tools:
+      disabled: [bash]
+  donkey:
+    base: coder
+    feeds: [alpha, beta]
+    prompt_append: Stay focused.
+    tools:
+      disabled: [edit]
+  sister:
+    base: coder
+    feeds: [gamma]
+    prompt_append: Sister note.
+    tools:
+      disabled: [grep]
+  quiet-donkey:
+    base: donkey
+    model_family: false
+`), config.FormatYAML)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	settings.Profile = "donkey"
+	runtime := buildIn(t, settings, config.Overrides{}, dir, theExecutors())
+
+	if !runtime.Options.ModelFamily {
+		t.Errorf("donkey did not inherit model_family: true from coder")
+	}
+	if !slices.Equal(runtime.Profile.Feeds, []string{"alpha", "beta"}) {
+		t.Errorf("donkey feeds = %v, want [alpha beta]", runtime.Profile.Feeds)
+	}
+	for _, forbidden := range []string{"bash", "edit"} {
+		for _, tool := range runtime.Profile.Tools {
+			if tool.Name == forbidden {
+				t.Errorf("donkey still offers disabled tool %q", forbidden)
+			}
+		}
+	}
+	render := theSessionPrompt(t, runtime, dir)
+	baseAt := strings.Index(render, code.Profile().Prompt)
+	coderAt := strings.Index(render, "Coder discipline.")
+	donkeyAt := strings.Index(render, "Stay focused.")
+	if baseAt < 0 || coderAt < 0 || donkeyAt < 0 || !(baseAt < coderAt && coderAt < donkeyAt) {
+		t.Errorf("expected base -> coder -> donkey prompt order, got base=%d coder=%d donkey=%d", baseAt, coderAt, donkeyAt)
+	}
+	if strings.Contains(render, "Sister note.") {
+		t.Errorf("donkey prompt leaked sibling sister prompt")
+	}
+	if !strings.Contains(render, "the user's first look at your work") {
+		t.Errorf("donkey did not render inherited model_family guidance")
+	}
+
+	// Sibling profile sharing coder stays isolated from donkey's additions.
+	settings.Profile = "sister"
+	sister := buildIn(t, settings, config.Overrides{}, dir, theExecutors())
+	if !slices.Equal(sister.Profile.Feeds, []string{"alpha", "gamma"}) {
+		t.Errorf("sister feeds = %v, want [alpha gamma]", sister.Profile.Feeds)
+	}
+	sisterRender := theSessionPrompt(t, sister, dir)
+	if !strings.Contains(sisterRender, "Coder discipline.") || !strings.Contains(sisterRender, "Sister note.") || strings.Contains(sisterRender, "Stay focused.") {
+		t.Errorf("sister prompt did not stay isolated from donkey: %s", sisterRender)
+	}
+
+	// Child overriding model_family: false turns off inherited model_family: true.
+	settings.Profile = "quiet-donkey"
+	quiet := buildIn(t, settings, config.Overrides{}, dir, theExecutors())
+	if quiet.Options.ModelFamily {
+		t.Errorf("quiet-donkey did not override inherited model_family to false")
+	}
+}
+
+func TestCompositionalProfileInheritsManifestDefaults(t *testing.T) {
+	pooDir := theDefaultsPooDir(t)
+	theDefaultFeedManifest(t, pooDir)
+	theDefaultRegistry(t, pooDir)
+
+	settings, err := config.Parse([]byte(theModelSettings+`
+profiles:
+  coder:
+    base: code
+    feeds_defaults: false
+    cli_registry_defaults: false
+  donkey:
+    base: coder
+  loud-donkey:
+    base: donkey
+    feeds_defaults: true
+    cli_registry_defaults: true
+`), config.FormatYAML)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	settings.Profile = "donkey"
+	donkey := buildIn(t, settings, config.Overrides{}, t.TempDir(), theExecutors())
+	if donkey.Feeds.Len() != 0 {
+		t.Errorf("donkey loaded %d default feeds, want 0 (inherited feeds_defaults: false)", donkey.Feeds.Len())
+	}
+	if donkey.Registry != nil {
+		t.Errorf("donkey loaded default registry, want nil (inherited cli_registry_defaults: false)")
+	}
+	// Non-active loud-donkey in runtime.Profiles still gets registry tools from its own override.
+	var loudTools []string
+	for _, p := range donkey.Profiles {
+		if p.Name == "loud-donkey" {
+			for _, tool := range p.Tools {
+				loudTools = append(loudTools, tool.Name)
+			}
+		}
+	}
+	if !slices.Contains(loudTools, "ticker") && !slices.Contains(loudTools, "call_cli") {
+		t.Errorf("non-active loud-donkey profile tools = %v, want default registry tool", loudTools)
+	}
+
+	settings.Profile = "loud-donkey"
+	loud := buildIn(t, settings, config.Overrides{}, t.TempDir(), theExecutors())
+	if !loud.Feeds.Has("broker") {
+		t.Errorf("loud-donkey did not override inherited feeds_defaults back to true")
+	}
+	if loud.Registry == nil {
+		t.Errorf("loud-donkey did not override inherited cli_registry_defaults back to true")
+	}
+}
+
+func TestCompositionalProfilePromptFileReplacesAncestorPrompt(t *testing.T) {
+	dir := t.TempDir()
+	childFile := filepath.Join(dir, "child.md")
+	if err := os.WriteFile(childFile, []byte("Child owns the section."), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	settings, err := config.Parse([]byte(theModelSettings), config.FormatYAML)
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings.Profile = "child"
+	settings.Profiles = map[string]config.ProfileSettings{
+		"parent": {Base: "code", PromptFile: filepath.Join(dir, "missing-parent.md"), PromptAppend: "Parent line."},
+		"child":  {Base: "parent", PromptFile: childFile, PromptAppend: "Child line."},
+	}
+	runtime := buildIn(t, settings, config.Overrides{}, dir, theExecutors())
+	render := theSessionPrompt(t, runtime, dir)
+	if strings.Contains(render, "Parent line.") || strings.Contains(render, code.Profile().Prompt) {
+		t.Errorf("child prompt_file did not replace ancestor prompt: %s", render)
+	}
+	fileAt := strings.Index(render, "Child owns the section.")
+	appendAt := strings.Index(render, "Child line.")
+	if fileAt < 0 || appendAt < 0 || fileAt > appendAt {
+		t.Errorf("child prompt_append does not ride after child prompt_file: %s", render)
+	}
+}
+
+func TestCompositionalProfileMissingAncestorFileAttributesAncestor(t *testing.T) {
+	dir := t.TempDir()
+	for _, tt := range []struct {
+		name   string
+		parent config.ProfileSettings
+		want   string
+	}{
+		{
+			name:   "missing prompt_append_file",
+			parent: config.ProfileSettings{Base: "code", PromptAppendFile: filepath.Join(dir, "absent.md")},
+			want:   "profiles.parent.prompt_append_file",
+		},
+		{
+			name:   "missing prompt_file",
+			parent: config.ProfileSettings{Base: "code", PromptFile: filepath.Join(dir, "absent.md")},
+			want:   "profiles.parent.prompt_file",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			settings, err := config.Parse([]byte(theModelSettings), config.FormatYAML)
+			if err != nil {
+				t.Fatal(err)
+			}
+			settings.Profile = "child"
+			settings.Profiles = map[string]config.ProfileSettings{
+				"parent": tt.parent,
+				"child":  {Base: "parent"},
+			}
+			runtime := buildIn(t, settings, config.Overrides{}, dir, theExecutors())
+			_, err = runtime.SessionPrompt(dir)
+			if err == nil {
+				t.Fatalf("expected error for %s", tt.name)
+			}
+			if field, _ := config.FieldOf(err); field != tt.want {
+				t.Errorf("got field %q (%v), want %s", field, err, tt.want)
+			}
+		})
+	}
+}
+
+func TestProfileInheritanceCycleIsRejected(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		profiles map[string]config.ProfileSettings
+	}{
+		{
+			name: "self cycle",
+			profiles: map[string]config.ProfileSettings{
+				"a": {Base: "a"},
+			},
+		},
+		{
+			name: "three-way cycle",
+			profiles: map[string]config.ProfileSettings{
+				"a": {Base: "b"},
+				"b": {Base: "c"},
+				"c": {Base: "a"},
+			},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			settings, err := config.Parse([]byte(theModelSettings), config.FormatYAML)
+			if err != nil {
+				t.Fatal(err)
+			}
+			settings.Profiles = tt.profiles
+			_, err = config.Build(config.BuildOptions{
+				Settings: settings, DefaultProfile: "code", WorkingDir: t.TempDir(),
+				Tools: theTools(), Profiles: theProfiles(), Executors: theExecutors(),
+			})
+			if err == nil {
+				t.Fatal("expected cycle error, got nil")
+			}
+			code, _ := config.CodeOf(err)
+			field, _ := config.FieldOf(err)
+			if code != config.CodeInvalid || !strings.HasSuffix(field, ".base") {
+				t.Fatalf("got %v (code=%s field=%s), want invalid_value on *.base", err, code, field)
+			}
+		})
+	}
+}
+
+func TestNoVariantFamilyWarningRequiresDebug(t *testing.T) {
+	settings, err := config.Parse([]byte(theModelSettings+theProfilesBody("codex", true)), config.FormatYAML)
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings.Profile = "codex"
+
+	runtime := buildIn(t, settings, config.Overrides{}, t.TempDir(), theExecutors())
+	if strings.Contains(runtime.Warning, "renders with no variant") {
+		t.Errorf("got unexpected warning without POO_DEBUG: %q", runtime.Warning)
+	}
+
+	t.Setenv("POO_DEBUG", "true")
+	debugRuntime := buildIn(t, settings, config.Overrides{}, t.TempDir(), theExecutors())
+	if !strings.Contains(debugRuntime.Warning, "renders with no variant") {
+		t.Errorf("got warning %q under POO_DEBUG=true, want no-variant note", debugRuntime.Warning)
+	}
+}

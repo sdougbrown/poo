@@ -58,8 +58,8 @@ func withVariantSections(b *prompt.Builder) {
 
 // TestAWarningRidesTheVariantChange covers the session's own variant
 // change: a session that carries the family section warns when the
-// variant it changes to renders none of the guidance, and says the
-// same when it names no variant at all.
+// variant it changes to renders none of the guidance, and warns on an
+// empty variant only when POO_DEBUG is enabled.
 func TestAWarningRidesTheVariantChange(t *testing.T) {
 	first := poo.ModelInfo{
 		Name:          "m",
@@ -92,8 +92,17 @@ func TestAWarningRidesTheVariantChange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("setting the variant: %v", err)
 	}
+	if slices.Contains(warnings, "the prompt renders with no variant, so the model family's guidance does not render") {
+		t.Errorf("the change warned %v without POO_DEBUG; want no variantless warning by default", warnings)
+	}
+
+	t.Setenv("POO_DEBUG", "true")
+	warnings, err = s.SetPromptVariant("")
+	if err != nil {
+		t.Fatalf("setting the variant under POO_DEBUG: %v", err)
+	}
 	if !slices.Contains(warnings, "the prompt renders with no variant, so the model family's guidance does not render") {
-		t.Errorf("the change's warnings are %v, want the no-variant note", warnings)
+		t.Errorf("the change's warnings under POO_DEBUG are %v, want the no-variant note", warnings)
 	}
 }
 
@@ -139,6 +148,33 @@ func TestASessionCarriesItsStartWarning(t *testing.T) {
 	})
 	if got := plain.StartWarnings(); len(got) != 0 {
 		t.Errorf("the session's start warnings are %v, want none", got)
+	}
+
+	variantless := newTestSession(t, poo.Options{
+		Transport:   tr,
+		Tools:       map[string]poo.Tool{"echo": &echoTool{}},
+		ToolOrder:   []string{"echo"},
+		SessionID:   "s3",
+		Model:       first,
+		ModelFamily: true,
+		WorkingDir:  t.TempDir(),
+	})
+	if got := variantless.StartWarnings(); len(got) != 0 {
+		t.Errorf("variantless session start warnings = %v without POO_DEBUG, want none", got)
+	}
+
+	t.Setenv("POO_DEBUG", "true")
+	variantlessDebug := newTestSession(t, poo.Options{
+		Transport:   tr,
+		Tools:       map[string]poo.Tool{"echo": &echoTool{}},
+		ToolOrder:   []string{"echo"},
+		SessionID:   "s4",
+		Model:       first,
+		ModelFamily: true,
+		WorkingDir:  t.TempDir(),
+	})
+	if got := variantlessDebug.StartWarnings(); !slices.Contains(got, "the prompt renders with no variant, so the model family's guidance does not render") {
+		t.Errorf("variantless session start warnings under POO_DEBUG = %v, want no-variant note", got)
 	}
 }
 

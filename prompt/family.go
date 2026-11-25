@@ -3,9 +3,25 @@ package prompt
 import (
 	_ "embed"
 	"fmt"
+	"os"
 	"slices"
+	"strconv"
 	"strings"
 )
+
+// EnvDebug is the environment variable that enables debug-only diagnostics,
+// such as reporting when a model with no prompt variant skips model-family
+// guidance.
+const EnvDebug = "POO_DEBUG"
+
+func debugEnabled() bool {
+	v := strings.TrimSpace(os.Getenv(EnvDebug))
+	if v == "" {
+		return false
+	}
+	b, err := strconv.ParseBool(v)
+	return err == nil && b
+}
 
 // FamilySection is the name of the prompt's model-family section.
 //
@@ -82,6 +98,9 @@ func FamilyWarning(b *Builder, variant string) (string, bool) {
 		return "", false
 	}
 	if variant == "" {
+		if !debugEnabled() {
+			return "", false
+		}
 		return "the prompt renders with no variant, so the model family's guidance does not render", true
 	}
 	return fmt.Sprintf("the prompt variant %q names no family the prompt ships, so the model family's guidance does not render in a session that keeps it", variant), true

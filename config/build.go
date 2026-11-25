@@ -275,6 +275,7 @@ type Runtime struct {
 	// Profiles are the profiles the binary offers.
 	Profiles           []poo.Profile
 	profileDefinitions []profile.Profile
+	resolvedProfiles   map[string]resolvedProfile
 	// Profile is the profile the session is built from.
 	Profile poo.Profile
 	// Models are the models the settings offer, by name.
@@ -430,6 +431,13 @@ func Build(opts BuildOptions) (*Runtime, error) {
 	// the client from the first one, not from the transports alone.
 	runtime.Build = opts.Build
 
+	definitions, resolvedProfiles, err := runtime.resolveProfileDefinitions(opts)
+	if err != nil {
+		return nil, err
+	}
+	runtime.profileDefinitions = definitions
+	runtime.resolvedProfiles = resolvedProfiles
+
 	if err := runtime.resolveRegistry(opts, workingDir); err != nil {
 		return nil, err
 	}
@@ -495,11 +503,7 @@ func (r *Runtime) resolveProfile(opts BuildOptions, workingDir string) error {
 	if name == "" {
 		return &Error{Code: CodeUnsupported, Message: "the build has no profile to run under"}
 	}
-	definitions, err := r.resolveProfileDefinitions(opts)
-	if err != nil {
-		return err
-	}
-	r.profileDefinitions = definitions
+	definitions := r.profileDefinitions
 	chosen, err := profile.Find(definitions, name)
 	if err != nil {
 		return &Error{
@@ -763,11 +767,11 @@ func (r *Runtime) profileName(opts BuildOptions) string {
 	return ""
 }
 
-// chosenProfile returns the settings' definition of the profile the
+// chosenProfile returns the resolved settings of the profile the
 // session runs under, or the zero value when the name is a linked
 // profile alone.
-func (r *Runtime) chosenProfile(opts BuildOptions) ProfileSettings {
-	return r.Settings.Profiles[r.profileName(opts)]
+func (r *Runtime) chosenProfile(opts BuildOptions) resolvedProfile {
+	return r.resolvedProfiles[r.profileName(opts)]
 }
 
 // manifestPaths joins the paths one manifest kind loads with the kind's
@@ -1356,7 +1360,7 @@ func (r *Runtime) resolveProfiles(opts BuildOptions, definitions []profile.Profi
 	for _, definition := range definitions {
 		// A settings variant carries the toggle words; a linked profile's
 		// name is not in the map, so it follows the settings' word.
-		variant := r.Settings.Profiles[definition.Name]
+		variant := r.resolvedProfiles[definition.Name]
 		pair, err := pairFor(manifestKey{
 			feeds:    defaultsOn(r.Settings.Feeds.Defaults, variant.FeedsDefaults),
 			registry: defaultsOn(r.Settings.CLIRegistry.Defaults, variant.RegistryDefaults),
