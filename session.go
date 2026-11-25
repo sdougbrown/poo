@@ -402,8 +402,9 @@ type runState struct {
 	// same rule, and its bound, maxEmptyTurns, is the stricter one.
 	emptyTurns int
 	// truncatedTurns counts the consecutive turns whose response stopped on
-	// the output-token limit. It resets with unusableTurns, and it is only
-	// read when the session was given TruncationRetries.
+	// the output-token limit. It resets with unusableTurns, and a turn that
+	// counted as unusable for another reason ends it. It is only read when the
+	// session was given TruncationRetries.
 	truncatedTurns int
 	// lastRendered is the snapshot of the last main request, so a
 	// compactor can fork it.

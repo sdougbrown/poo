@@ -1830,6 +1830,10 @@ func (s *Session) noteUnusableTurn(run *runState, kind string) turnNote {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	run.unusableTurns++
+	// The turn was unusable for another reason, so it ends a run of truncated
+	// turns: the settle that names such a run counts the turns that were cut,
+	// in a row.
+	run.truncatedTurns = 0
 	if kind == emptyTurnsSource {
 		run.emptyTurns++
 		if run.emptyTurns >= maxEmptyTurns {
@@ -1873,8 +1877,9 @@ const truncatedTurnNote = "Your previous response reached the output limit befor
 // A response that stopped on the output-token limit carries nothing the run can
 // use, and the cause is the model's verbosity rather than a malformed call. The
 // run asks the model to say less and opens another turn, up to the retries the
-// session was given; past them, and by default, it settles output_truncated,
-// which is the reason that names what the provider did.
+// session was given. Past them it settles output_truncated, which is the reason
+// that names what the provider did; a session given no retries settles on the
+// first such turn.
 func (s *Session) reportTruncatedTurn(run *runState, turn int) (turnNote, error) {
 	if s.opts.TruncationRetries <= 0 {
 		return turnNote{}, nil

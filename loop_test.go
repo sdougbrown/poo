@@ -321,6 +321,34 @@ func TestATruncatedTurnThatIsNotRetriedEndsTheRunOfUnusableTurns(t *testing.T) {
 	}
 }
 
+// TestATruncationRetryCountsOnlyTurnsInARow covers the count's reset against
+// another unusable turn. The empty turn between the two truncations ends the
+// run the settle names, so the second truncation gets its retry instead of
+// spending a bound the log would then describe as "in a row".
+func TestATruncationRetryCountsOnlyTurnsInARow(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{text: "a truncated ans", finish: poo.FinishLength},
+		// An empty turn is unusable for another reason, so it breaks the run
+		// of truncated turns.
+		{finish: poo.FinishToolCalls},
+		{text: "another truncat", finish: poo.FinishLength},
+		{text: "done"},
+	})
+	sink := &recordingSink{}
+	opts := testOptions(t, tr, &echoTool{result: "echoed"}, sink)
+	opts.TruncationRetries = 1
+	s := newTestSession(t, opts)
+
+	res := runSession(t, s, "do the thing")
+	if res.Reason != poo.ReasonEndTurn {
+		t.Fatalf("the run settled %q (%s), want end_turn: the second truncation started a new run",
+			res.Reason, res.Detail.Source)
+	}
+	if n := len(tr.Requests()); n != 4 {
+		t.Errorf("the run made %d requests, want 4: the empty turn ended the run of truncations", n)
+	}
+}
+
 // TestATruncatedTurnKeepsItsParseFailureNote covers a response the provider cut
 // at the output limit that also carries a failure the parser reported. The
 // model wrote a call as text on the turn it overran. The parse failure is the
