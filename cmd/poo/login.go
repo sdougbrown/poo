@@ -19,6 +19,7 @@ import (
 
 	clicontract "github.com/sdougbrown/cli-contract"
 
+	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/config"
 	"github.com/sdougbrown/poo/internal/term"
 	"github.com/sdougbrown/poo/provider/auth"
@@ -190,7 +191,7 @@ func (o *loginOptions) probeSignedIn(ctx context.Context, flow auth.Flow, settin
 	cat := catalog.New(options)
 	served := make([]string, 0, 4)
 	for name, endpoint := range cat.Endpoints() {
-		if endpoint.SkipProbe || !servesProvider(settings, name, flow.Provider) {
+		if endpoint.SkipProbe || !servesProvider(endpoint, flow.Provider) {
 			continue
 		}
 		_ = cat.ReprobeEndpoint(ctx, name)
@@ -199,9 +200,12 @@ func (o *loginOptions) probeSignedIn(ctx context.Context, flow auth.Flow, settin
 	if len(served) == 0 {
 		return
 	}
+	// The count is what the probe reported, not what a layer declares: a key the
+	// endpoint refuses leaves the record's placeholder model in place, and a sign-in
+	// that says the provider serves one model at that moment says nothing useful.
 	count := 0
 	for _, model := range cat.List() {
-		if slices.Contains(served, model.Provider) {
+		if slices.Contains(served, model.Provider) && reported(model) {
 			count++
 		}
 	}
@@ -223,14 +227,24 @@ func (o *loginOptions) reloadSettings(settingsPath string) (*config.Settings, er
 // servesProvider reports whether an endpoint reads the key the given provider stores.
 //
 // The environment variable's name is the join: a provider stores its key under a name, and
-// the endpoint that reads the same variable is the one the key serves.
-func servesProvider(settings *config.Settings, endpoint string, provider auth.Provider) bool {
-	declared, ok := settings.Endpoints[endpoint]
-	if !ok {
+// the endpoint that reads the same variable is the one the key serves. The endpoint is the
+// one the catalog holds, so an endpoint the built-in record declares counts as much as one
+// the operator wrote: both are in the catalog, and only one of them is in Settings.Endpoints.
+func servesProvider(endpoint catalog.Endpoint, provider auth.Provider) bool {
+	if provider.Env == "" || endpoint.Credential.Source != catalog.CredentialEnv {
 		return false
 	}
-	return provider.Env != "" && declared.APIKeyEnv == provider.Env
+	return endpoint.Credential.Env == provider.Env
 }
+
+// reported reports whether an endpoint's own answer is what describes a model, rather than
+// a layer that declared it.
+func reported(model poo.ModelInfo) bool {
+	return model.Source[servedByField] == catalog.LayerDiscovery
+}
+
+// servedByField is the model field whose layer names where a model came from.
+const servedByField = "endpoint"
 
 // refuseBrowserFlags refuses the flags a browser sign-in takes when the chosen sign-in is not one.
 //

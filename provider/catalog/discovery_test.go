@@ -1265,3 +1265,234 @@ func TestTheShowProbeReadsEveryModelTheListServes(t *testing.T) {
 		}
 	}
 }
+
+// TestAProbeOfOneEndpointKeepsWhatTheOtherReported covers the cache a single
+// endpoint's reprobe writes. The cache is one file for every endpoint, so the file a
+// sign-in's probe saves must still describe the endpoints it did not ask about — the
+// session that follows reads them from it.
+func TestAProbeOfOneEndpointKeepsWhatTheOtherReported(t *testing.T) {
+	first := vllmServer(t, "gemma4", 32768)
+	second := vllmServer(t, "glm-5.3", 8192)
+	stateDir := t.TempDir()
+	settings := catalog.Settings{
+		Endpoints: map[string]catalog.EndpointSettings{
+			"one": {Endpoint: first.URL},
+			"two": {Endpoint: second.URL},
+		},
+	}
+	c := catalog.New(catalog.Options{Settings: settings, StateDir: stateDir})
+	if err := c.Refresh(context.Background()); err != nil {
+		t.Fatalf("the refresh: %v", err)
+	}
+	if err := c.ReprobeEndpoint(context.Background(), "two"); err != nil {
+		t.Fatalf("the endpoint's reprobe: %v", err)
+	}
+
+	// A catalog built from the file the reprobe wrote holds both endpoints' models.
+	built := catalog.New(catalog.Options{Settings: settings, StateDir: stateDir, Cached: true})
+	for _, name := range []string{"one/gemma4", "two/glm-5.3"} {
+		if _, err := built.Resolve(name); err != nil {
+			t.Errorf("the model %q is not in the catalog the reprobe wrote: %v", name, err)
+		}
+	}
+}
+
+// TestAShowThatFailsForOneModelKeepsTheRest covers the fan-out's cost: one model's
+// show failing, or its answer not reading, takes that model's own fields and not the
+// models the list named beside it.
+func TestAShowThatFailsForOneModelKeepsTheRest(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"object": "list",
+			"data": []map[string]any{
+				{"id": "good-1"}, {"id": "broken"}, {"id": "good-2"},
+			},
+		})
+	})
+	mux.HandleFunc("/api/show", func(w http.ResponseWriter, r *http.Request) {
+		var asked struct {
+			Model string `json:"model"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&asked)
+		if asked.Model == "broken" {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"model_info":   map[string]any{"arch.context_length": 65536},
+			"capabilities": []string{"completion", "tools"},
+		})
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	c := catalog.New(catalog.Options{
+		StateDir: t.TempDir(),
+		Settings: catalog.Settings{
+			Endpoints: map[string]catalog.EndpointSettings{"cloud": {Endpoint: server.URL}},
+		},
+	})
+	if err := c.Refresh(context.Background()); err != nil {
+		t.Fatalf("the refresh: %v", err)
+	}
+	for _, name := range []string{"cloud/good-1", "cloud/good-2"} {
+		info, err := c.Resolve(name)
+		if err != nil {
+			t.Fatalf("the model %q the list named did not resolve: %v", name, err)
+		}
+		if info.Tools.Mode != poo.ToolsNative {
+			t.Errorf("%s has the tools mode %q, want native", name, info.Tools.Mode)
+		}
+	}
+	// The model whose show failed is still a model the list named; it stands with the
+	// fields the list itself gave.
+	if _, err := c.Resolve("cloud/broken"); err != nil {
+		t.Errorf("the model whose show failed did not resolve: %v", err)
+	}
+}
+
+// TestAProbeRefusedWithTheKeyAsksAgainWithoutIt covers the endpoint that never took a
+// credential: a stored key one endpoint reads must not turn another endpoint's public
+// answer into a refusal.
+func TestAProbeRefusedWithTheKeyAsksAgainWithoutIt(t *testing.T) {
+	var keyed, anonymous atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "" {
+			keyed.Add(1)
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		anonymous.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"object": "list",
+			"data":   []map[string]any{{"id": "public-model"}},
+		})
+	}))
+	t.Cleanup(server.Close)
+
+	c := catalog.New(catalog.Options{
+		StateDir: t.TempDir(),
+		Settings: catalog.Settings{
+			Endpoints: map[string]catalog.EndpointSettings{
+				"public": {Endpoint: server.URL, APIKeyEnv: "PUBLIC_API_KEY"},
+			},
+		},
+		EndpointKey: func(string, catalog.Credential) string { return "a-stored-key" },
+	})
+	if err := c.Refresh(context.Background()); err != nil {
+		t.Fatalf("the refresh: %v", err)
+	}
+	if keyed.Load() == 0 || anonymous.Load() == 0 {
+		t.Errorf("the probe made %d keyed and %d anonymous requests, want both",
+			keyed.Load(), anonymous.Load())
+	}
+	if _, err := c.Resolve("public/public-model"); err != nil {
+		t.Errorf("the list's model did not resolve: %v", err)
+	}
+}
+
+// TestARefreshDoesNotWakeAnEndpointThatIsNotProbed covers the cache read twice: an
+// endpoint whose models are declared rather than listed is not one a build reads from
+// the cache, and a refresh of another endpoint must not write its entries back into the
+// catalog or the file — a model the session build refuses is not one a refresh offers.
+func TestARefreshDoesNotWakeAnEndpointThatIsNotProbed(t *testing.T) {
+	fixture := vllmServer(t, "listed", 32768)
+	other := vllmServer(t, "other", 8192)
+	stateDir := t.TempDir()
+
+	// The endpoint is probeable once, so its report is in the cache.
+	probeable := catalog.New(catalog.Options{
+		StateDir: stateDir,
+		Settings: catalog.Settings{
+			Endpoints: map[string]catalog.EndpointSettings{"declared": {Endpoint: fixture.URL}},
+		},
+	})
+	if err := probeable.Refresh(context.Background()); err != nil {
+		t.Fatalf("the refresh: %v", err)
+	}
+	if _, err := probeable.Resolve("declared/listed"); err != nil {
+		t.Fatalf("the probed model did not resolve: %v", err)
+	}
+
+	// The same endpoint now declares its models, and another endpoint is probed.
+	declaring := catalog.New(catalog.Options{
+		StateDir: stateDir,
+		Settings: catalog.Settings{
+			Endpoints: map[string]catalog.EndpointSettings{
+				"declared": {Endpoint: fixture.URL, SkipProbe: true},
+				"other":    {Endpoint: other.URL},
+			},
+			Models: map[string]catalog.ModelSettings{
+				"declared/typed": {Endpoint: "declared", ModelID: "typed", ContextLimit: 4096},
+			},
+		},
+	})
+	if err := declaring.Refresh(context.Background()); err != nil {
+		t.Fatalf("the refresh: %v", err)
+	}
+	if _, err := declaring.Resolve("declared/listed"); err == nil {
+		t.Error("a refresh offered a model from an endpoint it does not probe")
+	}
+	if _, err := declaring.Resolve("declared/typed"); err != nil {
+		t.Errorf("the declared model did not resolve: %v", err)
+	}
+	if _, err := declaring.Resolve("other/other"); err != nil {
+		t.Errorf("the probed endpoint's model did not resolve: %v", err)
+	}
+}
+
+// TestOneEndpointsKeyDoesNotReachAnother covers the fan-out's requests: the key a probe
+// carries is the endpoint's own. Two endpoints with keys in reach are two requests that
+// must each carry their own, or one provider's credential is spent at another's door.
+func TestOneEndpointsKeyDoesNotReachAnother(t *testing.T) {
+	seen := map[string]map[string]bool{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host := r.URL.Path
+		if seen[host] == nil {
+			seen[host] = map[string]bool{}
+		}
+		seen[host][r.Header.Get("Authorization")] = true
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"object": "list",
+			"data":   []map[string]any{{"id": "m"}},
+		})
+	}))
+	t.Cleanup(server.Close)
+
+	c := catalog.New(catalog.Options{
+		StateDir: t.TempDir(),
+		Settings: catalog.Settings{
+			Endpoints: map[string]catalog.EndpointSettings{
+				"one": {Endpoint: server.URL + "/one/v1", APIKeyEnv: "ONE_KEY"},
+				"two": {Endpoint: server.URL + "/two/v1", APIKeyEnv: "TWO_KEY"},
+			},
+		},
+		EndpointKey: func(name string, credential catalog.Credential) string {
+			if credential.Env == "ONE_KEY" && name == "one" {
+				return "key-one"
+			}
+			if credential.Env == "TWO_KEY" && name == "two" {
+				return "key-two"
+			}
+			t.Errorf("the probe asks %q for its key with %+v", name, credential)
+			return ""
+		},
+	})
+	if err := c.Refresh(context.Background()); err != nil {
+		t.Fatalf("the refresh: %v", err)
+	}
+	for path, want := range map[string]string{
+		"/one/v1/models": "Bearer key-one",
+		"/two/v1/models": "Bearer key-two",
+	} {
+		got := seen[path]
+		if len(got) != 1 || !got[want] {
+			t.Errorf("the requests to %s carried %v, want only %q", path, got, want)
+		}
+	}
+}

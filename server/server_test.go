@@ -4,10 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/sdougbrown/poo"
@@ -936,4 +940,82 @@ func TestASessionNamesAModelTheModelsFileDeclares(t *testing.T) {
 	}
 	defer func() { _ = sess.Close() }()
 	_ = info.Release()
+}
+
+// TestARefreshedCatalogIsWhatASessionSwitchesTo covers the list a reprobe reports:
+// it is a list of models the session may switch to. The names a switch resolves
+// through are built once, when the server is, so a refresh that moved only the
+// catalog would show an operator a model and refuse it — the exact model the
+// refresh exists to surface.
+func TestARefreshedCatalogIsWhatASessionSwitchesTo(t *testing.T) {
+	ctx := context.Background()
+	var serving atomic.Bool
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		list := []string{"chat-model"}
+		if serving.Load() {
+			list = append(list, "fresh-model")
+		}
+		data := make([]map[string]any, 0, len(list))
+		for _, id := range list {
+			data = append(data, map[string]any{"id": id, "max_model_len": 32768})
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"object": "list", "data": data})
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	document := `{
+  "version": 1,
+  "session": {"mode": "logged"},
+  "endpoints": {"grace": {"endpoint": "` + server.URL + `"}},
+  "models": {"chat-model": {"endpoint": "grace", "model_id": "chat-model", "ops": ["chat"], "context_limit": 32768}},
+  "roles": {"chat": "chat-model"}
+}`
+	settings, err := config.Parse([]byte(document), config.FormatJSON)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	srv := newServer(t, settings)
+	sess, info, err := srv.Create(ctx, protocol.CreateParams{
+		Mode:       "logged",
+		SessionDir: t.TempDir(),
+	}, wire.FactoryEnv{})
+	if err != nil {
+		t.Fatalf("creating the session: %v", err)
+	}
+	defer func() {
+		if err := sess.Close(); err != nil {
+			t.Errorf("closing the session: %v", err)
+		}
+		if err := info.Release(); err != nil {
+			t.Errorf("releasing the store: %v", err)
+		}
+	}()
+
+	// The endpoint gains a model, and the refresh reports it.
+	serving.Store(true)
+	models, err := srv.Models(ctx, true)
+	if err != nil {
+		t.Fatalf("refreshing the catalog: %v", err)
+	}
+	names := make([]string, 0, len(models))
+	for _, model := range models {
+		names = append(names, model.Name)
+	}
+	if !slices.Contains(names, "grace/fresh-model") {
+		t.Fatalf("the refreshed catalog holds %v, want the model the endpoint reports", names)
+	}
+
+	// The model the refresh added is one the session switches to.
+	configured, err := srv.Configure(ctx, sess, protocol.ConfigureParams{
+		Models: &protocol.ModelRoles{Chat: "grace/fresh-model"},
+	})
+	if err != nil {
+		t.Fatalf("switching to the model the refresh reported: %v", err)
+	}
+	if configured.Models.Chat != "grace/fresh-model" {
+		t.Errorf("the session runs %q, want the model the refresh reported", configured.Models.Chat)
+	}
 }

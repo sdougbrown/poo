@@ -400,6 +400,82 @@ session:
 	}
 }
 
+// TestAKeyLoginProbesTheRecordedEndpoint covers the documented path: an operator with a
+// credential file and no `endpoints` block. The Ollama Cloud endpoint is the built-in
+// record's, so it is in the catalog and not in the settings, and the sign-in still has to
+// ask it what it serves. The requests go to a transport standing in for the provider.
+func TestAKeyLoginProbesTheRecordedEndpoint(t *testing.T) {
+	isolatedConfigHome(t)
+	t.Setenv("OLLAMA_API_KEY", "")
+	dir := t.TempDir()
+	authPath := filepath.Join(dir, "auth.json")
+	if err := os.WriteFile(authPath, []byte("version: 1\ncredentials: {}\n"), 0o600); err != nil {
+		t.Fatalf("writing the credential file: %v", err)
+	}
+	settings := filepath.Join(dir, "settings.yaml")
+	body := "version: 1\nauth_file: " + authPath + "\nsession:\n  mode: ephemeral\n"
+	if err := os.WriteFile(settings, []byte(body), 0o644); err != nil {
+		t.Fatalf("writing the settings: %v", err)
+	}
+
+	provider := &providerTransport{list: []string{"glm-5.3", "kimi-k3"}}
+	probesThrough(t, &http.Client{Transport: provider})
+	withoutATerminal(t)
+	withStdin(t, "the-key\n")
+	if code := run([]string{"login", "ollama-cloud", "--settings", settings}); code != 0 {
+		t.Fatalf("poo login exited with %d", code)
+	}
+	if provider.asked == 0 {
+		t.Fatalf("the sign-in never asked the provider what it serves")
+	}
+	if provider.key != "the-key" {
+		t.Errorf("the probe carried the key %q, want the one the sign-in stored", provider.key)
+	}
+
+	runtime := loginRuntime(t, settings)
+	for _, name := range []string{"ollama-cloud/glm-5.3", "ollama-cloud/kimi-k3"} {
+		if _, err := runtime.Catalog.Resolve(name); err != nil {
+			t.Errorf("the model %q the record's endpoint serves is not in the catalog: %v", name, err)
+		}
+	}
+}
+
+// providerTransport answers a probe the way a hosted Ollama Cloud does: a model list, and
+// a show for each model in it.
+type providerTransport struct {
+	// list are the ids the model list answers with.
+	list []string
+	// asked counts the requests the probe made.
+	asked int
+	// key is the credential the last request carried.
+	key string
+}
+
+func (p *providerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	p.asked++
+	if key := strings.TrimPrefix(req.Header.Get("Authorization"), "Bearer "); key != "" {
+		p.key = key
+	}
+	body := `{"object":"list","data":[`
+	if strings.HasSuffix(req.URL.Path, "/api/show") {
+		body = `{"model_info":{"arch.context_length":65536},"capabilities":["completion","tools"]}`
+	} else {
+		for i, id := range p.list {
+			if i > 0 {
+				body += ","
+			}
+			body += `{"id":"` + id + `"}`
+		}
+		body += `]}`
+	}
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Request:    req,
+	}, nil
+}
+
 // loginRuntime builds the runtime a command builds from the settings file, so a test can ask
 // what the credential poo stores resolves to.
 func loginRuntime(t *testing.T, settingsPath string) *config.Runtime {

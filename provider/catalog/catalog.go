@@ -22,6 +22,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/sdougbrown/poo"
@@ -119,8 +120,17 @@ type Options struct {
 
 // Catalog is the effective catalog: the merged models, the endpoints
 // that serve them and the role assignments.
+//
+// The entries and the model index move when a probe reports what an endpoint
+// serves, and a probe can land while another goroutine reads the catalog: a wire
+// request reprobes, and a session's switch, decider and statusline read. The
+// mutex is what keeps a reprobe from writing the maps a reader is walking, which
+// in Go is not an error but a panic. The endpoints and the roles are set once,
+// when the catalog is built, and are read without it.
 type Catalog struct {
-	opts       Options
+	opts Options
+	// mu guards the entries and the model index.
+	mu         sync.RWMutex
 	curated    *curated
 	entries    map[string]*entry
 	modelIndex map[modelRef]*entry
@@ -321,6 +331,8 @@ func (c *Catalog) entryForModel(endpoint, modelID string) *entry {
 
 // List returns the effective models, sorted by name.
 func (c *Catalog) List() []poo.ModelInfo {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	names := make([]string, 0, len(c.entries))
 	for name := range c.entries {
 		names = append(names, name)
@@ -338,6 +350,8 @@ func (c *Catalog) List() []poo.ModelInfo {
 // A name the catalog does not hold is an error: the caller asked for a
 // model that does not exist.
 func (c *Catalog) Resolve(name string) (poo.ModelInfo, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	if _, ok := c.entries[name]; !ok {
 		return poo.ModelInfo{}, &UnresolvedError{Name: name}
 	}
@@ -376,6 +390,8 @@ type Explanation struct {
 // The fields come in the order of the model info, so the explanation
 // reads like the model info it explains.
 func (c *Catalog) Explain(name string) (poo.ModelInfo, []Explanation, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	e, ok := c.entries[name]
 	if !ok {
 		return poo.ModelInfo{}, nil, &UnresolvedError{Name: name}
@@ -416,6 +432,8 @@ func (c *Catalog) Explain(name string) (poo.ModelInfo, []Explanation, error) {
 // The notes say what the model's family needs: the text tool-call
 // parser, a reasoning switch, a context limit that bites.
 func (c *Catalog) Notes(name string) []string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	e, ok := c.entries[name]
 	if !ok {
 		return nil
@@ -429,6 +447,8 @@ func (c *Catalog) Notes(name string) []string {
 // catalog but does not serve what the role needs: a caller that asks a role for its
 // model is asking what a session would run, and a session refuses the second.
 func (c *Catalog) Role(role Role) (poo.ModelInfo, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	name, ok := c.roles[role]
 	if !ok {
 		return poo.ModelInfo{}, c.unassignedRole(role)
@@ -492,6 +512,8 @@ func (c *Catalog) servable(role Role) []string {
 // catalog does not hold is a warning, and the catalog carries on
 // without it.
 func (c *Catalog) CheckRoles() error {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	roles := make([]string, 0, len(c.roles))
 	for role := range c.roles {
 		roles = append(roles, string(role))

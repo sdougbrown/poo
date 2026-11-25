@@ -1027,7 +1027,7 @@ func TestTheModelsCommandAsksTheEndpointsAgain(t *testing.T) {
 func TestAModelsCommandThatCannotReprobeListsWhatItHolds(t *testing.T) {
 	out, server := startReplServer(t, "/models\n/quit\n", &fakeServer{t: t, refuseRefresh: true})
 
-	if !strings.Contains(out, "/models") {
+	if !strings.Contains(out, "the endpoints could not be asked what they serve") {
 		t.Errorf("the transcript does not say the refresh failed:\n%s", out)
 	}
 	if !strings.Contains(out, "1. gemma4") {
