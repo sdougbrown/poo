@@ -140,6 +140,7 @@ PYTHONPATH=evals/harbor harbor run \
 | `reasoning_effort` | none | Passed to `--reasoning-effort` |
 | `max_turns` | none | Turn cap (`--max-turns`); unset leaves the run uncapped, matching `poo` |
 | `max_output` | none | Output token cap (`--max-output`) |
+| `truncation_retries` | none | Turns to retry after an output-limit cut; unset settles at once (`--truncation-retries`) |
 | `profile` | `code` | `poo` profile (`--profile`) |
 | `context_strategy` | none | Compaction strategy (`--context-strategy`) |
 | `context_keep_recent` | none | Compaction verbatim tail in tokens (`--context-keep-recent`) |

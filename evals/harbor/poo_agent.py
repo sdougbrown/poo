@@ -222,6 +222,7 @@ class PooAgent(BaseAgent):
         reasoning_effort: str | None = None,
         max_turns: int | None = None,
         max_output: int | None = None,
+        truncation_retries: int | None = None,
         profile: str = "code",
         context_strategy: str | None = None,
         context_keep_recent: int | None = None,
@@ -248,6 +249,9 @@ class PooAgent(BaseAgent):
         self.reasoning_effort = reasoning_effort
         self.max_turns = int(max_turns) if max_turns is not None else None
         self.max_output = int(max_output) if max_output is not None else None
+        self.truncation_retries = (
+            int(truncation_retries) if truncation_retries is not None else None
+        )
         self.profile = profile
         self.context_strategy = context_strategy
         self.context_keep_recent = (
@@ -344,6 +348,8 @@ class PooAgent(BaseAgent):
             args.extend(["--max-turns", str(self.max_turns)])
         if self.max_output is not None and self.max_output > 0:
             args.extend(["--max-output", str(self.max_output)])
+        if self.truncation_retries is not None and self.truncation_retries > 0:
+            args.extend(["--truncation-retries", str(self.truncation_retries)])
         if self.context_strategy:
             args.extend(["--context-strategy", self.context_strategy])
         if self.context_keep_recent is not None and self.context_keep_recent > 0:
