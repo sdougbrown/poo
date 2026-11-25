@@ -486,6 +486,7 @@ func TestEveryOtherCommandBindsItsFlags(t *testing.T) {
 			"--user-prompt-file", "user.md",
 			"--profile", "search",
 			"--project-prompt",
+			"--pretty",
 		})
 		if err != nil {
 			t.Fatalf("parsing the prompt's flags: %v", err)
@@ -499,6 +500,7 @@ func TestEveryOtherCommandBindsItsFlags(t *testing.T) {
 				profile:        "search",
 			},
 			projectPrompt: true,
+			pretty:        true,
 		}
 		if !reflect.DeepEqual(o, want) {
 			t.Errorf("the bound options are\n%+v\nwant\n%+v", o, want)

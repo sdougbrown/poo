@@ -17,6 +17,7 @@ package skill
 
 import (
 	_ "embed"
+	"fmt"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -87,6 +88,32 @@ func (s *Set) Template() *prompt.Template {
 // Section renders the catalog's section of the system prompt.
 func (s *Set) Section() string {
 	return s.Template().Render(prompt.Env{})
+}
+
+// Summary renders the catalog's section for human reading, replacing the
+// XML skill entries with a compact list of names and descriptions.
+func (s *Set) Summary() string {
+	skills := s.Skills()
+	if len(skills) == 0 {
+		return ""
+	}
+	intro, _, _ := strings.Cut(skillsText, "<available_skills>")
+	intro = strings.TrimSpace(intro)
+	var b strings.Builder
+	if intro != "" {
+		b.WriteString(intro)
+		b.WriteString("\n\n")
+	}
+	fmt.Fprintf(&b, "Available skills (%d):", len(skills))
+	for _, sk := range skills {
+		b.WriteByte('\n')
+		if sk.Description != "" {
+			fmt.Fprintf(&b, "- %s: %s", sk.Name, sk.Description)
+		} else {
+			fmt.Fprintf(&b, "- %s", sk.Name)
+		}
+	}
+	return b.String()
 }
 
 //go:embed skills.md

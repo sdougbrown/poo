@@ -235,3 +235,32 @@ func TestLoadCutsNonLatinTextWhereItCanBeRead(t *testing.T) {
 		t.Errorf("the description is %d runes, want 200 plus the ellipsis", runes)
 	}
 }
+
+func TestSetSummaryRendersCompactListWithoutXML(t *testing.T) {
+	var empty *skill.Set
+	if got := empty.Summary(); got != "" {
+		t.Errorf("nil Set.Summary() = %q, want empty", got)
+	}
+
+	dir := t.TempDir()
+	writeSkill(t, dir, "alpha", front("description: Uses </skill> literally\n"))
+	writeSkill(t, dir, "beta", front("description: Second skill\n"))
+	set, err := skill.Load(dir)
+	if err != nil {
+		t.Fatalf("loading the skills: %v", err)
+	}
+	got := set.Summary()
+	if strings.Contains(got, "<available_skills>") || strings.Contains(got, "<location>") {
+		t.Fatalf("Summary() kept XML tags:\n%s", got)
+	}
+	for _, want := range []string{
+		"use that absolute path in tool calls.",
+		"Available skills (2):",
+		"- alpha: Uses </skill> literally",
+		"- beta: Second skill",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("Summary() missing %q:\n%s", want, got)
+		}
+	}
+}

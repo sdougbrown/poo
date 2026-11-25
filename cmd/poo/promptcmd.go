@@ -9,6 +9,8 @@ import (
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/config"
+	"github.com/sdougbrown/poo/prompt"
+	"github.com/sdougbrown/poo/skill"
 )
 
 // promptOptions are the flags of `poo prompt`.
@@ -17,18 +19,23 @@ type promptOptions struct {
 	// projectPrompt includes the working directory's project
 	// instructions in the prompt.
 	projectPrompt bool
+	// pretty formats the prompt with section headers and summarized
+	// skills for human reading instead of the raw wire prompt.
+	pretty bool
 }
 
 // bind reads the prompt command's flags out of a parsed invocation.
 func (o *promptOptions) bind(inv clicontract.Invocation) {
 	o.sharedFlags.bind(inv)
 	o.projectPrompt = inv.Bools["project-prompt"]
+	o.pretty = inv.Bools["pretty"]
 }
 
 // handlePrompt executes `poo prompt`.
 //
-// The command prints the prompt a session would send, with the sections
-// marked, so an operator can see what the model is told.
+// By default it prints the exact rendered system prompt a session would send
+// to the model. With --pretty it formats each section under a header and
+// summarizes the skill catalog for reading.
 func handlePrompt(inv clicontract.Invocation, stdout, stderr io.Writer) exit {
 	var o promptOptions
 	o.bind(inv)
@@ -83,9 +90,23 @@ func handlePrompt(inv clicontract.Invocation, stdout, stderr io.Writer) exit {
 
 	// The build rendered the prompt; the sections the command adds after
 	// it are its own fixed templates, so the render cannot fail here.
-	sections := poo.PromptBuilder(runtime.Options).Sections()
-	for _, section := range sections {
-		fmt.Fprintf(stdout, "--- %s ---\n%s\n", section.Name, section.Text)
+	builder := poo.PromptBuilder(runtime.Options)
+	if !o.pretty {
+		_, _ = io.WriteString(stdout, builder.Render())
+		return exit{}
 	}
+	writePrettyPrompt(stdout, builder.Sections(), runtime.Skills)
 	return exit{}
+}
+
+// writePrettyPrompt writes the sections under readable headers, replacing the
+// default skills catalog XML with the skill set's compact summary.
+func writePrettyPrompt(w io.Writer, sections []prompt.SectionText, skills *skill.Set) {
+	for _, section := range sections {
+		text := section.Text
+		if section.Name == skill.SectionName && skills != nil && skills.Len() > 0 && text == skills.Section() {
+			text = skills.Summary()
+		}
+		fmt.Fprintf(w, "--- %s ---\n%s\n", section.Name, text)
+	}
 }
