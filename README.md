@@ -346,7 +346,7 @@ context:
     # ratio: 0.85  # optional early trigger; the fit rule decides when unset
     keep_recent_tokens: 12000
     max_tokens: 32768
-    pointer_max_tokens: 16384
+    # pointer_max_tokens: 16384  # optional; defaults to the run output limit's own scale for the window
     snippet_budget: 32768
 ```
 
@@ -416,7 +416,7 @@ context:
     # ratio: 0.85  # optional early trigger; the fit rule decides when unset
     keep_recent_tokens: 12000
     max_tokens: 32768
-    pointer_max_tokens: 16384
+    # pointer_max_tokens: 16384  # optional; defaults to the run output limit's own scale for the window
 ```
 
 The strategy's own requests run inside the run that is compaction, so a model

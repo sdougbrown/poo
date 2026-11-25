@@ -50,13 +50,6 @@ const (
 	// DefaultMaxTokens is the output limit of the compose request.
 	DefaultMaxTokens = 32768
 
-	// DefaultPointerMaxTokens is the output limit of the fork's pointer
-	// pass. On a thinking model the reasoning tokens count against the
-	// limit, and a pass the limit cuts short is wasted: the queries it
-	// would have named are what the compose ask reads. The reform pass
-	// reuses the limit.
-	DefaultPointerMaxTokens = 16384
-
 	// DefaultSnippetBudget is the most text the queries may collect.
 	DefaultSnippetBudget = 32768
 
@@ -77,7 +70,8 @@ type Options struct {
 	// to DefaultMaxTokens.
 	MaxTokens int
 	// PointerMaxTokens is the output limit of the fork's pointer pass.
-	// It defaults to DefaultPointerMaxTokens.
+	// It defaults to the window-scaled default: the run output limit's
+	// own scale, 8192 under a 64k window, 16384 to 128k, 32768 above.
 	PointerMaxTokens int
 	// SnippetBudget is the most text the queries may collect, in bytes.
 	// It defaults to DefaultSnippetBudget.
@@ -151,9 +145,6 @@ func New(opts Options) *Compactor {
 	if c.maxTokens <= 0 {
 		c.maxTokens = DefaultMaxTokens
 	}
-	if c.pointerMaxTokens <= 0 {
-		c.pointerMaxTokens = DefaultPointerMaxTokens
-	}
 	if c.snippetBudget <= 0 {
 		c.snippetBudget = DefaultSnippetBudget
 	}
@@ -164,7 +155,7 @@ func New(opts Options) *Compactor {
 	if c.files == nil {
 		c.files = cut.DefaultFileOp
 	}
-	c.trigger = cut.Trigger{Ratio: c.ratio, KeepRecent: c.keepRecent, MaxTokens: c.maxTokens, ForkNeed: c.pointerMaxTokens, Files: c.files, Marker: "reconstructed", Retention: true}
+	c.trigger = cut.Trigger{Ratio: c.ratio, KeepRecent: c.keepRecent, MaxTokens: c.maxTokens, Files: c.files, Marker: "reconstructed", Retention: true}
 	if c.fallback == nil {
 		c.fallback = mine.New(mine.Options{
 			Ratio:            c.ratio,
@@ -187,8 +178,29 @@ func (c *Compactor) KeepRecentTokens() int { return c.keepRecent }
 // MaxTokens returns the output limit of the compose request.
 func (c *Compactor) MaxTokens() int { return c.maxTokens }
 
-// PointerMaxTokens returns the output limit of the pointer pass.
+// PointerMaxTokens returns the configured output limit of the pointer
+// pass. Zero means the window-scaled default.
 func (c *Compactor) PointerMaxTokens() int { return c.pointerMaxTokens }
+
+// forkNeed returns the output limit the fork's pointer pass asks for:
+// the configured one, or the window-scaled default when none is set.
+// The scale is the run output limit's own, so a small window asks its
+// fork for less. The reform pass reuses the limit.
+func (c *Compactor) forkNeed(budget poo.ContextBudget) int {
+	if c.pointerMaxTokens > 0 {
+		return c.pointerMaxTokens
+	}
+	return poo.DefaultMaxOutputFor(budget.ContextLimit)
+}
+
+// triggerFor returns the reconstruction trigger the budget acts under:
+// the trigger the strategy was built with, with the fork's need scaled
+// to the budget's window.
+func (c *Compactor) triggerFor(budget poo.ContextBudget) cut.Trigger {
+	t := c.trigger
+	t.ForkNeed = c.forkNeed(budget)
+	return t
+}
 
 // SnippetBudget returns the most text the queries may collect.
 func (c *Compactor) SnippetBudget() int { return c.snippetBudget }
@@ -202,7 +214,10 @@ func (c *Compactor) EscalateAfter() int { return c.escalateAfter }
 // The strategy acts when the next answer no longer fits and the view
 // holds a turn older than the newest one. The need is the larger of the
 // run's output limit and the pointer pass's, because the fork re-sends
-// the whole window and its limit is sent as it is.
+// the whole window. When the strategy acts the room is under the need,
+// so the session's clamp can leave the pass's limit below what it
+// asked for: the queries a short reply would have named are lost, and
+// the compose ask reads the pointers the reply did name.
 //
 // A configured ratio is an explicit override: when it is set, the
 // strategy also acts at that share of the prompt limit.
@@ -212,7 +227,7 @@ func (c *Compactor) EscalateAfter() int { return c.escalateAfter }
 // trigger needs a request behind it. The trigger is the cut package's,
 // shared with the other block strategies.
 func (c *Compactor) ShouldCompact(view poo.View, budget poo.ContextBudget) bool {
-	return c.trigger.ShouldCompact(view, budget)
+	return c.triggerFor(budget).ShouldCompact(view, budget)
 }
 
 // Compact reconstructs the turns the view can spare from what the
@@ -244,14 +259,14 @@ func (c *Compactor) Compact(ctx context.Context, in poo.CompactionEnv) (poo.Comp
 	notes := ""
 	fork := &poo.ForkSide{}
 	if in.Fork != nil {
-		reply, err := in.Fork(ctx, pointerRequest(), c.pointerMaxTokens, poo.ForkOptions{JSON: true})
+		reply, err := in.Fork(ctx, pointerRequest(), c.forkNeed(in.Budget), poo.ForkOptions{JSON: true})
 		// The reply is asked for as JSON; an endpoint that cannot be
 		// asked gets one more fork without the ask, and the reply is
 		// parsed leniently either way.
 		if err != nil {
 			// The endpoint refused the response-format ask: one more fork
 			// without it, and the reply is parsed leniently either way.
-			reply, err = in.Fork(ctx, pointerRequest(), c.pointerMaxTokens, poo.ForkOptions{})
+			reply, err = in.Fork(ctx, pointerRequest(), c.forkNeed(in.Budget), poo.ForkOptions{})
 		}
 		if err != nil {
 			// Both passes failed: the record says so, the way the mine
@@ -406,7 +421,7 @@ func (c *Compactor) reform(ctx context.Context, in poo.CompactionEnv, malformed 
 	if in.Ask == nil {
 		return nil, strings.TrimSpace(malformed)
 	}
-	reply, err := in.Ask(ctx, reformRequest(malformed), c.pointerMaxTokens)
+	reply, err := in.Ask(ctx, reformRequest(malformed), c.forkNeed(in.Budget))
 	if err != nil || len(reply.Message.ToolCalls()) > 0 {
 		return nil, strings.TrimSpace(malformed)
 	}
