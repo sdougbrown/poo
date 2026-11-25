@@ -216,6 +216,48 @@ func TestAContextLengthErrorSettlesContextExhausted(t *testing.T) {
 	}
 }
 
+func TestATruncationRetryGivesTheModelAnotherTurn(t *testing.T) {
+	// A turn the output limit cut short carries nothing the run can use. With
+	// retries the run asks the model to say less and opens another turn, so a
+	// model that overruns once can still finish the work.
+	tr := scripted([]fakeResponse{
+		{text: "a truncated ans", finish: poo.FinishLength},
+		{text: "done"},
+	})
+	sink := &recordingSink{}
+	tool := &echoTool{result: "echoed"}
+
+	opts := testOptions(t, tr, tool, sink)
+	opts.TruncationRetries = 1
+	s := newTestSession(t, opts)
+	res := runSession(t, s, "do the thing")
+	if res.Reason != poo.ReasonEndTurn {
+		t.Errorf("the run settled %q, want end_turn once the retry answered", res.Reason)
+	}
+	if n := len(tr.Requests()); n != 2 {
+		t.Errorf("the run made %d requests, want 2: the truncated turn and its retry", n)
+	}
+}
+
+func TestATruncationRetryStopsAtItsBound(t *testing.T) {
+	// A model that keeps overrunning its own limit settles output_truncated
+	// once the retries are spent, rather than looping forever.
+	tr := scripted([]fakeResponse{
+		{text: "a truncated ans", finish: poo.FinishLength},
+		{text: "another truncat", finish: poo.FinishLength},
+	})
+	sink := &recordingSink{}
+	tool := &echoTool{result: "echoed"}
+
+	opts := testOptions(t, tr, tool, sink)
+	opts.TruncationRetries = 1
+	s := newTestSession(t, opts)
+	res := runSession(t, s, "do the thing")
+	if res.Reason != poo.ReasonOutputTruncated {
+		t.Errorf("the run settled %q, want output_truncated after the retries", res.Reason)
+	}
+}
+
 func TestAFinishReasonOfLengthReachesBeforeSettle(t *testing.T) {
 	// A truncated response is a natural stop, and the
 	// `output_truncated` reason is what it settles as.
