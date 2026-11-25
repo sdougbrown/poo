@@ -2449,7 +2449,7 @@ func (t *JobTool) Spec() ToolSpec {
 	default:
 		return ToolSpec{
 			Name:        JobsToolName,
-			Description: "List the background jobs that are running, and the results that are held.",
+			Description: "List the background jobs that are running, and the results that are held. Do not poll it to wait: a job's result arrives as a message.",
 			Schema: json.RawMessage(`{
   "type": "object",
   "properties": {}
