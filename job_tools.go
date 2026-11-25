@@ -70,7 +70,7 @@ func (s *Session) registerJobTools() error {
 		default:
 			return fmt.Errorf("poo: the tool %q has an unknown background mode %q", name, spec.Background)
 		}
-		if spec.Background != BackgroundNever && schemaDefinesBackground(spec.Schema) {
+		if spec.Background != BackgroundNever && SchemaDefinesBackground(spec.Schema) {
 			return fmt.Errorf("poo: the tool %q defines the reserved %q argument", name, BackgroundArgName)
 		}
 		if spec.Background != BackgroundNever {

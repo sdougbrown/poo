@@ -63,7 +63,7 @@ func (t *entryTool) Spec() poo.ToolSpec {
 	// background and refuses a tool whose schema already defines it. A
 	// manifest that declares the name keeps its own argument, and the entry
 	// runs in the turn rather than failing the session.
-	if schemaDefinesBackground(schema) {
+	if poo.SchemaDefinesBackground(schema) {
 		spec.Background = poo.BackgroundNever
 	}
 	return spec
@@ -138,29 +138,3 @@ func entrySchema(schema map[string]any) json.RawMessage {
 
 // emptyEntrySchema is the schema of an entry that declares no arguments.
 const emptyEntrySchema = `{"type":"object","properties":{},"additionalProperties":false}`
-
-// schemaDefinesBackground reports that an entry's schema already defines the
-// argument poo reserves for asking that a call run as a job.
-//
-// poo does not know whether such a property is the tool's argument or the
-// core's, so it refuses to register one that is offered the reserved argument;
-// the entry keeps its own and runs in the turn.
-func schemaDefinesBackground(schema json.RawMessage) bool {
-	if len(schema) == 0 {
-		return false
-	}
-	var parsed map[string]json.RawMessage
-	if err := json.Unmarshal(schema, &parsed); err != nil {
-		return false
-	}
-	props, ok := parsed["properties"]
-	if !ok {
-		return false
-	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(props, &fields); err != nil {
-		return false
-	}
-	_, ok = fields[poo.BackgroundArgName]
-	return ok
-}

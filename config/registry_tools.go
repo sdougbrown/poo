@@ -21,18 +21,25 @@ type generatedToolset interface {
 	Tools() []poo.Tool
 }
 
-// reservedToolNames are the names a catalog entry may not take as a native
-// tool: the tools every poo session may already offer, the core's own, and the
-// two tools over the catalog itself.
+// reservedToolNames returns the names a catalog entry may not take as a
+// native tool: the tools the binary links, the core's own, and the two
+// tools over the catalog itself.
 //
 // A registry that names one of them keeps the call tool, so an existing
-// manifest never changes the meaning of a tool the model was already offered.
-// The list is the tools poo's own binaries link; the call tool's refusal names
-// the same built-ins, and cmd/poo pins that list to the tools it builds.
-var reservedToolNames = []string{
-	ToolBash, "read", "grep", "history", "edit", "fetch", "codemode",
-	profile.JobsToolName, profile.CancelJobToolName, poo.SubscribeFeedToolName, poo.FinishToolName,
-	cli.CallToolName, cli.FindToolName,
+// manifest never changes the meaning of a tool the model was already
+// offered. The names come from the source of truth rather than a second
+// hand-maintained list: the binary's own linked factories, and the core
+// name constants poo adds by itself, so a tool the binary gains is
+// reserved with it.
+func reservedToolNames(opts BuildOptions) []string {
+	names := make([]string, 0, len(opts.Tools)+6)
+	for name := range opts.Tools {
+		names = append(names, name)
+	}
+	return append(names,
+		profile.JobsToolName, profile.CancelJobToolName,
+		poo.SubscribeFeedToolName, poo.FinishToolName,
+		cli.CallToolName, cli.FindToolName)
 }
 
 // elevatedRegistryTools returns the catalog's entries as tools of their own,
@@ -80,9 +87,10 @@ func elevatedRegistryTools(opts BuildOptions, catalog *cli.Catalog, existing []p
 		return nil
 	}
 	elevated := make([]poo.ToolInfo, 0, len(tools))
+	reserved := reservedToolNames(opts)
 	for _, tool := range tools {
 		spec := tool.Spec()
-		if spec.Name == "" || slices.Contains(reservedToolNames, spec.Name) || offersToolName(existing, spec.Name) {
+		if spec.Name == "" || slices.Contains(reserved, spec.Name) || offersToolName(existing, spec.Name) {
 			return nil
 		}
 		elevated = append(elevated, poo.ToolInfo{Name: spec.Name, Class: spec.Class, Background: spec.Background})
