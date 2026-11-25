@@ -1492,6 +1492,21 @@ func (s *Settings) CatalogSettings() catalog.Settings {
 	return settings
 }
 
+// ReloadModels holds the models the catalog serves now.
+//
+// It is the one place the runtime's model map is filled, so a caller that rebuilds the
+// catalog after a reprobe — the server's refresh — holds the same answer the build does.
+// A mapping the build puts between the catalog and the map belongs here, where both
+// readers of it meet.
+func (r *Runtime) ReloadModels() {
+	list := r.Catalog.List()
+	models := make(map[string]poo.ModelInfo, len(list))
+	for _, model := range list {
+		models[model.Name] = model
+	}
+	r.Models = models
+}
+
 // resolveModels builds the catalog and resolves the roles.
 //
 // The catalog is built from the settings and the models file, as the settings
@@ -1509,10 +1524,7 @@ func (r *Runtime) resolveModels(opts BuildOptions) error {
 		}
 	}
 	r.Catalog = cat
-	r.Models = map[string]poo.ModelInfo{}
-	for _, model := range cat.List() {
-		r.Models[model.Name] = model
-	}
+	r.ReloadModels()
 	return nil
 }
 

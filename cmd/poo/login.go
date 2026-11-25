@@ -187,6 +187,9 @@ func (o *loginOptions) probeSignedIn(ctx context.Context, flow auth.Flow, settin
 	}
 	options := settings.CatalogOptions()
 	options.HTTPClient = probeClient
+	// The probes name the client, the way every other catalog build in the binary
+	// does: a provider that gates or reads its traffic by user agent sees poo.
+	options.UserAgent = userAgent()
 	// The cached layer is not applied here: this catalog probes below, and a refresh
 	// reads the cache itself, so applying it twice reads the file twice and warns
 	// twice when it cannot be read. catalog.Build strips it for the same reason.
@@ -194,7 +197,7 @@ func (o *loginOptions) probeSignedIn(ctx context.Context, flow auth.Flow, settin
 	cat := catalog.New(options)
 	served := make([]string, 0, 4)
 	for name, endpoint := range cat.Endpoints() {
-		if endpoint.SkipProbe || !servesProvider(endpoint, flow.Provider) {
+		if endpoint.SkipProbe || !config.ReadsProviderKey(endpoint.Credential, flow.Provider) {
 			continue
 		}
 		_ = cat.ReprobeEndpoint(ctx, name)
@@ -223,19 +226,6 @@ func (o *loginOptions) reloadSettings(settingsPath string) (*config.Settings, er
 		return config.LoadDefaults()
 	}
 	return config.Load(settingsPath)
-}
-
-// servesProvider reports whether an endpoint reads the key the given provider stores.
-//
-// The environment variable's name is the join: a provider stores its key under a name, and
-// the endpoint that reads the same variable is the one the key serves. The endpoint is the
-// one the catalog holds, so an endpoint the built-in record declares counts as much as one
-// the operator wrote: both are in the catalog, and only one of them is in Settings.Endpoints.
-func servesProvider(endpoint catalog.Endpoint, provider auth.Provider) bool {
-	if provider.Env == "" || endpoint.Credential.Source != catalog.CredentialEnv {
-		return false
-	}
-	return endpoint.Credential.Env == provider.Env
 }
 
 // refuseBrowserFlags refuses the flags a browser sign-in takes when the chosen sign-in is not one.

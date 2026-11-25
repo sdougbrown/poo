@@ -270,15 +270,11 @@ func (f *Server) modelFor(name string) (poo.ModelInfo, bool) {
 func (f *Server) adoptCatalog(runtime *config.Runtime) error {
 	f.modelsMu.Lock()
 	defer f.modelsMu.Unlock()
-	models := map[string]poo.ModelInfo{}
-	for _, model := range runtime.Catalog.List() {
-		models[model.Name] = model
-	}
-	qualified, err := qualifiedModelNames(f.effective, models)
+	runtime.ReloadModels()
+	qualified, err := qualifiedModelNames(f.effective, runtime.Models)
 	if err != nil {
 		return err
 	}
-	runtime.Models = models
 	f.qualified = qualified
 	return nil
 }

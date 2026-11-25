@@ -160,3 +160,26 @@ func TestTheBuiltinOllamaCloudEndpointIsOfferedOnItsKey(t *testing.T) {
 		t.Errorf("the endpoint's model did not resolve on the variable: %v", err)
 	}
 }
+
+// TestTheProviderKeyJoinIsOneRule covers the join a sign-in and a key's resolution both
+// ask: which endpoints read the key a provider stores. It is one answer, so a sign-in
+// cannot report that a provider serves nothing while the key resolution finds the key.
+func TestTheProviderKeyJoinIsOneRule(t *testing.T) {
+	reads := catalog.Credential{Source: catalog.CredentialEnv, Env: "OLLAMA_API_KEY"}
+	if !config.ReadsProviderKey(reads, auth.OllamaCloud) {
+		t.Errorf("the endpoint reading %s does not read the key the Ollama Cloud sign-in stores", reads.Env)
+	}
+	for _, other := range []struct {
+		name       string
+		credential catalog.Credential
+		provider   auth.Provider
+	}{
+		{"another provider's variable", reads, auth.Opencode},
+		{"a static key", catalog.Credential{Source: catalog.CredentialStatic}, auth.OllamaCloud},
+		{"an endpoint that reads no key", catalog.Credential{Source: catalog.CredentialNone}, auth.OllamaCloud},
+	} {
+		if config.ReadsProviderKey(other.credential, other.provider) {
+			t.Errorf("the join reports %s as the %s provider's", other.name, other.provider.ID)
+		}
+	}
+}

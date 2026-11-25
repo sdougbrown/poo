@@ -426,12 +426,17 @@ func TestAKeyLoginProbesTheRecordedEndpoint(t *testing.T) {
 	if code := run([]string{"login", "ollama-cloud", "--settings", settings}); code != 0 {
 		t.Fatalf("poo login exited with %d", code)
 	}
-	asked, key := provider.requests()
+	asked, key, agent := provider.requests()
 	if asked == 0 {
 		t.Fatalf("the sign-in never asked the provider what it serves")
 	}
 	if key != "the-key" {
 		t.Errorf("the probe carried the key %q, want the one the sign-in stored", key)
+	}
+	// The probes name the client, like every other catalog build in the binary: a
+	// provider that reads its traffic by user agent sees these requests as poo.
+	if !strings.HasPrefix(agent, "poo/") {
+		t.Errorf("the probe carried the user agent %q, want poo's own", agent)
 	}
 
 	runtime := loginRuntime(t, settings)
@@ -452,15 +457,17 @@ type providerTransport struct {
 	asked int
 	// key is the credential the last request carried.
 	key string
+	// agent is the user agent the last request carried.
+	agent string
 	// list are the ids the model list answers with.
 	list []string
 }
 
-// requests returns the count and the key the probe carried.
-func (p *providerTransport) requests() (int, string) {
+// requests returns the count, the key and the user agent the probe carried.
+func (p *providerTransport) requests() (int, string, string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.asked, p.key
+	return p.asked, p.key, p.agent
 }
 
 func (p *providerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -469,6 +476,7 @@ func (p *providerTransport) RoundTrip(req *http.Request) (*http.Response, error)
 	if key := strings.TrimPrefix(req.Header.Get("Authorization"), "Bearer "); key != "" {
 		p.key = key
 	}
+	p.agent = req.Header.Get("User-Agent")
 	list := append([]string(nil), p.list...)
 	p.mu.Unlock()
 	body := `{"object":"list","data":[`
