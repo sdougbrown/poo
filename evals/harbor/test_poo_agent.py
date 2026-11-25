@@ -111,6 +111,27 @@ class ParseSessionLogTests(unittest.TestCase):
             self.assertIsNone(summary.cache_read_tokens)
             self.assertTrue(summary.torn)
 
+    def test_tolerates_a_torn_line_before_the_end(self) -> None:
+        # A killed write can be followed by more records, so a torn line is not
+        # always the last one. The parse must skip it and keep counting rather
+        # than abort, which is what killed a whole job once.
+        with tempfile.TemporaryDirectory() as tmp:
+            log_path = Path(tmp) / "session.jsonl"
+            log_path.write_text(
+                json.dumps({"record": "usage", "input_tokens": 500, "output_tokens": 50})
+                + "\n"
+                + '{"record": "usage", "input_tok'
+                + "\n"
+                + json.dumps({"record": "usage", "input_tokens": 300, "output_tokens": 30})
+                + "\n",
+                encoding="utf-8",
+            )
+            summary = parse_session_log(log_path)
+            self.assertEqual(summary.input_tokens, 800)
+            self.assertEqual(summary.output_tokens, 80)
+            self.assertTrue(summary.torn)
+            self.assertEqual(summary.skipped_lines, 1)
+
 
 class ProviderResolutionTests(unittest.TestCase):
     def test_known_provider_prefix(self) -> None:

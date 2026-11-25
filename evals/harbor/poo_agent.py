@@ -87,6 +87,7 @@ class SessionSummary:
     settle_reason: str = "unknown"
     settle_source: str = ""
     torn: bool = False
+    skipped_lines: int = 0
     records: int = 0
     extra: dict[str, Any] = field(default_factory=dict)
 
@@ -95,8 +96,11 @@ def parse_session_log(path: Path) -> SessionSummary:
     """Parse a poo JSONL session log into token and execution metrics.
 
     Mirrors the loose decoding rules in eval/log.go and eval/metrics.go:
-    unknown fields are ignored, and an undecodable final line (e.g. from a
-    timeout kill mid-write) is marked torn rather than failing the parse.
+    unknown fields are ignored, and an undecodable line is marked torn rather
+    than failing the parse. A torn line can sit anywhere in the file, not only
+    at the end: a write that a kill interrupted can be followed by further
+    records, so the parse skips the line, keeps reading, and leaves the counts
+    as a lower bound.
     """
     summary = SessionSummary()
     if not path.exists():
@@ -115,10 +119,11 @@ def parse_session_log(path: Path) -> SessionSummary:
         try:
             rec = json.loads(line)
         except json.JSONDecodeError:
+            summary.torn = True
+            summary.skipped_lines += 1
             if is_last:
-                summary.torn = True
                 break
-            raise
+            continue
 
         if not isinstance(rec, dict):
             continue
