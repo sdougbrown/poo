@@ -478,6 +478,19 @@ func faultReportTexts(sink *recordingSink) []string {
 	return out
 }
 
+// waitForNoFaultReservation waits until the instance's fault report is queued
+// and its reservation retired. The report path writes the record before it
+// retires the reservation. A record in the sink therefore does not say the
+// attempt's report is done. A second report for that attempt would fold into
+// the one still reserved.
+func waitForNoFaultReservation(t *testing.T, s *poo.Session, instance string) {
+	t.Helper()
+	waitFor(t, "the fault report's reservation to be retired", func() bool {
+		_, ok := poo.PendingFaultReportAttempt(s, instance)
+		return !ok
+	})
+}
+
 // TestAStaleSuspensionReportIsDropped covers the race between a suspension
 // and a re-subscribe: an instance that was started again is running, so the
 // old supervisor's report is stale and is not queued. A fault on the running
@@ -507,6 +520,10 @@ func TestAStaleSuspensionReportIsDropped(t *testing.T) {
 		t.Fatalf("subscribing to the feed: started=%v err=%v", started, err)
 	}
 	waitForSink(t, sink, "the first fault's report", func() bool { return len(faultReportTexts(sink)) >= 1 })
+	// The assertion below reads the reservation, and the report path retires
+	// it after the record lands. Wait for the retire: otherwise the first
+	// attempt's leftover reads as one the stale report took.
+	waitForNoFaultReservation(t, s, origin)
 
 	// The instance is started again after its suspension, and the second
 	// attempt runs.
