@@ -255,10 +255,12 @@ func (s *Session) runAfterTurn(run *runState, turn int, interrupted bool) (appen
 	s.startActivity(run)
 	defer s.endActivity(run)
 	ctx := s.activityContext(&run.callOwner)
-	for _, h := range s.opts.AfterTurn {
+	for i, h := range s.opts.AfterTurn {
+		s.writeTurnHook(run, turn, "after_turn", "started", i, interrupted)
 		out, err := s.callHook(ctx, h, func(hctx context.Context) (any, error) {
 			return h.AfterTurn(s.hookContext(hctx, turn, interrupted))
 		})
+		s.writeTurnHook(run, turn, "after_turn", "ended", i, interrupted)
 		if out.interrupted {
 			// The hook's decision is discarded, and that is not a
 			// hook error. A decision that arrives late is logged.
@@ -316,10 +318,12 @@ func (s *Session) runBeforeSettle(run *runState, turn int, natural Reason) (Sett
 	defer s.endActivity(run)
 	ctx := s.activityContext(&run.callOwner)
 	var continues []hookAppend
-	for _, h := range s.opts.BeforeSettle {
+	for i, h := range s.opts.BeforeSettle {
+		s.writeTurnHook(run, turn, "before_settle", "started", i, false)
 		out, err := s.callHook(ctx, h, func(hctx context.Context) (any, error) {
 			return h.BeforeSettle(s.hookContext(hctx, turn, false), natural)
 		})
+		s.writeTurnHook(run, turn, "before_settle", "ended", i, false)
 		if out.interrupted {
 			// The hook's decision is discarded, and that is not a
 			// hook error. A decision that arrives late is logged.
@@ -366,6 +370,32 @@ func (s *Session) runBeforeSettle(run *runState, turn int, natural Reason) (Sett
 		s.appendMessages(msg)
 	}
 	return SettleDecision{Accepted: true}, true, nil
+}
+
+// writeTurnHook records a turn hook's start or its end.
+//
+// The started record is written before the hook runs and the ended one
+// after it returns, so a hook a crash cut short leaves a start with no
+// end: the log says which hook the run was inside. The write goes
+// through the session's claimed-write gate.
+func (s *Session) writeTurnHook(run *runState, turn int, phase, status string, index int, interrupted bool) {
+	gate, ok := s.beginWrite("turn.hook")
+	if !ok {
+		// The close has fenced the session: the record is abandoned.
+		return
+	}
+	rec := &TurnHookRecord{
+		RecordMeta:  NewRecordMeta("turn.hook"),
+		RunID:       run.id,
+		Turn:        turn,
+		Phase:       phase,
+		Status:      status,
+		HookIndex:   index,
+		Interrupted: interrupted,
+	}
+	if err := s.writeClaimed(context.Background(), rec, gate); err != nil {
+		s.noteStoreError(&run.callOwner, err)
+	}
 }
 
 // hookContinueLimitError reports that a run asked for more

@@ -21,11 +21,11 @@ func TestCodecRoundTripsTheDurableSessionRecords(t *testing.T) {
 			Tool:       "bash",
 		},
 		&poo.RunResumedRecord{
-			RecordMeta:       poo.NewRecordMeta("run.resumed"),
-			RunID:            "r1",
+			RecordMeta:        poo.NewRecordMeta("run.resumed"),
+			RunID:             "r1",
 			ResumptionAttempt: 1,
-			FromPhase:        poo.StateExecuting,
-			Turn:             2,
+			FromPhase:         poo.StateExecuting,
+			Turn:              2,
 		},
 		&poo.TurnHookRecord{
 			RecordMeta:  poo.NewRecordMeta("turn.hook"),

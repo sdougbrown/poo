@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"sort"
+	"time"
 )
 
 // AskReason is why a call is being asked about. The values are the
@@ -231,6 +232,15 @@ func (s *Session) persistPermission(owner *callOwner, p *PermissionRequest) {
 		p.askedWritten = true
 		ask := p.ask
 		rec := &PermissionAskedRecord{RecordMeta: NewRecordMeta("permission.asked"), RunID: owner.id, AskID: ask.AskID, Tool: ask.Tool, Summary: ask.Summary, Class: ask.Class, Reason: ask.Reason, RepeatCount: ask.RepeatCount}
+		// The ask's deadline and its fallback ride in the record, so a
+		// reader of the log knows when the ask expires and what it
+		// resolves to. The deadline is the request's own, which a policy
+		// reports through the chain's options; it is absent when the
+		// request has none.
+		if !p.options.Deadline.IsZero() {
+			rec.Deadline = p.options.Deadline.UTC().Format(time.RFC3339Nano)
+		}
+		rec.Fallback = p.options.Fallback
 		if err := s.writeClaimed(context.Background(), rec, gate); err != nil {
 			s.noteStoreError(owner, err)
 		}

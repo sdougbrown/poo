@@ -152,6 +152,49 @@ func TestARunBoundaryAndASideEffectingResultAreSynced(t *testing.T) {
 	}
 }
 
+// TestAToolStartAndAResumptionAreSynced covers the durability rule's
+// additions: a side-effecting call's start and a run's resumption are on
+// disk before the write returns. A crash must not lose the record that
+// says an effect may have happened, nor the phase a resumed run picked up
+// in.
+func TestAToolStartAndAResumptionAreSynced(t *testing.T) {
+	_, store := newTestStore(t)
+	ctx := context.Background()
+
+	if _, err := store.Create(ctx, createdRecord("s1")); err != nil {
+		t.Fatalf("creating the session: %v", err)
+	}
+	log := store.open.log
+	before := log.syncs
+
+	if err := store.Append(ctx, &poo.ToolStartedRecord{
+		RecordMeta: poo.NewRecordMeta("tool.started"),
+		RunID:      "r1",
+		Turn:       1,
+		Handle:     "r1",
+		CallID:     "c1",
+		Tool:       "bash",
+	}); err != nil {
+		t.Fatalf("appending: %v", err)
+	}
+	if log.syncs != before+1 {
+		t.Errorf("the call's start was synced %d times, want one", log.syncs-before)
+	}
+
+	if err := store.Append(ctx, &poo.RunResumedRecord{
+		RecordMeta:        poo.NewRecordMeta("run.resumed"),
+		RunID:             "r1",
+		ResumptionAttempt: 1,
+		FromPhase:         poo.StateExecuting,
+		Turn:              1,
+	}); err != nil {
+		t.Fatalf("appending: %v", err)
+	}
+	if log.syncs != before+2 {
+		t.Errorf("the resumption was synced %d times, want two", log.syncs-before)
+	}
+}
+
 // TestACodecMismatchIsATypedError covers a log written in a format the
 // codec does not know.
 func TestACodecMismatchIsATypedError(t *testing.T) {

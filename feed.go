@@ -1238,13 +1238,30 @@ func (r *feedFault) remedy() string {
 // cancelFeed stops one instance of a feed.
 //
 // The id is the instance's origin, which is how the job list names it. The
-// attempt's context ends, and a feed that waits for its next attempt waits
-// no more: the attempt's end record is already in the log. A suspended feed
-// has no supervisor left to record the stop, so the cancel records it here.
+// unsubscribe is recorded before the instance stops, so a durable session
+// does not take on the instance the session let go. The attempt's context
+// ends, and a feed that waits for its next attempt waits no more: the
+// attempt's end record is already in the log. A suspended feed has no
+// supervisor left to record the stop, so the cancel records it here.
 func (s *Session) cancelFeed(instanceID string) error {
 	s.mu.Lock()
 	f, ok := s.feeds[instanceID]
 	if !ok || f.status == feedStopped {
+		s.mu.Unlock()
+		return ErrUnknownJob
+	}
+	s.mu.Unlock()
+	if err := s.writeFeedUnsubscribed(f); err != nil {
+		// The log cannot say the instance let go, so the session does not
+		// stop it behind the record's back: a durable session would take
+		// it on again as if the unsubscribe never happened.
+		return err
+	}
+	s.mu.Lock()
+	f, ok = s.feeds[instanceID]
+	if !ok || f.status == feedStopped {
+		// The instance stopped while its unsubscribe was being written:
+		// there is nothing left to cancel.
 		s.mu.Unlock()
 		return ErrUnknownJob
 	}
@@ -1378,6 +1395,7 @@ func (s *Session) subscribeFeed(name string, scope map[string]string, prompt *Fe
 	}
 	f.started = true
 	instanceLabel := f.instance
+	promptQuestion := f.filterPrompt.Question
 	s.mu.Unlock()
 	if change != nil && spec.FilterQuestion != "" {
 		// The prompt is the model's screening policy, and it replaces the
@@ -1388,10 +1406,60 @@ func (s *Session) subscribeFeed(name string, scope map[string]string, prompt *Fe
 			slog.String("feed", instanceLabel),
 			slog.Bool("cleared", change.Question == ""))
 	}
+	if started || change != nil {
+		// The instance is on the log before its supervisor runs, and a
+		// prompt the call set rides with it: a durable session reads the
+		// record as the instance to take on again and the question it
+		// screens its records with. An instance the log cannot name does
+		// not start.
+		if err := s.writeFeedSubscribed(f, feedInstanceScope(values), promptQuestion); err != nil {
+			return "", false, err
+		}
+	}
 	if started {
 		go s.runFeed(f)
 	}
 	return id, started, nil
+}
+
+// writeFeedSubscribed records that an optional feed instance subscribed.
+//
+// The write goes through the session's claimed-write gate. A record the
+// store refuses is returned to the caller, because an instance the log
+// cannot name is one a durable session would not take on again.
+func (s *Session) writeFeedSubscribed(f *feedState, scope, prompt string) error {
+	gate, ok := s.beginWrite("feed.subscribed")
+	if !ok {
+		// The close has fenced the session: the record is abandoned.
+		return ErrSessionClosed
+	}
+	rec := &FeedSubscribedRecord{
+		RecordMeta: NewRecordMetaFrom("feed.subscribed", f.origin),
+		Feed:       f.name,
+		Instance:   f.instance,
+		Scope:      scope,
+		Prompt:     prompt,
+	}
+	return s.writeClaimed(context.Background(), rec, gate)
+}
+
+// writeFeedUnsubscribed records that a feed instance unsubscribed.
+//
+// The write goes through the session's claimed-write gate, and it is made
+// before the instance stops: a reader of the log sees the instances the
+// session let go, and a durable session does not take them on again.
+func (s *Session) writeFeedUnsubscribed(f *feedState) error {
+	gate, ok := s.beginWrite("feed.unsubscribed")
+	if !ok {
+		// The close has fenced the session: the record is abandoned.
+		return ErrSessionClosed
+	}
+	rec := &FeedUnsubscribedRecord{
+		RecordMeta: NewRecordMetaFrom("feed.unsubscribed", f.origin),
+		Feed:       f.name,
+		Instance:   f.instance,
+	}
+	return s.writeClaimed(context.Background(), rec, gate)
 }
 
 // filterOverrideNotice returns the sentence a subscribe call's result adds

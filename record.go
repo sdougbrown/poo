@@ -348,7 +348,8 @@ type PermissionAskedRecord struct {
 	// no deadline, and on a log written before the field existed.
 	Deadline string `json:"deadline,omitempty"`
 	// Fallback is the decision ("allow" or "deny") an expired ask
-	// resolves to. It is absent when the ask names none, and on a log
+	// resolves to. It is the request's effective fallback, so an ask
+	// that names none resolves to "deny". It is absent on a log
 	// written before the field existed.
 	Fallback string `json:"fallback,omitempty"`
 }

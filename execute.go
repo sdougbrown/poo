@@ -723,6 +723,12 @@ func (s *Session) executeOne(owner *callOwner, turn int, plan callPlan) {
 		callCtx = plan.callCtx
 	}
 	env := s.toolEnv(owner, turn, handle, plan)
+	// A side-effecting call is on the log before the tool can change
+	// anything, so a crash that cuts the call short leaves a durable
+	// record of the effect that may have happened.
+	if tool.Spec().Class == ClassSideEffecting {
+		s.writeToolStarted(owner, turn, handle, call.CallID, call.Name)
+	}
 	var result ToolResult
 	if owner.run != nil && s.backgroundableCall(call.Name, plan.parent) {
 		var moved bool
@@ -825,7 +831,7 @@ func (s *Session) executeOne(owner *callOwner, turn int, plan callPlan) {
 // starts. The call's own result is the "started" one, and the batch
 // carries on.
 func (s *Session) startJobCall(owner *callOwner, turn int, handle string, call ToolCall, plan callPlan) {
-	jobID, ok, winding, refusal := s.startJob(owner.run, turn, handle, call.Name, plan.prepared, plan.summary, call.Arguments, plan.stripped, plan.shorthand, nil)
+	jobID, ok, winding, refusal := s.startJob(owner.run, turn, handle, call.CallID, call.Name, plan.prepared, plan.summary, call.Arguments, plan.stripped, plan.shorthand, nil)
 	if winding {
 		// The run settled while the job was being accepted; nothing
 		// else starts, and the finalization owns the run.
@@ -1341,6 +1347,33 @@ func (s *Session) startCall(owner *callOwner, handle string) bool {
 	}
 	call.started = true
 	return true
+}
+
+// writeToolStarted records a side-effecting call's start before its tool
+// runs.
+//
+// The write goes through the session's claimed-write gate, and the store
+// syncs the record before the append returns, so a call a crash cut short
+// is on disk: the log says the effect may have happened, and a durable
+// session replays the call or reports it. A read-only call writes none,
+// because a crashed read has nothing to replay.
+func (s *Session) writeToolStarted(owner *callOwner, turn int, handle, callID, tool string) {
+	gate, ok := s.beginWrite("tool.started")
+	if !ok {
+		// The close has fenced the session: the record is abandoned.
+		return
+	}
+	rec := &ToolStartedRecord{
+		RecordMeta: NewRecordMetaFrom("tool.started", OriginModel),
+		RunID:      owner.id,
+		Turn:       turn,
+		Handle:     handle,
+		CallID:     callID,
+		Tool:       tool,
+	}
+	if err := s.writeClaimed(context.Background(), rec, gate); err != nil {
+		s.noteStoreError(owner, err)
+	}
 }
 
 // claimResult claims a call's result.

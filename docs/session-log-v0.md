@@ -94,10 +94,10 @@ A record that someone produced also carries an `origin`:
 | `job.ended` | Once per background job, when it finishes. |
 | `feed.started` | Once per attempt of a feed, when the attempt starts. |
 | `feed.ended` | Once per attempt of a feed, when the attempt ends. |
-| `tool.started` | Once per tool call, when the call starts. |
+| `tool.started` | Once per side-effecting tool call, when the call starts. |
 | `run.resumed` | Once per run that resumes after a crash. |
 | `turn.hook` | Once per turn hook, at its start and at its end. |
-| `feed.subscribed` | Once per feed instance, when it subscribes. |
+| `feed.subscribed` | Once per feed instance, when it subscribes, and again when a call changes the prompt it screens its records with. |
 | `feed.unsubscribed` | Once per feed instance, when it unsubscribes. |
 | `observer.dropped` | Once a second at most, per observer that fell behind. |
 | `turn.interrupted` | Once per turn an interrupt cut short. |
@@ -529,9 +529,9 @@ report is delivered joins it, and the report counts it.
 
 ## `tool.started`
 
-A tool call started. The record is written when the call starts, so a
-log shows what the model asked for even when the call never finished, and
-a durable session sees the interrupted call it may replay.
+A side-effecting tool call started. The record is written before the
+tool runs, so a durable session sees the effect a crash cut short and may
+replay it. A read-only call writes none: it changes nothing to replay.
 
 | Field | Type | Meaning |
 |---|---|---|
@@ -570,9 +570,12 @@ short: its start has no end, and its end may say it was interrupted.
 
 ## `feed.subscribed`
 
-A feed instance subscribed. The record is written when the instance
-subscribes, so a reader of the log sees the instances a session ran, and
-a durable session knows which to take on again.
+A feed instance subscribed. The record is written before the instance
+runs, so a reader of the log sees the instances a session ran, and a
+durable session knows which to take on again and the scope and prompt to
+take them on with. A call that sets a prompt on a running instance writes
+the record again, so the last one is the subscription the session would
+repeat.
 
 | Field | Type | Meaning |
 |---|---|---|
@@ -739,7 +742,7 @@ waiting, before any asker has answered.
 | `reason` | string | Why the call is being asked about: `"policy"` or `"doom_loop"`. **Absent** when there is none. |
 | `repeat_count` | object | The doom loop's counts, for a doom-loop ask: `exact` and `near`. **Absent** for a policy ask. |
 | `deadline` | string | The wall-clock time, RFC 3339 with nanosecond precision, when the ask expires. **Absent** when the ask has no deadline, and on a log written before the field existed. |
-| `fallback` | string | The decision an expired ask resolves to: `"allow"` or `"deny"`. **Absent** when the ask names none, and on a log written before the field existed. |
+| `fallback` | string | The decision an expired ask resolves to: `"allow"` or `"deny"`. It is the request's effective fallback, so an ask that names none resolves to `"deny"`. **Absent** on a log written before the field existed. |
 
 ## `permission.answered`
 

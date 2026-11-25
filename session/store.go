@@ -583,8 +583,9 @@ func (s *FileStore) decodeRecords(lines [][]byte) ([]poo.Record, error) {
 // Append writes one record to the open session.
 //
 // The record is written as one write of the line and its newline. A run's
-// boundaries and a side-effecting tool's result are synced before the
-// append returns: those are the records a crash must not lose.
+// boundaries, a run's resumption, and a side-effecting tool's start and
+// result are synced before the append returns: those are the records a
+// crash must not lose.
 func (s *FileStore) Append(ctx context.Context, rec poo.Record) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -620,12 +621,19 @@ func (s *FileStore) Flush(ctx context.Context) error {
 // needsSync reports whether a record must be on disk before the session
 // carries on.
 //
-// A run's boundaries and a side-effecting tool's result are the records
-// a crash must not lose: the run's outcome, and the effect that
+// A run's boundaries, a run's resumption, a side-effecting tool's start
+// and its result are the records a crash must not lose: the run's
+// outcome, where a resumed run picked up, and the effect that may have
 // happened.
 func (s *FileStore) needsSync(rec poo.Record) bool {
 	switch r := rec.(type) {
 	case *poo.RunStartedRecord, *poo.RunSettledRecord:
+		return true
+	case *poo.ToolStartedRecord, *poo.RunResumedRecord:
+		// A tool's start is written before the tool can act, so it is on
+		// disk before the effect it marks may happen. A resumption's
+		// record says where the run picked up, and a crash must not lose
+		// it either.
 		return true
 	case *poo.ToolResultRecord:
 		return s.open.tools[r.Tool] == poo.ClassSideEffecting

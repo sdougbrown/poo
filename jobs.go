@@ -241,6 +241,9 @@ type jobState struct {
 	id string
 	// handle is the handle of the tool call the job came from.
 	handle string
+	// callID is the provider's id of the call the job came from, so the
+	// job's tool.started record pairs with the call's own record.
+	callID string
 	// tool is the name of the tool the job runs.
 	tool string
 	// runID identifies the run that started the job.
@@ -468,7 +471,7 @@ func WithJobs(o JobOptions) Option {
 // admission hooks saw, and a live call rides in when the job moves a
 // running call into the session's jobs: the move keys on the tool's
 // CanBackgroundRunningCall, not on any one tool.
-func (s *Session) startJob(run *runState, turn int, handle, tool string, prepared Prepared, summary string, raw, stripped, shorthand json.RawMessage, live *liveCall) (jobID string, ok bool, winding bool, refusal string) {
+func (s *Session) startJob(run *runState, turn int, handle, callID, tool string, prepared Prepared, summary string, raw, stripped, shorthand json.RawMessage, live *liveCall) (jobID string, ok bool, winding bool, refusal string) {
 	// The slot is reserved under the lock, and the job is registered
 	// there too, so a job that is admitted is a job the session knows
 	// about. A run that is winding down admits nothing: no new effect
@@ -540,6 +543,7 @@ func (s *Session) startJob(run *runState, turn int, handle, tool string, prepare
 	job := &jobState{
 		id:        jobID,
 		handle:    handle,
+		callID:    callID,
 		tool:      tool,
 		runID:     run.id,
 		turn:      turn,
@@ -736,6 +740,15 @@ func (s *Session) runJob(job *jobState, prepared Prepared, live *liveCall) {
 	ctx, cancel := context.WithCancelCause(job.ctx)
 	defer cancel(nil)
 	defer s.armJobTimeout(cancel)()
+
+	// A side-effecting job's call is on the log before the tool runs, on
+	// the job's own goroutine: the record is durable before the job's
+	// effect can start, whatever the model's turn is doing. A job that
+	// never launches writes none, because the write is here and not at
+	// the admission.
+	if tool.Spec().Class == ClassSideEffecting {
+		s.writeToolStarted(job.owner, job.turn, job.handle, job.callID, job.tool)
+	}
 
 	env := s.jobToolEnv(job)
 	result, err := tool.Call(ctx, prepared, env)
