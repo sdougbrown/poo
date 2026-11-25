@@ -106,7 +106,7 @@ through procfs as described below.
 
 ## Registered tools
 
-A `call_tool` call is one of the operator's registered tools, and it runs
+A `call_cli` call is one of the operator's registered tools, and it runs
 where a bash command runs: through the session's executor, with the
 sandbox's binds and the protected paths it masks.
 

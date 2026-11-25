@@ -24,9 +24,9 @@ func TestCallCLIBindsStdin(t *testing.T) {
 	})
 	tool := cliregistry.NewCall(load(t, manifest))
 	for _, tc := range []struct{ name, args, want string }{
-		{"absent", `{"name":"stdin","args":{}}`, "0||"},
-		{"empty", `{"name":"stdin","args":{"message":""}}`, "1|--read-stdin|"},
-		{"text", `{"name":"stdin","args":{"message":"secret\n雪\n"}}`, "1|--read-stdin|secret\n雪\n"},
+		{"absent", `{"command":"stdin","args":{}}`, "0||"},
+		{"empty", `{"command":"stdin","args":{"message":""}}`, "1|--read-stdin|"},
+		{"text", `{"command":"stdin","args":{"message":"secret\n雪\n"}}`, "1|--read-stdin|secret\n雪\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			res := call(t, tool, tc.args, poo.ToolEnv{})
@@ -61,7 +61,7 @@ func TestCallCLIReportsIncompleteStdin(t *testing.T) {
 				},
 			})
 			tool := cliregistry.NewCall(load(t, manifest))
-			args, err := json.Marshal(map[string]any{"name": "stdin", "args": map[string]any{"message": strings.Repeat("secret", 1<<18)}})
+			args, err := json.Marshal(map[string]any{"command": "stdin", "args": map[string]any{"message": strings.Repeat("secret", 1<<18)}})
 			if err != nil {
 				t.Fatal(err)
 			}

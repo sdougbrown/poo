@@ -461,7 +461,7 @@ func TestCallStillWorksForANameTheSearchMissed(t *testing.T) {
 	}
 
 	callTool := cliregistry.NewCall(catalog)
-	prepared, err := callTool.Prepare(json.RawMessage(fmt.Sprintf(`{"name":%q,"args":{}}`, wideName(0))), poo.PrepareEnv{})
+	prepared, err := callTool.Prepare(json.RawMessage(fmt.Sprintf(`{"command":%q,"args":{}}`, wideName(0))), poo.PrepareEnv{})
 	if err != nil {
 		t.Fatalf("preparing an entry the search did not return: %v", err)
 	}

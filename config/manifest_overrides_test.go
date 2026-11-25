@@ -19,7 +19,7 @@ func TestOverrideFailuresNameTheirSources(t *testing.T) {
 	}
 	t.Setenv("POO_CLI_REGISTRY_PATH", registry(t, "deploy"))
 	tools := theTools()
-	delete(tools, "call_tool")
+	delete(tools, "call_cli")
 	_, err = config.Build(config.BuildOptions{Settings: settings, Overrides: config.EnvOverrides(config.Overrides{}), DefaultProfile: "code", Tools: tools, Profiles: theProfiles(), Executors: theExecutors()})
 	if err == nil || !strings.Contains(err.Error(), "POO_CLI_REGISTRY_PATH") {
 		t.Fatalf("registry failure does not name its environment source: %v", err)

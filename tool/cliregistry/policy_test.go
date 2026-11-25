@@ -40,7 +40,7 @@ func TestCallCLIGoesThroughThePolicy(t *testing.T) {
 			transport := pootest.NewTransport(
 				pootest.Turn{Calls: []pootest.Call{{
 					Name:      cliregistry.CallToolName,
-					Arguments: json.RawMessage(`{"name":"say","args":{}}`),
+					Arguments: json.RawMessage(`{"command":"say","args":{}}`),
 				}}},
 				pootest.Turn{Text: "done"},
 			)

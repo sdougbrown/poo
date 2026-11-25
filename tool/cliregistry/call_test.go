@@ -63,7 +63,7 @@ func TestCallRunsTheCLI(t *testing.T) {
 	catalog := fixtureCatalog(t)
 	tool := cliregistry.NewCall(catalog)
 
-	res := call(t, tool, `{"name":"say","args":{"name":"ada"}}`, poo.ToolEnv{
+	res := call(t, tool, `{"command":"say","args":{"name":"ada"}}`, poo.ToolEnv{
 		Settings: poo.ToolSettings{ObservationCapChars: bash.ObservationCapMax},
 	})
 	if res.IsError {
@@ -79,7 +79,7 @@ func TestCallRunsTheCLI(t *testing.T) {
 	}
 
 	// The array argument becomes the command's positional arguments.
-	res = call(t, tool, `{"name":"list","args":{"words":["one","two"]}}`, poo.ToolEnv{})
+	res = call(t, tool, `{"command":"list","args":{"words":["one","two"]}}`, poo.ToolEnv{})
 	obs = observation(t, res)
 	output, _ = obs[bash.EnvelopeOutput].(string)
 	if output != "one\ntwo\n" {
@@ -88,7 +88,7 @@ func TestCallRunsTheCLI(t *testing.T) {
 
 	// A tool that takes no arguments is called without the args
 	// property: an omitted args is an empty object.
-	res = call(t, tool, `{"name":"list"}`, poo.ToolEnv{})
+	res = call(t, tool, `{"command":"list"}`, poo.ToolEnv{})
 	if res.IsError {
 		t.Errorf("a call with no args is an error: %q", res.Text)
 	}
@@ -100,7 +100,7 @@ func TestCallRunsTheCLI(t *testing.T) {
 func TestAKilledCLIReportsNoReturncode(t *testing.T) {
 	tool := cliregistry.NewCall(load(t, suicideManifest(t)))
 
-	res := call(t, tool, `{"name":"suicide","args":{}}`, poo.ToolEnv{})
+	res := call(t, tool, `{"command":"suicide","args":{}}`, poo.ToolEnv{})
 	if !res.IsError {
 		t.Errorf("a tool that died by a signal is not an error: %q", res.Text)
 	}
@@ -136,7 +136,7 @@ func TestCallReportsAFailedExit(t *testing.T) {
 	catalog := fixtureCatalog(t)
 	tool := cliregistry.NewCall(catalog)
 
-	res := call(t, tool, `{"name":"say","args":{"name":"nobody"}}`, poo.ToolEnv{})
+	res := call(t, tool, `{"command":"say","args":{"name":"nobody"}}`, poo.ToolEnv{})
 	if !res.IsError {
 		t.Error("a call that exited 3 is not an error")
 	}
@@ -162,7 +162,7 @@ func TestPrepareRefusesBadArgumentsBeforeAnyProcess(t *testing.T) {
 	t.Setenv(markerEnv, marker)
 
 	// The record works: a call that prepares and runs wrote to it.
-	call(t, tool, `{"name":"say","args":{}}`, poo.ToolEnv{})
+	call(t, tool, `{"command":"say","args":{}}`, poo.ToolEnv{})
 	if got := markerLines(t, marker); got != 1 {
 		t.Fatalf("the fixture ran %d times, want 1", got)
 	}
@@ -171,13 +171,13 @@ func TestPrepareRefusesBadArgumentsBeforeAnyProcess(t *testing.T) {
 		name string
 		args string
 	}{
-		{"an unknown name", `{"name":"nope","args":{}}`},
+		{"an unknown name", `{"command":"nope","args":{}}`},
 		{"a missing name", `{"args":{}}`},
-		{"an argument of the wrong type", `{"name":"say","args":{"name":5}}`},
-		{"an argument the schema does not have", `{"name":"say","args":{"colour":"red"}}`},
-		{"args that are not an object", `{"name":"say","args":["ada"]}`},
-		{"an explicit null", `{"name":"say","args":null}`},
-		{"a malformed call", `{"name":"say"} {}`},
+		{"an argument of the wrong type", `{"command":"say","args":{"command":5}}`},
+		{"an argument the schema does not have", `{"command":"say","args":{"colour":"red"}}`},
+		{"args that are not an object", `{"command":"say","args":["ada"]}`},
+		{"an explicit null", `{"command":"say","args":null}`},
+		{"a malformed call", `{"command":"say"} {}`},
 	}
 	for _, c := range bad {
 		prepared, err := prepare(t, tool, c.args)
@@ -199,7 +199,7 @@ func TestPrepareRefusesBadArgumentsBeforeAnyProcess(t *testing.T) {
 func TestTheObservationIsElided(t *testing.T) {
 	tool := cliregistry.NewCall(load(t, floodManifest(t)))
 
-	res := call(t, tool, `{"name":"flood","args":{}}`, poo.ToolEnv{
+	res := call(t, tool, `{"command":"flood","args":{}}`, poo.ToolEnv{
 		Settings: poo.ToolSettings{ObservationCapChars: 40},
 	})
 	obs := observation(t, res)
@@ -232,4 +232,79 @@ func floodManifest(t *testing.T) string {
 			},
 		},
 	})
+}
+
+// TestAnUnknownCommandIsSelfCorrecting covers the two misreadings the tool's
+// name invited: nesting it inside itself, and handing it a tool the session
+// already offers. Each is answered with the correction, not the catalog's
+// size, and neither starts a process.
+func TestAnUnknownCommandIsSelfCorrecting(t *testing.T) {
+	tool := cliregistry.NewCall(fixtureCatalog(t))
+
+	for _, c := range []struct {
+		name string
+		args string
+		want []string
+	}{
+		{
+			name: "the tool nested inside itself",
+			args: `{"command":"call_cli","args":{"command":"say"}}`,
+			want: []string{"call_cli", `"command"`},
+		},
+		{
+			name: "the retired tool name nested inside itself",
+			args: `{"command":"call_tool","args":{"command":"say"}}`,
+			want: []string{"call_cli", `"command"`},
+		},
+		{
+			name: "a built-in tool",
+			args: `{"command":"bash","args":{"command":"ls"}}`,
+			want: []string{`"bash" is a built-in tool`, "call it directly"},
+		},
+		{
+			name: "a tool the core adds",
+			args: `{"command":"jobs"}`,
+			want: []string{`"jobs" is a built-in tool`, "call it directly"},
+		},
+		{
+			name: "a name the catalog does not hold",
+			args: `{"command":"nope"}`,
+			want: []string{`no tool named "nope"`, "list, say"},
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := prepare(t, tool, c.args)
+			if err == nil {
+				t.Fatalf("%s prepared a call", c.args)
+			}
+			text := err.Error()
+			for _, want := range c.want {
+				if !strings.Contains(text, want) {
+					t.Errorf("the refusal of %s does not carry %q: %q", c.args, want, text)
+				}
+			}
+		})
+	}
+}
+
+// TestABuiltinTheSessionDoesNotOfferPointsAtTheCatalog covers the
+// refusal's session scope: a built-in name the session does not offer
+// cannot be called directly, so the refusal points at the catalog
+// instead of at a call that cannot succeed.
+func TestABuiltinTheSessionDoesNotOfferPointsAtTheCatalog(t *testing.T) {
+	tool := cliregistry.NewCall(fixtureCatalog(t)).WithSessionTools([]string{"bash"})
+
+	_, err := prepare(t, tool, `{"command":"edit","args":{"path":"a","content":"b"}}`)
+	if err == nil {
+		t.Fatal("the call prepared")
+	}
+	text := err.Error()
+	if strings.Contains(text, "is a built-in tool") {
+		t.Errorf("the refusal names a tool the session does not offer a built-in: %q", text)
+	}
+	for _, want := range []string{`no tool named "edit"`} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the refusal does not carry %q: %q", want, text)
+		}
+	}
 }

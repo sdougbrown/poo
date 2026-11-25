@@ -65,7 +65,7 @@ func sandbox(t *testing.T) *bwrap.Executor {
 // runCall prepares and runs one call with no arguments.
 func runCall(t *testing.T, tool *cliregistry.CallTool, env poo.ToolEnv) (poo.ToolResult, error) {
 	t.Helper()
-	prepared, err := prepare(t, tool, `{"name":"probe","args":{}}`)
+	prepared, err := prepare(t, tool, `{"command":"probe","args":{}}`)
 	if err != nil {
 		return poo.ToolResult{}, err
 	}
@@ -389,7 +389,7 @@ func TestASpaceArrayBindingIsOneFlagPerElement(t *testing.T) {
 		"bindings": []any{map[string]any{"property": "tags", "style": "space", "flag": "--tag"}},
 	})
 
-	res := call(t, tool, `{"name":"probe","args":{"tags":["one","two"]}}`, poo.ToolEnv{})
+	res := call(t, tool, `{"command":"probe","args":{"tags":["one","two"]}}`, poo.ToolEnv{})
 	if output, _ := observation(t, res)[bash.EnvelopeOutput].(string); output != "<--tag>\n<one>\n<--tag>\n<two>\n" {
 		t.Errorf("the space-bound array is %q, want one flag and one value per element", output)
 	}
@@ -418,7 +418,7 @@ func TestADashLeadingValueCannotBecomeAFlag(t *testing.T) {
 		"bindings": []any{map[string]any{"property": "color", "style": "space", "flag": "--color"}},
 	})
 
-	_, err := prepare(t, tool, `{"name":"probe","args":{"color":"--recursive"}}`)
+	_, err := prepare(t, tool, `{"command":"probe","args":{"color":"--recursive"}}`)
 	if err == nil {
 		t.Fatal("a value that looks like an option prepared")
 	}
@@ -442,7 +442,7 @@ func TestADashLeadingValueCannotBecomeAFlag(t *testing.T) {
 		},
 		"bindings": []any{map[string]any{"property": "words", "style": "positional"}},
 	})
-	res := call(t, positional, `{"name":"probe","args":{"words":["ok","-rf"]}}`, poo.ToolEnv{})
+	res := call(t, positional, `{"command":"probe","args":{"words":["ok","-rf"]}}`, poo.ToolEnv{})
 	if output, _ := observation(t, res)[bash.EnvelopeOutput].(string); output != "<ok>\n<-->\n<-rf>\n" {
 		t.Errorf("the positional value was not escaped: %q", output)
 	}
@@ -459,7 +459,7 @@ func TestACancelledCallStopsTheCLI(t *testing.T) {
 		"timeout": "60s",
 		"env":     map[string]string{"FIXTURE_PID": "env:FIXTURE_PID"},
 	})
-	prepared, err := prepare(t, tool, `{"name":"probe","args":{}}`)
+	prepared, err := prepare(t, tool, `{"command":"probe","args":{}}`)
 	if err != nil {
 		t.Fatalf("preparing the call: %v", err)
 	}
@@ -507,7 +507,7 @@ func TestAClosedSessionStopsTheCLI(t *testing.T) {
 	transport := pootest.NewTransport(
 		pootest.Turn{Calls: []pootest.Call{{
 			Name:      cliregistry.CallToolName,
-			Arguments: json.RawMessage(`{"name":"probe","args":{}}`),
+			Arguments: json.RawMessage(`{"command":"probe","args":{}}`),
 		}}},
 		pootest.Turn{Text: "done"},
 	)
@@ -594,7 +594,7 @@ func TestAnAlreadyCancelledCallStartsNothing(t *testing.T) {
 	marker := filepath.Join(dir, "marker")
 	executor := &startedExecutor{Executor: bash.NewLocal()}
 	tool := execTool(t, []string{"/bin/sh", "-c", `printf executed > "$1"`, "probe", marker}, nil).WithExecutor(executor)
-	prepared, err := prepare(t, tool, `{"name":"probe","args":{}}`)
+	prepared, err := prepare(t, tool, `{"command":"probe","args":{}}`)
 	if err != nil {
 		t.Fatalf("preparing the call: %v", err)
 	}
@@ -631,7 +631,7 @@ func TestAnAlreadyCancelledSandboxDoesNotExecute(t *testing.T) {
 	marker := filepath.Join(dir, "marker")
 	tool := execTool(t, []string{"/bin/sh", "-c", `printf executed >> "$1"`, "probe", marker}, nil).
 		WithExecutor(sandbox(t))
-	prepared, err := prepare(t, tool, `{"name":"probe","args":{}}`)
+	prepared, err := prepare(t, tool, `{"command":"probe","args":{}}`)
 	if err != nil {
 		t.Fatalf("preparing the call: %v", err)
 	}

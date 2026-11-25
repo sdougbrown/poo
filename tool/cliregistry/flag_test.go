@@ -57,7 +57,7 @@ func spaceStringManifest() map[string]any {
 func TestASeparateValueBindingRefusesADelimiter(t *testing.T) {
 	tool, marker := recorderTool(t, spaceStringManifest())
 
-	prepared, err := prepare(t, tool, `{"name":"probe","args":{"a_ignore":"--","z_color":"--recursive"}}`)
+	prepared, err := prepare(t, tool, `{"command":"probe","args":{"a_ignore":"--","z_color":"--recursive"}}`)
 	if err == nil {
 		t.Fatalf("a call that passes -- as a value prepared: %v", prepared)
 	}
@@ -91,8 +91,8 @@ func TestASeparateValueBindingRefusesANegativeNumber(t *testing.T) {
 	})
 
 	for _, args := range []string{
-		`{"name":"probe","args":{"color":-1}}`,
-		`{"name":"probe","args":{"color":-1.5}}`,
+		`{"command":"probe","args":{"color":-1}}`,
+		`{"command":"probe","args":{"color":-1.5}}`,
 	} {
 		prepared, err := prepare(t, tool, args)
 		if err == nil {
@@ -127,7 +127,7 @@ func TestAnEqualsBindingAcceptsAValueThatLooksLikeAFixedOption(t *testing.T) {
 		"bindings": []any{map[string]any{"property": "ignore", "style": "equals", "flag": "--ignore"}},
 	})
 
-	prepared, err := prepare(t, tool, `{"name":"probe","args":{"ignore":"--recursive"}}`)
+	prepared, err := prepare(t, tool, `{"command":"probe","args":{"ignore":"--recursive"}}`)
 	if err != nil {
 		t.Fatalf("an equals-bound --ignore=--recursive was refused: %v", err)
 	}

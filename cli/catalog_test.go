@@ -2,6 +2,7 @@ package cli_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -184,12 +185,68 @@ func TestANilCatalogRendersAnEmptySection(t *testing.T) {
 	// Rendering is the point: a nil catalog must not panic, and its section is
 	// the list form, not a search over entries it does not have.
 	text := catalog.Section(false)
-	for _, want := range []string{"Registered tools:", "Call one with call_tool"} {
+	for _, want := range []string{"Registered tools:", "Call one with call_cli"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("a nil catalog's section does not carry %q: %q", want, text)
 		}
 	}
 	if strings.Contains(text, "too many to list") {
 		t.Errorf("a nil catalog's section asks for a search: %q", text)
+	}
+}
+
+// loadManyCatalog writes a registry of n entries, named entry-000 upwards,
+// and loads it.
+func loadManyCatalog(t *testing.T, n int) *cli.Catalog {
+	t.Helper()
+	tools := map[string]any{}
+	for i := 0; i < n; i++ {
+		tools[fmt.Sprintf("entry-%03d", i)] = map[string]any{
+			"description": "A command",
+			"command":     []string{"true"},
+			"inputSchema": map[string]any{
+				"type":                 "object",
+				"properties":           map[string]any{},
+				"additionalProperties": false,
+			},
+		}
+	}
+	body, err := json.Marshal(map[string]any{"version": 1, "tools": tools})
+	if err != nil {
+		t.Fatalf("encoding the registry: %v", err)
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "registry.json"), body, 0o600); err != nil {
+		t.Fatalf("writing the registry: %v", err)
+	}
+	catalog, err := cli.Load(dir)
+	if err != nil {
+		t.Fatalf("loading the registry: %v", err)
+	}
+	return catalog
+}
+
+// TestANamesHintListsEveryCatalogThePromptLists covers the correction: a
+// catalog short enough to be listed in the prompt is short enough to name in
+// a failure, so a model that named nothing the catalog holds reads the names
+// it could have used instead of a count.
+func TestANamesHintListsEveryCatalogThePromptLists(t *testing.T) {
+	listed := loadManyCatalog(t, cli.FindThreshold)
+	hint := listed.NamesHint(true)
+	for _, name := range listed.Names() {
+		if !strings.Contains(hint, name) {
+			t.Errorf("the hint of a %d-entry catalog does not name %q: %q", cli.FindThreshold, name, hint)
+		}
+	}
+
+	// Past the threshold the prompt does not list the catalog either, so the
+	// failure does not spend the room the prompt saved.
+	unlisted := loadManyCatalog(t, cli.FindThreshold+1)
+	hint = unlisted.NamesHint(true)
+	if strings.Contains(hint, "entry-000") {
+		t.Errorf("the hint of a %d-entry catalog lists its names: %q", cli.FindThreshold+1, hint)
+	}
+	if !strings.Contains(hint, "search it") {
+		t.Errorf("the hint of a searched catalog does not point at the search: %q", hint)
 	}
 }
