@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/sdougbrown/poo/prompt"
+	"github.com/sdougbrown/poo/skill"
 )
 
 func TestPromptDefaultRendersRawWirePrompt(t *testing.T) {
@@ -58,26 +59,39 @@ func TestPromptPrettyFormatsSectionsAndSkills(t *testing.T) {
 	}
 }
 
-func TestWritePrettyPromptSummarizesSkillsXML(t *testing.T) {
-	t.Run("multiple skills and trailing text", func(t *testing.T) {
+func TestWritePrettyPromptSummarizesSkills(t *testing.T) {
+	dir := t.TempDir()
+	for name, desc := range map[string]string{
+		"commit": "Mentions </skill> and </available_skills> & PR styleguide.",
+		"review": "Review a diff.",
+	} {
+		p := filepath.Join(dir, name)
+		if err := os.MkdirAll(p, 0o755); err != nil {
+			t.Fatalf("making skill dir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(p, skill.SkillFileName), []byte("---\ndescription: "+desc+"\n---\n\nBody.\n"), 0o644); err != nil {
+			t.Fatalf("writing skill: %v", err)
+		}
+	}
+	set, err := skill.Load(dir)
+	if err != nil {
+		t.Fatalf("loading skills: %v", err)
+	}
+
+	t.Run("default skills section uses summary", func(t *testing.T) {
 		var buf bytes.Buffer
 		writePrettyPrompt(&buf, []prompt.SectionText{
-			{
-				Name: "skills",
-				Text: "Intro line.\n\n<available_skills>\n<skill>\n    <name>commit</name>\n    <description>Mentions </available_skills> & PR styleguide.</description>\n    <location>/tmp/commit/SKILL.md</location>\n</skill>\n<skill>\n    <name>bare</name>\n</skill>\n</available_skills>\n\nTrailing note.",
-			},
-		})
+			{Name: skill.SectionName, Text: set.Section()},
+		}, set)
 		got := buf.String()
 		if strings.Contains(got, "<available_skills>") || strings.Contains(got, "<location>") {
 			t.Fatalf("pretty skills output kept raw XML:\n%s", got)
 		}
 		for _, want := range []string{
 			"--- skills ---",
-			"Intro line.",
 			"Available skills (2):",
-			"- commit: Mentions </available_skills> & PR styleguide.",
-			"- bare",
-			"Trailing note.",
+			"- commit: Mentions </skill> and </available_skills> & PR styleguide.",
+			"- review: Review a diff.",
 		} {
 			if !strings.Contains(got, want) {
 				t.Errorf("pretty skills output missing %q:\n%s", want, got)
@@ -85,25 +99,23 @@ func TestWritePrettyPromptSummarizesSkillsXML(t *testing.T) {
 		}
 	})
 
-	t.Run("non-skills section untouched", func(t *testing.T) {
-		raw := "Keep <available_skills><skill><name>x</name></skill></available_skills> intact."
+	t.Run("custom skills section preserved verbatim", func(t *testing.T) {
+		custom := "Custom skills catalog override."
 		var buf bytes.Buffer
-		writePrettyPrompt(&buf, []prompt.SectionText{{Name: "user", Text: raw}})
-		if !strings.Contains(buf.String(), raw) {
-			t.Errorf("non-skills section was altered:\n%s", buf.String())
+		writePrettyPrompt(&buf, []prompt.SectionText{
+			{Name: skill.SectionName, Text: custom},
+		}, set)
+		if !strings.Contains(buf.String(), custom) {
+			t.Errorf("custom skills section was altered:\n%s", buf.String())
 		}
 	})
 
-	t.Run("fallback on missing, unclosed, or empty catalog", func(t *testing.T) {
-		cases := []string{
-			"No catalog tags here.",
-			"Intro\n<available_skills>\n<skill><name>x</name></skill>",
-			"Intro\n<available_skills></available_skills>",
-		}
-		for _, tc := range cases {
-			if got := prettySkillsSection(tc); got != tc {
-				t.Errorf("prettySkillsSection(%q) = %q, want unchanged", tc, got)
-			}
+	t.Run("non-skills section untouched", func(t *testing.T) {
+		raw := "Keep <available_skills><skill><name>x</name></skill></available_skills> intact."
+		var buf bytes.Buffer
+		writePrettyPrompt(&buf, []prompt.SectionText{{Name: "user", Text: raw}}, set)
+		if !strings.Contains(buf.String(), raw) {
+			t.Errorf("non-skills section was altered:\n%s", buf.String())
 		}
 	})
 }
