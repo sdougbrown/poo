@@ -638,11 +638,14 @@ func (s *Session) loop(run *runState) []candidate {
 		// usable turn, one with a call or answer text, ends a run of
 		// unusable turns; an unusable turn of one kind leaves the other
 		// kind's count alone.
-		// A truncated turn is never usable, whatever text came before the
-		// cut: it is about to be retried, so it must not clear the run of
-		// turns that count against a bound.
+		//
+		// A truncated turn the run retries does not end that run: the retry
+		// is the remedy, so the counts carry across it. A truncated turn the
+		// run does not retry settles here, or continues on a drained steer
+		// or a hook. Either way it ends the counts like any other usable
+		// turn.
 		empty := emptyToolCallTurn(resp)
-		if usableTurn(resp) && !resp.truncated() {
+		if usableTurn(resp) && !(truncated && s.opts.TruncationRetries > 0) {
 			s.resetUnusableTurns(run)
 		}
 
@@ -651,13 +654,17 @@ func (s *Session) loop(run *runState) []candidate {
 		// that opened another turn is a continuation, like a steer. A
 		// run of unusable turns that reached a bound settles
 		// invalid_turns.
+		//
+		// The response's own failures come first: a response cut at the
+		// output limit can still carry a call that did not parse. The parse
+		// failure is the note the model can act on.
 		var note turnNote
 		var noteErr error
 		switch {
-		case resp.truncated():
-			note, noteErr = s.reportTruncatedTurn(run, turn)
 		case len(resp.errors) > 0:
 			note, noteErr = s.reportResponseErrors(run, turn, resp.errors)
+		case truncated:
+			note, noteErr = s.reportTruncatedTurn(run, turn)
 		case empty:
 			note, noteErr = s.reportEmptyToolCallTurn(run, turn)
 		}
