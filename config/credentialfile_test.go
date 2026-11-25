@@ -264,3 +264,83 @@ session:
 		t.Errorf("the credential file is %q after the file arrived, want %q", got, beside)
 	}
 }
+
+// TestTheCredentialFilePooWritesIsNamedForItsEncoding covers the name poo's own file
+// goes by. The file is written as YAML, so the name says YAML: a file named .json that
+// holds YAML misleads anything that reads it by its extension.
+func TestTheCredentialFilePooWritesIsNamedForItsEncoding(t *testing.T) {
+	dir := tempUserConfigDir(t)
+	path := writeSettings(t, t.TempDir(), "version: 1\nsession:\n  mode: ephemeral\n")
+	settings, err := Load(path)
+	if err != nil {
+		t.Fatalf("loading the settings: %v", err)
+	}
+	want := filepath.Join(dir, "poo", "auth.yaml")
+	if got := settings.CredentialFile(); got != want {
+		t.Errorf("the credential file is %q, want %q", got, want)
+	}
+}
+
+// TestTheLegacyCredentialFileIsReadWhereItIs covers the file poo wrote before the name
+// described its encoding: an operator who already signed in there is not migrated out
+// of their credential, and poo keeps reading and writing the file that is there.
+func TestTheLegacyCredentialFileIsReadWhereItIs(t *testing.T) {
+	dir := tempUserConfigDir(t)
+	poo := filepath.Join(dir, "poo")
+	if err := os.MkdirAll(poo, 0o700); err != nil {
+		t.Fatalf("creating the credential directory: %v", err)
+	}
+	legacy := filepath.Join(poo, LegacyAuthFileName)
+	if err := os.WriteFile(legacy, []byte("version: 1\ncredentials:\n"), 0o600); err != nil {
+		t.Fatalf("writing the legacy credential file: %v", err)
+	}
+	path := writeSettings(t, t.TempDir(), "version: 1\nsession:\n  mode: ephemeral\n")
+	settings, err := Load(path)
+	if err != nil {
+		t.Fatalf("loading the settings: %v", err)
+	}
+	if got := settings.CredentialFile(); got != legacy {
+		t.Errorf("the credential file is %q, want the file that is there at %q", got, legacy)
+	}
+
+	// The new name wins where an operator has moved the file to it.
+	named := filepath.Join(poo, AuthFileName)
+	if err := os.Rename(legacy, named); err != nil {
+		t.Fatalf("moving the credential file: %v", err)
+	}
+	settings, err = Load(path)
+	if err != nil {
+		t.Fatalf("loading the settings again: %v", err)
+	}
+	if got := settings.CredentialFile(); got != named {
+		t.Errorf("the credential file is %q, want the one it was moved to at %q", got, named)
+	}
+}
+
+// TestTheCredentialFileBesidePisModelsFileIsPisOwn covers the pi setup poo reads
+// without naming a file. pi writes its credentials to auth.json beside its models.json,
+// and poo answers that path before pi's first login, so a credential pi writes later is
+// the one poo reads.
+func TestTheCredentialFileBesidePisModelsFileIsPisOwn(t *testing.T) {
+	dir := tempUserConfigDir(t)
+	if err := os.WriteFile(filepath.Join(dir, PiModelsFileName),
+		[]byte(`{"providers": {"home": {"baseUrl": "http://127.0.0.1:1/v1", "models": [{"id": "qwen"}]}}}`), 0o644); err != nil {
+		t.Fatalf("writing pi's models file: %v", err)
+	}
+	path := writeSettings(t, dir, "version: 1\nsession:\n  mode: ephemeral\n")
+	settings, err := Load(path)
+	if err != nil {
+		t.Fatalf("loading the settings: %v", err)
+	}
+	want := filepath.Join(dir, "auth.json")
+	if got := settings.CredentialFile(); got != want {
+		t.Fatalf("the credential file is %q, want pi's own at %q", got, want)
+	}
+	// pi signs in afterwards, and the answer already pointed at pi's file.
+	if err := os.WriteFile(want, []byte(`{}`), 0o600); err != nil {
+		t.Fatalf("writing pi's credential: %v", err)
+	}
+	if got := settings.CredentialFile(); got != want {
+		t.Errorf("the credential file is %q after pi wrote, want %q", got, want)
+	}
+}

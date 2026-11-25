@@ -1026,3 +1026,40 @@ func TestThePickerRefusesWhatIsNotASignIn(t *testing.T) {
 		})
 	}
 }
+
+// TestALoginWithNoCredentialFileNamedWritesPooOwnName covers the file a sign-in
+// creates when the settings name none: poo's own, under the name its encoding
+// describes. The file is YAML, and a .json name on YAML is a trap.
+func TestALoginWithNoCredentialFileNamedWritesPooOwnName(t *testing.T) {
+	isolatedConfigHome(t)
+	t.Setenv("OLLAMA_API_KEY", "")
+	dir := t.TempDir()
+	settings := filepath.Join(dir, "settings.yaml")
+	if err := os.WriteFile(settings, []byte("version: 1\nsession:\n  mode: ephemeral\n"), 0o644); err != nil {
+		t.Fatalf("writing the settings: %v", err)
+	}
+	probesThrough(t, &http.Client{Transport: refusingTransport{}})
+	withoutATerminal(t)
+	withStdin(t, "the-key\n")
+	if code := run([]string{"login", "ollama-cloud", "--settings", settings}); code != 0 {
+		t.Fatalf("poo login exited with %d", code)
+	}
+
+	want, err := config.DefaultAuthFile()
+	if err != nil {
+		t.Fatalf("resolving the default credential file: %v", err)
+	}
+	if filepath.Base(want) != "auth.yaml" {
+		t.Errorf("the default credential file is %q, want poo's own auth.yaml", want)
+	}
+	body, err := os.ReadFile(want)
+	if err != nil {
+		t.Fatalf("reading the credential poo wrote: %v", err)
+	}
+	if !strings.Contains(string(body), "the-key") {
+		t.Errorf("the credential file %q does not hold the key that was typed:\n%s", want, body)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(want), "auth.json")); err == nil {
+		t.Errorf("the sign-in also wrote an auth.json beside its own file")
+	}
+}

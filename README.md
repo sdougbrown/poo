@@ -179,16 +179,21 @@ roles:
   chat: openai-codex/gpt-6.1-sol
 ```
 
-On macOS, poo's default is `~/Library/Application Support/poo/auth.json`.
-If that file is absent, poo uses an existing `~/.config/poo/auth.json`.
+On macOS, poo's default is `~/Library/Application Support/poo/auth.yaml`.
+If that file is absent, poo uses an existing `~/.config/poo/auth.yaml`.
 If neither exists, login creates the native file. Poo does not merge the files.
-Other platforms use `auth.json` in poo's platform config directory.
+Other platforms use `auth.yaml` in poo's platform config directory.
 
-Set `auth_file: auth.json` to keep the credential beside your settings.
+The name says what the file is: poo writes it as YAML. A credential file already
+named `auth.json` is read where it is and kept, so a sign-in that happened before
+the rename is not lost. Renaming it to `auth.yaml` moves poo with it.
+
+Set `auth_file: auth.yaml` to keep the credential beside your settings.
 Pass the same `--settings` path to `poo login` when using this option.
-Without `auth_file` or `pi_auth_file`, a loaded models file makes poo read
-`auth.json` beside that models file instead of the default. This rule does
-not redirect login writes. Poo rejects settings that name both credential paths.
+Without `auth_file` or `pi_auth_file`, a loaded models file makes poo read the
+credential beside that models file instead of the default: poo's own `auth.yaml`,
+or the `auth.json` beside it, or pi's `auth.json` beside pi's `models.json`.
+Poo rejects settings that name both credential paths.
 
 poo's own file is versioned, holds the credentials under it, and is written as
 YAML — the format an operator edits, and the one the models file is written with.
