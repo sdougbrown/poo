@@ -639,13 +639,14 @@ func (s *Session) loop(run *runState) []candidate {
 		// unusable turns; an unusable turn of one kind leaves the other
 		// kind's count alone.
 		//
-		// A truncated turn the run retries does not end that run: the retry
-		// is the remedy, so the counts carry across it. A truncated turn the
-		// run does not retry settles here, or continues on a drained steer
-		// or a hook. Either way it ends the counts like any other usable
-		// turn.
+		// A truncated turn with no complete call is the turn the run cannot
+		// use: nothing ran, so the model gets the retry's note instead of the
+		// run settling output_truncated. A truncated turn whose call ran goes
+		// to the gate like any other turn with calls. The note would tell the
+		// model the run could not use calls it just ran.
 		empty := emptyToolCallTurn(resp)
-		if usableTurn(resp) && !(truncated && s.opts.TruncationRetries > 0) {
+		noCompleteCall := truncated && !processed
+		if usableTurn(resp) && !(noCompleteCall && s.opts.TruncationRetries > 0) {
 			s.resetUnusableTurns(run)
 		}
 
@@ -663,7 +664,7 @@ func (s *Session) loop(run *runState) []candidate {
 		switch {
 		case len(resp.errors) > 0:
 			note, noteErr = s.reportResponseErrors(run, turn, resp.errors)
-		case truncated:
+		case noCompleteCall:
 			note, noteErr = s.reportTruncatedTurn(run, turn)
 		case empty:
 			note, noteErr = s.reportEmptyToolCallTurn(run, turn)

@@ -257,6 +257,44 @@ func TestATruncationRetryStopsAtItsBound(t *testing.T) {
 	if res.Reason != poo.ReasonOutputTruncated {
 		t.Errorf("the run settled %q, want output_truncated after the retries", res.Reason)
 	}
+	// The settle is the retry's bound, not the natural stop a single cut
+	// turn reaches.
+	if res.Detail.Source != "truncated_turns" {
+		t.Errorf("the settle source is %q, want truncated_turns", res.Detail.Source)
+	}
+}
+
+// TestATruncatedTurnThatRanItsCallsKeepsGoing covers a truncated turn that
+// carried a complete call. The call runs, so the turn continues to the gate. The
+// run neither spends a retry on it nor tells the model its work was lost. Two
+// such turns in a row used to settle output_truncated on the second.
+func TestATruncatedTurnThatRanItsCallsKeepsGoing(t *testing.T) {
+	call := poo.ToolCall{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{call}, finish: poo.FinishLength},
+		{calls: []poo.ToolCall{call}, finish: poo.FinishLength},
+		{text: "done"},
+	})
+	sink := &recordingSink{}
+	opts := testOptions(t, tr, &echoTool{result: "echoed"}, sink)
+	opts.TruncationRetries = 1
+	s := newTestSession(t, opts)
+
+	res := runSession(t, s, "do the thing")
+	if res.Reason != poo.ReasonEndTurn {
+		t.Fatalf("the run settled %q (%s), want end_turn: the calls ran", res.Reason, res.Detail.Source)
+	}
+	if n := len(tr.Requests()); n != 3 {
+		t.Errorf("the run made %d requests, want 3: the truncated turns with calls ran and continued", n)
+	}
+	for i, req := range tr.Requests()[1:] {
+		for _, msg := range req.Messages {
+			if strings.Contains(msg.Text(), "reached the output limit") {
+				t.Errorf("request %d tells the model %q, want no note about a response whose calls ran",
+					i+1, msg.Text())
+			}
+		}
+	}
 }
 
 // TestATruncationRetryStartsOverAfterAUsableTurn covers the count's reset. A
