@@ -112,8 +112,8 @@ credential is traded, and the command exits non-zero when a role does not
 resolve.`
 
 // promptLong is the help body of `poo prompt`.
-const promptLong = `The command prints the prompt a session would send, with the sections
-marked, so an operator can see what the model is told.`
+const promptLong = `The command prints the exact system prompt a session would send to the model.
+Pass --pretty to print each section under a header with skills summarized for reading.`
 
 // authImportLong is the help body of `poo auth import`.
 const authImportLong = `The command copies the Codex credential pi's auth.json holds into poo's own file,
@@ -234,7 +234,7 @@ func pooApp(stdout io.Writer) *clicontract.App {
 				Name:  "prompt",
 				Short: "Print the prompt a session would send",
 				Long:  promptLong,
-				Flags: projectPromptFlagSpecs(),
+				Flags: promptFlagSpecs(),
 				Handle: func(_ context.Context, inv clicontract.Invocation, cmdStderr io.Writer) (any, error) {
 					return handlePrompt(inv, stdout, cmdStderr), nil
 				},
@@ -365,6 +365,13 @@ func projectPromptFlagSpecs() []clicontract.Flag {
 	return []clicontract.Flag{
 		{Name: "project-prompt", Kind: clicontract.Bool, Usage: "Include the working directory's AGENTS.md (or CLAUDE.md) in the prompt"},
 	}
+}
+
+// promptFlagSpecs declares the flags of `poo prompt`.
+func promptFlagSpecs() []clicontract.Flag {
+	return append(projectPromptFlagSpecs(),
+		clicontract.Flag{Name: "pretty", Kind: clicontract.Bool, Usage: "Format the prompt with section headers for human reading"},
+	)
 }
 
 // serveFlagSpecs declares the flags serve and repl share: the endpoint and

@@ -4,11 +4,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	clicontract "github.com/sdougbrown/cli-contract"
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/config"
+	"github.com/sdougbrown/poo/prompt"
 )
 
 // promptOptions are the flags of `poo prompt`.
@@ -17,12 +19,16 @@ type promptOptions struct {
 	// projectPrompt includes the working directory's project
 	// instructions in the prompt.
 	projectPrompt bool
+	// pretty formats the prompt with section headers and summarized
+	// skills for human reading instead of the raw wire prompt.
+	pretty bool
 }
 
 // bind reads the prompt command's flags out of a parsed invocation.
 func (o *promptOptions) bind(inv clicontract.Invocation) {
 	o.sharedFlags.bind(inv)
 	o.projectPrompt = inv.Bools["project-prompt"]
+	o.pretty = inv.Bools["pretty"]
 }
 
 // handlePrompt executes `poo prompt`.
@@ -83,9 +89,100 @@ func handlePrompt(inv clicontract.Invocation, stdout, stderr io.Writer) exit {
 
 	// The build rendered the prompt; the sections the command adds after
 	// it are its own fixed templates, so the render cannot fail here.
-	sections := poo.PromptBuilder(runtime.Options).Sections()
-	for _, section := range sections {
-		fmt.Fprintf(stdout, "--- %s ---\n%s\n", section.Name, section.Text)
+	builder := poo.PromptBuilder(runtime.Options)
+	if !o.pretty {
+		_, _ = io.WriteString(stdout, builder.Render())
+		return exit{}
 	}
+	writePrettyPrompt(stdout, builder.Sections())
 	return exit{}
+}
+
+// writePrettyPrompt writes the sections under readable headers, summarizing
+// nested skill catalog XML as a compact list.
+func writePrettyPrompt(w io.Writer, sections []prompt.SectionText) {
+	for _, section := range sections {
+		text := section.Text
+		if section.Name == "skills" {
+			text = prettySkillsSection(text)
+		}
+		fmt.Fprintf(w, "--- %s ---\n%s\n", section.Name, text)
+	}
+}
+
+// prettySkillsSection replaces an <available_skills> XML block with a compact
+// list of skill names and descriptions.
+func prettySkillsSection(text string) string {
+	const openTag = "<available_skills>"
+	const closeTag = "</available_skills>"
+	start := strings.Index(text, openTag)
+	if start < 0 {
+		return text
+	}
+	end := strings.Index(text[start:], closeTag)
+	if end < 0 {
+		return text
+	}
+	end += start + len(closeTag)
+
+	body := text[start+len(openTag) : end-len(closeTag)]
+	var skills []string
+	for {
+		s := strings.Index(body, "<skill>")
+		if s < 0 {
+			break
+		}
+		body = body[s+len("<skill>"):]
+		e := strings.Index(body, "</skill>")
+		if e < 0 {
+			break
+		}
+		entry := body[:e]
+		body = body[e+len("</skill>"):]
+
+		name := xmlTagContent(entry, "name")
+		desc := xmlTagContent(entry, "description")
+		if name == "" {
+			continue
+		}
+		if desc != "" {
+			skills = append(skills, fmt.Sprintf("- %s: %s", name, desc))
+		} else {
+			skills = append(skills, fmt.Sprintf("- %s", name))
+		}
+	}
+	if len(skills) == 0 {
+		return text
+	}
+
+	prefix := strings.TrimRight(text[:start], "\n")
+	suffix := strings.TrimLeft(text[end:], "\n")
+	var b strings.Builder
+	if prefix != "" {
+		b.WriteString(prefix)
+		b.WriteString("\n\n")
+	}
+	fmt.Fprintf(&b, "Available skills (%d):\n", len(skills))
+	b.WriteString(strings.Join(skills, "\n"))
+	if suffix != "" {
+		b.WriteString("\n\n")
+		b.WriteString(suffix)
+	}
+	return b.String()
+}
+
+// xmlTagContent returns the trimmed text inside <tag>...</tag>, or "".
+func xmlTagContent(s, tag string) string {
+	open := "<" + tag + ">"
+	close := "</" + tag + ">"
+	start := strings.Index(s, open)
+	if start < 0 {
+		return ""
+	}
+	s = s[start+len(open):]
+	end := strings.Index(s, close)
+	if end < 0 {
+		return ""
+	}
+	return strings.TrimSpace(s[:end])
 }
