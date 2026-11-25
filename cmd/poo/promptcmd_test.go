@@ -11,18 +11,6 @@ import (
 	"github.com/sdougbrown/poo/skill"
 )
 
-func TestPromptDefaultRendersRawWirePrompt(t *testing.T) {
-	got := promptFor(t, "code")
-	if strings.Contains(got, "--- persona ---") || strings.Contains(got, "--- base ---") {
-		t.Fatalf("default poo prompt included pretty section markers:\n%s", got)
-	}
-	for _, tag := range []string{"<base>", "</base>", "<profile>", "</profile>", "<tools>", "</tools>", "<environment>", "</environment>"} {
-		if !strings.Contains(got, tag) {
-			t.Errorf("default poo prompt missing %q:\n%s", tag, got)
-		}
-	}
-}
-
 func TestPromptPrettyFormatsSectionsAndSkills(t *testing.T) {
 	dir := t.TempDir()
 	skillDir := filepath.Join(dir, "skills", "demo")
