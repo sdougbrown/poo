@@ -36,10 +36,19 @@ except ImportError:  # pragma: no cover - allows importing/testing without harbo
             logs_dir: Path,
             model_name: str | None = None,
             *args: Any,
+            extra_env: dict[str, str] | None = None,
             **kwargs: Any,
         ) -> None:
             self.logs_dir = Path(logs_dir)
             self.model_name = model_name
+            # Harbor's BaseAgent owns extra_env as a read-only property over
+            # _extra_env. Mirroring that here keeps the stub faithful, so a
+            # subclass that shadows it fails the tests instead of the run.
+            self._extra_env: dict[str, str] = dict(extra_env) if extra_env else {}
+
+        @property
+        def extra_env(self) -> dict[str, str]:
+            return dict(self._extra_env)
 
     BaseEnvironment = Any  # type: ignore[misc,assignment]
     AgentContext = Any  # type: ignore[misc,assignment]
@@ -214,7 +223,6 @@ class PooAgent(BaseAgent):
         context_keep_recent: int | None = None,
         timeout: str | None = None,
         append_system_prompt: str | None = None,
-        extra_env: dict[str, str] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(logs_dir=logs_dir, model_name=model_name, **kwargs)
@@ -243,7 +251,6 @@ class PooAgent(BaseAgent):
         )
         self.timeout = timeout
         self.append_system_prompt = append_system_prompt
-        self.extra_env = dict(extra_env or {})
         self._cached_version: str | None = None
 
     @staticmethod
