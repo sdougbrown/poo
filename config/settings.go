@@ -290,7 +290,8 @@ type Decide struct {
 	TimeoutMS *int `json:"timeout_ms,omitempty"`
 }
 
-// ProfileSettings defines a named variant of a profile linked by the binary.
+// ProfileSettings defines a named variant of a linked profile or another
+// defined profile.
 type ProfileSettings struct {
 	Base string `json:"base"`
 	// Feeds are the feeds the profile declares it needs, by manifest

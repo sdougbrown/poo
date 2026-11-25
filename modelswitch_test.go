@@ -765,7 +765,16 @@ func TestASwitchWarnsWhenTheFamilyGuidanceCannotFollow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("switching the model: %v", err)
 	}
+	if slices.Contains(outcome.Warnings, "the prompt renders with no variant, so the model family's guidance does not render") {
+		t.Errorf("the switch warned %v without POO_DEBUG; want no variantless warning by default", outcome.Warnings)
+	}
+
+	t.Setenv("POO_DEBUG", "true")
+	outcome, err = s.SetModel(variantless, openai.New(openai.Options{Endpoint: nextServer.URL, Model: variantless.ModelID, ModelInfo: variantless}))
+	if err != nil {
+		t.Fatalf("switching the model under POO_DEBUG: %v", err)
+	}
 	if !slices.Contains(outcome.Warnings, "the prompt renders with no variant, so the model family's guidance does not render") {
-		t.Errorf("the switch's warnings are %v, want the variantless note", outcome.Warnings)
+		t.Errorf("the switch's warnings under POO_DEBUG are %v, want the variantless note", outcome.Warnings)
 	}
 }
