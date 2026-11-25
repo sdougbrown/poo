@@ -41,7 +41,7 @@ export OPENAI_API_KEY="sk-..."
 
 PYTHONPATH=evals/harbor harbor run \
   --dataset terminal-bench/terminal-bench@4.1.0 \
-  --agent-import-path poo_agent:PooAgent \
+  --agent poo_agent:PooAgent \
   --model openai/gpt-4o \
   --ak context_limit=128000 \
   --ak max_turns=80 \
@@ -59,7 +59,7 @@ Pass `--ak endpoint=...` and `--ak model_id=...` (note: inside a container,
 ```bash
 PYTHONPATH=evals/harbor harbor run \
   --dataset terminal-bench/terminal-bench@4.1.0 \
-  --agent-import-path poo_agent:PooAgent \
+  --agent poo_agent:PooAgent \
   --ak endpoint=http://grace:4000/v1 \
   --ak model_id=qwen \
   --ak context_limit=131072 \
@@ -77,7 +77,7 @@ If you want to pin compaction strategies, sampling, or built-in providers
 ```bash
 PYTHONPATH=evals/harbor harbor run \
   --dataset terminal-bench/terminal-bench@4.1.0 \
-  --agent-import-path poo_agent:PooAgent \
+  --agent poo_agent:PooAgent \
   --ak settings=/path/to/settings.yaml \
   --ak auth_file=/path/to/auth.json \
   --n-tasks 3
@@ -93,7 +93,7 @@ same tasks:
 # Run poo
 PYTHONPATH=evals/harbor harbor run \
   --dataset terminal-bench/terminal-bench@4.1.0 \
-  --agent-import-path poo_agent:PooAgent \
+  --agent poo_agent:PooAgent \
   --model openai/gpt-4o \
   --ak context_limit=128000 \
   --n-tasks 15 \
@@ -118,7 +118,7 @@ The same adapter works on any Harbor dataset, including SWE-bench:
 ```bash
 PYTHONPATH=evals/harbor harbor run \
   --dataset swebench-verified \
-  --agent-import-path poo_agent:PooAgent \
+  --agent poo_agent:PooAgent \
   --model openai/gpt-4o \
   --ak context_limit=128000 \
   --n-tasks 10 \
