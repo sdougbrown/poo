@@ -88,6 +88,9 @@ type Transport struct {
 	index int
 	// requests holds the requests the transport received.
 	requests []poo.ChatRequest
+	// changed is closed by the request that lands, so a wait on the
+	// requests ends on the request instead of a poll.
+	changed chan struct{}
 	// rendered holds the snapshot of each request.
 	rendered []poo.Rendered
 	// forks holds the forks the transport received.
@@ -246,6 +249,28 @@ func (t *Transport) Requests() []poo.ChatRequest {
 	return out
 }
 
+// WaitRequests blocks until the transport holds at least n requests,
+// or the context ends.
+func (t *Transport) WaitRequests(ctx context.Context, n int) error {
+	for {
+		t.mu.Lock()
+		if t.changed == nil {
+			t.changed = make(chan struct{})
+		}
+		changed := t.changed
+		have := len(t.requests)
+		t.mu.Unlock()
+		if have >= n {
+			return nil
+		}
+		select {
+		case <-changed:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
 // Rendered returns the snapshots of the requests, in order.
 func (t *Transport) Rendered() []poo.Rendered {
 	t.mu.Lock()
@@ -308,6 +333,11 @@ func (t *Transport) Stream(ctx context.Context, req poo.ChatRequest) (poo.Stream
 	defer t.mu.Unlock()
 
 	t.requests = append(t.requests, copyRequest(req))
+	if t.changed == nil {
+		t.changed = make(chan struct{})
+	}
+	close(t.changed)
+	t.changed = make(chan struct{})
 	rendered := poo.Rendered{
 		API:       poo.APIChatCompletions,
 		Body:      renderBody(req),

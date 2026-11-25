@@ -97,7 +97,7 @@ func TestTheJobsRedactionKeepsTheSecretOutOfTheStore(t *testing.T) {
 	}
 	tool.ReleaseAll()
 
-	waitFor(t, "the job to end", func() bool { return sink.count("job.ended") == 1 })
+	waitRecords(t, sink, "job.ended", 1)
 	// The record the job's end carries holds no secret.
 	for _, rec := range sink.allRecords() {
 		ended, ok := rec.(*poo.JobEndedRecord)
@@ -150,8 +150,8 @@ func TestTheDeliveryDoesNotRerunTheJobsChain(t *testing.T) {
 	// The run waits for the job, and the job's result is delivered to
 	// the waiting run.
 	tool.ReleaseAll()
-	waitFor(t, "the result to be delivered", func() bool { return sink.count("input.delivered") == 1 })
-	waitFor(t, "the run to settle", func() bool { return sink.Settled() != nil })
+	waitRecords(t, sink, "input.delivered", 1)
+	waitRecords(t, sink, "run.settled", 1)
 	if got := hook.Calls(); got != 1 {
 		t.Errorf("the chain ran %d time(s), want 1: the delivery does not run it again", got)
 	}
@@ -188,7 +188,7 @@ func TestAJobTimeoutKeepsItsPartialOutputAndItsFlag(t *testing.T) {
 			if _, err := s.Prompt(context.Background(), "go"); err != nil {
 				t.Fatalf("starting the run: %v", err)
 			}
-			waitFor(t, "the job to end", func() bool { return sink.count("job.ended") == 1 })
+			waitRecords(t, sink, "job.ended", 1)
 			ended := jobEndedRecord(t, sink)
 			if !ended.TimedOut {
 				t.Errorf("job.ended.TimedOut is false, want true (outcome %q, text %q)", ended.Outcome, ended.Text)
@@ -225,7 +225,7 @@ func TestACancelledJobRunsItsAfterToolChain(t *testing.T) {
 	if err := s.CancelJob("j1"); err != nil {
 		t.Fatalf("cancelling the job: %v", err)
 	}
-	waitFor(t, "the job to end", func() bool { return sink.count("job.ended") == 1 })
+	waitRecords(t, sink, "job.ended", 1)
 
 	ended := jobEndedRecord(t, sink)
 	if strings.Contains(ended.Text, secret) {
@@ -302,7 +302,7 @@ func TestAReplacedJobKeepsTheOriginalInItsRecord(t *testing.T) {
 	<-tool.Started()
 	s.Cancel("cancel:review")
 	tool.ReleaseAll()
-	waitFor(t, "job.ended", func() bool { return sink.count("job.ended") == 1 })
+	waitRecords(t, sink, "job.ended", 1)
 
 	ended := jobEndedRecord(t, sink)
 	if ended.Text != "replacement" {

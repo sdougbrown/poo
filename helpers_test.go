@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/pootest"
@@ -182,6 +183,28 @@ func (s *recordingSink) count(name string) int {
 		}
 	}
 	return n
+}
+
+// waitRecords waits until the sink holds at least n records named
+// name, on the sink's own signal rather than a poll.
+func waitRecords(t *testing.T, s *recordingSink, name string, n int) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := s.WaitRecords(ctx, name, n); err != nil {
+		t.Fatalf("timed out waiting for %d %s records (the sink holds %d)", n, name, s.count(name))
+	}
+}
+
+// waitForSink waits for the sink's contents to satisfy cond, on the
+// sink's own signal instead of a poll loop.
+func waitForSink(t *testing.T, sink *recordingSink, what string, cond func() bool) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := sink.WaitFunc(ctx, cond); err != nil {
+		t.Fatalf("timed out waiting for %s", what)
+	}
 }
 
 // messages returns the message records, in order.

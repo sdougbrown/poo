@@ -335,7 +335,7 @@ func TestSkippedCallRecordsPrecedeTheSettle(t *testing.T) {
 		t.Fatal(err)
 	}
 	<-cancelled
-	waitFor(t, "the skipped call's result", func() bool { return sink.count("tool.result") == 2 })
+	waitRecords(t, &sink.recordingSink, "tool.result", 2)
 
 	names := sink.Names()
 	lastResult, settledAt := -1, -1

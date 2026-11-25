@@ -41,8 +41,8 @@ func TestAFeedBacklogDropsItsOldestInput(t *testing.T) {
 			t.Fatalf("queueing %q: %v", text, err)
 		}
 	}
-	waitFor(t, "the oldest input to be dropped", func() bool {
-		return sink.count("input.dropped") == 1
+	waitForSink(t, sink, "the oldest input to be dropped", func() bool {
+		return sink.count("input.dropped") >= 1
 	})
 
 	// The dropped input is the oldest one, and the drop names the
@@ -154,8 +154,8 @@ func TestAFeedBacklogCapsEachFeedOnItsOwn(t *testing.T) {
 			t.Fatalf("queueing %s on %s: %v", input.text, input.feed, err)
 		}
 	}
-	waitFor(t, "both of inbox's first inputs to be dropped", func() bool {
-		return sink.count("input.dropped") == 2
+	waitForSink(t, sink, "both of inbox's first inputs to be dropped", func() bool {
+		return sink.count("input.dropped") >= 2
 	})
 
 	// Each feed dropped its own oldest input, in its own order.
@@ -246,7 +246,7 @@ func TestTheCapDropsTheOldestWhateverOrderTheQueueHolds(t *testing.T) {
 			t.Fatalf("queueing %s: %v", text, err)
 		}
 	}
-	waitFor(t, "both inputs to be held", func() bool { return sink.count("input.held") == 2 })
+	waitForSink(t, sink, "both inputs to be held", func() bool { return sink.count("input.held") >= 2 })
 
 	// The queue reads [A, B] by acceptance order. An abandoned delivery
 	// puts its item back at the front: the queue then reads [B, A].
@@ -266,7 +266,7 @@ func TestTheCapDropsTheOldestWhateverOrderTheQueueHolds(t *testing.T) {
 	if err := poo.QueueFeedInput(s, "inbox", "", "C"); err != nil {
 		t.Fatalf("queueing C: %v", err)
 	}
-	waitFor(t, "the cap to drop an input", func() bool { return sink.count("input.dropped") == 1 })
+	waitForSink(t, sink, "the cap to drop an input", func() bool { return sink.count("input.dropped") >= 1 })
 
 	var droppedID string
 	for _, rec := range sink.allRecords() {
@@ -297,8 +297,8 @@ func TestAFeedWithoutASpecTakesTheDefaultBacklog(t *testing.T) {
 			t.Fatalf("queueing the input: %v", err)
 		}
 	}
-	waitFor(t, "the oldest input to be dropped", func() bool {
-		return sink.count("input.dropped") == 1
+	waitForSink(t, sink, "the oldest input to be dropped", func() bool {
+		return sink.count("input.dropped") >= 1
 	})
 	if pending := poo.PendingJobResults(sink.allRecords()); len(pending) != poo.DefaultFeedBacklog {
 		t.Errorf("the log holds %d pending inputs, want %d", len(pending), poo.DefaultFeedBacklog)

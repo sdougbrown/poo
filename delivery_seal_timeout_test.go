@@ -783,14 +783,13 @@ func TestAJobMessageAfterTheSealDoesNotMutateTheSettledRun(t *testing.T) {
 		t.Fatalf("waiting for the run: %v", err)
 	}
 	before := len(poo.Messages(s))
+	lateMsgs := sink.recordingSink.count("message")
 	close(sink.release)
 	<-cancelled
 
 	wantStalledRun(t, s, res)
 	assertNoSettledRecord(t, sink.count("run.settled"))
-	waitFor(t, "the late message to land", func() bool {
-		return len(deliveryMessages(sink.recordingSink)) == 1
-	})
+	waitRecords(t, sink.recordingSink, "message", lateMsgs+1)
 	if got := len(poo.Messages(s)); got != before {
 		t.Errorf("the settled run's view grew from %d to %d messages", before, got)
 	}

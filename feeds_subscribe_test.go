@@ -179,15 +179,15 @@ func TestSubscribeFeedStartsTheFeedWithItsScope(t *testing.T) {
 	}, poo.OnIdleWake)
 	s := newTestSession(t, testOptions(t, tr, &echoTool{}, sink), poo.WithFeeds(spec))
 	runSession(t, s, "subscribe to the feed")
-	waitFor(t, "the instance to start", func() bool { return len(feedStarts(sink)) == 1 })
+	waitRecords(t, sink, "feed.started", 1)
 	close(emitNow)
 
 	// The woken run reads the input, so the emit happened and reached the
 	// model.
-	waitFor(t, "the subscribed feed's input to reach the model", func() bool {
-		_, _, ok := deliveredMessage(sink)
-		return ok
-	})
+	waitRecords(t, sink, "input.delivered", 1)
+	if _, _, ok := deliveredMessage(sink); !ok {
+		t.Fatal("the feed's input did not reach the model")
+	}
 	starts := feedStarts(sink)
 	if len(starts) != 1 {
 		t.Fatalf("the session started %d feeds, want the one instance", len(starts))
@@ -261,9 +261,7 @@ func TestSubscribingTheSameScopeReachesOneInstance(t *testing.T) {
 	s := newTestSession(t, testOptions(t, tr, &echoTool{}, sink), poo.WithFeeds(theOptionalFeedSpec(waitingFeed, "")))
 	runSession(t, s, "start it twice")
 
-	waitFor(t, "the instance to start", func() bool {
-		return len(feedStarts(sink)) == 1
-	})
+	waitRecords(t, sink, "feed.started", 1)
 	if starts := feedStarts(sink); len(starts) != 1 {
 		t.Fatalf("the session started %d attempts, want the one instance", len(starts))
 	}
@@ -312,15 +310,15 @@ func TestResubscribingAStoppedFeedStartsItAgain(t *testing.T) {
 	s := newTestSession(t, testOptions(t, tr, &echoTool{}, sink), poo.WithFeeds(theOptionalFeedSpec(waitingFeed, "")))
 	runSession(t, s, "start it")
 
-	waitFor(t, "the instance to start", func() bool { return len(feedStarts(sink)) == 1 })
+	waitRecords(t, sink, "feed.started", 1)
 	origin := feedStarts(sink)[0].Meta().Origin
 	if err := s.CancelJob(string(origin)); err != nil {
 		t.Fatalf("stopping the instance: %v", err)
 	}
-	waitFor(t, "the instance to stop", func() bool { return len(feedEnds(sink)) == 1 })
+	waitRecords(t, sink, "feed.ended", 1)
 
 	runSession(t, s, "start it again")
-	waitFor(t, "the instance to start again", func() bool { return len(feedStarts(sink)) == 2 })
+	waitRecords(t, sink, "feed.started", 2)
 	starts := feedStarts(sink)
 	if starts[1].Meta().Origin != origin {
 		t.Errorf("the re-armed attempt's origin is %q, want the same instance %q", starts[1].Meta().Origin, origin)
@@ -354,7 +352,7 @@ func TestSubscribingBeyondTheInstanceCapIsRefused(t *testing.T) {
 		}
 		instances = append(instances, instance)
 	}
-	waitFor(t, "the instances to start", func() bool { return len(feedStarts(sink)) == poo.MaxFeedInstances })
+	waitRecords(t, sink, "feed.started", poo.MaxFeedInstances)
 
 	// One more is past the cap, and the refusal says how many the session
 	// runs and how to make room.
@@ -380,7 +378,7 @@ func TestSubscribingBeyondTheInstanceCapIsRefused(t *testing.T) {
 	if err := s.CancelJob(instances[0]); err != nil {
 		t.Fatalf("stopping the instance: %v", err)
 	}
-	waitFor(t, "the instance to stop", func() bool { return len(feedEnds(sink)) == 1 })
+	waitRecords(t, sink, "feed.ended", 1)
 	instance, started, err := poo.SubscribeFeed(s, "git-feedback", map[string]string{"url": "https://example.test/one-too-many"})
 	if err != nil || !started {
 		t.Fatalf("the call after a stop reached %q (started=%v, err=%v), want a new instance", instance, started, err)
@@ -415,7 +413,7 @@ func TestSubscribingTwoScopesThatSpellEachOtherStartsTwoInstances(t *testing.T) 
 	s := newTestSession(t, testOptions(t, tr, &echoTool{}, sink), poo.WithFeeds(spec))
 	runSession(t, s, "subscribe twice")
 
-	waitFor(t, "both instances to start", func() bool { return len(feedStarts(sink)) == 2 })
+	waitRecords(t, sink, "feed.started", 2)
 	starts := feedStarts(sink)
 	if len(starts) != 2 {
 		t.Fatalf("the session started %d instances, want two", len(starts))
@@ -523,10 +521,12 @@ func TestSubscribeFeedRefusesWhatTheManifestCannotTake(t *testing.T) {
 			))
 			runSession(t, s, "subscribe")
 
-			waitFor(t, "the call's refusal", func() bool {
-				return len(toolResults(sink, poo.SubscribeFeedToolName)) == 1
-			})
-			result := toolResults(sink, poo.SubscribeFeedToolName)[0]
+			waitRecords(t, sink, "tool.result", 1)
+			results := toolResults(sink, poo.SubscribeFeedToolName)
+			if len(results) == 0 {
+				t.Fatal("the log holds no subscribe result")
+			}
+			result := results[0]
 			if !result.IsError {
 				t.Fatalf("the call succeeded: %q", result.Text)
 			}
@@ -557,7 +557,7 @@ func TestAnOptionalFeedWithoutAScopeStartsAsItself(t *testing.T) {
 	))
 	runSession(t, s, "subscribe")
 
-	waitFor(t, "the instance to start", func() bool { return len(feedStarts(sink)) == 1 })
+	waitRecords(t, sink, "feed.started", 1)
 	if origin := feedStarts(sink)[0].Meta().Origin; origin != poo.FeedOrigin("audit") {
 		t.Errorf("the instance's origin is %q, want %q", origin, poo.FeedOrigin("audit"))
 	}
@@ -602,22 +602,18 @@ func TestAnOptionalFeedHoldsItsInputsUnlessItsManifestSaysWake(t *testing.T) {
 			s := newTestSession(t, testOptions(t, tr, &echoTool{}, sink), poo.WithFeeds(spec))
 			runSession(t, s, "subscribe")
 			close(emitNow)
-			waitFor(t, "the instance's input to join the queue", func() bool {
-				return sink.count("input.queued") == 1
-			})
+			waitRecords(t, sink, "input.queued", 1)
 			if tc.held {
-				waitFor(t, "the input to be held", func() bool {
-					return sink.count("input.held") == 1
-				})
+				waitRecords(t, sink, "input.held", 1)
 				if s.Running() {
 					t.Error("the session woke a run for a held feed's input")
 				}
 				return
 			}
-			waitFor(t, "the input to wake a run", func() bool {
-				_, _, ok := deliveredMessage(sink)
-				return ok
-			})
+			waitRecords(t, sink, "input.delivered", 1)
+			if _, _, ok := deliveredMessage(sink); !ok {
+				t.Fatal("the feed's input did not reach the model")
+			}
 		})
 	}
 }
@@ -639,7 +635,7 @@ func TestASubscriptionIsListedAndStoppedLikeAFeed(t *testing.T) {
 	// stopped: a cancel that arrives before the first attempt is not an
 	// attempt that ended.
 	runSession(t, s, "subscribe")
-	waitFor(t, "the instance to start", func() bool { return len(feedStarts(sink)) == 1 })
+	waitRecords(t, sink, "feed.started", 1)
 	instance := string(feedStarts(sink)[0].Meta().Origin)
 
 	runSession(t, s, "list it")
@@ -659,7 +655,7 @@ func TestASubscriptionIsListedAndStoppedLikeAFeed(t *testing.T) {
 	if err := s.CancelJob(instance); err != nil {
 		t.Fatalf("stopping the instance: %v", err)
 	}
-	waitFor(t, "the instance to stop", func() bool { return len(feedEnds(sink)) == 1 })
+	waitRecords(t, sink, "feed.ended", 1)
 	if ends := feedEnds(sink); string(ends[0].Meta().Origin) != instance || ends[0].Outcome != poo.FeedCancelled {
 		t.Errorf("the attempt ended as %q on %q, want cancelled on %q", ends[0].Outcome, ends[0].Meta().Origin, instance)
 	}
@@ -694,9 +690,11 @@ func TestAnInstanceKeepsItsOwnBacklogCap(t *testing.T) {
 	runSession(t, s, "subscribe")
 	close(emitNow)
 
-	waitFor(t, "the second input to make room at the cap", func() bool {
-		return sink.count("input.dropped") == 1
-	})
+	// The drop's record is written before the acceptance (the fate is
+	// recorded first, so a restore reads it), so the wait is on the
+	// acceptance: at the cap of one, a second queued input means the
+	// first one was dropped.
+	waitRecords(t, sink, "input.queued", 2)
 	if queued := sink.count("input.queued"); queued != 2 {
 		t.Errorf("the instance accepted %d inputs, want 2", queued)
 	}

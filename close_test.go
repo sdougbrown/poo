@@ -834,7 +834,7 @@ func TestTheObserverDropDiagnosticIsRecordOnly(t *testing.T) {
 	s := newTestSession(t, opts)
 	runSession(t, s, "start")
 	<-observer.entered
-	waitFor(t, "the overflow record", func() bool { return sink.count("observer.dropped") > 0 })
+	waitRecords(t, sink, "observer.dropped", 1)
 	for _, ev := range s.Events() {
 		if ev.Name == poo.EventObserverDropped {
 			t.Errorf("the overflow diagnostic was emitted as an event: %+v", ev)

@@ -85,12 +85,17 @@ func startTypedRepl(t *testing.T, server *fakeServer) (out *syncBuffer, typeLine
 type syncBuffer struct {
 	mu  sync.Mutex
 	buf bytes.Buffer
+	// sig is the write signal: the next write closes it, so a wait
+	// ends on the write that landed the text instead of a poll.
+	sig changedSignal
 }
 
 func (b *syncBuffer) Write(p []byte) (int, error) {
 	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buf.Write(p)
+	n, err := b.buf.Write(p)
+	b.mu.Unlock()
+	b.sig.signal()
+	return n, err
 }
 
 func (b *syncBuffer) String() string {
@@ -99,24 +104,70 @@ func (b *syncBuffer) String() string {
 	return b.buf.String()
 }
 
-// waitFor waits for what the repl drew to say want.
-func waitFor(t *testing.T, drawn interface{ String() string }, want string) {
+// changed hands out the buffer's write signal.
+func (b *syncBuffer) changed() chan struct{} { return b.sig.changed() }
+
+// changedSignal is the wait-on-signal the fakes share: a channel a
+// change closes, so a wait ends on the change instead of a poll. The
+// owner writes its state under its own mutex, then calls signal, which
+// takes only the signal's own mutex. A wait takes the channel, then
+// checks, then blocks: any change after the check closes the channel
+// the wait holds, so no change is missed.
+type changedSignal struct {
+	mu sync.Mutex
+	ch chan struct{}
+}
+
+func (c *changedSignal) changed() chan struct{} {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.ch == nil {
+		c.ch = make(chan struct{})
+	}
+	return c.ch
+}
+
+func (c *changedSignal) signal() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.ch != nil {
+		close(c.ch)
+		c.ch = nil
+	}
+}
+
+// drawnBuffer is what the drawn-output waits block on: the buffer's
+// own signal closes on each write. Both the repl's in-memory
+// transcript and the pty terminal's drawn stream speak it.
+type drawnBuffer interface {
+	String() string
+	changed() chan struct{}
+}
+
+// waitFor waits for what the repl drew to say want. The wait blocks
+// on the buffer's own signal, so the wait ends on the draw that landed
+// the text instead of a poll.
+func waitFor(t *testing.T, drawn drawnBuffer, want string) {
 	t.Helper()
 	waitTimes(t, drawn, want, 1)
 }
 
 // waitTimes waits for what the repl drew to say want count times.
-func waitTimes(t *testing.T, drawn interface{ String() string }, want string, count int) {
+func waitTimes(t *testing.T, drawn drawnBuffer, want string, count int) {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		if strings.Count(drawn.String(), want) >= count {
+	for {
+		changed := drawn.changed()
+		if got := strings.Count(drawn.String(), want); got >= count {
 			return
 		}
-		time.Sleep(5 * time.Millisecond)
+		select {
+		case <-changed:
+		case <-time.After(time.Until(deadline)):
+			t.Fatalf("the repl drew %q %d times, want %d:\n%s", want,
+				strings.Count(drawn.String(), want), count, drawn.String())
+		}
 	}
-	t.Fatalf("the repl drew %q %d times, want %d:\n%s", want,
-		strings.Count(drawn.String(), want), count, drawn.String())
 }
 
 // promptsSoFar returns the prompts the session has received so far.
@@ -127,66 +178,78 @@ func (s *fakeServer) promptsSoFar() []string {
 }
 
 // waitPrompts waits until the server has want prompts from the
-// session, and returns them.
+// session, and returns them. The wait blocks on the server's own
+// signal, so the wait ends on the prompt's arrival instead of a poll.
 func (s *fakeServer) waitPrompts(t *testing.T, want int) []string {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
+	deadline := time.After(10 * time.Second)
+	for {
+		changed := s.changed()
 		s.mu.Lock()
 		prompts := append([]string(nil), s.prompts...)
 		s.mu.Unlock()
 		if len(prompts) >= want {
 			return prompts
 		}
-		time.Sleep(5 * time.Millisecond)
+		select {
+		case <-changed:
+		case <-deadline:
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			t.Fatalf("the server got %d prompts, want %d: %v", len(s.prompts), want, s.prompts)
+		}
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	t.Fatalf("the server got %d prompts, want %d: %v", len(s.prompts), want, s.prompts)
-	return nil
 }
 
 // waitMessages waits until the server has want run/message texts from
-// the session, and returns them.
+// the session, and returns them. The wait blocks on the server's own
+// signal, so the wait ends on the message's arrival instead of a poll.
 //
 // The transcript's steer echo is written before the request goes out,
 // so a test that waits for the echo has not yet waited for the send.
 func (s *fakeServer) waitMessages(t *testing.T, want int) []string {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
+	deadline := time.After(10 * time.Second)
+	for {
+		changed := s.changed()
 		s.mu.Lock()
 		messages := append([]string(nil), s.messages...)
 		s.mu.Unlock()
 		if len(messages) >= want {
 			return messages
 		}
-		time.Sleep(5 * time.Millisecond)
+		select {
+		case <-changed:
+		case <-deadline:
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			t.Fatalf("the server got %d messages, want %d: %v", len(s.messages), want, s.messages)
+		}
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	t.Fatalf("the server got %d messages, want %d: %v", len(s.messages), want, s.messages)
-	return nil
 }
 
 // waitCancels waits until the session's cancels number want, and
-// returns them.
+// returns them. The wait blocks on the server's own signal, so the
+// wait ends on the cancel's arrival instead of a poll.
 func (s *fakeServer) waitCancels(t *testing.T, want int) []string {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
+	deadline := time.After(10 * time.Second)
+	for {
+		changed := s.changed()
 		s.mu.Lock()
 		cancels := append([]string(nil), s.cancels...)
 		s.mu.Unlock()
 		if len(cancels) >= want {
 			return cancels
 		}
-		time.Sleep(5 * time.Millisecond)
+		select {
+		case <-changed:
+		case <-deadline:
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			t.Fatalf("the server got %d cancels, want %d: %v", len(s.cancels), want, s.cancels)
+		}
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	t.Fatalf("the server got %d cancels, want %d: %v", len(s.cancels), want, s.cancels)
-	return nil
 }
 
 func TestUsageUpdatesTheStatus(t *testing.T) {

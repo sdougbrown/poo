@@ -35,11 +35,14 @@ type Sink struct {
 	flushed int
 	// err is the failure the sink returns, when it is set.
 	err error
+	// changed is closed by the append that lands a record, so a wait
+	// on the records ends on the append instead of a poll.
+	changed chan struct{}
 }
 
 // NewSink returns an empty sink.
 func NewSink() *Sink {
-	return &Sink{}
+	return &Sink{changed: make(chan struct{})}
 }
 
 // ReadRecords reads the sink's records back. It is the read side the
@@ -84,7 +87,64 @@ func (s *Sink) Append(ctx context.Context, rec poo.Record) error {
 	s.seq++
 	poo.Stamp(rec, s.seq, time.Now())
 	s.records = append(s.records, rec)
+	if s.changed == nil {
+		s.changed = make(chan struct{})
+	}
+	close(s.changed)
+	s.changed = make(chan struct{})
 	return nil
+}
+
+// WaitRecords blocks until the sink holds at least n records named
+// name, or the context ends. It is the signal form of a count poll:
+// the append that reaches the count ends the wait, so a test waits on
+// the event instead of polling the log on a deadline.
+func (s *Sink) WaitRecords(ctx context.Context, name string, n int) error {
+	for {
+		s.mu.Lock()
+		if s.changed == nil {
+			s.changed = make(chan struct{})
+		}
+		changed := s.changed
+		have := 0
+		for _, rec := range s.records {
+			if rec.Meta().Record == name {
+				have++
+			}
+		}
+		if have >= n {
+			s.mu.Unlock()
+			return nil
+		}
+		s.mu.Unlock()
+		select {
+		case <-changed:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
+// WaitFunc blocks until cond holds or the context ends. The sink wakes
+// the wait on every append, so a condition the appends drive ends on
+// the event instead of a poll.
+func (s *Sink) WaitFunc(ctx context.Context, cond func() bool) error {
+	for {
+		s.mu.Lock()
+		if s.changed == nil {
+			s.changed = make(chan struct{})
+		}
+		changed := s.changed
+		s.mu.Unlock()
+		if cond() {
+			return nil
+		}
+		select {
+		case <-changed:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 }
 
 // Flush does nothing: the records are already in memory.

@@ -187,7 +187,7 @@ func TestTheJobTimeoutStopsTheJob(t *testing.T) {
 		t.Fatalf("starting the run: %v", err)
 	}
 	<-tool.Started()
-	waitFor(t, "the job to time out", func() bool {
+	waitForSink(t, sink, "the job to time out", func() bool {
 		return sink.count("job.ended") == 1
 	})
 	var ended *poo.JobEndedRecord
@@ -352,7 +352,7 @@ func TestTheJobsToolListsTheRunningJobs(t *testing.T) {
 	// The job stays running while the model lists it: releasing it
 	// before the jobs call would make it a finished result, not a
 	// running job.
-	waitFor(t, "the jobs tool to run", func() bool {
+	waitForSink(t, sink, "the jobs tool to run", func() bool {
 		for _, rec := range sink.allRecords() {
 			if r, ok := rec.(*poo.ToolResultRecord); ok && r.Tool == "jobs" {
 				return true
@@ -515,7 +515,7 @@ func TestTheJobRunsUnderTheSessionContext(t *testing.T) {
 	}
 	// The job is still running: the cancel did not stop it.
 	tool.Release()
-	waitFor(t, "the job to end", func() bool {
+	waitForSink(t, sink, "the job to end", func() bool {
 		return sink.count("job.ended") == 1
 	})
 	for _, rec := range sink.allRecords() {
@@ -640,7 +640,7 @@ func TestACancelWithASynchronousCallAndAJobSettlesTheRun(t *testing.T) {
 	}
 	// The job keeps running, and its result wakes the session.
 	jobTool.Release()
-	waitFor(t, "the woken run to settle", func() bool {
+	waitForSink(t, sink, "the woken run to settle", func() bool {
 		settled := sink.Settled()
 		return settled != nil && settled.RunID != firstRunID
 	})
@@ -780,7 +780,7 @@ func TestAJobTimeoutBeatsANilError(t *testing.T) {
 		t.Fatalf("starting the run: %v", err)
 	}
 	<-tool.entered
-	waitFor(t, "job completion", func() bool { return sink.count("job.ended") == 1 })
+	waitForSink(t, sink, "job completion", func() bool { return sink.count("job.ended") >= 1 })
 	for _, rec := range sink.allRecords() {
 		end, ok := rec.(*poo.JobEndedRecord)
 		if !ok {

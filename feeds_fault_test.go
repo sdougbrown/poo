@@ -69,12 +69,12 @@ func TestAFeedFaultSuspendsTheFeedAndWakesUnderHold(t *testing.T) {
 	restore := poo.SetFeedRestartDelay(s, func(ran, prev time.Duration) time.Duration { return 0 })
 	defer restore()
 
-	waitFor(t, "the feed's attempt to start", func() bool { return len(feedStarts(sink)) == 1 })
+	waitForSink(t, sink, "the feed's attempt to start", func() bool { return len(feedStarts(sink)) >= 1 })
 	close(fire)
 
 	// The report wakes the session although the feed holds its inputs, and
 	// the model reads it as the feed's own message.
-	waitFor(t, "the fault report to reach the chat model", func() bool {
+	waitForSink(t, sink, "the fault report to reach the chat model", func() bool {
 		_, _, ok := deliveredMessage(sink)
 		return ok
 	})
@@ -102,7 +102,7 @@ func TestAFeedFaultSuspendsTheFeedAndWakesUnderHold(t *testing.T) {
 		t.Errorf("the report %q carries the filter's stderr", text)
 	}
 	// One failure, one attempt: the suspension is what the log says.
-	waitFor(t, "the attempt's end to be recorded", func() bool { return len(feedEnds(sink)) == 1 })
+	waitForSink(t, sink, "the attempt's end to be recorded", func() bool { return len(feedEnds(sink)) >= 1 })
 	ends := feedEnds(sink)
 	if ends[0].Outcome != poo.FeedSuspended {
 		t.Errorf("the attempt ended %q, want %q", ends[0].Outcome, poo.FeedSuspended)
@@ -142,7 +142,7 @@ func TestALongScopeStillWritesTheFaultLog(t *testing.T) {
 	s := newTestSession(t, opts, poo.WithFeeds(theOptionalFeedSpec(faultedFeed, poo.OnIdleHold)))
 
 	runSession(t, s, "start the feed")
-	waitFor(t, "the fault report to reach the chat model", func() bool {
+	waitForSink(t, sink, "the fault report to reach the chat model", func() bool {
 		_, _, ok := deliveredMessage(sink)
 		return ok
 	})
@@ -192,7 +192,7 @@ func TestAFaultReportWithoutItsLogSaysSo(t *testing.T) {
 		Run:    faultedFeed,
 	}))
 
-	waitFor(t, "the fault report to reach the chat model", func() bool {
+	waitForSink(t, sink, "the fault report to reach the chat model", func() bool {
 		_, _, ok := deliveredMessage(sink)
 		return ok
 	})
@@ -251,7 +251,7 @@ func TestResubscribingASuspendedFeedStartsItAgain(t *testing.T) {
 	// The first attempt failed and the session delivered the report, which
 	// names the call that starts the feed again with the scope it runs
 	// with.
-	waitFor(t, "the fault report to reach the chat model", func() bool {
+	waitForSink(t, sink, "the fault report to reach the chat model", func() bool {
 		_, _, ok := deliveredMessage(sink)
 		return ok
 	})
@@ -271,7 +271,7 @@ func TestResubscribingASuspendedFeedStartsItAgain(t *testing.T) {
 	// The second call starts the suspended instance again rather than
 	// leaving it down.
 	runSession(t, s, "start it again")
-	waitFor(t, "the instance's second attempt", func() bool { return len(feedStarts(sink)) == 2 })
+	waitForSink(t, sink, "the instance's second attempt", func() bool { return len(feedStarts(sink)) >= 2 })
 	result := toolResults(sink, poo.SubscribeFeedToolName)
 	if len(result) != 2 || result[1].IsError {
 		t.Fatalf("the calls' results are %+v, want two that succeeded", result)
@@ -309,7 +309,7 @@ func TestCancelStopsASuspendedFeed(t *testing.T) {
 	if _, started, err := poo.SubscribeFeed(s, "git-feedback", scope); err != nil || !started {
 		t.Fatalf("subscribing to the stopped feed: started=%v err=%v", started, err)
 	}
-	waitFor(t, "the instance's next attempt", func() bool { return len(feedStarts(sink)) == 2 })
+	waitForSink(t, sink, "the instance's next attempt", func() bool { return len(feedStarts(sink)) >= 2 })
 }
 
 // listedAs returns the status the jobs listing gives one job, or the empty
@@ -335,6 +335,18 @@ func TestOneSuspensionIsOneWakeAndCountsWhatJoinedIt(t *testing.T) {
 	opts.Tools = map[string]poo.Tool{gate.Spec().Name: gate}
 	opts.ToolOrder = []string{gate.Spec().Name}
 	s := newTestSession(t, opts, poo.WithFeeds(theOptionalFeedSpec(faultedFeed, poo.OnIdleHold)))
+	// The firebreak's two seams choreograph the race the fold covers:
+	// the first report's delivery waits for the test, the second fault
+	// folds into the report in flight, and the delivery writes the
+	// joined count.
+	folded := make(chan struct{})
+	deliveryHold := make(chan struct{})
+	deliveryReleased := make(chan struct{})
+	restore := s.SetJobRaceHooks(&poo.JobRaceHooks{
+		AfterFaultFold:      func() { close(folded) },
+		BeforeFaultDelivery: func() { close(deliveryHold); <-deliveryReleased },
+	})
+	defer restore()
 
 	// The run is open in a tool, so the report a fault queues waits for
 	// the next turn end.
@@ -345,11 +357,11 @@ func TestOneSuspensionIsOneWakeAndCountsWhatJoinedIt(t *testing.T) {
 	if _, started, err := poo.SubscribeFeed(s, "git-feedback", map[string]string{"url": "https://example.test/repo"}); err != nil || !started {
 		t.Fatalf("subscribing to the feed: started=%v err=%v", started, err)
 	}
-	waitFor(t, "the first fault's end", func() bool { return len(feedEnds(sink)) == 1 })
+	waitForSink(t, sink, "the first fault's end", func() bool { return len(feedEnds(sink)) >= 1 })
 	// The first report must be queued before the re-arm: a second arm that
 	// fails before it is would queue its own report, and the fold the test
 	// covers would miss.
-	waitFor(t, "the first fault report to be queued", func() bool {
+	waitForSink(t, sink, "the first fault report to be queued", func() bool {
 		for _, rec := range sink.allRecords() {
 			if r, ok := rec.(*poo.InputQueuedRecord); ok && strings.Contains(r.Text, ` fault="`) {
 				return true
@@ -357,15 +369,28 @@ func TestOneSuspensionIsOneWakeAndCountsWhatJoinedIt(t *testing.T) {
 		}
 		return false
 	})
-	// A second arm fails again while the first report is still queued: it
+	// The record is written before the report joins the job queue, and the
+	// fold looks in the queue: wait for the queue so a fault that arrives
+	// now folds in rather than queueing one of its own.
+	waitFor(t, "the first report to join the job queue", func() bool {
+		return s.QueuedJobResults() >= 1
+	})
+	// The run can be released now: the drain takes the queued report
+	// for delivery and waits, so the second fault folds into the report
+	// in flight rather than racing it.
+	close(gate.release)
+	<-deliveryHold
+	// A second arm fails again while the first report is in flight: it
 	// joins that report rather than queueing one of its own.
 	if _, started, err := poo.SubscribeFeed(s, "git-feedback", map[string]string{"url": "https://example.test/repo"}); err != nil || !started {
 		t.Fatalf("re-arming the feed: started=%v err=%v", started, err)
 	}
-	waitFor(t, "the second fault's end", func() bool { return len(feedEnds(sink)) == 2 })
-
-	close(gate.release)
-	waitFor(t, "the joined report to reach the chat model", func() bool {
+	waitForSink(t, sink, "the second fault's end", func() bool { return len(feedEnds(sink)) >= 2 })
+	// The fold ran, so the in-flight report counts the second fault:
+	// the delivery can write the joined report now.
+	<-folded
+	close(deliveryReleased)
+	waitForSink(t, sink, "the joined report to reach the chat model", func() bool {
 		_, _, ok := deliveredMessage(sink)
 		return ok
 	})
@@ -481,14 +506,20 @@ func TestAStaleSuspensionReportIsDropped(t *testing.T) {
 	if err != nil || !started {
 		t.Fatalf("subscribing to the feed: started=%v err=%v", started, err)
 	}
-	waitFor(t, "the first fault's report", func() bool { return len(faultReportTexts(sink)) == 1 })
+	waitForSink(t, sink, "the first fault's report", func() bool { return len(faultReportTexts(sink)) >= 1 })
 
 	// The instance is started again after its suspension, and the second
 	// attempt runs.
 	if _, started, err := poo.SubscribeFeed(s, "git-feedback", scope); err != nil || !started {
 		t.Fatalf("re-arming the feed: started=%v err=%v", started, err)
 	}
-	waitFor(t, "the instance's second attempt", func() bool { return len(feedStarts(sink)) == 2 })
+	waitForSink(t, sink, "the instance's second attempt", func() bool { return len(feedStarts(sink)) >= 2 })
+	// The record is written before the instance's state moves to running,
+	// and the stale check reads the state: wait for the listing so the
+	// report for the first attempt is seen as stale.
+	waitFor(t, "the re-armed feed to be listed running", func() bool {
+		return listedAs(s, origin) == poo.JobRunning
+	})
 
 	// The first attempt's supervisor reports after the re-arm. The instance
 	// is running, so there is nothing to remedy: the report is dropped.
@@ -506,7 +537,7 @@ func TestAStaleSuspensionReportIsDropped(t *testing.T) {
 	// The running attempt's own fault is reported: the stale path left no
 	// reservation to fold into, and no stale report to answer.
 	close(fire)
-	waitFor(t, "the second fault's report", func() bool { return len(faultReportTexts(sink)) == 2 })
+	waitForSink(t, sink, "the second fault's report", func() bool { return len(faultReportTexts(sink)) >= 2 })
 	reports := faultReportTexts(sink)
 	if strings.Contains(reports[1], "more arrived") {
 		t.Errorf("the second report %q folded into the stale one", reports[1])
@@ -608,7 +639,7 @@ func TestAFaultReportReservationBelongsToItsAttempt(t *testing.T) {
 		t.Error("the reservation outlived its attempt's cleanup")
 	}
 	gate.release(0)
-	waitFor(t, "the report to be queued", func() bool {
-		return len(faultReportTexts(gate.recordingSink)) == 1
+	waitForSink(t, gate.recordingSink, "the report to be queued", func() bool {
+		return len(faultReportTexts(gate.recordingSink)) >= 1
 	})
 }

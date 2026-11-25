@@ -169,9 +169,7 @@ func TestASteerWhileWaitingIsDeliveredAtOnce(t *testing.T) {
 		t.Fatalf("sending the steer: %v", err)
 	}
 	// The steer was delivered at once.
-	waitFor(t, "the steer to be delivered", func() bool {
-		return sink.count("input.delivered") == 1
-	})
+	waitRecords(t, sink, "input.delivered", 1)
 	// The job is still running: it was not stopped by the steer.
 	tool.Release()
 	res, err := s.Wait(context.Background())
@@ -206,9 +204,7 @@ func TestAnInterruptWhileWaitingIsDeliveredAtOnce(t *testing.T) {
 	if _, err := s.Send("stop that", poo.Interrupt); err != nil {
 		t.Fatalf("sending the interrupt: %v", err)
 	}
-	waitFor(t, "the interrupt to be delivered", func() bool {
-		return sink.count("input.delivered") == 1
-	})
+	waitRecords(t, sink, "input.delivered", 1)
 	tool.Release()
 	if _, err := s.Wait(context.Background()); err != nil {
 		t.Fatalf("waiting for the run: %v", err)
@@ -284,9 +280,7 @@ func TestACancelWithARunningJobSettlesTheRunAndListsTheJob(t *testing.T) {
 	}
 	// The job is still running: the cancel did not stop it.
 	tool.Release()
-	waitFor(t, "the job to end", func() bool {
-		return sink.count("job.ended") == 1
-	})
+	waitRecords(t, sink, "job.ended", 1)
 }
 
 // TestTheJobResultWakesTheSession covers the rule: a result that
@@ -348,10 +342,10 @@ func TestACancelledRunsJobResultWakesTheSession(t *testing.T) {
 	}
 	// The job finishes, and the session wakes with it.
 	tool.Release()
-	waitFor(t, "the woken run to settle", func() bool {
-		settled := sink.Settled()
-		return settled != nil && settled.RunID != firstRunID
-	})
+	waitRecords(t, sink, "run.settled", 2)
+	if sink.Settled().RunID == firstRunID {
+		t.Fatal("the settle is the first run's, want the woken run's")
+	}
 	// The woken run carries the job results.
 	found := false
 	for _, rec := range sink.allRecords() {
@@ -401,9 +395,7 @@ func TestOnIdleHoldEmitsInputHeld(t *testing.T) {
 	}
 	// The result is held: the session says so.
 	tool.Release()
-	waitFor(t, "the result to be held", func() bool {
-		return sink.count("input.held") == 1
-	})
+	waitRecords(t, sink, "input.held", 1)
 	// No run was woken: the result waits for the next prompt.
 	if s.Running() {
 		t.Error("the session woke a run, want the result to wait")
@@ -440,10 +432,10 @@ func TestTheUnattendedWakeLimitHoldsTheThirdWake(t *testing.T) {
 	}
 	// The first wake is unattended, and the limit is two.
 	tool.Release()
-	waitFor(t, "the woken run to settle", func() bool {
-		settled := sink.Settled()
-		return settled != nil && settled.RunID != firstRunID
-	})
+	waitRecords(t, sink, "run.settled", 2)
+	if sink.Settled().RunID == firstRunID {
+		t.Fatal("the settle is the first run's, want the woken run's")
+	}
 	// No result was held: the first wake is under the limit.
 	if sink.count("input.held") != 0 {
 		t.Errorf("the log holds %d input.held records, want 0", sink.count("input.held"))
@@ -525,9 +517,7 @@ func TestAnInterruptDuringExecutingStopsTheCallAndNotTheJob(t *testing.T) {
 	if res.Reason == poo.ReasonCancelled {
 		t.Errorf("the run settled %q: an interrupt does not end the run", res.Reason)
 	}
-	waitFor(t, "the job to end", func() bool {
-		return sink.count("job.ended") == 1
-	})
+	waitRecords(t, sink, "job.ended", 1)
 }
 
 // TestOnIdleHoldDoesNotSuppressAWaitingDelivery covers the delivery table: a result arriving while the run waits is delivered at

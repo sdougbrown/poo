@@ -211,7 +211,7 @@ func TestTheFilterPromptBelongsToTheInstance(t *testing.T) {
 	if err := s.CancelJob(string(origin)); err != nil {
 		t.Fatalf("stopping the instance: %v", err)
 	}
-	waitFor(t, "the instance's attempt to end", func() bool { return len(feedEnds(sink)) == 1 })
+	waitForSink(t, sink, "the instance's attempt to end", func() bool { return len(feedEnds(sink)) >= 1 })
 	if _, started, err := poo.SubscribeFeed(s, "audit", nil); err != nil || !started {
 		t.Fatalf("the re-arm is %v, %v; want the stopped instance started again", started, err)
 	}

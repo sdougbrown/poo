@@ -165,7 +165,7 @@ func TestARepeatCallAfterTheJobEndedRuns(t *testing.T) {
 	// an idle session: it is held for the next prompt, and OnIdleHold
 	// wakes no run of its own.
 	tool.Release()
-	waitFor(t, "the job's result to be held", func() bool {
+	waitForSink(t, sink, "the job's result to be held", func() bool {
 		return sink.count("input.held") >= 1
 	})
 	held := false

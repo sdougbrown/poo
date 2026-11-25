@@ -117,7 +117,7 @@ func TestACallCliBackgroundCallBecomesAJob(t *testing.T) {
 		return err == nil && strings.Contains(string(data), "ran")
 	})
 	var end *poo.JobEndedRecord
-	waitFor(t, "the job's completed result", func() bool {
+	waitForSink(t, sink, "the job's completed result", func() bool {
 		for _, rec := range sink.allRecords() {
 			if r, ok := rec.(*poo.JobEndedRecord); ok && strings.Contains(r.Text, "hello ada") {
 				end = r

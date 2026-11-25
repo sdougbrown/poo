@@ -429,8 +429,17 @@ func TestABackgroundJobIsStoppedByCancelJob(t *testing.T) {
 			if _, err := s.Prompt(context.Background(), "start the long job"); err != nil {
 				t.Fatalf("starting the run: %v", err)
 			}
-			// The background call returns at once, and the job runs.
-			waitFor(t, "the job to start", func() bool { return resultTexts(sink, "started job j1") > 0 })
+			// The background call returns at once, and the job runs. The
+			// result is the first tool result the run records, so the
+			// wait ends on the record's own signal.
+			jobCtx, jobCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			if err := sink.WaitRecords(jobCtx, "tool.result", 1); err != nil {
+				t.Fatalf("the job's start result did not land: %v", err)
+			}
+			jobCancel()
+			if resultTexts(sink, "started job j1") == 0 {
+				t.Fatal("the job's start result is not there")
+			}
 			waitFor(t, "the job's process to start", func() bool { return c.alive(t, dir) })
 
 			// The run is cancelled while the job runs. The job keeps

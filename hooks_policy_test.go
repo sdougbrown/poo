@@ -333,7 +333,7 @@ func TestAnInterruptDuringTheBeforeToolChainKeepsTheFirstResult(t *testing.T) {
 		t.Fatalf("interrupting the run: %v", err)
 	}
 	close(blocker.release)
-	waitFor(t, "the run to settle", func() bool { return sink.Settled() != nil })
+	waitRecords(t, sink, "run.settled", 1)
 
 	if got := tool.Calls(); got != 0 {
 		t.Errorf("the tool was called %d time(s) after an interrupt, want 0", got)

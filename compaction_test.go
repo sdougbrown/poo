@@ -1508,7 +1508,7 @@ func TestAJobHandleSurvivesTheCompaction(t *testing.T) {
 	<-started
 	// The compaction happens at the gate after the first turn, and the
 	// job is still running then.
-	waitFor(t, "the compaction to happen", func() bool { return sink.count("compaction") == 1 })
+	waitForSink(t, sink, "the compaction to happen", func() bool { return sink.count("compaction") >= 1 })
 	// The job finishes, and its result waits for the turn end.
 	tool.ReleaseAll()
 	waitFor(t, "the job's result to be queued", func() bool { return s.QueuedJobResults() > 0 })
@@ -1649,7 +1649,7 @@ func TestTheSessionKeepsItsJobsAfterAnEnd(t *testing.T) {
 	// The job is still the session's, and its result still reaches the
 	// model: the result wakes the session and is delivered.
 	tool.ReleaseAll()
-	waitFor(t, "the job's result to reach the model", func() bool {
+	waitForSink(t, sink, "the job's result to reach the model", func() bool {
 		for _, m := range sink.messages() {
 			if m.Origin == poo.OriginJob {
 				return true

@@ -1818,7 +1818,11 @@ func TestARefusedInputIsNotDrainedBeforeItsQueuedRecord(t *testing.T) {
 	hold.finish()
 	// The turn-end drain has run, and the run has moved on to its next
 	// request. The refused message must not be part of it.
-	waitFor(t, "the drain's next request", func() bool { return len(tr.Requests()) >= 2 })
+	reqCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := tr.WaitRequests(reqCtx, 2); err != nil {
+		t.Fatalf("timed out waiting for the drain's next request")
+	}
 	close(sink.release)
 	if err := <-done; err == nil {
 		t.Fatal("Send accepted a message whose input.queued record was refused")

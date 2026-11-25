@@ -31,8 +31,8 @@ func TestARunningFeedIsListedOnceWithItsHeldInput(t *testing.T) {
 			return ctx.Err()
 		},
 	}))
-	waitFor(t, "the input to be held", func() bool {
-		return sink.count("input.held") == 1
+	waitForSink(t, sink, "the input to be held", func() bool {
+		return sink.count("input.held") >= 1
 	})
 
 	jobs := s.Jobs()

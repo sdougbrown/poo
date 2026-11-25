@@ -819,7 +819,7 @@ func TestCloseFinishesJobHookBeforeReturning(t *testing.T) {
 	}
 	before := sink.count("job.ended")
 	close(h.release)
-	waitFor(t, "late job.ended", func() bool { return sink.count("job.ended") == 1 })
+	waitRecords(t, sink, "job.ended", 1)
 	if before != 1 {
 		t.Fatal("Close returned and flushed with job.ended=0; releasing completion hook writes job.ended after Close")
 	}

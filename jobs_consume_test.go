@@ -79,13 +79,9 @@ func TestTheJobResultIsDeliveredInCompletionOrder(t *testing.T) {
 	// lower id.
 	before := sink.count("job.ended")
 	tool.Release()
-	waitFor(t, "the first job to end", func() bool {
-		return sink.count("job.ended") > before
-	})
+	waitRecords(t, sink, "job.ended", before+1)
 	tool.Release()
-	waitFor(t, "the results to be delivered", func() bool {
-		return countJobDeliveries(sink) == 2
-	})
+	waitRecords(t, sink, "input.delivered", 2)
 	// The queue hands the results out in the order they were finished,
 	// so the input ids follow the jobs' order: the first job to finish
 	// has the lower id.
@@ -120,19 +116,6 @@ func TestTheJobResultIsDeliveredInCompletionOrder(t *testing.T) {
 	}
 }
 
-// countJobDeliveries returns how many job results were delivered.
-func countJobDeliveries(sink *recordingSink) int {
-	n := 0
-	for _, rec := range sink.allRecords() {
-		d, ok := rec.(*poo.InputDeliveredRecord)
-		if !ok || d.Mode != poo.InputModeJob {
-			continue
-		}
-		n++
-	}
-	return n
-}
-
 // TestTheJobsToolListsTheHeldJobs covers the rule: the jobs tool
 // lists the running and the held jobs.
 func TestTheJobsToolListsTheHeldJobs(t *testing.T) {
@@ -165,9 +148,7 @@ func TestTheJobsToolListsTheHeldJobs(t *testing.T) {
 		t.Fatalf("waiting for the run: %v", err)
 	}
 	tool.Release()
-	waitFor(t, "the result to be held", func() bool {
-		return sink.count("input.held") == 1
-	})
+	waitRecords(t, sink, "input.held", 1)
 	// The held job is named by the session.
 	held := s.HeldJobs()
 	if len(held) != 1 || held[0] != "j1" {
@@ -244,9 +225,7 @@ func TestWaitJobsWaitsForTheRunningJobs(t *testing.T) {
 	}
 	// The job ends, and the wait ends with it.
 	tool.Release()
-	waitFor(t, "the job to end", func() bool {
-		return sink.count("job.ended") == 1
-	})
+	waitRecords(t, sink, "job.ended", 1)
 	select {
 	case err := <-done:
 		if err != nil {
@@ -329,12 +308,8 @@ func TestAJobResultDuringCompactingStaysQueued(t *testing.T) {
 	// The job ends: the result waits for the next turn end, and the
 	// compactor's next view does not hold it.
 	tool.Release()
-	waitFor(t, "the job to end", func() bool {
-		return sink.count("job.ended") == 1
-	})
-	waitFor(t, "the result to be delivered", func() bool {
-		return countJobDeliveries(sink) == 1
-	})
+	waitRecords(t, sink, "job.ended", 1)
+	waitRecords(t, sink, "input.delivered", 1)
 	views := compactor.Views()
 	if len(views) == 0 {
 		t.Fatal("the compactor was never asked")

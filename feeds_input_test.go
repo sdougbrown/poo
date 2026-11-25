@@ -38,7 +38,7 @@ func TestAFeedInputWakesAnIdleSession(t *testing.T) {
 	if err := poo.QueueFeedInput(s, "inbox", "alice", "the message"); err != nil {
 		t.Fatalf("queueing the feed's input: %v", err)
 	}
-	waitFor(t, "the woken run to settle", func() bool {
+	waitForSink(t, sink, "the woken run to settle", func() bool {
 		return sink.Settled() != nil
 	})
 
@@ -108,8 +108,8 @@ func TestAHeldFeedInputWaitsForTheNextPrompt(t *testing.T) {
 	if err := poo.QueueFeedInput(s, "inbox", "", "the message"); err != nil {
 		t.Fatalf("queueing the feed's input: %v", err)
 	}
-	waitFor(t, "the input to be held", func() bool {
-		return sink.count("input.held") == 1
+	waitForSink(t, sink, "the input to be held", func() bool {
+		return sink.count("input.held") >= 1
 	})
 	if s.Running() {
 		t.Fatal("the session woke a run, want the input held")
@@ -188,15 +188,15 @@ func TestTheWakeLimitHoldsAFeedInput(t *testing.T) {
 	if err := poo.QueueFeedInput(s, "inbox", "", "the first"); err != nil {
 		t.Fatalf("queueing the first input: %v", err)
 	}
-	waitFor(t, "the woken run to settle", func() bool {
+	waitForSink(t, sink, "the woken run to settle", func() bool {
 		return sink.Settled() != nil
 	})
 	// The second input is past the limit of one unattended wake.
 	if err := poo.QueueFeedInput(s, "inbox", "", "the second"); err != nil {
 		t.Fatalf("queueing the second input: %v", err)
 	}
-	waitFor(t, "the second input to be held", func() bool {
-		return sink.count("input.held") == 1
+	waitForSink(t, sink, "the second input to be held", func() bool {
+		return sink.count("input.held") >= 1
 	})
 	var held *poo.InputHeldRecord
 	for _, rec := range sink.allRecords() {
@@ -262,8 +262,8 @@ func TestTheRestoreDeliversAnUndeliveredFeedInputOnce(t *testing.T) {
 	if err := poo.QueueFeedInput(live, "inbox", "alice", "the message"); err != nil {
 		t.Fatalf("queueing the feed's input: %v", err)
 	}
-	waitFor(t, "the input to be held", func() bool {
-		return liveSink.count("input.held") == 1
+	waitForSink(t, liveSink, "the input to be held", func() bool {
+		return liveSink.count("input.held") >= 1
 	})
 	if _, err := live.Prompt(context.Background(), "go"); err != nil {
 		t.Fatalf("starting the live run: %v", err)
@@ -290,8 +290,8 @@ func TestTheRestoreDeliversAnUndeliveredFeedInputOnce(t *testing.T) {
 		t.Fatalf("restoring the session: %v", err)
 	}
 	t.Cleanup(func() { restored.Close() })
-	waitFor(t, "the restored input to be held", func() bool {
-		return sink.count("input.held") == 1
+	waitForSink(t, sink, "the restored input to be held", func() bool {
+		return sink.count("input.held") >= 1
 	})
 	if _, err := restored.Prompt(context.Background(), "go"); err != nil {
 		t.Fatalf("starting the restored run: %v", err)
@@ -498,7 +498,7 @@ func TestAWakeNamesEachFeedOnce(t *testing.T) {
 			t.Fatalf("queueing an input inside the wake: %v", err)
 		}
 	}
-	waitFor(t, "the woken run to settle", func() bool {
+	waitForSink(t, sink, "the woken run to settle", func() bool {
 		return sink.Settled() != nil
 	})
 
@@ -554,7 +554,7 @@ func TestAMixedWakeNamesTheJobAndTheFeed(t *testing.T) {
 	if err := <-queued; err != nil {
 		t.Fatalf("queueing the feed's input: %v", err)
 	}
-	waitFor(t, "the woken run to settle", func() bool {
+	waitForSink(t, sink, "the woken run to settle", func() bool {
 		return sink.Settled() != nil
 	})
 
@@ -635,14 +635,14 @@ func TestAMixedIdleWakeTakesTheHeldResult(t *testing.T) {
 		Text:    "the job's output",
 		Outcome: poo.OutcomeOK,
 	})
-	waitFor(t, "the job's result to be held", func() bool {
-		return sink.count("input.held") == 1
+	waitForSink(t, sink, "the job's result to be held", func() bool {
+		return sink.count("input.held") >= 1
 	})
 
 	// The feed's input wakes the session, and the wake takes the result
 	// the session held.
 	close(emit)
-	waitFor(t, "the woken run to settle", func() bool {
+	waitForSink(t, sink, "the woken run to settle", func() bool {
 		return sink.Settled() != nil
 	})
 
@@ -837,7 +837,7 @@ func TestASenderCannotCloseTheElement(t *testing.T) {
 	if err := poo.QueueFeedInput(s, "inbox", from, "the message"); err != nil {
 		t.Fatalf("queueing the feed's input: %v", err)
 	}
-	waitFor(t, "the woken run to settle", func() bool {
+	waitForSink(t, sink, "the woken run to settle", func() bool {
 		return sink.Settled() != nil
 	})
 
@@ -872,7 +872,7 @@ func TestATextCannotCloseTheElement(t *testing.T) {
 	if err := poo.QueueFeedInput(s, "inbox", "alice", text); err != nil {
 		t.Fatalf("queueing the feed's input: %v", err)
 	}
-	waitFor(t, "the woken run to settle", func() bool {
+	waitForSink(t, sink, "the woken run to settle", func() bool {
 		return sink.Settled() != nil
 	})
 

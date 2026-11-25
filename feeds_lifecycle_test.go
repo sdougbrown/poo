@@ -48,7 +48,7 @@ func TestAFeedDeliversItsInputs(t *testing.T) {
 		},
 	}))
 
-	waitFor(t, "the woken run to settle", func() bool {
+	waitForSink(t, sink, "the woken run to settle", func() bool {
 		return sink.Settled() != nil
 	})
 	if n := sink.count("feed.started"); n != 1 {
@@ -106,8 +106,8 @@ func TestARunningFeedIsListedWithTheJobs(t *testing.T) {
 			},
 		},
 	))
-	waitFor(t, "the feed to start", func() bool {
-		return sink.count("feed.started") == 1
+	waitForSink(t, sink, "the feed to start", func() bool {
+		return sink.count("feed.started") >= 1
 	})
 	jobs := s.Jobs()
 	if len(jobs) != 1 {
@@ -156,14 +156,14 @@ func TestCancelJobStopsAFeed(t *testing.T) {
 			return ctx.Err()
 		},
 	}))
-	waitFor(t, "the feed to start", func() bool {
-		return sink.count("feed.started") == 1
+	waitForSink(t, sink, "the feed to start", func() bool {
+		return sink.count("feed.started") >= 1
 	})
 	if err := s.CancelJob("feed:inbox"); err != nil {
 		t.Fatalf("cancelling the feed: %v", err)
 	}
-	waitFor(t, "the feed to end", func() bool {
-		return sink.count("feed.ended") == 1
+	waitForSink(t, sink, "the feed to end", func() bool {
+		return sink.count("feed.ended") >= 1
 	})
 	ended := feedEnd(sink.allRecords(), 1)
 	if ended.Outcome != poo.FeedCancelled {
@@ -202,8 +202,8 @@ func TestAFailingFeedEndsOnceAndDoesNotRestart(t *testing.T) {
 			return errors.New("the feed broke")
 		},
 	}))
-	waitFor(t, "the feed to end", func() bool {
-		return sink.count("feed.ended") == 1
+	waitForSink(t, sink, "the feed to end", func() bool {
+		return sink.count("feed.ended") >= 1
 	})
 	ended := feedEnd(sink.allRecords(), 1)
 	if ended.Outcome != poo.FeedFailed {
@@ -249,8 +249,8 @@ func TestARestartingFeedWaitsForTheBackoff(t *testing.T) {
 		return time.Millisecond
 	})
 	close(fail)
-	waitFor(t, "the second attempt", func() bool {
-		return sink.count("feed.started") == 2
+	waitForSink(t, sink, "the second attempt", func() bool {
+		return sink.count("feed.started") >= 2
 	})
 	ended := feedEnd(sink.allRecords(), 1)
 	if ended == nil {
@@ -285,8 +285,8 @@ func TestACancelDuringTheBackoffStopsTheFeed(t *testing.T) {
 		return time.Hour
 	})
 	close(fail)
-	waitFor(t, "the attempt to end", func() bool {
-		return sink.count("feed.ended") == 1
+	waitForSink(t, sink, "the attempt to end", func() bool {
+		return sink.count("feed.ended") >= 1
 	})
 	if jobs := s.Jobs(); len(jobs) != 1 || jobs[0].Status != poo.JobRestarting {
 		t.Fatalf("the waiting feed is listed as %v, want one restarting entry", jobs)
@@ -319,8 +319,8 @@ func TestTheCloseEndsAFeedOnce(t *testing.T) {
 			return ctx.Err()
 		},
 	}))
-	waitFor(t, "the feed to start", func() bool {
-		return sink.count("feed.started") == 1
+	waitForSink(t, sink, "the feed to start", func() bool {
+		return sink.count("feed.started") >= 1
 	})
 	if err := s.Close(); err != nil {
 		t.Fatalf("closing the session: %v", err)
@@ -348,8 +348,8 @@ func TestAPanickingFeedEndsFailed(t *testing.T) {
 			panic("the feed exploded")
 		},
 	}))
-	waitFor(t, "the feed to end", func() bool {
-		return sink.count("feed.ended") == 1
+	waitForSink(t, sink, "the feed to end", func() bool {
+		return sink.count("feed.ended") >= 1
 	})
 	ended := feedEnd(sink.allRecords(), 1)
 	if ended.Outcome != poo.FeedFailed {
@@ -379,8 +379,8 @@ func TestAFeedsHoldOverridesTheSessionsWake(t *testing.T) {
 			return ctx.Err()
 		},
 	}))
-	waitFor(t, "the input to be held", func() bool {
-		return sink.count("input.held") == 1
+	waitForSink(t, sink, "the input to be held", func() bool {
+		return sink.count("input.held") >= 1
 	})
 	if s.Running() {
 		t.Fatal("the session woke a run, want the feed's input held")
@@ -418,7 +418,7 @@ func TestAFeedsWakeOverridesTheSessionsHold(t *testing.T) {
 			return ctx.Err()
 		},
 	}))
-	waitFor(t, "the woken run to settle", func() bool {
+	waitForSink(t, sink, "the woken run to settle", func() bool {
 		return sink.Settled() != nil
 	})
 	if n := sink.count("input.held"); n != 0 {
@@ -520,8 +520,8 @@ func TestTheRestoreContinuesTheFeedAttempts(t *testing.T) {
 		t.Fatalf("restoring the session: %v", err)
 	}
 	t.Cleanup(func() { restored.Close() })
-	waitFor(t, "both feeds to start", func() bool {
-		return sink.count("feed.started") == 2
+	waitForSink(t, sink, "both feeds to start", func() bool {
+		return sink.count("feed.started") >= 2
 	})
 	attempts := map[string]int{}
 	for _, rec := range sink.allRecords() {
@@ -568,8 +568,8 @@ func TestTheRestoreStartsFeedsAfterThePendingInputs(t *testing.T) {
 		t.Fatalf("restoring the session: %v", err)
 	}
 	t.Cleanup(func() { restored.Close() })
-	waitFor(t, "both inputs to be held", func() bool {
-		return sink.count("input.held") == 2
+	waitForSink(t, sink, "both inputs to be held", func() bool {
+		return sink.count("input.held") >= 2
 	})
 	var held []*poo.InputHeldRecord
 	for _, rec := range sink.allRecords() {
@@ -737,8 +737,8 @@ func TestAnEmitAfterTheAttemptEndedIsRefused(t *testing.T) {
 	if err := s.CancelJob("feed:inbox"); err != nil {
 		t.Fatalf("cancelling the feed: %v", err)
 	}
-	waitFor(t, "the attempt to end", func() bool {
-		return sink.count("feed.ended") == 1
+	waitForSink(t, sink, "the attempt to end", func() bool {
+		return sink.count("feed.ended") >= 1
 	})
 	err := emit("alice", "the late message", nil, nil)
 	if !errors.Is(err, poo.ErrSessionClosed) {
@@ -773,8 +773,8 @@ func TestTheCloseDuringTheRestartWait(t *testing.T) {
 		return time.Hour
 	})
 	close(fail)
-	waitFor(t, "the feed to wait for its next attempt", func() bool {
-		return sink.count("feed.ended") == 1
+	waitForSink(t, sink, "the feed to wait for its next attempt", func() bool {
+		return sink.count("feed.ended") >= 1
 	})
 	if err := s.Close(); err != nil {
 		t.Fatalf("closing the session: %v", err)

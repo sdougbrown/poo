@@ -237,7 +237,7 @@ func TestAJobFinishingAfterTheCommitWakesAfterTheSettle(t *testing.T) {
 		}
 	}
 	// The session woke with the result.
-	waitFor(t, "the woken run to settle", func() bool {
+	waitForSink(t, sink, "the woken run to settle", func() bool {
 		settled := sink.Settled()
 		return settled != nil && settled.RunID != firstRunID
 	})
@@ -273,7 +273,7 @@ func TestAJobResultNeverReopensASettlingRun(t *testing.T) {
 	// The result wakes the session, and the woken run never reopens the
 	// first one.
 	tool.Release()
-	waitFor(t, "the woken run to settle", func() bool {
+	waitForSink(t, sink, "the woken run to settle", func() bool {
 		settled := sink.Settled()
 		return settled != nil && settled.RunID != firstRunID
 	})
@@ -341,7 +341,7 @@ func TestAWakeRacingAPromptStartsOneRun(t *testing.T) {
 	close(release)
 
 	// Exactly one run started after the first one: the wake's.
-	waitFor(t, "the woken run to settle", func() bool {
+	waitForSink(t, sink, "the woken run to settle", func() bool {
 		settled := sink.Settled()
 		return settled != nil && settled.RunID != firstRunID
 	})

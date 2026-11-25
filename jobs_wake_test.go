@@ -75,14 +75,13 @@ func TestTwoResultsFinishingWhileIdleStartOneWokenRun(t *testing.T) {
 	waitFor(t, "the second result to be queued", func() bool {
 		return s.QueuedJobResults() == 2
 	})
-	waitFor(t, "the jobs to end", func() bool {
-		return sink.count("job.ended") == 2
-	})
+	waitRecords(t, sink, "job.ended", 2)
 	close(release)
-	waitFor(t, "the woken run to settle", func() bool {
-		settled := sink.Settled()
-		return settled != nil && settled.RunID != firstRunID
-	})
+	waitRecords(t, sink, "run.settled", 2)
+	settled := sink.Settled()
+	if settled.RunID == firstRunID {
+		t.Fatal("the settle is the first run's, want the woken run's")
+	}
 
 	// Exactly one woken run started, and it carries both results.
 	woken := 0
@@ -188,12 +187,23 @@ func TestAClientMessageResetsTheWakeCount(t *testing.T) {
 func releaseJobAndWait(t *testing.T, s *poo.Session, sink *recordingSink, tool *pootest.JobTool) {
 	t.Helper()
 	before := sink.count("job.ended")
+	settles := sink.count("run.settled")
+	held := sink.count("input.held")
 	tool.Release()
-	waitFor(t, "the job to end", func() bool {
-		return sink.count("job.ended") > before
+	waitRecords(t, sink, "job.ended", before+1)
+	// The wake resolves a moment after the job's end: a woken run
+	// starts, or the result is held. The idle alone is not the
+	// signal, because it holds in the gap between the two.
+	waitFor(t, "the wake to resolve", func() bool {
+		return sink.count("run.settled") > settles || s.Running() || sink.count("input.held") > held
 	})
-	// The woken run settles on its own.
-	waitFor(t, "the session to settle", func() bool {
+	if s.Running() {
+		// The woken run settles on its own.
+		waitRecords(t, sink, "run.settled", settles+1)
+	}
+	// The settle record lands before the busy flag clears, so the
+	// session is busy for a moment after it: wait for the idle.
+	waitFor(t, "the session to go idle", func() bool {
 		return !s.Running()
 	})
 }
@@ -274,11 +284,11 @@ func TestAJobThatFailsFatallyWhileIdleWakesARunThatSettles(t *testing.T) {
 	// The job fails fatally while the session is idle, and the woken
 	// run settles tool_fatal.
 	tool.Release()
-	waitFor(t, "the woken run to settle", func() bool {
-		settled := sink.Settled()
-		return settled != nil && settled.RunID != firstRunID
-	})
+	waitRecords(t, sink, "run.settled", 2)
 	settled := sink.Settled()
+	if settled.RunID == firstRunID {
+		t.Fatal("the settle is the first run's, want the woken run's")
+	}
 	if settled.Reason != poo.ReasonToolFatal {
 		t.Errorf("the woken run settled %q, want tool_fatal", settled.Reason)
 	}
@@ -372,9 +382,7 @@ func TestTheHeldResultIsDeliveredBeforeTheNextPrompt(t *testing.T) {
 	}
 	// The result is held, and the session says so.
 	tool.Release()
-	waitFor(t, "the result to be held", func() bool {
-		return sink.count("input.held") == 1
-	})
+	waitRecords(t, sink, "input.held", 1)
 	// The next prompt delivers the held result before its own text.
 	secondRunID, err := s.Prompt(context.Background(), "and this")
 	if err != nil {

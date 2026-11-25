@@ -40,7 +40,7 @@ func TestAnAnsweredAskLogsNoStaleInput(t *testing.T) {
 	if res := runSession(t, s, "start"); res.Reason != poo.ReasonEndTurn {
 		t.Fatalf("the run settled %q, want end_turn", res.Reason)
 	}
-	waitFor(t, "the permission answer", func() bool { return sink.count("permission.answered") == 1 })
+	waitRecords(t, sink, "permission.answered", 1)
 	// The log dispatch is asynchronous, so a record queued while the ask
 	// resolved would reach the capture shortly after the answer does.
 	deadline := time.Now().Add(200 * time.Millisecond)
