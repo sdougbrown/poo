@@ -274,9 +274,10 @@ type Trigger struct {
 	MaxTokens int
 	// ForkNeed is the output the strategy's fork asks for. The fork
 	// re-sends the whole window with that limit, clamped to the room the
-	// window leaves, and the trigger keeps the need inside that room so
-	// a fork's output is never cut off. Zero means the strategy makes no
-	// fork, and the run's output limit is the whole need.
+	// window leaves; when the trigger fires the room is under the need,
+	// so the pass's limit can land below the ask, and the strategies
+	// treat the pass as advisory. Zero means the strategy makes no fork,
+	// and the run's output limit is the whole need.
 	ForkNeed int
 	// Marker is the verb the replacement's marker line names the turns
 	// with. The carriage estimate counts the line the replacement
