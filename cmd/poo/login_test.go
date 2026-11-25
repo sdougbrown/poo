@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -425,11 +426,12 @@ func TestAKeyLoginProbesTheRecordedEndpoint(t *testing.T) {
 	if code := run([]string{"login", "ollama-cloud", "--settings", settings}); code != 0 {
 		t.Fatalf("poo login exited with %d", code)
 	}
-	if provider.asked == 0 {
+	asked, key := provider.requests()
+	if asked == 0 {
 		t.Fatalf("the sign-in never asked the provider what it serves")
 	}
-	if provider.key != "the-key" {
-		t.Errorf("the probe carried the key %q, want the one the sign-in stored", provider.key)
+	if key != "the-key" {
+		t.Errorf("the probe carried the key %q, want the one the sign-in stored", key)
 	}
 
 	runtime := loginRuntime(t, settings)
@@ -441,26 +443,39 @@ func TestAKeyLoginProbesTheRecordedEndpoint(t *testing.T) {
 }
 
 // providerTransport answers a probe the way a hosted Ollama Cloud does: a model list, and
-// a show for each model in it.
+// a show for each model in it. The probe's shows run in parallel, so every field is
+// guarded.
 type providerTransport struct {
-	// list are the ids the model list answers with.
-	list []string
+	// mu guards the fields below.
+	mu sync.Mutex
 	// asked counts the requests the probe made.
 	asked int
 	// key is the credential the last request carried.
 	key string
+	// list are the ids the model list answers with.
+	list []string
+}
+
+// requests returns the count and the key the probe carried.
+func (p *providerTransport) requests() (int, string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.asked, p.key
 }
 
 func (p *providerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	p.mu.Lock()
 	p.asked++
 	if key := strings.TrimPrefix(req.Header.Get("Authorization"), "Bearer "); key != "" {
 		p.key = key
 	}
+	list := append([]string(nil), p.list...)
+	p.mu.Unlock()
 	body := `{"object":"list","data":[`
 	if strings.HasSuffix(req.URL.Path, "/api/show") {
 		body = `{"model_info":{"arch.context_length":65536},"capabilities":["completion","tools"]}`
 	} else {
-		for i, id := range p.list {
+		for i, id := range list {
 			if i > 0 {
 				body += ","
 			}
