@@ -201,8 +201,8 @@ func TestAnExplicitRatioCompactsEarly(t *testing.T) {
 
 // TestTheRoomForTheOutputLimitTriggersASummaryBeforeTheRatio covers a
 // 131072-token window with the 32768-token default: three turns of
-// 120000 characters put the input near 79% of the window, under the 85%
-// ratio but with less room left than the output limit.
+// 120000 characters put the input near 79% of the window. No default
+// ratio exists, so the room trigger is the only one that can fire.
 func TestTheRoomForTheOutputLimitTriggersASummaryBeforeTheRatio(t *testing.T) {
 	compactions, _, _ := runWithBigTurns(t, poo.ModelInfo{ContextLimit: 131072}, 3, 120000)
 	if compactions != 1 {
@@ -211,8 +211,8 @@ func TestTheRoomForTheOutputLimitTriggersASummaryBeforeTheRatio(t *testing.T) {
 }
 
 // TestAnOutputLimitThatFitsUnderTheRatioLeavesTheTriggerAlone covers the
-// same history for a model that declares a 4096-token output limit: the
-// room stays above the limit until the ratio, so nothing compacts.
+// same history for a model that declares a 4096-token output limit: with
+// no default ratio, the room stays above the limit and nothing fires.
 func TestAnOutputLimitThatFitsUnderTheRatioLeavesTheTriggerAlone(t *testing.T) {
 	compactions, _, _ := runWithBigTurns(t, poo.ModelInfo{ContextLimit: 131072, MaxOutput: 4096}, 3, 120000)
 	if compactions != 0 {
@@ -241,8 +241,8 @@ func TestASmallWindowDoesNotSummarizeEveryTurn(t *testing.T) {
 // the limit the room trigger reads: a 200000-token window whose model
 // declares 64000 output tokens uses the 32768-token default instead, so a
 // 70%-full window is not short and a window with under 32768 tokens of room
-// left is. The trigger fires before the 85% ratio, so only the room can be
-// what compacts.
+// left is. No default ratio exists, so only the room can be what
+// compacts.
 func TestADeclaredLimitAboveTheWindowDefaultUsesTheDefaultForTheRoom(t *testing.T) {
 	const window = 200000
 	limit := min(64000, poo.DefaultMaxOutputFor(window))

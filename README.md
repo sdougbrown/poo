@@ -322,10 +322,12 @@ declaring `ops: [systemone]`.
 **When compaction fires.** Every strategy compacts when the next request no
 longer fits: the prompt plus the answer's output need and a small reserve is
 over the context window, or the prompt plus the reserve is over the endpoint's
-input cap. A `context.summary.ratio` or `context.handoff.ratio` is an optional
-override that adds an earlier trigger at that share of the prompt limit. The
-removed `context.notice_ratio` and `context.hard_ratio` have no effect; a
-settings file that still sets them loads with a warning.
+input cap. A `context.summary.ratio`, `context.handoff.ratio`,
+`context.mine.ratio` or `context.pointer.ratio` is an optional override that
+adds an earlier trigger at that share of the prompt limit. The mine and pointer
+fork re-sends the whole window, so its own output limit counts toward the fit
+rule as well. The removed `context.notice_ratio` and `context.hard_ratio` have
+no effect; a settings file that still sets them loads with a warning.
 
 **Pointer compaction.** `context.strategy: pointer` keeps the mine strategy's fork — the chat
 model names, from its own window, what the replacement must preserve — and makes the pointers
@@ -341,10 +343,10 @@ mine strategy's full-span read. Its own keys sit under `context.pointer`:
 context:
   strategy: pointer
   pointer:
-    ratio: 0.85
+    # ratio: 0.85  # optional early trigger; the fit rule decides when unset
     keep_recent_tokens: 12000
     max_tokens: 32768
-    pointer_max_tokens: 2048
+    pointer_max_tokens: 16384
     snippet_budget: 32768
 ```
 
@@ -411,10 +413,10 @@ keys sit under `context.mine`:
 context:
   strategy: mine
   mine:
-    ratio: 0.85
+    # ratio: 0.85  # optional early trigger; the fit rule decides when unset
     keep_recent_tokens: 12000
     max_tokens: 32768
-    pointer_max_tokens: 1024
+    pointer_max_tokens: 16384
 ```
 
 The strategy's own requests run inside the run that is compaction, so a model

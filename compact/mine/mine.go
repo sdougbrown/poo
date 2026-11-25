@@ -50,11 +50,6 @@ const (
 	// Strategy is the name the compaction carries.
 	Strategy = "mine"
 
-	// DefaultRatio is the share of the prompt limit at which the
-	// strategy mines. It sits under the handoff strategy's ratio, so the
-	// two requests have room to run before the prompt is full.
-	DefaultRatio = 0.85
-
 	// DefaultKeepRecentTokens is how much of the newest history the
 	// strategy keeps verbatim. It is under the summary strategy's
 	// default: the reconstruction carries the long view, so the verbatim
@@ -69,18 +64,17 @@ const (
 	DefaultMaxTokens = 32768
 
 	// DefaultPointerMaxTokens is the output limit of the fork's pointer
-	// pass.
-	DefaultPointerMaxTokens = 1024
-
-	// markerVerb is what the replacement's marker line says the turns
-	// were replaced with.
-	markerVerb = "reconstructed"
+	// pass. On a thinking model the reasoning tokens count against the
+	// limit, and a pass the limit cuts short is wasted: the pointers it
+	// would have named are what steers the reconstruction.
+	DefaultPointerMaxTokens = 16384
 )
 
 // Options configure the strategy.
 type Options struct {
 	// Ratio is the share of the prompt limit at which the strategy
-	// mines. It defaults to DefaultRatio.
+	// mines. Zero means no ratio trigger: the strategy acts when the
+	// next answer no longer fits.
 	Ratio float64
 	// KeepRecentTokens is how much of the newest history the strategy
 	// keeps verbatim. It defaults to DefaultKeepRecentTokens.
@@ -121,9 +115,6 @@ type Compactor struct {
 // New returns the mine strategy.
 func New(opts Options) *Compactor {
 	c := &Compactor{ratio: opts.Ratio, keepRecent: opts.KeepRecentTokens, maxTokens: opts.MaxTokens, pointerMaxTokens: opts.PointerMaxTokens, files: opts.Files}
-	if c.ratio <= 0 {
-		c.ratio = DefaultRatio
-	}
 	if c.keepRecent <= 0 {
 		c.keepRecent = DefaultKeepRecentTokens
 	}
@@ -136,7 +127,7 @@ func New(opts Options) *Compactor {
 	if c.files == nil {
 		c.files = cut.DefaultFileOp
 	}
-	c.trigger = cut.Trigger{Ratio: c.ratio, KeepRecent: c.keepRecent, MaxTokens: c.maxTokens, Files: c.files}
+	c.trigger = cut.Trigger{Ratio: c.ratio, KeepRecent: c.keepRecent, MaxTokens: c.maxTokens, ForkNeed: c.pointerMaxTokens, Files: c.files, Marker: "reconstructed", Retention: true}
 	return c
 }
 
@@ -155,15 +146,19 @@ func (c *Compactor) PointerMaxTokens() int { return c.pointerMaxTokens }
 
 // ShouldCompact reports whether the view should be mined.
 //
-// The strategy acts when the window is nearly full and the view holds a
-// turn older than the newest one, and before the ratio when the room
-// left in the window is under the output limit and a compaction would
-// give the room back. It also acts when the conversation alone exceeds
-// the window: a run that starts over the window cannot wait for a turn,
-// because the ratio trigger needs a request behind it. The trigger is
-// the cut package's, shared with the other block strategies: the same
-// view under the same budget reconstructs at the same window fill,
-// whichever strategy runs.
+// The strategy acts when the next answer no longer fits and the view
+// holds a turn older than the newest one. The need is the larger of the
+// run's output limit and the pointer pass's, because the fork re-sends
+// the whole window and its limit is sent as it is.
+//
+// A configured ratio is an explicit override: when it is set, the
+// strategy also acts at that share of the prompt limit.
+//
+// It also acts when the conversation alone exceeds the window: a run
+// that starts over the window cannot wait for a turn, because the ratio
+// trigger needs a request behind it. The trigger is the cut package's,
+// shared with the other block strategies: the same view under the same
+// budget reconstructs at the same window fill, whichever strategy runs.
 func (c *Compactor) ShouldCompact(view poo.View, budget poo.ContextBudget) bool {
 	return c.trigger.ShouldCompact(view, budget)
 }
@@ -228,11 +223,13 @@ func (c *Compactor) Compact(ctx context.Context, in poo.CompactionEnv) (poo.Comp
 	if text == "" {
 		return poo.Compaction{}, errors.New("mine: the model wrote no reconstruction")
 	}
-	replacement := cut.Marker(r, markerVerb) + "\n\n" + text
+	replacement := cut.Marker(r, c.trigger.Marker) + "\n\n" + text
 	if files := cut.FileList(c.files, covered); files != "" {
 		replacement += "\n\n" + files
 	}
-	replacement += "\n\n" + cut.Retention(r.Cut, in.SessionID, in.HistoryTool)
+	if c.trigger.Retention {
+		replacement += "\n\n" + cut.Retention(r.Cut, in.SessionID, in.HistoryTool)
+	}
 	return poo.Compaction{
 		Strategy: Strategy,
 		Replace: &poo.RangeReplacement{

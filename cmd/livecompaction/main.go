@@ -106,7 +106,7 @@ func main() {
 	endpoint := flag.String("endpoint", "http://grace:4000/v1", "the chat endpoint")
 	model := flag.String("model", "deepseek-flash", "the chat model id the endpoint serves")
 	prompt := flag.String("prompt", "Continue with the work.", "the prompt that wakes the restored session")
-	ratio := flag.Float64("ratio", 0.85, "the fill share the mine strategy acts at")
+	ratio := flag.Float64("ratio", 0, "the optional fill share the strategy acts at; 0 takes the fit rule")
 	keepRecent := flag.Int("keeprecent", 0, "the verbatim tail the strategy keeps; 0 takes the strategy's own default")
 	maxTokens := flag.Int("maxtokens", 0, "the strategy's compose output limit; 0 takes the strategy's own default")
 	strategy := flag.String("strategy", "pointer", "the compaction strategy: pointer, mine, or summary")

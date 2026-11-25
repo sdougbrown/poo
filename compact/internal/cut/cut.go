@@ -254,43 +254,83 @@ func Retention(turns poo.TurnRange, sessionID string, historyTool bool) string {
 }
 
 // Trigger is the reconstruction trigger the block strategies share:
-// the ratio at which the view acts, the verbatim tail the replacement
-// keeps, the compose limit the reconstruction may use, and the file
-// reporter the replacement's file list reads.
+// the optional ratio at which the view acts, the verbatim tail the
+// replacement keeps, the compose limit the reconstruction may use, the
+// fork's own output need, the file reporter the replacement's file
+// list reads, and the marker verb and retention pointer the
+// replacement carries.
 //
 // The strategies live separately, but they trigger together: the same
 // view under the same budget reconstructs at the same window fill,
 // whichever strategy runs. The arithmetic lives here, next to the
 // cut machinery it reads, so the copies cannot drift.
 type Trigger struct {
-	// Ratio is the share of the prompt limit at which the strategy
-	// acts.
+	// Ratio is an explicit early trigger: the share of the prompt limit
+	// at which the strategy acts. Zero means no ratio trigger.
 	Ratio float64
 	// KeepRecent is how much of the newest history stays verbatim.
 	KeepRecent int
 	// MaxTokens is the replacement request's output limit.
 	MaxTokens int
+	// ForkNeed is the output the strategy's fork asks for. The fork
+	// re-sends the whole window with that limit, and the transport sends
+	// it as it is rather than clamping it to the room the window leaves,
+	// so the trigger has to make the fork fit as well. Zero means the
+	// strategy makes no fork, and the run's output limit is the whole
+	// need.
+	ForkNeed int
+	// Marker is the verb the replacement's marker line names the turns
+	// with. The carriage estimate counts the line the replacement
+	// builder writes.
+	Marker string
+	// Retention says the replacement carries the retention pointer that
+	// names the session and the turns to recover the cut from.
+	Retention bool
 	// Files reports the file a tool call names, for the file list.
 	Files FileOp
 }
 
-// ShouldCompact reports whether the view should be reconstructed: the
-// conversation alone exceeds the window, the fill share the ratio
-// names is reached, or the room left is under the compose limit and a
-// replacement would give it back. A view with fewer than two live
-// turns has nothing older to reconstruct, and starting a compaction
-// would only fail.
+// ShouldCompact reports whether the view should be reconstructed.
+//
+// The strategy acts when the next answer no longer fits and the view
+// holds a turn older than the newest one. A single turn has nothing
+// older to reconstruct, so starting a compaction would only fail.
+//
+// It also acts when the conversation alone exceeds the window: a run
+// that starts over the window cannot wait for a turn, because the ratio
+// trigger needs a request behind it.
+//
+// A configured ratio is an explicit override: when it is set, the
+// strategy also acts at that share of the prompt limit.
+//
+// The room trigger fires only when a reconstruction would give the room
+// back. On a window so small that the verbatim tail and the replacement
+// alone leave less room than the need, a reconstruction on every turn
+// would gain nothing.
 func (t Trigger) ShouldCompact(view poo.View, budget poo.ContextBudget) bool {
 	if len(LiveTurns(view.Turns())) < 2 {
 		return false
 	}
-	return budget.OverWindow() || budget.Reached(t.Ratio) || t.restoresOutputRoom(view, budget)
+	if budget.OverWindow() {
+		return true
+	}
+	if t.Ratio > 0 && budget.Reached(t.Ratio) {
+		return true
+	}
+	return t.restoresOutputRoom(view, budget)
+}
+
+// need is the output room the strategy's next requests require: the
+// larger of the run's output limit and the fork's own need.
+func (t Trigger) need(budget poo.ContextBudget) int {
+	return max(budget.OutputLimit, t.ForkNeed)
 }
 
 // restoresOutputRoom reports that the output room is short and a
 // reconstruction would end the shortage.
 func (t Trigger) restoresOutputRoom(view poo.View, budget poo.ContextBudget) bool {
-	if !budget.RoomShort(budget.OutputLimit) {
+	need := t.need(budget)
+	if !budget.RoomShort(need) {
 		return false
 	}
 	messages := view.Messages()
@@ -300,15 +340,20 @@ func (t Trigger) restoresOutputRoom(view poo.View, budget poo.ContextBudget) boo
 	}
 	after := RoomAfter(budget, TurnTokens(messages[r.Start:r.End], budget),
 		t.MaxTokens+t.replacementCarriageTokens(r, messages[r.Start:r.End], budget))
-	return !after.RoomShort(after.OutputLimit)
+	return !after.RoomShort(need)
 }
 
 // replacementCarriageTokens estimates what the replacement carries
 // besides the reconstruction: the marker line, the retention pointer
-// and the file list.
+// when the replacement carries one, and the file list.
 func (t Trigger) replacementCarriageTokens(r Range, covered []poo.Message, budget poo.ContextBudget) int {
-	text := Marker(r, "reconstructed") + "\n\n" + Retention(r.Cut, "", true) +
-		"\n\n" + FileList(t.Files, covered)
+	text := Marker(r, t.Marker)
+	if t.Retention {
+		text += "\n\n" + Retention(r.Cut, "", true)
+	}
+	if files := FileList(t.Files, covered); files != "" {
+		text += "\n\n" + files
+	}
 	return TurnTokens([]poo.Message{poo.NewTextMessage(poo.RoleUser, text)}, budget)
 }
 

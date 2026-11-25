@@ -43,10 +43,6 @@ const (
 	// Strategy is the name the compaction carries.
 	Strategy = "pointer"
 
-	// DefaultRatio is the share of the prompt limit at which the
-	// strategy acts.
-	DefaultRatio = 0.85
-
 	// DefaultKeepRecentTokens is how much of the newest history the
 	// strategy keeps verbatim.
 	DefaultKeepRecentTokens = 12000
@@ -55,24 +51,24 @@ const (
 	DefaultMaxTokens = 32768
 
 	// DefaultPointerMaxTokens is the output limit of the fork's pointer
-	// pass.
-	DefaultPointerMaxTokens = 2048
+	// pass. On a thinking model the reasoning tokens count against the
+	// limit, and a pass the limit cuts short is wasted: the queries it
+	// would have named are what the compose ask reads. The reform pass
+	// reuses the limit.
+	DefaultPointerMaxTokens = 16384
 
 	// DefaultSnippetBudget is the most text the queries may collect.
 	DefaultSnippetBudget = 32768
 
 	// DefaultQueryCount is the most queries the pointer pass may name.
 	DefaultQueryCount = 8
-
-	// markerVerb is what the replacement's marker line says the turns
-	// were replaced with.
-	markerVerb = "reconstructed"
 )
 
 // Options configure the strategy.
 type Options struct {
 	// Ratio is the share of the prompt limit at which the strategy
-	// acts. It defaults to DefaultRatio.
+	// acts. Zero means no ratio trigger: the strategy acts when the
+	// next answer no longer fits.
 	Ratio float64
 	// KeepRecentTokens is how much of the newest history the strategy
 	// keeps verbatim. It defaults to DefaultKeepRecentTokens.
@@ -102,7 +98,7 @@ type Options struct {
 	Files FileOp
 	// Fallback is the full-span strategy a selective pass that cannot
 	// produce a context falls back to. It defaults to the mine strategy
-	// with the same ratio, tail and output limit.
+	// with the same ratio, tail, output limit and pointer limit.
 	Fallback poo.Compactor
 }
 
@@ -149,9 +145,6 @@ func New(opts Options) *Compactor {
 		files:            opts.Files,
 		fallback:         opts.Fallback,
 	}
-	if c.ratio <= 0 {
-		c.ratio = DefaultRatio
-	}
 	if c.keepRecent <= 0 {
 		c.keepRecent = DefaultKeepRecentTokens
 	}
@@ -171,12 +164,13 @@ func New(opts Options) *Compactor {
 	if c.files == nil {
 		c.files = cut.DefaultFileOp
 	}
-	c.trigger = cut.Trigger{Ratio: c.ratio, KeepRecent: c.keepRecent, MaxTokens: c.maxTokens, Files: c.files}
+	c.trigger = cut.Trigger{Ratio: c.ratio, KeepRecent: c.keepRecent, MaxTokens: c.maxTokens, ForkNeed: c.pointerMaxTokens, Files: c.files, Marker: "reconstructed", Retention: true}
 	if c.fallback == nil {
 		c.fallback = mine.New(mine.Options{
 			Ratio:            c.ratio,
 			KeepRecentTokens: c.keepRecent,
 			MaxTokens:        c.maxTokens,
+			PointerMaxTokens: c.pointerMaxTokens,
 			Files:            c.files,
 		})
 	}
@@ -203,10 +197,19 @@ func (c *Compactor) SnippetBudget() int { return c.snippetBudget }
 // session runs before the rest are the full-span fallback's.
 func (c *Compactor) EscalateAfter() int { return c.escalateAfter }
 
-// ShouldCompact reports whether the view should be reconstructed: the
-// conversation alone exceeds the window, the fill share the ratio names
-// is reached, or the room left is under the compose limit and a
-// replacement would give it back. The trigger is the cut package's,
+// ShouldCompact reports whether the view should be reconstructed.
+//
+// The strategy acts when the next answer no longer fits and the view
+// holds a turn older than the newest one. The need is the larger of the
+// run's output limit and the pointer pass's, because the fork re-sends
+// the whole window and its limit is sent as it is.
+//
+// A configured ratio is an explicit override: when it is set, the
+// strategy also acts at that share of the prompt limit.
+//
+// It also acts when the conversation alone exceeds the window: a run
+// that starts over the window cannot wait for a turn, because the ratio
+// trigger needs a request behind it. The trigger is the cut package's,
 // shared with the other block strategies.
 func (c *Compactor) ShouldCompact(view poo.View, budget poo.ContextBudget) bool {
 	return c.trigger.ShouldCompact(view, budget)
@@ -289,11 +292,13 @@ func (c *Compactor) Compact(ctx context.Context, in poo.CompactionEnv) (poo.Comp
 	if text == "" {
 		return c.fallback.Compact(ctx, in)
 	}
-	replacement := cut.Marker(r, markerVerb) + "\n\n" + text
+	replacement := cut.Marker(r, c.trigger.Marker) + "\n\n" + text
 	if files := cut.FileList(c.files, covered); files != "" {
 		replacement += "\n\n" + files
 	}
-	replacement += "\n\n" + cut.Retention(r.Cut, in.SessionID, in.HistoryTool)
+	if c.trigger.Retention {
+		replacement += "\n\n" + cut.Retention(r.Cut, in.SessionID, in.HistoryTool)
+	}
 	return poo.Compaction{
 		Strategy: Strategy,
 		Replace: &poo.RangeReplacement{
