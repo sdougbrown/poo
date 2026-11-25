@@ -214,9 +214,10 @@ func (c *Compactor) EscalateAfter() int { return c.escalateAfter }
 // The strategy acts when the next answer no longer fits and the view
 // holds a turn older than the newest one. The need is the larger of the
 // run's output limit and the pointer pass's, because the fork re-sends
-// the whole window; the session clamps the fork's limit to the room the
-// window leaves, and the fit rule keeps the need inside that room so
-// the pass is never cut short.
+// the whole window. When the strategy acts the room is under the need,
+// so the session's clamp can leave the pass's limit below what it
+// asked for: the queries a short reply would have named are lost, and
+// the compose ask reads the pointers the reply did name.
 //
 // A configured ratio is an explicit override: when it is set, the
 // strategy also acts at that share of the prompt limit.
