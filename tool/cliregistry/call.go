@@ -198,7 +198,7 @@ func (t *CallTool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepare
 	}
 	plan, err := t.catalog.Plan(a.Command, args)
 	if err != nil {
-		return nil, planError(a.Command, entry.Schema, err)
+		return nil, planError(CallToolName, a.Command, entry.Schema, err)
 	}
 	key := marshal(struct {
 		Command string         `json:"command"`
@@ -247,19 +247,62 @@ func (t *CallTool) isRefusableBuiltin(command string) bool {
 // would put where the command reads an option, are both the library's
 // checks and both land here. Anything else is the manifest being
 // unusable — a binding that cannot be built, or a working directory that
-// does not resolve — and it is reported as it is.
-func planError(name string, schema map[string]any, err error) error {
+// does not resolve — and it is reported as it is. tool is the tool over the
+// catalog, and name the entry whose schema refused the arguments; a direct
+// tool is named after its entry, so it names it once.
+func planError(tool, name string, schema map[string]any, err error) error {
 	var invalid *registry.ValidationError
 	if errors.As(err, &invalid) {
 		// The refusal is the model's to correct, so it renders in the
 		// schema's own vocabulary: the shared renderer, aimed at the
 		// tool's schema.
-		return poo.InvalidArgsf("%s: %s: %s", CallToolName, name, schematext.IssuesText(name, schema, invalid.Issues))
+		return poo.InvalidArgsf("%s: %s", subject(tool, name), schematext.IssuesText(name, schema, invalid.Issues))
 	}
-	return fmt.Errorf("%s: %s: %w", CallToolName, name, err)
+	return fmt.Errorf("%s: %w", subject(tool, name), err)
 }
 
 // Call runs the planned command through the session's executor.
+func (t *CallTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.ToolResult, error) {
+	return runCall(ctx, CallToolName, t.executor, in, env)
+}
+
+// runCall runs a prepared value the tool named tool made.
+//
+// Both tools over the catalog run their plan through the same runner, so an
+// entry offered directly runs exactly as the call over the catalog runs it,
+// and neither can drift from the other. The tool's name is the prefix a
+// failure carries: a call names itself and the command it runs, and a direct
+// tool is already named after its command.
+func runCall(ctx context.Context, tool string, executor exec.Executor, in poo.Prepared, env poo.ToolEnv) (poo.ToolResult, error) {
+	p, ok := in.(*preparedCall)
+	if !ok {
+		return poo.ToolResult{}, fmt.Errorf("%s: prepared value is not a %s call", tool, tool)
+	}
+	if p.plan == nil {
+		return poo.ToolResult{}, fmt.Errorf("%s: the call has no plan", subject(tool, p.command))
+	}
+	return runner{executor: executor}.run(ctx, tool, p, env)
+}
+
+// subject names what a failure is about.
+//
+// A call is the tool and the command inside it; a direct tool is the command
+// alone, so it says its name once.
+func subject(tool, command string) string {
+	if tool == command {
+		return tool
+	}
+	return tool + ": " + command
+}
+
+// runner runs a planned command through a session's executor.
+type runner struct {
+	// executor runs the command. Nil means the local executor, the way it
+	// does for bash.
+	executor exec.Executor
+}
+
+// run runs one planned command.
 //
 // The command runs where bash runs and under the same rules: the
 // session's executor (the sandbox, when the settings name one), the
@@ -272,15 +315,7 @@ func planError(name string, schema map[string]any, err error) error {
 // envelope bash's observation uses. An exit outside the tool's success
 // codes and a timeout are recoverable failures: the model sees what the
 // command said and may try something else.
-func (t *CallTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.ToolResult, error) {
-	p, ok := in.(*preparedCall)
-	if !ok {
-		return poo.ToolResult{}, fmt.Errorf("%s: prepared value is not a %s call", CallToolName, CallToolName)
-	}
-	if p.plan == nil {
-		return poo.ToolResult{}, fmt.Errorf("%s: %s: the call has no plan", CallToolName, p.command)
-	}
-
+func (r runner) run(ctx context.Context, tool string, p *preparedCall, env poo.ToolEnv) (poo.ToolResult, error) {
 	// A manifest's env:NAME is resolved against the session's scrubbed
 	// environment, never the host's: a name the scrub removed or the
 	// passthrough list left out is a reference the tool cannot have. A
@@ -288,7 +323,7 @@ func (t *CallTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (
 	// call, never when the settings loaded.
 	environ, err := p.plan.ResolveEnvScoped(exec.Lookup(env.Env), exec.SessionScope(env.SessionID))
 	if err != nil {
-		return poo.ToolResult{}, fmt.Errorf("%s: %s: %w", CallToolName, p.command, err)
+		return poo.ToolResult{}, fmt.Errorf("%s: %w", subject(tool, p.command), err)
 	}
 
 	dir := p.plan.Dir
@@ -309,7 +344,7 @@ func (t *CallTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (
 		return res, nil
 	}
 
-	executor := t.executor
+	executor := r.executor
 	if executor == nil {
 		executor = bash.NewLocal()
 	}
@@ -333,7 +368,7 @@ func (t *CallTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (
 		Stderr: stderr,
 	}, stdout)
 	if err != nil {
-		return poo.ToolResult{}, fmt.Errorf("%s: %s: %w", CallToolName, p.command, err)
+		return poo.ToolResult{}, fmt.Errorf("%s: %w", subject(tool, p.command), err)
 	}
 	code, waitErr := proc.Wait()
 
@@ -358,10 +393,10 @@ func (t *CallTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (
 	// A failed tool's exit and diagnostics take precedence over an incomplete write.
 	res, err := p.plan.Finish(out)
 	if err != nil {
-		return failed(err, cap)
+		return failed(tool, err, cap)
 	}
 	if errors.Is(waitErr, exec.ErrStdinIncomplete) {
-		return poo.ToolResult{}, fmt.Errorf("%s: %s: %w", CallToolName, p.command, exec.ErrStdinIncomplete)
+		return poo.ToolResult{}, fmt.Errorf("%s: %w", subject(tool, p.command), exec.ErrStdinIncomplete)
 	}
 	// A tool whose manifest decodes JSON returns that JSON as the
 	// result: the decoded value is the output, and the bash
@@ -380,7 +415,7 @@ func (t *CallTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (
 		enc := json.NewEncoder(&buf)
 		enc.SetEscapeHTML(false)
 		if err := enc.Encode(res.Decoded); err != nil {
-			return failed(err, cap)
+			return failed(tool, err, cap)
 		}
 		// The encoder appends a newline; drop it.
 		buf.Truncate(buf.Len() - 1)
@@ -443,8 +478,9 @@ func stoppedResult(err error, out registry.Output, cap int) (poo.ToolResult, boo
 //
 // Such a run is recoverable: the model sees what the command said, on
 // both streams, and may try something else. Anything else is the
-// environment being unusable, and it goes back as an error.
-func failed(err error, cap int) (poo.ToolResult, error) {
+// environment being unusable, and it goes back as an error, named after the
+// tool that ran it.
+func failed(tool string, err error, cap int) (poo.ToolResult, error) {
 	var exited *registry.ExecError
 	if errors.As(err, &exited) {
 		// A process that died by a signal has no exit status, so the
@@ -462,7 +498,7 @@ func failed(err error, cap int) (poo.ToolResult, error) {
 		})
 		return poo.ToolResult{Text: text, Structured: structured, IsError: true}, nil
 	}
-	return poo.ToolResult{}, fmt.Errorf("%s: %w", CallToolName, err)
+	return poo.ToolResult{}, fmt.Errorf("%s: %w", tool, err)
 }
 
 // decodeStrict decodes one JSON value and nothing else.

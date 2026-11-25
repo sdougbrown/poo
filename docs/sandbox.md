@@ -106,9 +106,9 @@ through procfs as described below.
 
 ## Registered tools
 
-A `call_cli` call is one of the operator's registered tools, and it runs
-where a bash command runs: through the session's executor, with the
-sandbox's binds and the protected paths it masks.
+A registered tool — whether the session offers it directly or runs it
+through `call_cli` — runs where a bash command runs: through the session's
+executor, with the sandbox's binds and the protected paths it masks.
 
 - **The command is the one its manifest names**, and the executor wraps
   it the way it wraps a shell command. A `bwrap` session runs it in the

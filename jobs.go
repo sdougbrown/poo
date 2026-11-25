@@ -2353,12 +2353,14 @@ func backgroundArg(raw json.RawMessage) (bool, json.RawMessage, error) {
 	return flag, stripped, nil
 }
 
-// schemaDefinesBackground reports that a tool's own schema defines the
+// SchemaDefinesBackground reports that a tool's own schema defines the
 // reserved background argument.
 //
 // A schema that defines it cannot be registered: the core would not know
-// whether the model meant the tool's argument or the core's.
-func schemaDefinesBackground(schema json.RawMessage) bool {
+// whether the model meant the tool's argument or the core's. A tool that
+// decides its own background mode from its schema judges by the same
+// rule the registration check refuses by.
+func SchemaDefinesBackground(schema json.RawMessage) bool {
 	if len(schema) == 0 {
 		return false
 	}

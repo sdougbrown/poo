@@ -238,6 +238,11 @@ type Runtime struct {
 	// catalog. A binary may link them, and a profile may name them, without the
 	// session offering any.
 	registryOffered bool
+	// elevatedTools are the catalog's entries the session offers as tools of
+	// their own, in name order. It is empty when the session offers the call
+	// tool over the catalog instead, and the prompt carries the catalog's
+	// section beside it.
+	elevatedTools []poo.ToolInfo
 	// registryFromDefaults and feedsFromDefaults report that the only
 	// manifest paths the build loaded came from the default directories.
 	// An error that would say "the settings" names the real source.
@@ -1050,6 +1055,19 @@ func (r *Runtime) offersRegistry() bool {
 	return r.registryOffered
 }
 
+// offersCatalogSection reports whether the prompt carries the catalog's own
+// section.
+//
+// The catalog is a section only when the session offers tools over it and the
+// model does not already read them: an elevated catalog is offered entry by
+// entry, so its entries' names, descriptions and schemas are in the tool list
+// and a section listing them again would repeat the tool list. A session whose
+// profile earns no catalog carries no section either, because a tool left out
+// of the build takes its guidance with it.
+func (r *Runtime) offersCatalogSection() bool {
+	return r.offersRegistry() && len(r.elevatedTools) == 0
+}
+
 // addRegistryTools offers the registry's tools to the session.
 //
 // The catalog needs the tools that read it, and a binary that links none
@@ -1061,6 +1079,12 @@ func (r *Runtime) offersRegistry() bool {
 // tool, and one that declares them is narrowed entry by entry. A tool the
 // profile already names is not offered twice. The disabled tools are already
 // off the profile, so a tool the settings disable does not come back here.
+//
+// A catalog short enough to show is offered entry by entry instead of behind
+// the call tool: the entries join the profile as tools of their own, and the
+// call tool is not offered beside them. The catalog is still required to be
+// one the binary's call tool can generate, because that tool is what builds
+// them.
 func (r *Runtime) addRegistryTools(opts BuildOptions) error {
 	if r.Registry == nil {
 		return nil
@@ -1083,13 +1107,19 @@ func (r *Runtime) addRegistryTools(opts BuildOptions) error {
 	// search tool is required only once the rules have left enough to search.
 	r.Registry = offered
 	find := r.findTool()
+	disabled := r.disabledTools(r.Profile.Name)
+	if elevated := elevatedRegistryTools(opts, offered, r.Profile.Tools, disabled); len(elevated) > 0 {
+		r.elevatedTools = elevated
+		r.registryOffered = true
+		r.Profile.Tools = append(r.Profile.Tools, elevated...)
+		return nil
+	}
 	names := registryToolNames(find)
 	if find {
 		if err := r.requireRegistryTools(opts, names); err != nil {
 			return err
 		}
 	}
-	disabled := r.disabledTools(r.Profile.Name)
 	for _, name := range names {
 		if slices.Contains(disabled, name) {
 			continue
@@ -1158,13 +1188,13 @@ func offersSideEffects(tools []poo.ToolInfo) bool {
 // needsExecutor reports whether an offered tool or a configured feed
 // runs a command.
 //
-// bash and call_tool run a command through the executor, so a session that
-// offers either one builds it; a feed is a command of its own, so a
-// session that runs one builds it too. A read-only profile with no feeds
-// builds none, and a settings file naming an executor this binary lacks is
-// only an error when something would run in it.
+// bash and call_tool run a command through the executor, and so does every
+// catalog entry the session offers as a tool of its own; a feed is a command
+// of its own, so a session that runs one builds the executor too. A read-only
+// profile with no feeds builds none, and a settings file naming an executor
+// this binary lacks is only an error when something would run in it.
 func (r *Runtime) needsExecutor() bool {
-	if r.hasFeeds() {
+	if r.hasFeeds() || len(r.elevatedTools) > 0 {
 		return true
 	}
 	for _, name := range r.toolNames {
@@ -1365,14 +1395,18 @@ func (r *Runtime) resolveProfiles(opts BuildOptions, definitions []profile.Profi
 			return nil, err
 		}
 		if offered != nil {
-			for _, name := range registryToolNames(r.findToolFor(offered.Len())) {
-				if !linksTool(opts, name) || slices.Contains(disabled, name) {
-					continue
+			if elevated := elevatedRegistryTools(opts, offered, resolved.Tools, disabled); len(elevated) > 0 {
+				resolved.Tools = append(resolved.Tools, elevated...)
+			} else {
+				for _, name := range registryToolNames(r.findToolFor(offered.Len())) {
+					if !linksTool(opts, name) || slices.Contains(disabled, name) {
+						continue
+					}
+					if slices.ContainsFunc(resolved.Tools, func(tool poo.ToolInfo) bool { return tool.Name == name }) {
+						continue
+					}
+					resolved.Tools = append(resolved.Tools, toolInfo(opts.Tools[name]))
 				}
-				if slices.ContainsFunc(resolved.Tools, func(tool poo.ToolInfo) bool { return tool.Name == name }) {
-					continue
-				}
-				resolved.Tools = append(resolved.Tools, toolInfo(opts.Tools[name]))
 			}
 		}
 		resolved.Tools = withJobTools(resolved.Tools, feeds)
@@ -1732,10 +1766,46 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 		tools[tool] = factory(toolOptions)
 		order = append(order, tool)
 	}
+	tools, order = r.addElevatedTools(opts, toolOptions, tools, order)
 
 	r.Options.Tools = tools
 	r.Options.ToolOrder = order
 	return nil
+}
+
+// addElevatedTools builds the catalog's entries as tools of their own.
+//
+// The tools come from the tool the session's call tool factory builds over the
+// same catalog: one factory, one executor and one set of entry definitions, so
+// an entry offered directly runs exactly as the entry behind a call runs, and
+// the two shapes cannot drift. The names are the ones the build decided on, in
+// name order, so the tool list and the profile agree even if a factory offered
+// something else.
+func (r *Runtime) addElevatedTools(opts BuildOptions, toolOptions ToolOptions, tools map[string]poo.Tool, order []string) (map[string]poo.Tool, []string) {
+	if len(r.elevatedTools) == 0 {
+		return tools, order
+	}
+	factory := opts.Tools[cli.CallToolName]
+	if factory == nil {
+		return tools, order
+	}
+	set, ok := factory(toolOptions).(generatedToolset)
+	if !ok {
+		return tools, order
+	}
+	byName := map[string]poo.Tool{}
+	for _, tool := range set.Tools() {
+		byName[tool.Spec().Name] = tool
+	}
+	for _, info := range r.elevatedTools {
+		tool, ok := byName[info.Name]
+		if !ok {
+			continue
+		}
+		tools[info.Name] = tool
+		order = append(order, info.Name)
+	}
+	return tools, order
 }
 
 // resolveFeedRuns builds the feeds the session runs.
@@ -2344,7 +2414,7 @@ func (r *Runtime) resolvePrompt(opts BuildOptions, workingDir string) error {
 	// prompt directory and the settings' own sections come after it, so
 	// an operator who writes one keeps it.
 	var catalogTemplate *prompt.Template
-	if r.Registry != nil && r.offersRegistry() {
+	if r.Registry != nil && r.offersCatalogSection() {
 		catalogTemplate = r.Registry.Template(r.offersSearch())
 		r.Prompt = append(r.Prompt, func(b *prompt.Builder) {
 			b.SetTemplate(cli.SectionName, catalogTemplate)
@@ -2367,7 +2437,7 @@ func (r *Runtime) resolvePrompt(opts BuildOptions, workingDir string) error {
 			// A catalog the session cannot reach is not guidance
 			// the model can use. The file still loads, so one
 			// directory serves a code profile and a read-only one.
-			if !r.offersRegistry() {
+			if !r.offersCatalogSection() {
 				b.Remove(cli.SectionName)
 			}
 		})

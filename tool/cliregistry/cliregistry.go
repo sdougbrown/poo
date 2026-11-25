@@ -10,6 +10,14 @@
 //   - find_tool searches a large catalog with a decision model, because a
 //     catalog of hundreds of entries does not fit in a prompt.
 //
+// # Direct tools
+//
+// A catalog short enough to show is offered entry by entry rather than behind
+// a call: *CallTool.Tools returns one tool per entry, each with the entry's own
+// name and argument schema, and a host that links this package registers them
+// directly. The tools run through the same code as a call, so an entry means
+// the same thing however the model reaches it.
+//
 // # Execution
 //
 // A registered tool runs where bash runs. cli-registry's Plan validates an
@@ -73,15 +81,16 @@ const (
 // catalog.
 func Load(paths ...string) (*Catalog, error) { return cli.Load(paths...) }
 
-// GeneratedToolset is the seam for the deferred one-tool-per-entry shape.
+// GeneratedToolset is the seam for the one-tool-per-entry shape.
 //
-// A later version may offer every registered tool as a tool of its own,
-// generated from its manifest: the model would see each one in the tool
-// list, with its arguments as that tool's schema. It is deferred until an
-// eval shows the model ignoring the catalog.
+// A catalog short enough to show is offered entry by entry, generated from its
+// manifests: the model sees each one in the tool list, with its arguments as
+// that tool's schema, and there is no call name to wrap them in. *CallTool
+// implements it, so the catalog and the tools over it stay one adapter.
 //
-// Nothing implements it. It is the boundary the shape plugs into, so the
-// catalog and the tools over it stay one adapter.
+// A host that builds the tools asks the tool it built whether it offers them,
+// which is why the interface is exported: the host need not link this package
+// to offer what it returns.
 type GeneratedToolset interface {
 	// Tools returns one tool per catalog entry, in name order.
 	Tools() []poo.Tool

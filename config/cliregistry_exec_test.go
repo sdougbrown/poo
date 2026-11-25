@@ -17,7 +17,6 @@ import (
 	"github.com/sdougbrown/poo/exec"
 	"github.com/sdougbrown/poo/exec/bwrap"
 	"github.com/sdougbrown/poo/tool/bash"
-	"github.com/sdougbrown/poo/tool/cliregistry"
 )
 
 // sandboxExecutors are the executors a binary that links the sandbox has.
@@ -53,21 +52,30 @@ func registryFile(t *testing.T, body map[string]any) string {
 	return dir
 }
 
-// callCLI runs the session's call_cli the way the core does.
-func callCLI(t *testing.T, runtime *config.Runtime) poo.ToolResult {
+// probeTool is the session's tool for the single-entry fixture catalog.
+//
+// One entry is short enough to show, so the session offers it as a tool of its
+// own instead of behind call_cli: the tool's arguments are the command's own.
+func probeTool(t *testing.T, runtime *config.Runtime) poo.Tool {
 	t.Helper()
-	tool, ok := runtime.Options.Tools[cliregistry.CallToolName]
+	tool, ok := runtime.Options.Tools["probe"]
 	if !ok {
-		t.Fatalf("the session offers %v", runtime.Options.ToolOrder)
+		t.Fatalf("the session offers %v, and not the catalog's entry", runtime.Options.ToolOrder)
 	}
-	prepared, err := tool.Prepare(json.RawMessage(`{"command":"probe","args":{}}`), poo.PrepareEnv{
+	return tool
+}
+
+// callProbeTool runs the catalog's entry the way the core does.
+func callProbeTool(t *testing.T, runtime *config.Runtime) poo.ToolResult {
+	t.Helper()
+	prepared, err := probeTool(t, runtime).Prepare(json.RawMessage(`{}`), poo.PrepareEnv{
 		WorkingDir:     runtime.Options.WorkingDir,
 		ProtectedPaths: runtime.Options.ProtectedPaths,
 	})
 	if err != nil {
 		t.Fatalf("preparing the call: %v", err)
 	}
-	res, err := tool.Call(context.Background(), prepared, poo.ToolEnv{
+	res, err := probeTool(t, runtime).Call(context.Background(), prepared, poo.ToolEnv{
 		PrepareEnv: poo.PrepareEnv{
 			WorkingDir:     runtime.Options.WorkingDir,
 			ProtectedPaths: runtime.Options.ProtectedPaths,
@@ -113,14 +121,14 @@ cli_registry:
 	}
 	runtime := buildIn(t, settings, config.Overrides{}, dir, sandboxExecutors())
 
-	res := callCLI(t, runtime)
+	res := callProbeTool(t, runtime)
 	if strings.Contains(res.Text, "synthetic-protected-file-content") {
 		t.Errorf("the sandboxed tool read the protected file: %s", res.Text)
 	}
 }
 
 // TestTheSettingsExecutorRunsTheCLI covers the wiring: the executor the
-// settings name is the one call_cli runs through, with the sandbox's
+// settings name is the one a registered tool runs through, with the sandbox's
 // options and the protected paths the settings name.
 func TestTheSettingsExecutorRunsTheCLI(t *testing.T) {
 	dir := t.TempDir()
@@ -153,7 +161,7 @@ cli_registry:
 	}
 	runtime := buildIn(t, settings, config.Overrides{}, dir, sandboxExecutors())
 
-	res := callCLI(t, runtime)
+	res := callProbeTool(t, runtime)
 	if !strings.Contains(res.Text, dir) {
 		t.Errorf("the tool did not run in the session's directory: %s", res.Text)
 	}
@@ -253,11 +261,7 @@ func probeArgs(t *testing.T, message *string) string {
 
 func preparedProbe(t *testing.T, runtime *config.Runtime, args string) poo.Prepared {
 	t.Helper()
-	tool, ok := runtime.Options.Tools[cliregistry.CallToolName]
-	if !ok {
-		t.Fatalf("the session offers %v", runtime.Options.ToolOrder)
-	}
-	prepared, err := tool.Prepare(json.RawMessage(`{"command":"probe","args":`+args+`}`), poo.PrepareEnv{
+	prepared, err := probeTool(t, runtime).Prepare(json.RawMessage(args), poo.PrepareEnv{
 		WorkingDir:     runtime.Options.WorkingDir,
 		ProtectedPaths: runtime.Options.ProtectedPaths,
 	})
@@ -269,7 +273,7 @@ func preparedProbe(t *testing.T, runtime *config.Runtime, args string) poo.Prepa
 
 func callProbe(t *testing.T, runtime *config.Runtime, args string) (poo.ToolResult, error) {
 	t.Helper()
-	return runtime.Options.Tools[cliregistry.CallToolName].Call(context.Background(), preparedProbe(t, runtime, args), poo.ToolEnv{
+	return probeTool(t, runtime).Call(context.Background(), preparedProbe(t, runtime, args), poo.ToolEnv{
 		PrepareEnv: poo.PrepareEnv{
 			WorkingDir:     runtime.Options.WorkingDir,
 			ProtectedPaths: runtime.Options.ProtectedPaths,
@@ -466,7 +470,7 @@ func TestACancelledRunStopsAStdinBoundCLI(t *testing.T) {
 		)
 		runtime := stdinRuntimeIn(t, executor, body, dir)
 		prepared := preparedProbe(t, runtime, probeArgs(t, messageArg(strings.Repeat("x", 1<<20))))
-		tool := runtime.Options.Tools[cliregistry.CallToolName]
+		tool := probeTool(t, runtime)
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()

@@ -674,11 +674,18 @@ embedded beside the package that owns it.
 - `poo prompt` prints the sections a session would send.
 
 **CLI registry.** When the settings list manifests in `cli_registry.paths`,
-a profile with a side-effecting tool also offers `call_cli`. It runs one
-registered command, named by the call's `command` argument, through the
-session's executor. Above 30 entries, with a decision model configured, the
-profile also offers `find_tool` to search the catalog. The code is in
-`poo/cli` and `poo/tool/cliregistry`.
+a profile with a side-effecting tool also offers the registered commands.
+Up to 30 entries, each one is a tool of its own: the model calls it by the
+manifest's name with the command's own argument schema, and no catalog
+section is sent because the tool list already carries them. Above 30
+entries, with a decision model configured, the profile offers `call_cli` to
+run one entry by name and `find_tool` to search the catalog; without a
+decision model it offers `call_cli` over the listed catalog. A manifest that
+names one of poo's own tools, or one the profile already offers, keeps
+`call_cli` for the whole catalog rather than shadowing it, and
+`tools.disabled: [call_cli]` turns the registry off whole. Either shape runs
+the command through the session's executor. The code is in `poo/cli` and
+`poo/tool/cliregistry`.
 
 Both the registry and the feeds also load manifests from poo's own
 directories under the user config directory, before the settings' paths.

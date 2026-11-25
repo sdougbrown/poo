@@ -30,7 +30,7 @@ func TestServeReportsManifestOverrides(t *testing.T) {
 	settings := theSettings(t, dir, endpoint.URL+"/v1")
 	client := startServe(t, "--settings", settings, "--feeds-path", feed, "--cli-registry-path", registry)
 	handshake := result(t, client.call(t, "poo/initialize", map[string]any{"protocol_versions": []int{1}, "client": map[string]any{"name": "test", "version": "test"}}))
-	if !strings.Contains(fmt.Sprint(handshake), "call_cli") {
+	if !strings.Contains(fmt.Sprint(handshake), "flagtool") {
 		t.Fatalf("registry tool missing: %v", handshake)
 	}
 	effective := result(t, client.call(t, "settings/get", map[string]any{}))
