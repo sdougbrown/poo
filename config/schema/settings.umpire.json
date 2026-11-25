@@ -71,6 +71,7 @@
     "limits.max_duration_s": { "isEmpty": "number" },
     "limits.max_turns": { "isEmpty": "number" },
     "limits.max_continuations": { "isEmpty": "number" },
+    "limits.truncation_retries": { "isEmpty": "number" },
     "jobs.max_running": { "isEmpty": "number" },
     "jobs.timeout_s": { "isEmpty": "number" },
     "jobs.on_idle": { "isEmpty": "string" },
@@ -313,6 +314,13 @@
       "op": "min",
       "value": 0,
       "reason": "limits.max_continuations must not be negative"
+    },
+    {
+      "type": "check",
+      "field": "limits.truncation_retries",
+      "op": "min",
+      "value": 0,
+      "reason": "limits.truncation_retries must not be negative"
     },
     {
       "type": "check",

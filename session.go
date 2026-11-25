@@ -662,7 +662,8 @@ type Options struct {
 	// TruncationRetries is how many consecutive turns whose response stopped
 	// on the output-token limit the run asks the model to retry, more
 	// concisely, before it settles output_truncated. 0 settles on the first
-	// such turn, which is the default.
+	// such turn; a session built from a settings file gets that file's
+	// limits.truncation_retries, which defaults to one retry.
 	TruncationRetries int
 	// MaxRunTokens is the run's token limit. 0 means unlimited. A run
 	// that reaches it settles budget_exhausted.

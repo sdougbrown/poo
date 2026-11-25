@@ -39,6 +39,9 @@ type runOptions struct {
 	// truncationRetries is how many consecutive output-limit truncations
 	// the run asks the model to retry, more concisely, before settling.
 	truncationRetries int
+	// truncationRetriesGiven reports that the flag was on the command line,
+	// so 0 turns the retry off instead of taking the settings' default.
+	truncationRetriesGiven bool
 	// contextStrategy is the compaction strategy the run pins, when
 	// the flag names one.
 	contextStrategy string
@@ -92,6 +95,7 @@ func (o *runOptions) bind(inv clicontract.Invocation) {
 	o.maxTurns = inv.Ints["max-turns"]
 	o.maxOutput = inv.Ints["max-output"]
 	o.truncationRetries = inv.Ints["truncation-retries"]
+	o.truncationRetriesGiven = inv.Supplied["truncation-retries"]
 	o.contextStrategy = inv.Flags["context-strategy"]
 	o.contextKeepRecent = inv.Ints["context-keep-recent"]
 	o.logPath = inv.Flags["log"]
@@ -237,7 +241,6 @@ func handleRun(parent context.Context, inv clicontract.Invocation, stdout, stder
 	runtime.Options.SessionDir = sink.sessionDir()
 	runtime.Options.SessionID = sessionID
 	runtime.Options.ReasoningEffort = o.reasoningEffort
-	runtime.Options.TruncationRetries = o.truncationRetries
 	runtime.Options.ToolsMode = string(model.Tools.Mode)
 	runtime.Options.Prompt = append(runtime.Options.Prompt, promptMutation(runtime, model))
 	runtime.Options.Observers = append(runtime.Options.Observers, warningObserver{w: stderr})
@@ -403,6 +406,9 @@ func (o *runOptions) validate(rest []string) error {
 	if o.maxOutput < 0 {
 		return errors.New("--max-output must not be negative")
 	}
+	if o.truncationRetries < 0 {
+		return errors.New("--truncation-retries must not be negative")
+	}
 	if o.contextStrategy != "" && !slices.Contains(contextStrategies, o.contextStrategy) {
 		return errors.New("--context-strategy must be one of " + strings.Join(contextStrategies, ", "))
 	}
@@ -448,6 +454,12 @@ func (o *runOptions) apply(settings *config.Settings) error {
 	o.endpointFlags.apply(settings)
 	if o.maxTurns > 0 {
 		settings.Limits.MaxTurns = o.maxTurns
+	}
+	if o.truncationRetriesGiven {
+		// The flag is the settings' field: 1 is one retry, and 0 turns the
+		// retry off, which the settings' own default would otherwise hide.
+		retries := o.truncationRetries
+		settings.Limits.TruncationRetries = &retries
 	}
 	if o.contextStrategy != "" {
 		strategy := o.contextStrategy

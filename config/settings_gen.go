@@ -41,6 +41,7 @@ type SettingsFields struct {
 	LimitsMaxDurationS              *float64 "json:\"limits.max_duration_s,omitempty\""
 	LimitsMaxTokensPerRun           *float64 "json:\"limits.max_tokens_per_run,omitempty\""
 	LimitsMaxTurns                  *float64 "json:\"limits.max_turns,omitempty\""
+	LimitsTruncationRetries         *float64 "json:\"limits.truncation_retries,omitempty\""
 	ModelsFile                      *string  "json:\"models_file,omitempty\""
 	PermissionAskers                []string "json:\"permission.askers,omitempty\""
 	PermissionChainTimeoutS         *float64 "json:\"permission.chain_timeout_s,omitempty\""
@@ -142,6 +143,7 @@ type SettingsAvailability struct {
 	LimitsMaxDurationS              FieldStatus
 	LimitsMaxTokensPerRun           FieldStatus
 	LimitsMaxTurns                  FieldStatus
+	LimitsTruncationRetries         FieldStatus
 	ModelsFile                      FieldStatus
 	PermissionAskers                FieldStatus
 	PermissionChainTimeoutS         FieldStatus
@@ -307,6 +309,8 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 	LimitsMaxTokensPerRunSatisfied := f.LimitsMaxTokensPerRun != nil
 	LimitsMaxTurnsEnabled := true
 	LimitsMaxTurnsSatisfied := f.LimitsMaxTurns != nil
+	LimitsTruncationRetriesEnabled := true
+	LimitsTruncationRetriesSatisfied := f.LimitsTruncationRetries != nil
 	ModelsFileEnabled := true
 	ModelsFileSatisfied := func() bool { v := f.ModelsFile; return v != nil && *v != "" }()
 	PermissionAskersEnabled := (c.HasDecider || !(contains(f.PermissionAskers, "decide")))
@@ -1250,6 +1254,34 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 				var reasons []string
 				if !(f.LimitsMaxTurns != nil && *f.LimitsMaxTurns >= 0) && "limits.max_turns must not be negative" != "" {
 					reasons = append(reasons, "limits.max_turns must not be negative")
+				}
+				if reasons == nil {
+					reasons = []string{}
+				}
+				return reasons
+			}(),
+			Valid: nil,
+			Error: "",
+		},
+		LimitsTruncationRetries: FieldStatus{
+			Required:  LimitsTruncationRetriesEnabled && false,
+			Enabled:   LimitsTruncationRetriesEnabled,
+			Satisfied: LimitsTruncationRetriesSatisfied,
+			Fair:      f.LimitsTruncationRetries != nil && *f.LimitsTruncationRetries >= 0,
+			Reason: func() *string {
+				var reasons []string
+				if !(f.LimitsTruncationRetries != nil && *f.LimitsTruncationRetries >= 0) && "limits.truncation_retries must not be negative" != "" {
+					reasons = append(reasons, "limits.truncation_retries must not be negative")
+				}
+				if len(reasons) == 0 {
+					return nil
+				}
+				return &reasons[0]
+			}(),
+			Reasons: func() []string {
+				var reasons []string
+				if !(f.LimitsTruncationRetries != nil && *f.LimitsTruncationRetries >= 0) && "limits.truncation_retries must not be negative" != "" {
+					reasons = append(reasons, "limits.truncation_retries must not be negative")
 				}
 				if reasons == nil {
 					reasons = []string{}
@@ -2779,6 +2811,8 @@ func depSatisfied(f SettingsFields, name string) bool {
 		return f.LimitsMaxTokensPerRun != nil
 	case "LimitsMaxTurns":
 		return f.LimitsMaxTurns != nil
+	case "LimitsTruncationRetries":
+		return f.LimitsTruncationRetries != nil
 	case "ModelsFile":
 		v := f.ModelsFile
 		return v != nil && *v != ""
@@ -3057,6 +3091,7 @@ var ruleMeta = []RuleMetaEntry{
 	{Field: "LimitsMaxDurationS", RuleType: "check", Expr: "f.LimitsMaxDurationS != nil && *f.LimitsMaxDurationS >= 0", Reason: "limits.max_duration_s must not be negative"},
 	{Field: "LimitsMaxTokensPerRun", RuleType: "check", Expr: "f.LimitsMaxTokensPerRun != nil && *f.LimitsMaxTokensPerRun >= 0", Reason: "limits.max_tokens_per_run must not be negative"},
 	{Field: "LimitsMaxTurns", RuleType: "check", Expr: "f.LimitsMaxTurns != nil && *f.LimitsMaxTurns >= 0", Reason: "limits.max_turns must not be negative"},
+	{Field: "LimitsTruncationRetries", RuleType: "check", Expr: "f.LimitsTruncationRetries != nil && *f.LimitsTruncationRetries >= 0", Reason: "limits.truncation_retries must not be negative"},
 	{Field: "", RuleType: "enabledWhen", Expr: "(c.HasDecider || !(contains(f.PermissionAskers, \"decide\")))", Reason: "the decide asker needs a decider model: roles.decider names one"},
 	{Field: "PermissionAskers", RuleType: "fairWhen", Expr: "(c.HasWireClient || !(contains(f.PermissionAskers, \"wire\")))", Reason: "the wire asker needs a wire client, and this runtime has none: the chain runs without it"},
 	{Field: "PermissionChainTimeoutS", RuleType: "check", Expr: "f.PermissionChainTimeoutS != nil && *f.PermissionChainTimeoutS >= 1", Reason: "permission.chain_timeout_s must be at least a second"},
@@ -3308,6 +3343,13 @@ func Challenge(fieldName string, f SettingsFields, c SettingsConditions, prev Se
 			explanations = append(explanations, "* "+*status.Reason)
 		}
 		explanations = append(explanations, "* check: limits.max_turns must not be negative")
+	case "LimitsTruncationRetries", "limits.truncation_retries":
+		found = true
+		status = avail.LimitsTruncationRetries
+		if status.Reason != nil {
+			explanations = append(explanations, "* "+*status.Reason)
+		}
+		explanations = append(explanations, "* check: limits.truncation_retries must not be negative")
 	case "ModelsFile", "models_file":
 		found = true
 		status = avail.ModelsFile

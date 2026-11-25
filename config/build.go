@@ -70,6 +70,11 @@ const (
 	// DefaultExecutor is the executor the commands run through when
 	// the settings do not say.
 	DefaultExecutor = "local"
+	// DefaultTruncationRetries is how many times a run asks the model to
+	// say less when the settings do not say. A model that overruns its
+	// output limit usually finishes on the retry. A run that does not
+	// retry settles output_truncated on the first overrun.
+	DefaultTruncationRetries = 1
 )
 
 // The overrides a command line makes.
@@ -2298,6 +2303,13 @@ func (r *Runtime) resolveSession(opts BuildOptions, workingDir string) error {
 	}
 	if settings.Limits.MaxContinuations > 0 {
 		r.Options.MaxContinuations = settings.Limits.MaxContinuations
+	}
+	// The retry is on by default: a model that overruns its output limit
+	// usually finishes when asked to say less. A settings file that names
+	// 0 turns it off.
+	r.Options.TruncationRetries = DefaultTruncationRetries
+	if settings.Limits.TruncationRetries != nil {
+		r.Options.TruncationRetries = *settings.Limits.TruncationRetries
 	}
 	if settings.Context.NoticeRatio != nil {
 		r.warn("context.notice_ratio is removed and no longer has any effect")
