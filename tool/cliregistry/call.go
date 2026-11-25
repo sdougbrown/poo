@@ -33,6 +33,11 @@ type CallTool struct {
 	// search reports that the session offers find_tool over the
 	// catalog, so an unknown name can point at the search.
 	search bool
+	// sessionTools are the names of the tools the session offers. A
+	// refusal that says "call it directly" is only true for a name
+	// this list holds; nil keeps the binary-scoped refusal for a tool
+	// built without the session's names.
+	sessionTools []string
 	// executor runs the tool. Nil means the local executor, the way it
 	// does for bash.
 	executor exec.Executor
@@ -58,6 +63,17 @@ func (t *CallTool) WithExecutor(e exec.Executor) *CallTool {
 // search is not pointed at a search.
 func (t *CallTool) WithSearch(search bool) *CallTool {
 	t.search = search
+	return t
+}
+
+// WithSessionTools gives the tool the names of the tools the session
+// offers beside it.
+//
+// The built-in refusal tells the model to call a tool directly, which
+// only works when the session offers it: a name the settings disabled,
+// or one a profile did not include, gets the catalog's hint instead.
+func (t *CallTool) WithSessionTools(names []string) *CallTool {
+	t.sessionTools = names
 	return t
 }
 
@@ -203,7 +219,7 @@ func (t *CallTool) unknownCommand(command string) error {
 	case command == CallToolName || command == "call_tool":
 		return poo.InvalidArgsf("%s: %q is this tool; pass a registered command's name as \"command\", "+
 			"not %s itself", CallToolName, command, CallToolName)
-	case slices.Contains(builtinToolNames, command):
+	case t.isRefusableBuiltin(command):
 		return poo.InvalidArgsf("%s: %q is a built-in tool; call it directly instead of through %s",
 			CallToolName, command, CallToolName)
 	}
@@ -212,6 +228,16 @@ func (t *CallTool) unknownCommand(command string) error {
 	}
 	return poo.InvalidArgsf("%s: no tool named %q; %s",
 		CallToolName, command, t.catalog.NamesHint(t.search))
+}
+
+// isRefusableBuiltin reports whether the refusal may name the command
+// a built-in tool: the command is one of the binary's tools, and the
+// session offers it too.
+func (t *CallTool) isRefusableBuiltin(command string) bool {
+	if !slices.Contains(builtinToolNames, command) {
+		return false
+	}
+	return t.sessionTools == nil || slices.Contains(t.sessionTools, command)
 }
 
 // planError reports a call the tool's own definition refused.

@@ -26,10 +26,13 @@ func TestTheCallToolAnswersEveryBuiltInToolWithTheCorrection(t *testing.T) {
 	for name := range linkedTools() {
 		names = append(names, name)
 	}
+	// The names are the session's own, so the built-in refusal fires for
+	// every name the pin checks.
+	tool = tool.WithSessionTools(names)
 	for _, name := range names {
-		// The catalog's own two tools are not built-in: one of them runs the
-		// call, and the other searches what it runs.
-		if name == cliregistry.CallToolName || name == cliregistry.FindToolName {
+		// call_cli is this tool, so its refusal names the mistake instead
+		// of a built-in tool.
+		if name == cliregistry.CallToolName {
 			continue
 		}
 		raw, err := json.Marshal(map[string]any{"command": name})

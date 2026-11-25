@@ -286,3 +286,25 @@ func TestAnUnknownCommandIsSelfCorrecting(t *testing.T) {
 		})
 	}
 }
+
+// TestABuiltinTheSessionDoesNotOfferPointsAtTheCatalog covers the
+// refusal's session scope: a built-in name the session does not offer
+// cannot be called directly, so the refusal points at the catalog
+// instead of at a call that cannot succeed.
+func TestABuiltinTheSessionDoesNotOfferPointsAtTheCatalog(t *testing.T) {
+	tool := cliregistry.NewCall(fixtureCatalog(t)).WithSessionTools([]string{"bash"})
+
+	_, err := prepare(t, tool, `{"command":"edit","args":{"path":"a","content":"b"}}`)
+	if err == nil {
+		t.Fatal("the call prepared")
+	}
+	text := err.Error()
+	if strings.Contains(text, "is a built-in tool") {
+		t.Errorf("the refusal names a tool the session does not offer a built-in: %q", text)
+	}
+	for _, want := range []string{`no tool named "edit"`} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the refusal does not carry %q: %q", want, text)
+		}
+	}
+}

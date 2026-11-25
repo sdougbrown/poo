@@ -393,6 +393,10 @@ type ToolOptions struct {
 	Inputs []poo.Modality
 	// CodemodeEngine is the engine selected for the codemode tool.
 	CodemodeEngine string
+	// ToolNames are the names of the tools the session offers. A tool
+	// whose refusal points at another tool offers that tool only when
+	// this list holds its name.
+	ToolNames []string
 }
 
 // Build turns the settings into the runtime a session is built from.
@@ -1673,6 +1677,17 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 		}
 	}
 
+	// The names the session offers are the build's, not the binary's:
+	// a profile, or a disabled setting, removes a tool the binary
+	// links, and a refusal that says "call it directly" has to be true
+	// for this session.
+	offered := make([]string, 0, len(r.toolNames))
+	for _, name := range r.toolNames {
+		if linksTool(opts, name) {
+			offered = append(offered, name)
+		}
+	}
+
 	toolOptions := ToolOptions{
 		Scrub:          credentialScrub,
 		ProtectedPaths: protected,
@@ -1682,6 +1697,7 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 		// A file that names an engine keeps it; an unset one gets the
 		// default, the same engine the settings check judges limits by.
 		CodemodeEngine: DefaultCodemodeEngine,
+		ToolNames:      offered,
 	}
 	if settings.Tools.Codemode.Engine != nil {
 		toolOptions.CodemodeEngine = *settings.Tools.Codemode.Engine
