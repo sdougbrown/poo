@@ -138,7 +138,7 @@ PYTHONPATH=evals/harbor harbor run \
 | `context_limit` | `131072` | Context window in tokens (`--context-limit`) |
 | `tools_mode` | none | `native`, `text`, or `auto` (`--tools-mode`) |
 | `reasoning_effort` | none | Passed to `--reasoning-effort` |
-| `max_turns` | `100` | Turn cap (`--max-turns`) |
+| `max_turns` | none | Turn cap (`--max-turns`); unset leaves the run uncapped, matching `poo` |
 | `max_output` | none | Output token cap (`--max-output`) |
 | `profile` | `code` | `poo` profile (`--profile`) |
 | `context_strategy` | none | Compaction strategy (`--context-strategy`) |

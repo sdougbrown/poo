@@ -70,7 +70,6 @@ KNOWN_PROVIDERS: dict[str, tuple[str, str]] = {
 }
 
 DEFAULT_CONTEXT_LIMIT = 131072
-DEFAULT_MAX_TURNS = 100
 DEFAULT_BIN_TARGET = "/usr/local/bin/poo"
 
 
@@ -216,7 +215,7 @@ class PooAgent(BaseAgent):
         api_key_env: str | None = None,
         tools_mode: str | None = None,
         reasoning_effort: str | None = None,
-        max_turns: int | None = DEFAULT_MAX_TURNS,
+        max_turns: int | None = None,
         max_output: int | None = None,
         profile: str = "code",
         context_strategy: str | None = None,
