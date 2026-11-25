@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/sdougbrown/poo"
@@ -81,7 +82,7 @@ type discovery struct {
 // it is, so a catalog that is built often does not ask the endpoints
 // again on every run.
 func (c *Catalog) Refresh(ctx context.Context) error {
-	return c.refresh(ctx, false)
+	return c.refresh(ctx, c.endpointNames(), false)
 }
 
 // Reprobe probes every endpoint and merges the discovery layer, whatever
@@ -91,16 +92,35 @@ func (c *Catalog) Refresh(ctx context.Context) error {
 // That ask lands here, not at Refresh, which trusts a cache that is
 // still fresh.
 func (c *Catalog) Reprobe(ctx context.Context) error {
-	return c.refresh(ctx, true)
+	return c.refresh(ctx, c.endpointNames(), true)
 }
 
-// refresh probes the endpoints and merges the discovery layer.
+// ReprobeEndpoint probes one endpoint and merges its discovery layer, whatever
+// the cache says.
 //
-// A probe that fails falls back to the cached result, and then to the
-// curated catalog, with a warning. The refresh never fails over a
-// probe: only the role check decides whether a model the catalog cannot
-// resolve is an error.
-func (c *Catalog) refresh(ctx context.Context, force bool) error {
+// A caller that has just given an endpoint its credential asks this one, not
+// Reprobe: the models a key just bought are worth learning, and the endpoints the
+// operator was already running are not worth asking again at that moment.
+func (c *Catalog) ReprobeEndpoint(ctx context.Context, name string) error {
+	endpoint, ok := c.endpoints[name]
+	if !ok {
+		return nil
+	}
+	if endpoint.SkipProbe {
+		return nil
+	}
+	return c.refresh(ctx, []string{name}, true)
+}
+
+// refresh probes the endpoints it names and merges the discovery layer.
+//
+// A probe that fails falls back to the cached result, and then to what the layers
+// declare, with a warning. The refresh never fails over a probe: only the role
+// check decides whether a model the catalog cannot resolve is an error.
+//
+// The cache is saved with what the endpoints it did not ask about still say, so
+// a probe of one endpoint does not erase another's answer.
+func (c *Catalog) refresh(ctx context.Context, names []string, force bool) error {
 	cache := c.cache()
 	cached, err := cache.load()
 	if err != nil {
@@ -114,7 +134,9 @@ func (c *Catalog) refresh(ctx context.Context, force bool) error {
 		fetched:   map[string]time.Time{},
 		fetchedAt: now,
 	}
-	for _, name := range c.endpointNames() {
+	asked := make(map[string]bool, len(names))
+	for _, name := range names {
+		asked[name] = true
 		endpoint := c.endpoints[name]
 		if !force {
 			if models, shape, fetchedAt, ok := cache.fresh(cached, name); ok {
@@ -146,6 +168,23 @@ func (c *Catalog) refresh(ctx context.Context, force bool) error {
 		found.models[name] = models
 		found.shapes[name] = shape
 	}
+	// An endpoint this refresh did not ask about keeps what the cache already
+	// said about it: the cache is one file for every endpoint, and a probe of one
+	// is not a statement about the others. The names are the ones a build reads
+	// the cache through, so the two readers of the file cannot disagree about
+	// which endpoints it describes.
+	for _, name := range c.endpointNames() {
+		if asked[name] {
+			continue
+		}
+		models, shape, fetchedAt, ok := cache.stale(cached, name)
+		if !ok {
+			continue
+		}
+		found.models[name] = models
+		found.shapes[name] = shape
+		found.fetched[name] = fetchedAt
+	}
 	c.applyDiscovery(found)
 	if err := cache.save(*found); err != nil {
 		c.warn("the discovery cache could not be written",
@@ -156,6 +195,8 @@ func (c *Catalog) refresh(ctx context.Context, force bool) error {
 
 // applyDiscovery merges the discovery layer into the catalog.
 func (c *Catalog) applyDiscovery(found *discovery) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	for _, endpoint := range sortedKeys(found.models) {
 		models := found.models[endpoint]
 		for _, id := range sortedModelIDs(models) {
@@ -185,14 +226,10 @@ func (c *Catalog) applyDiscovery(found *discovery) {
 // endpointNames returns the names of the endpoints the catalog probes,
 // sorted.
 //
-// The hosted providers are not probed: a hosted endpoint is asked for a
-// key that is not there. The curated entry already says what the
-// provider's models are. An endpoint the settings mark unprobed is not
-// asked either. Its models are declared, and a probe would send a request
-// the endpoint has no list to answer.
-// The endpoints a probe asks are the ones the operator declared: the models
-// file's, and the settings'. The curated layer's hosted providers are not
-// asked, because the operator named no credential for them.
+// The endpoints a probe asks are the ones the catalog offers: the models file's —
+// which carries the built-in providers' record — and the settings'. An endpoint
+// whose models are declared rather than listed is not asked: a probe would send a
+// request the endpoint has no list to answer.
 func (c *Catalog) endpointNames() []string {
 	var names []string
 	for name := range c.declared() {
@@ -207,7 +244,7 @@ func (c *Catalog) endpointNames() []string {
 	return names
 }
 
-// declared returns the endpoints the operator declared, by name.
+// declared returns the endpoints a layer declared, by name.
 func (c *Catalog) declared() map[string]bool {
 	names := make(map[string]bool, len(c.opts.Settings.Endpoints)+len(c.opts.File.Endpoints))
 	for name := range c.opts.Settings.Endpoints {
@@ -261,15 +298,16 @@ func (c *Catalog) probeEndpoint(ctx context.Context, endpoint Endpoint, modelIDs
 	// answer costs one timeout and not three.
 	ctx, cancel := context.WithTimeout(ctx, c.probeTimeout())
 	defer cancel()
-	list, err := c.probeOpenAI(ctx, client, endpoint.Endpoint)
+	key := c.endpointKey(endpoint)
+	list, err := c.probeOpenAI(ctx, client, endpoint, key)
 	if err != nil {
 		return nil, "", err
 	}
-	props, err := c.probeLlamaCPP(ctx, client, endpoint.Endpoint)
+	props, err := c.probeLlamaCPP(ctx, client, endpoint, key)
 	if err != nil {
 		return nil, "", err
 	}
-	shown, err := c.probeOllama(ctx, client, endpoint.Endpoint, c.candidates(modelIDs, list))
+	shown, err := c.probeOllama(ctx, client, endpoint, key, c.probeIDs(modelIDs, list))
 	if err != nil {
 		return nil, "", err
 	}
@@ -288,7 +326,7 @@ func (c *Catalog) probeEndpoint(ctx context.Context, endpoint Endpoint, modelIDs
 	}
 
 	models := map[string]Discovered{}
-	for _, id := range c.candidates(modelIDs, list) {
+	for _, id := range c.probeIDs(modelIDs, list) {
 		models[id] = Discovered{ModelID: id}
 	}
 	for id, item := range list {
@@ -358,18 +396,29 @@ func (c *Catalog) probeEndpoint(ctx context.Context, endpoint Endpoint, modelIDs
 	return models, shape, nil
 }
 
-// candidates returns the model ids the Ollama probe asks about.
+// probeIDs returns the model ids the Ollama probe asks about.
 //
-// The models the settings name come first, and the ids the model list
-// gave follow, up to a limit: a server that serves a hundred models
-// would otherwise be asked about a hundred of them.
-func (c *Catalog) candidates(modelIDs []string, list map[string]Discovered) []string {
-	const limit = 16
-	out := append([]string{}, modelIDs...)
-	for _, id := range sortedModelIDs(list) {
-		if len(out) >= limit {
-			break
+// The ids the settings name, then the ids the model list gave, deduplicated.
+// Every id the list named is asked about: a list is a server's own word
+// on what it serves, and a model left unasked arrives as a bare id with no
+// context window and no capabilities, which is a worse answer than not listing
+// it. The requests are bounded by the list itself, which is the set the server
+// says it has.
+func (c *Catalog) probeIDs(modelIDs []string, list map[string]Discovered) []string {
+	seen := make(map[string]bool, len(modelIDs)+len(list))
+	out := make([]string, 0, len(modelIDs)+len(list))
+	for _, id := range modelIDs {
+		if id == "" || seen[id] {
+			continue
 		}
+		seen[id] = true
+		out = append(out, id)
+	}
+	for _, id := range sortedModelIDs(list) {
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
 		out = append(out, id)
 	}
 	return out
@@ -421,8 +470,8 @@ func (n *tokenCount) UnmarshalJSON(data []byte) error {
 // max_input_tokens. A field the endpoint does not send stays unknown. A
 // server that does not serve the list answers with an error, and the probe
 // reports that the shape is not there.
-func (c *Catalog) probeOpenAI(ctx context.Context, client *http.Client, baseURL string) (map[string]Discovered, error) {
-	body, err := c.get(ctx, client, openAIBase(baseURL)+"/models")
+func (c *Catalog) probeOpenAI(ctx context.Context, client *http.Client, endpoint Endpoint, key string) (map[string]Discovered, error) {
+	body, err := c.get(ctx, client, openAIBase(endpoint.Endpoint)+"/models", endpoint, key)
 	if err != nil {
 		if isNotFound(err) {
 			return nil, nil
@@ -515,8 +564,8 @@ type llamaProps struct {
 // "cache_prompt":true},"chat_template":"..."}. A server that does not
 // serve the props answers with an error, and the probe reports that the
 // shape is not there.
-func (c *Catalog) probeLlamaCPP(ctx context.Context, client *http.Client, baseURL string) (*llamaProps, error) {
-	body, err := c.get(ctx, client, serverRoot(baseURL)+"/props")
+func (c *Catalog) probeLlamaCPP(ctx context.Context, client *http.Client, endpoint Endpoint, key string) (*llamaProps, error) {
+	body, err := c.get(ctx, client, serverRoot(endpoint.Endpoint)+"/props", endpoint, key)
 	if err != nil {
 		if isNotFound(err) {
 			return nil, nil
@@ -548,37 +597,119 @@ func (c *Catalog) probeLlamaCPP(ctx context.Context, client *http.Client, baseUR
 // "capabilities":["completion","tools"]}. A server that does not serve
 // it answers with an error, and the probe reports that the shape is not
 // there.
-func (c *Catalog) probeOllama(ctx context.Context, client *http.Client, baseURL string, modelIDs []string) (map[string]Discovered, error) {
+//
+// One model is one request, so a long list is a long fan-out: a fixed pool of
+// showWorkers asks about as many ids as one probe's budget serves, and a local
+// server answering a handful of requests together is unbothered. A model whose
+// show fails costs that model its own fields and nothing else — the list already
+// said the model is there — and only a probe that learned nothing about any id
+// reports an error, which is what falls back to the cache.
+func (c *Catalog) probeOllama(ctx context.Context, client *http.Client, endpoint Endpoint, key string, modelIDs []string) (map[string]Discovered, error) {
+	if len(modelIDs) > showLimit {
+		modelIDs = modelIDs[:showLimit]
+	}
 	out := map[string]Discovered{}
-	for _, id := range modelIDs {
-		body, err := c.post(ctx, client, serverRoot(baseURL)+"/api/show", map[string]string{"model": id})
-		if err != nil {
-			if isNotFound(err) {
-				return out, nil
+	var (
+		mu      sync.Mutex
+		failed  error
+		asked   int
+		missing bool
+	)
+	// The queue holds every id before the workers start, so a worker that stops early
+	// — the shape is not served, so nothing more is worth asking — cannot leave the
+	// feeder blocked on an id no one will read. Waiting that out would cost the probe's
+	// whole budget on an endpoint that answered at once.
+	ids := make(chan string, len(modelIDs))
+	workers := sync.WaitGroup{}
+	for range min(showWorkers, len(modelIDs)) {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			for id := range ids {
+				mu.Lock()
+				stop := missing
+				mu.Unlock()
+				if stop {
+					// The shape is not served at all: asking about the rest would
+					// be one refusal per id.
+					return
+				}
+				body, err := c.post(ctx, client, serverRoot(endpoint.Endpoint)+"/api/show",
+					map[string]string{"model": id}, endpoint, key)
+				mu.Lock()
+				asked++
+				if err != nil {
+					if isNotFound(err) {
+						// The server does not serve the show shape. One id's answer
+						// settles it for the probe, and the list's own fields stand.
+						missing = true
+						mu.Unlock()
+						return
+					}
+					if failed == nil {
+						failed = err
+					}
+					mu.Unlock()
+					continue
+				}
+				mu.Unlock()
+				var show struct {
+					Template     string            `json:"template"`
+					ModelInfo    map[string]any    `json:"model_info"`
+					Capabilities []string          `json:"capabilities"`
+					Details      map[string]string `json:"details"`
+				}
+				if err := json.Unmarshal(body, &show); err != nil {
+					mu.Lock()
+					if failed == nil {
+						failed = fmt.Errorf("catalog: the model show is not readable: %w", err)
+					}
+					mu.Unlock()
+					continue
+				}
+				model := Discovered{ModelID: id}
+				model.ContextLimit = contextLength(show.ModelInfo)
+				if hasCapability(show.Capabilities, "tools") {
+					model.Tools = poo.ToolsNative
+				}
+				if reasoning := templateReasoning(show.Template); reasoning != nil {
+					model.Reasoning = reasoning
+				}
+				mu.Lock()
+				out[id] = model
+				mu.Unlock()
 			}
-			return nil, err
+		}()
+	}
+feed:
+	for _, id := range modelIDs {
+		select {
+		case ids <- id:
+		case <-ctx.Done():
+			break feed
 		}
-		var show struct {
-			Template     string            `json:"template"`
-			ModelInfo    map[string]any    `json:"model_info"`
-			Capabilities []string          `json:"capabilities"`
-			Details      map[string]string `json:"details"`
-		}
-		if err := json.Unmarshal(body, &show); err != nil {
-			return nil, fmt.Errorf("catalog: the model show is not readable: %w", err)
-		}
-		model := Discovered{ModelID: id}
-		model.ContextLimit = contextLength(show.ModelInfo)
-		if hasCapability(show.Capabilities, "tools") {
-			model.Tools = poo.ToolsNative
-		}
-		if reasoning := templateReasoning(show.Template); reasoning != nil {
-			model.Reasoning = reasoning
-		}
-		out[id] = model
+	}
+	close(ids)
+	workers.Wait()
+	if len(out) == 0 && !missing && failed != nil {
+		// Not one model was described: the probe learned nothing about this
+		// endpoint's show, which is the failure the caller falls back over.
+		return nil, failed
 	}
 	return out, nil
 }
+
+// showWorkers is how many model shows one probe has in flight at once.
+const showWorkers = 6
+
+// showLimit is how many models one probe asks about.
+//
+// A model show is one request per model, and the probe shares one budget, so the
+// probe asks about as many as that budget serves. A longer list keeps the fields
+// the list itself reported; the ids past this are the ones that arrive without a
+// per-model report, which is the answer a local server's hundredth model has
+// always had.
+const showLimit = 64
 
 // contextLength returns the context window a model reports.
 //
@@ -646,51 +777,87 @@ func discoveredLayer(model Discovered, endpointURL string) poo.ModelInfo {
 	return info
 }
 
-// get reads a URL.
-func (c *Catalog) get(ctx context.Context, client *http.Client, url string) ([]byte, error) {
-	ctx, cancel := c.withTimeout(ctx)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("catalog: the request for %s is not buildable: %w", url, err)
-	}
-	return c.do(client, req)
+// get reads a URL with the endpoint's credential.
+func (c *Catalog) get(ctx context.Context, client *http.Client, url string, endpoint Endpoint, key string) ([]byte, error) {
+	return c.request(ctx, client, http.MethodGet, url, nil, endpoint, key)
 }
 
-// post sends a JSON body to a URL.
-func (c *Catalog) post(ctx context.Context, client *http.Client, url string, payload any) ([]byte, error) {
-	ctx, cancel := c.withTimeout(ctx)
-	defer cancel()
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return nil, fmt.Errorf("catalog: the request for %s is not buildable: %w", url, err)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(string(body)))
-	if err != nil {
-		return nil, fmt.Errorf("catalog: the request for %s is not buildable: %w", url, err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	return c.do(client, req)
+// post sends a JSON body to a URL with the endpoint's credential.
+func (c *Catalog) post(ctx context.Context, client *http.Client, url string, payload any, endpoint Endpoint, key string) ([]byte, error) {
+	return c.request(ctx, client, http.MethodPost, url, payload, endpoint, key)
 }
 
-// do sends a request and reads the answer.
-func (c *Catalog) do(client *http.Client, req *http.Request) ([]byte, error) {
+// request sends one probe request, and asks again without the credential when the
+// endpoint refuses the key it was given.
+//
+// The endpoint's key is what a hosted provider's list is served to, so the probe
+// carries it. An endpoint that reads no key — a local server, a gateway whose list
+// is public — refuses the header instead of ignoring it, and a stored key that one
+// endpoint takes must not turn another endpoint's answer into a refusal: the
+// second ask is the anonymous one every probe used to make.
+func (c *Catalog) request(ctx context.Context, client *http.Client, method, url string, payload any, endpoint Endpoint, key string) ([]byte, error) {
+	body, sent, refused, err := c.send(ctx, client, method, url, payload, endpoint, key)
+	if err != nil && refused && sent != "" {
+		body, _, _, err = c.send(ctx, client, method, url, payload, endpoint, "")
+	}
+	return body, err
+}
+
+// endpointKey returns the key the endpoint's credential resolves to, or the empty
+// string when none is in reach.
+//
+// It is asked once per probe, not per request: the fan-out runs the requests in
+// parallel, and the answer is the probe's, not each request's.
+func (c *Catalog) endpointKey(endpoint Endpoint) string {
+	if c.opts.EndpointKey == nil {
+		return ""
+	}
+	return c.opts.EndpointKey(endpoint.Name, endpoint.Credential)
+}
+
+// send sends one request and reads the answer.
+//
+// The key, when there is one, rides in the header the OpenAI-compatible shape reads
+// it from. The refusal flag says the endpoint answered 401 or 403, which is the one
+// answer a caller can settle by asking differently.
+func (c *Catalog) send(ctx context.Context, client *http.Client, method, url string, payload any, endpoint Endpoint, key string) ([]byte, string, bool, error) {
+	ctx, cancel := c.withTimeout(ctx)
+	defer cancel()
+	var body io.Reader
+	if payload != nil {
+		encoded, err := json.Marshal(payload)
+		if err != nil {
+			return nil, key, false, fmt.Errorf("catalog: the request for %s is not buildable: %w", url, err)
+		}
+		body = strings.NewReader(string(encoded))
+	}
+	req, err := http.NewRequestWithContext(ctx, method, url, body)
+	if err != nil {
+		return nil, key, false, fmt.Errorf("catalog: the request for %s is not buildable: %w", url, err)
+	}
+	if payload != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	if c.opts.UserAgent != "" {
 		req.Header.Set("User-Agent", c.opts.UserAgent)
 	}
+	if key != "" {
+		req.Header.Set("Authorization", "Bearer "+key)
+	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("catalog: the request for %s failed: %w", req.URL, err)
+		return nil, key, false, fmt.Errorf("catalog: the request for %s failed: %w", req.URL.Redacted(), err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, &statusError{url: req.URL.String(), status: resp.StatusCode}
+		refused := resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden
+		return nil, key, refused, &statusError{url: req.URL.Redacted(), status: resp.StatusCode}
 	}
-	body, err := io.ReadAll(resp.Body)
+	answer, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("catalog: the answer from %s is not readable: %w", req.URL, err)
+		return nil, key, false, fmt.Errorf("catalog: the answer from %s is not readable: %w", req.URL.Redacted(), err)
 	}
-	return body, nil
+	return answer, key, false, nil
 }
 
 // withTimeout bounds one probe.

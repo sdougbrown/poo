@@ -1432,10 +1432,10 @@ func (s *Settings) CatalogOptions() catalog.Options {
 		Settings: s.CatalogSettings(),
 		File:     s.modelsFileLayer,
 		Cached:   true,
-		// The curated layer is poo's word, and an entry whose key the
-		// operator cannot reach is not one to offer: the same presence
-		// answer the endpoint key's resolution gives a session.
-		KeyPresent: s.EndpointKeyPresent,
+		// The probes ask with the key the endpoint's credential resolves to, so
+		// a hosted provider's list reaches the catalog with the key the operator
+		// just signed in with.
+		EndpointKey: s.EndpointKey,
 	}
 }
 
@@ -1492,6 +1492,21 @@ func (s *Settings) CatalogSettings() catalog.Settings {
 	return settings
 }
 
+// ReloadModels holds the models the catalog serves now.
+//
+// It is the one place the runtime's model map is filled, so a caller that rebuilds the
+// catalog after a reprobe — the server's refresh — holds the same answer the build does.
+// A mapping the build puts between the catalog and the map belongs here, where both
+// readers of it meet.
+func (r *Runtime) ReloadModels() {
+	list := r.Catalog.List()
+	models := make(map[string]poo.ModelInfo, len(list))
+	for _, model := range list {
+		models[model.Name] = model
+	}
+	r.Models = models
+}
+
 // resolveModels builds the catalog and resolves the roles.
 //
 // The catalog is built from the settings and the models file, as the settings
@@ -1509,10 +1524,7 @@ func (r *Runtime) resolveModels(opts BuildOptions) error {
 		}
 	}
 	r.Catalog = cat
-	r.Models = map[string]poo.ModelInfo{}
-	for _, model := range cat.List() {
-		r.Models[model.Name] = model
-	}
+	r.ReloadModels()
 	return nil
 }
 

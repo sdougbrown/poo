@@ -12,17 +12,31 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sdougbrown/poo/pootest"
 	"github.com/sdougbrown/poo/provider/auth"
 )
 
 // isolatedConfigHome points the default credential paths at directories of the test's, so a
 // command cannot read or write the operator's own.
+//
+// The state root goes with them: the discovery cache lives under it, and a sign-in's
+// probe writes what it found there. A package-wide root would let one test's probe decide
+// another test's catalog.
 func isolatedConfigHome(t *testing.T) {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "xdg"))
 	t.Setenv("APPDATA", filepath.Join(home, "appdata"))
+	t.Setenv(pootest.StateRootEnv, filepath.Join(home, "state"))
+}
+
+// probesThrough points the sign-in's probe at a fixture, for the rest of the test.
+func probesThrough(t *testing.T, client *http.Client) {
+	t.Helper()
+	previous := probeClient
+	probeClient = client
+	t.Cleanup(func() { probeClient = previous })
 }
 
 // withStdin points os.Stdin at a pipe holding content, for the rest of the test.

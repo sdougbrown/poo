@@ -103,8 +103,8 @@ func TestTheBuiltinTypesafeModelIsOfferedOnItsKey(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "test-key")
 
 	dir := t.TempDir()
-	writeOpencodeAuth(t, dir, map[string]string{"typesafe": "ts_sk_test"})
-	settings, err := config.Load(typesafeSettings(t, dir, "chat: gpt-4o-mini\n  decider: typesafe/jev-latest"))
+	writeOpencodeAuth(t, dir, map[string]string{"typesafe": "ts_sk_test", "ollama-cloud": "an-ollama-key"})
+	settings, err := config.Load(typesafeSettings(t, dir, "chat: ollama-cloud/minimax-m3.1-flash\n  decider: typesafe/jev-latest"))
 	if err != nil {
 		t.Fatalf("loading the settings: %v", err)
 	}
@@ -155,7 +155,7 @@ func TestTheBuiltinTypesafeModelSleepsOnAnotherProvidersCredential(t *testing.T)
 
 	dir := t.TempDir()
 	writeOpencodeAuth(t, dir, map[string]string{"ollama-cloud": "an-ollama-key"})
-	settings, err := config.Load(typesafeSettings(t, dir, "chat: gpt-4o-mini\n  decider: typesafe/jev-latest"))
+	settings, err := config.Load(typesafeSettings(t, dir, "chat: ollama-cloud/minimax-m3.1-flash\n  decider: typesafe/jev-latest"))
 	if err != nil {
 		t.Fatalf("loading the settings: %v", err)
 	}
@@ -181,7 +181,7 @@ func TestTheBuiltinTypesafeModelWakesOnTheVariable(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "test-key")
 	writeOpencodeAuth(t, dir, map[string]string{"ollama-cloud": "an-ollama-key"})
 
-	settings, err := config.Load(typesafeSettings(t, dir, "chat: gpt-4o-mini\n  decider: typesafe/jev-latest"))
+	settings, err := config.Load(typesafeSettings(t, dir, "chat: ollama-cloud/minimax-m3.1-flash\n  decider: typesafe/jev-latest"))
 	if err != nil {
 		t.Fatalf("loading the settings: %v", err)
 	}
@@ -237,7 +237,8 @@ func TestTheTypesafeDeciderFoldsTheCallInstructions(t *testing.T) {
 	// The variable is pinned empty so the environment a test runs in cannot
 	// decide which key answers.
 	t.Setenv("TYPESAFE_API_KEY", "")
-	t.Setenv("OPENAI_API_KEY", "test-key")
+	t.Setenv("OPENCODE_API_KEY", "")
+	t.Setenv("TYPESAFE_API_KEY", "")
 
 	dir := t.TempDir()
 	srv := newTypesafeServer(t)
@@ -254,8 +255,12 @@ models:
     endpoint: jev
     model_id: jev-latest
     ops: [systemone]
+  chat-model:
+    endpoint: jev
+    model_id: glm-5.3
+    ops: [chat]
 roles:
-  chat: gpt-4o-mini
+  chat: chat-model
   decider: jev-latest
 `)
 	settings, err := config.Load(path)
@@ -314,7 +319,7 @@ func TestTheSettingsKeepTheBuiltinEndpointDeclarations(t *testing.T) {
 
 	dir := t.TempDir()
 	srv := newTypesafeServer(t)
-	writeOpencodeAuth(t, dir, map[string]string{"typesafe": "ts_sk_stored"})
+	writeOpencodeAuth(t, dir, map[string]string{"typesafe": "ts_sk_stored", "ollama-cloud": "an-ollama-key"})
 	path := writeCodexSettings(t, dir, `version: 1
 auth_file: auth.json
 session:
@@ -324,7 +329,7 @@ endpoints:
     endpoint: `+srv.URL+`
     api_key: ts_sk_literal
 roles:
-  chat: gpt-4o-mini
+  chat: ollama-cloud/minimax-m3.1-flash
   decider: typesafe/jev-latest
 `)
 	settings, err := config.Load(path)
@@ -397,7 +402,7 @@ func TestAKeylessSettingsEntryKeepsTheRecordCredential(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "test-key")
 
 	dir := t.TempDir()
-	writeOpencodeAuth(t, dir, map[string]string{"typesafe": "ts_sk_stored"})
+	writeOpencodeAuth(t, dir, map[string]string{"typesafe": "ts_sk_stored", "ollama-cloud": "an-ollama-key"})
 	path := writeCodexSettings(t, dir, `version: 1
 auth_file: auth.json
 session:
@@ -406,7 +411,7 @@ endpoints:
   typesafe:
     endpoint: https://api.typesafe.ai/v1
 roles:
-  chat: gpt-4o-mini
+  chat: ollama-cloud/minimax-m3.1-flash
   decider: typesafe/jev-latest
 `)
 	settings, err := config.Load(path)
@@ -431,7 +436,8 @@ roles:
 // as the request's own field, and each question says only what it was
 // asked.
 func TestADeciderKeepsTheCallInstructionsOnTheRequest(t *testing.T) {
-	t.Setenv("OPENAI_API_KEY", "test-key")
+	t.Setenv("OPENCODE_API_KEY", "")
+	t.Setenv("TYPESAFE_API_KEY", "")
 	dir := t.TempDir()
 	srv := newTypesafeServer(t)
 	path := writeCodexSettings(t, dir, `version: 1
@@ -446,8 +452,12 @@ models:
     endpoint: grace
     model_id: gemma4
     ops: [systemone]
+  chat-model:
+    endpoint: grace
+    model_id: glm-5.3
+    ops: [chat]
 roles:
-  chat: gpt-4o-mini
+  chat: chat-model
   decider: gemma4
 `)
 	settings, err := config.Load(path)

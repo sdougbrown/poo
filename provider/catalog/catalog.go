@@ -3,8 +3,9 @@
 // The catalog has four layers, and the later ones win, field by field.
 //
 //  1. The curated layer is embedded in the binary: the family rules in
-//     families.go describe the local models, and the hosted entries in
-//     modelsdev_gen.go are generated from the models.dev data.
+//     families.go describe families of local models. What a hosted provider
+//     serves is not here — a snapshot of it goes stale the day the provider
+//     adds or retires a model, and the provider's own list is one probe away.
 //  2. The discovery layer holds what the endpoints report about the
 //     models they serve.
 //  3. The models file layer is what the operator's models file declares.
@@ -21,6 +22,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/sdougbrown/poo"
@@ -97,13 +99,13 @@ type Options struct {
 	// client that says nothing is named by the HTTP library alone. Empty
 	// sends none.
 	UserAgent string
-	// KeyPresent reports whether the key an endpoint's credential reads is
-	// in reach. The curated layer is poo's word, and an entry whose key the
-	// operator cannot reach is not one to offer: poo models, the model
-	// switcher and the role checks all read the catalog's answer. Nil
-	// offers every entry: a binary that links no credential store offers
-	// what it embeds.
-	KeyPresent func(name string, credential Credential) bool
+	// EndpointKey resolves the key an endpoint's credential reads, and an
+	// endpoint whose key is not in reach resolves to the empty string. The
+	// probes ask with it: a hosted provider's model list is served to a key,
+	// and a probe that asked anonymously would be refused and would leave the
+	// endpoint offering nothing. Nil sends no credential, which is what a
+	// binary that links no credential store can do.
+	EndpointKey func(name string, credential Credential) string
 	// Cached says the catalog holds what the endpoints last reported, read from the
 	// discovery cache when it is built. It is how a model an endpoint served is a model a
 	// session can name without a probe: the build never reaches the network, and the cache
@@ -118,8 +120,17 @@ type Options struct {
 
 // Catalog is the effective catalog: the merged models, the endpoints
 // that serve them and the role assignments.
+//
+// The entries and the model index move when a probe reports what an endpoint
+// serves, and a probe can land while another goroutine reads the catalog: a wire
+// request reprobes, and a session's switch, decider and statusline read. The
+// mutex is what keeps a reprobe from writing the maps a reader is walking, which
+// in Go is not an error but a panic. The endpoints and the roles are set once,
+// when the catalog is built, and are read without it.
 type Catalog struct {
-	opts       Options
+	opts Options
+	// mu guards the entries and the model index.
+	mu         sync.RWMutex
 	curated    *curated
 	entries    map[string]*entry
 	modelIndex map[modelRef]*entry
@@ -169,9 +180,6 @@ func New(opts Options) *Catalog {
 		endpoints:  map[string]Endpoint{},
 		roles:      map[Role]string{},
 	}
-	for name, endpoint := range c.curated.endpoints {
-		c.endpoints[name] = endpoint
-	}
 	for name, endpoint := range opts.File.Endpoints {
 		c.endpoints[name] = mergeEndpoint(c.endpoints[name], endpoint.endpoint(name))
 	}
@@ -180,7 +188,6 @@ func New(opts Options) *Catalog {
 	}
 	c.addFileModels()
 	c.addSettingsModels()
-	c.addCuratedModels()
 	if opts.Cached {
 		c.applyCached()
 	}
@@ -240,9 +247,7 @@ func (c *Catalog) addFileModels() {
 			modelID:  model.ModelID,
 		}
 		e.file = model.layer(name, endpoint.Endpoint)
-		curated, _, notes := c.curated.forModel(model.ModelID)
-		e.curated = curated
-		e.notes = notes
+		e.curated, e.notes = c.curated.forModel(model.ModelID)
 		c.entries[name] = e
 		c.modelIndex[modelRef{endpoint: model.Endpoint, modelID: model.ModelID}] = e
 	}
@@ -306,63 +311,8 @@ func (c *Catalog) addSettingsModels() {
 		e.endpoint = model.Endpoint
 		e.modelID = model.ModelID
 		e.settings = model.layer(name, endpoint.Endpoint)
-		curated, _, notes := c.curated.forModel(model.ModelID)
-		e.curated = curated
-		e.notes = notes
+		e.curated, e.notes = c.curated.forModel(model.ModelID)
 		c.modelIndex[modelRef{endpoint: model.Endpoint, modelID: model.ModelID}] = e
-	}
-}
-
-// addCuratedModels adds the curated models that no other layer named.
-//
-// A curated model that the settings or the discovery already named is
-// not added twice: the layers of the one model are merged instead.
-func (c *Catalog) addCuratedModels() {
-	for _, id := range c.curated.modelIDs() {
-		if c.hasModelID(id) {
-			continue
-		}
-		curated, endpoint, notes := c.curated.forModel(id)
-		// The curated model rides the endpoint a session resolves its key
-		// from: the merged one, whichever layer had the last word on the
-		// credential. A model whose key is not in reach is not one to
-		// offer — poo's word is the curated entry, and the operator's own
-		// models ride no gate.
-		served, ok := c.endpoints[endpoint]
-		if ok {
-			if c.opts.KeyPresent != nil && !c.opts.KeyPresent(endpoint, served.Credential) {
-				// The curated model is not offered. An endpoint only poo
-				// declares goes with it: an endpoint the operator declared
-				// is theirs, and stays for the models they wrote against
-				// it.
-				if _, declared := c.opts.File.Endpoints[endpoint]; !declared {
-					if _, declared := c.opts.Settings.Endpoints[endpoint]; !declared {
-						delete(c.endpoints, endpoint)
-					}
-				}
-				continue
-			}
-			curated.Endpoint = served.Endpoint
-		} else {
-			hosted, isHosted := c.curated.endpoints[endpoint]
-			if !isHosted {
-				continue
-			}
-			if c.opts.KeyPresent != nil && !c.opts.KeyPresent(endpoint, hosted.Credential) {
-				continue
-			}
-			c.endpoints[endpoint] = hosted
-			curated.Endpoint = hosted.Endpoint
-		}
-		e := &entry{
-			name:     id,
-			endpoint: endpoint,
-			modelID:  id,
-			curated:  curated,
-			notes:    notes,
-		}
-		c.entries[id] = e
-		c.modelIndex[modelRef{endpoint: endpoint, modelID: id}] = e
 	}
 }
 
@@ -379,21 +329,10 @@ func (c *Catalog) entryForModel(endpoint, modelID string) *entry {
 	return c.modelIndex[modelRef{endpoint: endpoint, modelID: modelID}]
 }
 
-// hasModelID reports whether an entry already serves a model id.
-//
-// A model that the settings serve is not listed twice: the curated
-// entry of the same model is merged into the settings' one.
-func (c *Catalog) hasModelID(modelID string) bool {
-	for _, e := range c.entries {
-		if e.modelID == modelID {
-			return true
-		}
-	}
-	return false
-}
-
 // List returns the effective models, sorted by name.
 func (c *Catalog) List() []poo.ModelInfo {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	names := make([]string, 0, len(c.entries))
 	for name := range c.entries {
 		names = append(names, name)
@@ -411,6 +350,8 @@ func (c *Catalog) List() []poo.ModelInfo {
 // A name the catalog does not hold is an error: the caller asked for a
 // model that does not exist.
 func (c *Catalog) Resolve(name string) (poo.ModelInfo, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	if _, ok := c.entries[name]; !ok {
 		return poo.ModelInfo{}, &UnresolvedError{Name: name}
 	}
@@ -449,6 +390,8 @@ type Explanation struct {
 // The fields come in the order of the model info, so the explanation
 // reads like the model info it explains.
 func (c *Catalog) Explain(name string) (poo.ModelInfo, []Explanation, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	e, ok := c.entries[name]
 	if !ok {
 		return poo.ModelInfo{}, nil, &UnresolvedError{Name: name}
@@ -489,6 +432,8 @@ func (c *Catalog) Explain(name string) (poo.ModelInfo, []Explanation, error) {
 // The notes say what the model's family needs: the text tool-call
 // parser, a reasoning switch, a context limit that bites.
 func (c *Catalog) Notes(name string) []string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	e, ok := c.entries[name]
 	if !ok {
 		return nil
@@ -502,6 +447,8 @@ func (c *Catalog) Notes(name string) []string {
 // catalog but does not serve what the role needs: a caller that asks a role for its
 // model is asking what a session would run, and a session refuses the second.
 func (c *Catalog) Role(role Role) (poo.ModelInfo, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	name, ok := c.roles[role]
 	if !ok {
 		return poo.ModelInfo{}, c.unassignedRole(role)
@@ -565,6 +512,8 @@ func (c *Catalog) servable(role Role) []string {
 // catalog does not hold is a warning, and the catalog carries on
 // without it.
 func (c *Catalog) CheckRoles() error {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	roles := make([]string, 0, len(c.roles))
 	for role := range c.roles {
 		roles = append(roles, string(role))
@@ -592,6 +541,24 @@ func (c *Catalog) CheckRoles() error {
 		}
 	}
 	return nil
+}
+
+// Reported returns how many models an endpoint's last report described.
+//
+// A model a layer declares and a probe also described counts once: the report is the
+// entry's own discovery layer, which only a probe sets, so the answer is what the
+// endpoint said and not what a layer above it left in place. A caller reporting what a
+// sign-in bought asks this, because a placeholder a layer declares is not an answer.
+func (c *Catalog) Reported(endpoint string) int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	count := 0
+	for _, e := range c.entries {
+		if e.endpoint == endpoint && e.discovery.ModelID != "" {
+			count++
+		}
+	}
+	return count
 }
 
 // Endpoints returns the endpoints, by name.

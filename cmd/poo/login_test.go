@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -307,7 +308,7 @@ func TestTheStoredKeyOutranksTheSettingsLiteral(t *testing.T) {
 	body := `version: 1
 auth_file: ` + filepath.Join(dir, "auth.json") + `
 endpoints:
-  ollama:
+  ollama-cloud:
     endpoint: https://ollama.com/v1
     api_key_env: OLLAMA_API_KEY
     api_key: the-literal
@@ -316,6 +317,12 @@ session:
 `
 	if err := os.WriteFile(settings, []byte(body), 0o644); err != nil {
 		t.Fatalf("writing the settings: %v", err)
+	}
+	// The built-in providers are offered once a credential file is there, and the
+	// one this test signs in to is the file the settings name.
+	if err := os.WriteFile(filepath.Join(dir, "auth.json"),
+		[]byte("version: 1\ncredentials: {}\n"), 0o600); err != nil {
+		t.Fatalf("writing the credential file: %v", err)
 	}
 
 	runtime := loginRuntime(t, settings)
@@ -331,6 +338,165 @@ session:
 	if key := runtime.EndpointKey(ollamaModel(t, runtime)); key != "the-stored-key" {
 		t.Errorf("the model resolves to the key %q, want the key the sign-in stored", key)
 	}
+}
+
+// TestAKeyLoginProbesWhatTheProviderServes covers the catalog a sign-in leaves
+// behind: the key buys a list of models, so the sign-in asks the endpoint what it
+// serves and the session opened next already holds it. A `poo models` run, or a
+// /models in the repl, would otherwise be the first thing to learn it.
+func TestAKeyLoginProbesWhatTheProviderServes(t *testing.T) {
+	isolatedConfigHome(t)
+	t.Setenv("OLLAMA_API_KEY", "")
+	dir := t.TempDir()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"object":"list","data":[{"id":"glm-5.3"},{"id":"kimi-k3"}]}`)
+	})
+	mux.HandleFunc("/api/show", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"model_info":{"arch.context_length":262144},"capabilities":["completion","tools"]}`)
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	authPath := filepath.Join(dir, "auth.json")
+	if err := os.WriteFile(authPath, []byte("version: 1\ncredentials: {}\n"), 0o600); err != nil {
+		t.Fatalf("writing the credential file: %v", err)
+	}
+	settings := filepath.Join(dir, "settings.yaml")
+	body := `version: 1
+auth_file: ` + authPath + `
+endpoints:
+  ollama-cloud:
+    endpoint: ` + server.URL + `
+    api_key_env: OLLAMA_API_KEY
+session:
+  mode: ephemeral
+`
+	if err := os.WriteFile(settings, []byte(body), 0o644); err != nil {
+		t.Fatalf("writing the settings: %v", err)
+	}
+
+	// The probe reaches the fixture the settings name, so the sign-in can ask it
+	// what it serves.
+	probesThrough(t, server.Client())
+	withoutATerminal(t)
+	withStdin(t, "the-key\n")
+	if code := run([]string{"login", "ollama-cloud", "--settings", settings}); code != 0 {
+		t.Fatalf("poo login exited with %d", code)
+	}
+
+	runtime := loginRuntime(t, settings)
+	for _, name := range []string{"ollama-cloud/glm-5.3", "ollama-cloud/kimi-k3"} {
+		model, err := runtime.Catalog.Resolve(name)
+		if err != nil {
+			t.Errorf("the model %q the endpoint serves is not in the catalog after the sign-in: %v", name, err)
+			continue
+		}
+		if model.ContextLimit != 262144 {
+			t.Errorf("%s has the context limit %d, want the 262144 its own report names", name, model.ContextLimit)
+		}
+	}
+}
+
+// TestAKeyLoginProbesTheRecordedEndpoint covers the documented path: an operator with a
+// credential file and no `endpoints` block. The Ollama Cloud endpoint is the built-in
+// record's, so it is in the catalog and not in the settings, and the sign-in still has to
+// ask it what it serves. The requests go to a transport standing in for the provider.
+func TestAKeyLoginProbesTheRecordedEndpoint(t *testing.T) {
+	isolatedConfigHome(t)
+	t.Setenv("OLLAMA_API_KEY", "")
+	dir := t.TempDir()
+	authPath := filepath.Join(dir, "auth.json")
+	if err := os.WriteFile(authPath, []byte("version: 1\ncredentials: {}\n"), 0o600); err != nil {
+		t.Fatalf("writing the credential file: %v", err)
+	}
+	settings := filepath.Join(dir, "settings.yaml")
+	body := "version: 1\nauth_file: " + authPath + "\nsession:\n  mode: ephemeral\n"
+	if err := os.WriteFile(settings, []byte(body), 0o644); err != nil {
+		t.Fatalf("writing the settings: %v", err)
+	}
+
+	provider := &providerTransport{list: []string{"glm-5.3", "kimi-k3"}}
+	probesThrough(t, &http.Client{Transport: provider})
+	withoutATerminal(t)
+	withStdin(t, "the-key\n")
+	if code := run([]string{"login", "ollama-cloud", "--settings", settings}); code != 0 {
+		t.Fatalf("poo login exited with %d", code)
+	}
+	asked, key, agent := provider.requests()
+	if asked == 0 {
+		t.Fatalf("the sign-in never asked the provider what it serves")
+	}
+	if key != "the-key" {
+		t.Errorf("the probe carried the key %q, want the one the sign-in stored", key)
+	}
+	// The probes name the client, like every other catalog build in the binary: a
+	// provider that reads its traffic by user agent sees these requests as poo.
+	if !strings.HasPrefix(agent, "poo/") {
+		t.Errorf("the probe carried the user agent %q, want poo's own", agent)
+	}
+
+	runtime := loginRuntime(t, settings)
+	for _, name := range []string{"ollama-cloud/glm-5.3", "ollama-cloud/kimi-k3"} {
+		if _, err := runtime.Catalog.Resolve(name); err != nil {
+			t.Errorf("the model %q the record's endpoint serves is not in the catalog: %v", name, err)
+		}
+	}
+}
+
+// providerTransport answers a probe the way a hosted Ollama Cloud does: a model list, and
+// a show for each model in it. The probe's shows run in parallel, so every field is
+// guarded.
+type providerTransport struct {
+	// mu guards the fields below.
+	mu sync.Mutex
+	// asked counts the requests the probe made.
+	asked int
+	// key is the credential the last request carried.
+	key string
+	// agent is the user agent the last request carried.
+	agent string
+	// list are the ids the model list answers with.
+	list []string
+}
+
+// requests returns the count, the key and the user agent the probe carried.
+func (p *providerTransport) requests() (int, string, string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.asked, p.key, p.agent
+}
+
+func (p *providerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	p.mu.Lock()
+	p.asked++
+	if key := strings.TrimPrefix(req.Header.Get("Authorization"), "Bearer "); key != "" {
+		p.key = key
+	}
+	p.agent = req.Header.Get("User-Agent")
+	list := append([]string(nil), p.list...)
+	p.mu.Unlock()
+	body := `{"object":"list","data":[`
+	if strings.HasSuffix(req.URL.Path, "/api/show") {
+		body = `{"model_info":{"arch.context_length":65536},"capabilities":["completion","tools"]}`
+	} else {
+		for i, id := range list {
+			if i > 0 {
+				body += ","
+			}
+			body += `{"id":"` + id + `"}`
+		}
+		body += `]}`
+	}
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Request:    req,
+	}, nil
 }
 
 // loginRuntime builds the runtime a command builds from the settings file, so a test can ask
@@ -356,10 +522,11 @@ func loginRuntime(t *testing.T, settingsPath string) *config.Runtime {
 	return runtime
 }
 
-// ollamaModel is the curated model the Ollama Cloud endpoint serves.
+// ollamaModel is the model the built-in record declares for the Ollama Cloud endpoint,
+// which is where the key a sign-in stores is read from.
 func ollamaModel(t *testing.T, runtime *config.Runtime) poo.ModelInfo {
 	t.Helper()
-	model, err := runtime.Catalog.Resolve("minimax-m3.1-flash")
+	model, err := runtime.Catalog.Resolve("ollama-cloud/minimax-m3.1-flash")
 	if err != nil {
 		t.Fatalf("resolving the Ollama model: %v", err)
 	}
@@ -865,5 +1032,74 @@ func TestThePickerRefusesWhatIsNotASignIn(t *testing.T) {
 				t.Errorf("the refusal is %q, want it to say %q", stderr.String(), c.want)
 			}
 		})
+	}
+}
+
+// TestALoginWithNoCredentialFileNamedWritesPooOwnName covers the file a sign-in
+// creates when the settings name none: poo's own, under the name its encoding
+// describes. The file is YAML, and a .json name on YAML is a trap.
+func TestALoginWithNoCredentialFileNamedWritesPooOwnName(t *testing.T) {
+	isolatedConfigHome(t)
+	t.Setenv("OLLAMA_API_KEY", "")
+	dir := t.TempDir()
+	settings := filepath.Join(dir, "settings.yaml")
+	if err := os.WriteFile(settings, []byte("version: 1\nsession:\n  mode: ephemeral\n"), 0o644); err != nil {
+		t.Fatalf("writing the settings: %v", err)
+	}
+	probesThrough(t, &http.Client{Transport: refusingTransport{}})
+	withoutATerminal(t)
+	withStdin(t, "the-key\n")
+	if code := run([]string{"login", "ollama-cloud", "--settings", settings}); code != 0 {
+		t.Fatalf("poo login exited with %d", code)
+	}
+
+	want, err := config.DefaultAuthFile()
+	if err != nil {
+		t.Fatalf("resolving the default credential file: %v", err)
+	}
+	if filepath.Base(want) != "auth.yaml" {
+		t.Errorf("the default credential file is %q, want poo's own auth.yaml", want)
+	}
+	body, err := os.ReadFile(want)
+	if err != nil {
+		t.Fatalf("reading the credential poo wrote: %v", err)
+	}
+	if !strings.Contains(string(body), "the-key") {
+		t.Errorf("the credential file %q does not hold the key that was typed:\n%s", want, body)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(want), "auth.json")); err == nil {
+		t.Errorf("the sign-in also wrote an auth.json beside its own file")
+	}
+}
+
+// TestAKeyLoginCountsTheModelTheRecordDeclares covers the count a sign-in prints when
+// the endpoint answers with the one model the built-in record names and nothing else.
+// The record's placeholder is the provider's model until a probe describes it, so a
+// count that only reads the layer a field came from reports nothing at the moment the
+// probe just answered — success looks the same as a refused key.
+func TestAKeyLoginCountsTheModelTheRecordDeclares(t *testing.T) {
+	isolatedConfigHome(t)
+	t.Setenv("OLLAMA_API_KEY", "")
+	dir := t.TempDir()
+	authPath := filepath.Join(dir, "auth.json")
+	if err := os.WriteFile(authPath, []byte("version: 1\ncredentials: {}\n"), 0o600); err != nil {
+		t.Fatalf("writing the credential file: %v", err)
+	}
+	settings := filepath.Join(dir, "settings.yaml")
+	body := "version: 1\nauth_file: " + authPath + "\nsession:\n  mode: ephemeral\n"
+	if err := os.WriteFile(settings, []byte(body), 0o644); err != nil {
+		t.Fatalf("writing the settings: %v", err)
+	}
+
+	// The endpoint serves exactly the model the record names for it.
+	probesThrough(t, &http.Client{Transport: &providerTransport{list: []string{"minimax-m3.1-flash"}}})
+	withoutATerminal(t)
+	withStdin(t, "the-key\n")
+	code, stderr, stdout := runCLIWithStdout(t, "login", "ollama-cloud", "--settings", settings)
+	if code != 0 {
+		t.Fatalf("poo login exited with %d: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "serves 1 model(s)") {
+		t.Errorf("the sign-in says nothing about what the endpoint serves:\n%s", stdout)
 	}
 }

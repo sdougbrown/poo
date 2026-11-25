@@ -79,6 +79,12 @@ type fakeServer struct {
 	chat string
 	// level is the reasoning level the session runs at.
 	level string
+	// refreshes counts the model lists the client asked the server to reprobe
+	// for, so a test can tell `/models` from `/model`.
+	refreshes int
+	// refuseRefresh makes a models/list that asks for a reprobe refuse, for the
+	// tests of a refresh that fails: the session's opening list still answers.
+	refuseRefresh bool
 	// models is the catalog the server lists. A test sets it before
 	// pipeUp to put more names in front of the client; a nil catalog is
 	// the shared one, fakeModels.
@@ -239,6 +245,18 @@ func (s *fakeServer) line(line []byte) {
 			"broken":    false,
 		})
 	case protocol.MethodModelsList:
+		var params protocol.ModelsParams
+		_ = json.Unmarshal(req.Params, &params)
+		s.mu.Lock()
+		if params.Refresh {
+			s.refreshes++
+		}
+		refuse := s.refuseRefresh && params.Refresh
+		s.mu.Unlock()
+		if refuse {
+			s.fail(req.ID, "no_models", "the model list is not readable")
+			return
+		}
 		models := make([]map[string]any, 0, len(s.catalog()))
 		for _, model := range s.catalog() {
 			models = append(models, map[string]any{

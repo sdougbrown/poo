@@ -16,13 +16,7 @@ import (
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/provider/catalog"
-	"github.com/sdougbrown/poo/provider/catalog/internal/genmodelsdev"
 )
-
-// generate writes the generated catalog into a file.
-func generate(output string) error {
-	return genmodelsdev.Generate("testdata/models.dev.json", output)
-}
 
 // localSettings returns the settings of a local endpoint that serves
 // gemma4.
@@ -178,47 +172,6 @@ func TestTheExplainAttributesEveryField(t *testing.T) {
 	}
 }
 
-func TestTheHostedModelsAreListed(t *testing.T) {
-	c := catalog.New(catalog.Options{Settings: localSettings()})
-	var hosted *poo.ModelInfo
-	for _, info := range c.List() {
-		if info.Name == "gpt-5" {
-			model := info
-			hosted = &model
-		}
-	}
-	if hosted == nil {
-		t.Fatal("the hosted models are not listed")
-	}
-	if hosted.ContextLimit != 400000 {
-		t.Errorf("the context limit is %d, want the generated 400000", hosted.ContextLimit)
-	}
-	if hosted.InputLimit != 272000 {
-		t.Errorf("the input limit is %d, want the generated 272000", hosted.InputLimit)
-	}
-	if hosted.Temperature != poo.TempFixed {
-		t.Errorf("the temperature control is %q, want fixed", hosted.Temperature)
-	}
-	if hosted.Reasoning.Mode != poo.ReasoningEffort {
-		t.Errorf("the reasoning control is %q, want effort", hosted.Reasoning.Mode)
-	}
-}
-
-func TestAHostedModelTheSettingsServeIsNotListedTwice(t *testing.T) {
-	settings := localSettings()
-	settings.Models["fast"] = catalog.ModelSettings{Endpoint: "grace", ModelID: "gpt-5"}
-	c := catalog.New(catalog.Options{Settings: settings})
-	count := 0
-	for _, info := range c.List() {
-		if info.ModelID == "gpt-5" {
-			count++
-		}
-	}
-	if count != 1 {
-		t.Errorf("the model is listed %d times, want once", count)
-	}
-}
-
 func TestTheCatalogListsTheModelsByName(t *testing.T) {
 	settings := localSettings()
 	settings.Models["alpha"] = catalog.ModelSettings{Endpoint: "grace", ModelID: "gemma4"}
@@ -227,8 +180,8 @@ func TestTheCatalogListsTheModelsByName(t *testing.T) {
 	for _, info := range c.List() {
 		names = append(names, info.Name)
 	}
-	if len(names) < 3 {
-		t.Fatalf("the catalog holds %v, want the settings' models and the hosted ones", names)
+	if len(names) != 2 {
+		t.Fatalf("the catalog holds %v, want the settings' two models", names)
 	}
 	for i := 1; i < len(names); i++ {
 		if names[i-1] > names[i] {
@@ -441,25 +394,6 @@ func TestTheReasoningSettingOfAModelThatCannotDoIt(t *testing.T) {
 	}
 }
 
-func TestTheGeneratedCatalogIsFresh(t *testing.T) {
-	dir := t.TempDir()
-	generated := filepath.Join(dir, "modelsdev_gen.go")
-	if err := generate(generated); err != nil {
-		t.Fatalf("the generator: %v", err)
-	}
-	want, err := os.ReadFile("modelsdev_gen.go")
-	if err != nil {
-		t.Fatalf("the generated file: %v", err)
-	}
-	got, err := os.ReadFile(generated)
-	if err != nil {
-		t.Fatalf("the generated file: %v", err)
-	}
-	if string(got) != string(want) {
-		t.Error("the generated catalog is out of date: run go generate ./provider/catalog")
-	}
-}
-
 func TestTheBuildChecksTheRoles(t *testing.T) {
 	settings := localSettings()
 	settings.Roles = map[string]string{"chat": "gemma4"}
@@ -512,30 +446,6 @@ func TestTheDiscoveryCacheIsPrivate(t *testing.T) {
 	if got := info.Mode().Perm(); got != 0o600 {
 		t.Errorf("the cache file's mode is %#o, want 0600", got)
 	}
-}
-
-// TestAnAnthropicEntryGetsOnlyChatCompletionsControls covers the
-// catalog's Phase A data: the Anthropic entries are reached through Chat
-// Completions, which can send neither a thinking budget nor an explicit
-// cache breakpoint.
-func TestAnAnthropicEntryGetsOnlyChatCompletionsControls(t *testing.T) {
-	c := catalog.New(catalog.Options{Settings: localSettings()})
-	for _, info := range c.List() {
-		if info.ModelID != "claude-sonnet-4-5" {
-			continue
-		}
-		if info.API != poo.APIChatCompletions {
-			t.Errorf("the entry's API is %q, want chat_completions", info.API)
-		}
-		if info.Reasoning.Mode == poo.ReasoningBudget {
-			t.Error("the entry names a thinking budget that Chat Completions cannot send")
-		}
-		if info.PromptCache == poo.CacheExplicit {
-			t.Error("the entry names an explicit cache that Chat Completions cannot place")
-		}
-		return
-	}
-	t.Fatal("the Anthropic entry is not listed")
 }
 
 // vllmFixture starts an endpoint that serves one model id.
@@ -901,68 +811,5 @@ func TestADeciderServesTheRoleWithEitherOperation(t *testing.T) {
 				t.Fatal("the decider role accepted a model that serves neither operation")
 			}
 		})
-	}
-}
-
-// TestACuratedModelNeedsAKeyInTheReach covers the gate the curated hosted
-// layer takes: an entry whose key the operator cannot reach is not
-// offered, and one whose key is there is. A catalog built with no
-// presence answer offers everything the layer declares, so a binary that
-// links no credential store offers what it embeds.
-func TestACuratedModelNeedsAKeyInTheReach(t *testing.T) {
-	present := catalog.New(catalog.Options{
-		Settings:   localSettings(),
-		KeyPresent: func(name string, credential catalog.Credential) bool { return true },
-	})
-	if _, err := present.Resolve("claude-sonnet-4-5"); err != nil {
-		t.Errorf("the hosted model with its key in reach did not resolve: %v", err)
-	}
-	if _, ok := present.Endpoints()["anthropic"]; !ok {
-		t.Errorf("the hosted endpoint with its key in reach is not in the catalog")
-	}
-	gone := catalog.New(catalog.Options{
-		Settings:   localSettings(),
-		KeyPresent: func(name string, credential catalog.Credential) bool { return false },
-	})
-	if _, err := gone.Resolve("claude-sonnet-4-5"); err == nil {
-		t.Errorf("the hosted model with no key in reach resolved")
-	}
-	if _, ok := gone.Endpoints()["anthropic"]; ok {
-		t.Errorf("the hosted endpoint with no key in reach is in the catalog")
-	}
-	ungated := catalog.New(catalog.Options{Settings: localSettings()})
-	if _, err := ungated.Resolve("claude-sonnet-4-5"); err != nil {
-		t.Errorf("the hosted model without a presence answer did not resolve: %v", err)
-	}
-}
-
-// TestTheGateReadsTheCredentialTheSessionResolves covers the override
-// case: settings that re-declare a curated endpoint with their own key
-// variable change the credential the session resolves the key from, and
-// the gate follows the merged one. An entry the curated variable would
-// wake stays unoffered when the override's variable is not there, and
-// wakes when it is.
-func TestTheGateReadsTheCredentialTheSessionResolves(t *testing.T) {
-	t.Setenv("ANTHROPIC_API_KEY", "curated-key")
-	settings := catalog.Settings{
-		Endpoints: map[string]catalog.EndpointSettings{
-			"anthropic": {
-				Endpoint:  "https://api.anthropic.com/v1",
-				APIKeyEnv: "ANTHROPIC_KEY2",
-			},
-		},
-	}
-	keys := map[string]string{"ANTHROPIC_API_KEY": "curated-key"}
-	present := func(name string, credential catalog.Credential) bool {
-		return keys[credential.Env] != ""
-	}
-	gated := catalog.New(catalog.Options{Settings: settings, KeyPresent: present})
-	if _, err := gated.Resolve("claude-sonnet-4-5"); err == nil {
-		t.Errorf("the override's variable is not there, and the model resolved")
-	}
-	keys["ANTHROPIC_KEY2"] = "override-key"
-	woken := catalog.New(catalog.Options{Settings: settings, KeyPresent: present})
-	if _, err := woken.Resolve("claude-sonnet-4-5"); err != nil {
-		t.Errorf("the override's variable is there, and the model did not resolve: %v", err)
 	}
 }

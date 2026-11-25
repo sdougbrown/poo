@@ -109,7 +109,7 @@ func (s *Settings) EndpointKey(name string, credential catalog.Credential) strin
 		// variable a provider stores its key under is served by that provider's credential,
 		// and no endpoint name is hardcoded here.
 		for _, provider := range auth.KeyProviders() {
-			if credential.Env != provider.Env {
+			if !ReadsProviderKey(credential, provider) {
 				continue
 			}
 			// An absent or unreadable credential is not a failure here: the next rung answers.
@@ -123,6 +123,20 @@ func (s *Settings) EndpointKey(name string, credential catalog.Credential) strin
 		return named.APIKey
 	}
 	return ""
+}
+
+// ReadsProviderKey reports whether an endpoint's credential reads the key a provider
+// stores.
+//
+// The environment variable's name is the join, and it is the one rule two callers ask:
+// the key's own resolution, and a caller that reports what a provider's sign-in serves. A
+// second copy of the rule would answer one of them after the rule changed and not the
+// other.
+func ReadsProviderKey(credential catalog.Credential, provider auth.Provider) bool {
+	if credential.Source != catalog.CredentialEnv {
+		return false
+	}
+	return provider.Env != "" && credential.Env == provider.Env
 }
 
 // EndpointKeyPresent reports whether the key an endpoint reads is in reach,

@@ -28,9 +28,17 @@ const PiModelsFileName = "models.json"
 // file that names it is pi's shape; a file that names the endpoints is poo's.
 const providersField = "providers"
 
-// AuthFileName is the name a credential file goes by: poo's own, in the user's
-// config directory, and pi's beside pi's models file.
-const AuthFileName = "auth.json"
+// AuthFileName is the name poo's own credential file goes by, in the user's config
+// directory. pi's file keeps the name pi writes: AuthFileName in the piimport package.
+//
+// The file is written as YAML, so the name says so. A file whose name says JSON and
+// whose content is YAML is a trap for anything that reads it by its extension.
+const AuthFileName = "auth.yaml"
+
+// LegacyAuthFileName is the name poo wrote its own credential file under before
+// AuthFileName. It is read where it is and never created: an operator who has one
+// keeps signing in to it, and one who does not gets the file the name describes.
+const LegacyAuthFileName = "auth.json"
 
 // importPi imports what pi's files hold: the models file the settings name or
 // the one beside them, and the auth.json the Codex provider reads. pi's
@@ -303,13 +311,14 @@ func stripDocumentBOM(data []byte) []byte {
 //  2. pi_auth_file names pi's file. A relative path answers the same way, and a
 //     file that is not there is a settings failure, because an explicit path is
 //     a promise.
-//  3. An auth.json beside the models file is what pi writes beside its own models,
-//     so a pi setup keeps working without naming the file. The path is answered
-//     whether or not the file is there yet: a long-lived process that resolved it
-//     before pi's first login must still find the credential pi wrote after.
+//  3. A credential file beside the models file is what a setup keeps there without
+//     naming it: poo's own, then the auth.json pi writes. Beside pi's models.json the
+//     answer is pi's file whether or not it is there yet, so a long-lived process that
+//     resolved it before pi's first login still finds the credential pi wrote after.
 //  4. DefaultAuthFile selects poo's own file when there is no models file for a
-//     credential to sit beside. On macOS, an existing ~/.config/poo/auth.json
-//     stands in when the native file is absent.
+//     credential to sit beside: auth.yaml, or the auth.json poo wrote before that
+//     name when it is the file that is there. On macOS, an existing ~/.config/poo
+//     file stands in when the native file is absent.
 //
 // Naming both files is refused: poo reads one credential at a time, and two
 // settings naming one apiece is a question the file cannot answer.
@@ -328,9 +337,31 @@ func (s *Settings) resolveCredentialFile(dir, modelsPath string) (string, error)
 		return s.resolveCredentialPath(dir, "pi_auth_file", s.PiAuthFile, true)
 	}
 	if modelsPath != "" {
-		return filepath.Join(filepath.Dir(modelsPath), piimport.AuthFileName), nil
+		return besideCredentialFile(modelsPath), nil
 	}
 	return defaultCredentialFile(), nil
+}
+
+// besideCredentialFile returns the credential file that sits beside a models file.
+//
+// The file that is there is the answer: poo's own name first, then the auth.json pi
+// writes and poo wrote before that name. When neither is there, the models file's
+// name says whose setup it is — pi's models.json is a pi setup, and pi writes its
+// credentials to auth.json beside it whether or not the file is there yet, while
+// poo's own models file gets poo's own credential file. A pi models file under
+// another name names its credential with pi_auth_file.
+func besideCredentialFile(modelsPath string) string {
+	dir := filepath.Dir(modelsPath)
+	if fileExists(filepath.Join(dir, AuthFileName)) {
+		return filepath.Join(dir, AuthFileName)
+	}
+	if fileExists(filepath.Join(dir, piimport.AuthFileName)) {
+		return filepath.Join(dir, piimport.AuthFileName)
+	}
+	if filepath.Base(modelsPath) == PiModelsFileName {
+		return filepath.Join(dir, piimport.AuthFileName)
+	}
+	return filepath.Join(dir, AuthFileName)
 }
 
 // ResolveSettingPath resolves a path a setting or a flag names: the home shortcut first,
@@ -353,7 +384,7 @@ func DefaultAuthFile() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("the user's config directory cannot be resolved: %w", err)
 	}
-	native := filepath.Join(dir, AuthFileName)
+	native := credentialFileIn(dir)
 	if runtime.GOOS != "darwin" {
 		return native, nil
 	}
@@ -365,12 +396,33 @@ func DefaultAuthFile() (string, error) {
 		return native, nil
 	}
 	if dir, ok := userConfigFallbackDir(); ok {
-		fallback := filepath.Join(dir, AuthFileName)
+		fallback := credentialFileIn(dir)
 		if info, err := os.Stat(fallback); err == nil && info.Mode().IsRegular() {
 			return fallback, nil
 		}
 	}
 	return native, nil
+}
+
+// credentialFileIn returns the credential file poo reads in dir.
+//
+// The name poo gives its own file is the answer, unless the file under the name it
+// used before is the one that is there: a credential an operator already signed in
+// with is not migrated out from under them, and poo keeps writing where their
+// credential lives until they move it.
+//
+// A path that exists as anything at all — an empty file, a dangling link — is
+// poo's own file: a broken store is not permission to change stores.
+func credentialFileIn(dir string) string {
+	named := filepath.Join(dir, AuthFileName)
+	if _, err := os.Lstat(named); !errors.Is(err, os.ErrNotExist) {
+		return named
+	}
+	legacy := filepath.Join(dir, LegacyAuthFileName)
+	if info, err := os.Stat(legacy); err == nil && info.Mode().IsRegular() {
+		return legacy
+	}
+	return named
 }
 
 // resolveCredentialPath resolves the path a setting names: ~ first, then the

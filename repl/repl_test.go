@@ -998,6 +998,48 @@ func TestANumberPicksFromTheRankedList(t *testing.T) {
 	}
 }
 
+// TestTheModelsCommandAsksTheEndpointsAgain covers `/models`: it reprobes the
+// endpoints and lists what they say, so a model a provider just added is one a
+// session can switch to without leaving the repl for `poo models`. `/model`
+// keeps listing the catalog the session already holds, and switching from it
+// asks nothing.
+func TestTheModelsCommandAsksTheEndpointsAgain(t *testing.T) {
+	out, server := startRepl(t, "/model\n/models\n/quit\n")
+
+	for _, want := range []string{
+		"1. gemma4 \u2190 \u00b7 gemma4",
+		"/models lists what the endpoints say now",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the transcript lacks %q:\n%s", want, out)
+		}
+	}
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	if server.refreshes != 1 {
+		t.Errorf("the client asked for %d reprobes, want one", server.refreshes)
+	}
+}
+
+// TestAModelsCommandThatCannotReprobeListsWhatItHolds covers a failed refresh:
+// the session keeps the catalog it had, says the refresh failed, and lists it, so
+// a model switch still works while the endpoints are unreachable.
+func TestAModelsCommandThatCannotReprobeListsWhatItHolds(t *testing.T) {
+	out, server := startReplServer(t, "/models\n/quit\n", &fakeServer{t: t, refuseRefresh: true})
+
+	if !strings.Contains(out, "the endpoints could not be asked what they serve") {
+		t.Errorf("the transcript does not say the refresh failed:\n%s", out)
+	}
+	if !strings.Contains(out, "1. gemma4") {
+		t.Errorf("the transcript does not list the catalog it holds:\n%s", out)
+	}
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	if server.refreshes != 1 {
+		t.Errorf("the client asked for %d reprobes, want one", server.refreshes)
+	}
+}
+
 // TestTheCatalogListIsNumberedAndPickable covers `/model` bare: the
 // catalog reads numbered in name order, and a number takes the model off
 // that list.

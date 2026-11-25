@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -1103,5 +1104,438 @@ func TestAProbeThatFollowsTheCachedLayerWarnsOnce(t *testing.T) {
 	}
 	if got := strings.Count(log.String(), "the discovery cache could not be read"); got != 1 {
 		t.Errorf("the unreadable cache is reported %d times, want once:\n%s", got, log.String())
+	}
+}
+
+// keyedListServer serves an OpenAI-compatible list to a bearer key only.
+//
+// It is the shape a hosted provider answers with: a key that is not there
+// is a refusal, and the probe reads the models only when the request
+// carries the key the endpoint's credential resolves to.
+func keyedListServer(t *testing.T, key string, ids ...string) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer "+key {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		data := make([]map[string]any, 0, len(ids))
+		for _, id := range ids {
+			data = append(data, map[string]any{"id": id, "object": "model"})
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"object": "list", "data": data})
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	return server
+}
+
+// TestAProbeCarriesTheEndpointKey covers an endpoint whose list is served
+// to a key and to nothing else. The probe asks with the key the endpoint's
+// credential resolves to, so the models the list names reach the catalog;
+// a probe that asked anonymously would be refused and the endpoint would
+// offer nothing.
+func TestAProbeCarriesTheEndpointKey(t *testing.T) {
+	server := keyedListServer(t, "the-key", "glm-5.3", "kimi-k3")
+	asked := map[string]int{}
+	c := catalog.New(catalog.Options{
+		StateDir: t.TempDir(),
+		Settings: catalog.Settings{
+			Endpoints: map[string]catalog.EndpointSettings{
+				"cloud": {Endpoint: server.URL, APIKeyEnv: "CLOUD_API_KEY"},
+			},
+		},
+		EndpointKey: func(name string, credential catalog.Credential) string {
+			asked[name]++
+			if credential.Source != catalog.CredentialEnv || credential.Env != "CLOUD_API_KEY" {
+				t.Errorf("the probe asks for %q's key with %+v, want the endpoint's variable",
+					name, credential)
+			}
+			return "the-key"
+		},
+	})
+	if err := c.Refresh(context.Background()); err != nil {
+		t.Fatalf("the refresh: %v", err)
+	}
+	for _, name := range []string{"cloud/glm-5.3", "cloud/kimi-k3"} {
+		if _, err := c.Resolve(name); err != nil {
+			t.Errorf("the model %q the keyed list named did not resolve: %v", name, err)
+		}
+	}
+	if asked["cloud"] == 0 {
+		t.Errorf("the probe never asked for the endpoint's key")
+	}
+}
+
+// TestAProbeWhoseKeyIsNotThereAsksAnonymously covers the other half: an
+// endpoint with no key in reach is probed with no credential header, so an
+// operator's local server sees the plain request it has always seen.
+func TestAProbeWhoseKeyIsNotThereAsksAnonymously(t *testing.T) {
+	var seen []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r.Header.Get("Authorization"))
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"object": "list",
+			"data":   []map[string]any{{"id": "gemma4"}},
+		})
+	}))
+	t.Cleanup(server.Close)
+
+	c := catalog.New(catalog.Options{
+		StateDir: t.TempDir(),
+		Settings: catalog.Settings{
+			Endpoints: map[string]catalog.EndpointSettings{
+				"local": {Endpoint: server.URL, APIKeyEnv: "LOCAL_API_KEY"},
+			},
+		},
+		EndpointKey: func(string, catalog.Credential) string { return "" },
+	})
+	if err := c.Refresh(context.Background()); err != nil {
+		t.Fatalf("the refresh: %v", err)
+	}
+	for _, header := range seen {
+		if header != "" {
+			t.Errorf("a request carried %q, want no credential header", header)
+		}
+	}
+	if _, err := c.Resolve("local/gemma4"); err != nil {
+		t.Errorf("the list's model did not resolve: %v", err)
+	}
+}
+
+// TestTheShowProbeReadsEveryModelTheListServes covers a hosted endpoint
+// that serves more models than one probe used to ask about. Every id the
+// list named is asked about, so a model past the old request budget
+// arrives with the context window and the capabilities its own report
+// names rather than as a bare id.
+func TestTheShowProbeReadsEveryModelTheListServes(t *testing.T) {
+	const count = 25
+	ids := make([]string, 0, count)
+	for i := range count {
+		ids = append(ids, fmt.Sprintf("model-%02d", i))
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, r *http.Request) {
+		data := make([]map[string]any, 0, len(ids))
+		for _, id := range ids {
+			data = append(data, map[string]any{"id": id, "object": "model"})
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"object": "list", "data": data})
+	})
+	mux.HandleFunc("/api/show", func(w http.ResponseWriter, r *http.Request) {
+		var asked struct {
+			Model string `json:"model"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&asked)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"model_info":   map[string]any{"arch.context_length": 65536},
+			"capabilities": []string{"completion", "tools"},
+		})
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	c := catalog.New(catalog.Options{
+		StateDir: t.TempDir(),
+		Settings: catalog.Settings{
+			Endpoints: map[string]catalog.EndpointSettings{
+				"cloud": {Endpoint: server.URL},
+			},
+		},
+	})
+	if err := c.Refresh(context.Background()); err != nil {
+		t.Fatalf("the refresh: %v", err)
+	}
+	for _, id := range ids {
+		info, err := c.Resolve("cloud/" + id)
+		if err != nil {
+			t.Fatalf("the model %q the list named did not resolve: %v", id, err)
+		}
+		if info.ContextLimit != 65536 {
+			t.Errorf("%s has the context limit %d, want the 65536 its own report names",
+				id, info.ContextLimit)
+		}
+		if info.Tools.Mode != poo.ToolsNative {
+			t.Errorf("%s has the tools mode %q, want native", id, info.Tools.Mode)
+		}
+	}
+}
+
+// TestAProbeOfOneEndpointKeepsWhatTheOtherReported covers the cache a single
+// endpoint's reprobe writes. The cache is one file for every endpoint, so the file a
+// sign-in's probe saves must still describe the endpoints it did not ask about — the
+// session that follows reads them from it.
+func TestAProbeOfOneEndpointKeepsWhatTheOtherReported(t *testing.T) {
+	first := vllmServer(t, "gemma4", 32768)
+	second := vllmServer(t, "glm-5.3", 8192)
+	stateDir := t.TempDir()
+	settings := catalog.Settings{
+		Endpoints: map[string]catalog.EndpointSettings{
+			"one": {Endpoint: first.URL},
+			"two": {Endpoint: second.URL},
+		},
+	}
+	c := catalog.New(catalog.Options{Settings: settings, StateDir: stateDir})
+	if err := c.Refresh(context.Background()); err != nil {
+		t.Fatalf("the refresh: %v", err)
+	}
+	if err := c.ReprobeEndpoint(context.Background(), "two"); err != nil {
+		t.Fatalf("the endpoint's reprobe: %v", err)
+	}
+
+	// A catalog built from the file the reprobe wrote holds both endpoints' models.
+	built := catalog.New(catalog.Options{Settings: settings, StateDir: stateDir, Cached: true})
+	for _, name := range []string{"one/gemma4", "two/glm-5.3"} {
+		if _, err := built.Resolve(name); err != nil {
+			t.Errorf("the model %q is not in the catalog the reprobe wrote: %v", name, err)
+		}
+	}
+}
+
+// TestAShowThatFailsForOneModelKeepsTheRest covers the fan-out's cost: one model's
+// show failing, or its answer not reading, takes that model's own fields and not the
+// models the list named beside it.
+func TestAShowThatFailsForOneModelKeepsTheRest(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"object": "list",
+			"data": []map[string]any{
+				{"id": "good-1"}, {"id": "broken"}, {"id": "good-2"},
+			},
+		})
+	})
+	mux.HandleFunc("/api/show", func(w http.ResponseWriter, r *http.Request) {
+		var asked struct {
+			Model string `json:"model"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&asked)
+		if asked.Model == "broken" {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"model_info":   map[string]any{"arch.context_length": 65536},
+			"capabilities": []string{"completion", "tools"},
+		})
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	c := catalog.New(catalog.Options{
+		StateDir: t.TempDir(),
+		Settings: catalog.Settings{
+			Endpoints: map[string]catalog.EndpointSettings{"cloud": {Endpoint: server.URL}},
+		},
+	})
+	if err := c.Refresh(context.Background()); err != nil {
+		t.Fatalf("the refresh: %v", err)
+	}
+	for _, name := range []string{"cloud/good-1", "cloud/good-2"} {
+		info, err := c.Resolve(name)
+		if err != nil {
+			t.Fatalf("the model %q the list named did not resolve: %v", name, err)
+		}
+		if info.Tools.Mode != poo.ToolsNative {
+			t.Errorf("%s has the tools mode %q, want native", name, info.Tools.Mode)
+		}
+	}
+	// The model whose show failed is still a model the list named; it stands with the
+	// fields the list itself gave.
+	if _, err := c.Resolve("cloud/broken"); err != nil {
+		t.Errorf("the model whose show failed did not resolve: %v", err)
+	}
+}
+
+// TestAProbeRefusedWithTheKeyAsksAgainWithoutIt covers the endpoint that never took a
+// credential: a stored key one endpoint reads must not turn another endpoint's public
+// answer into a refusal.
+func TestAProbeRefusedWithTheKeyAsksAgainWithoutIt(t *testing.T) {
+	var keyed, anonymous atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "" {
+			keyed.Add(1)
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		anonymous.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"object": "list",
+			"data":   []map[string]any{{"id": "public-model"}},
+		})
+	}))
+	t.Cleanup(server.Close)
+
+	c := catalog.New(catalog.Options{
+		StateDir: t.TempDir(),
+		Settings: catalog.Settings{
+			Endpoints: map[string]catalog.EndpointSettings{
+				"public": {Endpoint: server.URL, APIKeyEnv: "PUBLIC_API_KEY"},
+			},
+		},
+		EndpointKey: func(string, catalog.Credential) string { return "a-stored-key" },
+	})
+	if err := c.Refresh(context.Background()); err != nil {
+		t.Fatalf("the refresh: %v", err)
+	}
+	if keyed.Load() == 0 || anonymous.Load() == 0 {
+		t.Errorf("the probe made %d keyed and %d anonymous requests, want both",
+			keyed.Load(), anonymous.Load())
+	}
+	if _, err := c.Resolve("public/public-model"); err != nil {
+		t.Errorf("the list's model did not resolve: %v", err)
+	}
+}
+
+// TestARefreshDoesNotWakeAnEndpointThatIsNotProbed covers the cache read twice: an
+// endpoint whose models are declared rather than listed is not one a build reads from
+// the cache, and a refresh of another endpoint must not write its entries back into the
+// catalog or the file — a model the session build refuses is not one a refresh offers.
+func TestARefreshDoesNotWakeAnEndpointThatIsNotProbed(t *testing.T) {
+	fixture := vllmServer(t, "listed", 32768)
+	other := vllmServer(t, "other", 8192)
+	stateDir := t.TempDir()
+
+	// The endpoint is probeable once, so its report is in the cache.
+	probeable := catalog.New(catalog.Options{
+		StateDir: stateDir,
+		Settings: catalog.Settings{
+			Endpoints: map[string]catalog.EndpointSettings{"declared": {Endpoint: fixture.URL}},
+		},
+	})
+	if err := probeable.Refresh(context.Background()); err != nil {
+		t.Fatalf("the refresh: %v", err)
+	}
+	if _, err := probeable.Resolve("declared/listed"); err != nil {
+		t.Fatalf("the probed model did not resolve: %v", err)
+	}
+
+	// The same endpoint now declares its models, and another endpoint is probed.
+	declaring := catalog.New(catalog.Options{
+		StateDir: stateDir,
+		Settings: catalog.Settings{
+			Endpoints: map[string]catalog.EndpointSettings{
+				"declared": {Endpoint: fixture.URL, SkipProbe: true},
+				"other":    {Endpoint: other.URL},
+			},
+			Models: map[string]catalog.ModelSettings{
+				"declared/typed": {Endpoint: "declared", ModelID: "typed", ContextLimit: 4096},
+			},
+		},
+	})
+	if err := declaring.Refresh(context.Background()); err != nil {
+		t.Fatalf("the refresh: %v", err)
+	}
+	if _, err := declaring.Resolve("declared/listed"); err == nil {
+		t.Error("a refresh offered a model from an endpoint it does not probe")
+	}
+	if _, err := declaring.Resolve("declared/typed"); err != nil {
+		t.Errorf("the declared model did not resolve: %v", err)
+	}
+	if _, err := declaring.Resolve("other/other"); err != nil {
+		t.Errorf("the probed endpoint's model did not resolve: %v", err)
+	}
+}
+
+// TestOneEndpointsKeyDoesNotReachAnother covers the fan-out's requests: the key a probe
+// carries is the endpoint's own. Two endpoints with keys in reach are two requests that
+// must each carry their own, or one provider's credential is spent at another's door.
+func TestOneEndpointsKeyDoesNotReachAnother(t *testing.T) {
+	seen := map[string]map[string]bool{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host := r.URL.Path
+		if seen[host] == nil {
+			seen[host] = map[string]bool{}
+		}
+		seen[host][r.Header.Get("Authorization")] = true
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"object": "list",
+			"data":   []map[string]any{{"id": "m"}},
+		})
+	}))
+	t.Cleanup(server.Close)
+
+	c := catalog.New(catalog.Options{
+		StateDir: t.TempDir(),
+		Settings: catalog.Settings{
+			Endpoints: map[string]catalog.EndpointSettings{
+				"one": {Endpoint: server.URL + "/one/v1", APIKeyEnv: "ONE_KEY"},
+				"two": {Endpoint: server.URL + "/two/v1", APIKeyEnv: "TWO_KEY"},
+			},
+		},
+		EndpointKey: func(name string, credential catalog.Credential) string {
+			if credential.Env == "ONE_KEY" && name == "one" {
+				return "key-one"
+			}
+			if credential.Env == "TWO_KEY" && name == "two" {
+				return "key-two"
+			}
+			t.Errorf("the probe asks %q for its key with %+v", name, credential)
+			return ""
+		},
+	})
+	if err := c.Refresh(context.Background()); err != nil {
+		t.Fatalf("the refresh: %v", err)
+	}
+	for path, want := range map[string]string{
+		"/one/v1/models": "Bearer key-one",
+		"/two/v1/models": "Bearer key-two",
+	} {
+		got := seen[path]
+		if len(got) != 1 || !got[want] {
+			t.Errorf("the requests to %s carried %v, want only %q", path, got, want)
+		}
+	}
+}
+
+// TestAShowTheServerDoesNotServeStopsTheProbeAtOnce covers the endpoint that lists its
+// models and answers nothing about them: a 404 on the first model show is the whole
+// answer, and the probe must not spend the rest of its budget queueing ids nothing will
+// read. Every hosted gateway that is not Ollama's own shape answers this way.
+func TestAShowTheServerDoesNotServeStopsTheProbeAtOnce(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		data := make([]map[string]any, 0, 12)
+		for i := range 12 {
+			data = append(data, map[string]any{"id": fmt.Sprintf("model-%02d", i)})
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"object": "list", "data": data})
+	})
+	mux.HandleFunc("/api/show", func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	c := catalog.New(catalog.Options{
+		StateDir: t.TempDir(),
+		// The budget is the stall's ceiling: a probe that waits it out is the bug.
+		ProbeTimeout: 2 * time.Second,
+		Settings: catalog.Settings{
+			Endpoints: map[string]catalog.EndpointSettings{"gateway": {Endpoint: server.URL}},
+		},
+	})
+	start := time.Now()
+	if err := c.Refresh(context.Background()); err != nil {
+		t.Fatalf("the refresh: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Errorf("the probe took %s, want the shape's absence to end it at once", elapsed)
+	}
+	// The list's own answer stands: the models are there, described by the list alone.
+	for _, id := range []string{"model-00", "model-11"} {
+		if _, err := c.Resolve("gateway/" + id); err != nil {
+			t.Errorf("the model %q the list named did not resolve: %v", id, err)
+		}
 	}
 }

@@ -43,7 +43,6 @@ func TestTheWelcomeFlowWritesTheSettings(t *testing.T) {
 	isolatedConfigHome(t)
 	noAmbientKeys(t)
 	t.Setenv("POO_SETTINGS", "")
-	t.Setenv("ANTHROPIC_API_KEY", "test-key")
 	withStdin(t, "2\nollama-key\n1\n\n")
 	var stdout, stderr bytes.Buffer
 
@@ -70,7 +69,7 @@ func TestTheWelcomeFlowWritesTheSettings(t *testing.T) {
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		t.Fatalf("the settings the flow wrote do not read: %v", err)
 	}
-	if decoded.Roles["chat"] != "claude-sonnet-4-5" {
+	if decoded.Roles["chat"] != "ollama-cloud/minimax-m3.1-flash" {
 		t.Errorf("the chat role is %q, want the model the operator picked", decoded.Roles["chat"])
 	}
 	if decoded.Profile != "code" {
@@ -86,7 +85,7 @@ func TestTheWelcomeFlowWritesTheSettings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the settings the flow wrote do not load: %v", err)
 	}
-	if loaded.Roles["chat"] != "claude-sonnet-4-5" || loaded.Profile != "code" {
+	if loaded.Roles["chat"] != "ollama-cloud/minimax-m3.1-flash" || loaded.Profile != "code" {
 		t.Errorf("the loaded settings are roles %v profile %q, want what the flow wrote", loaded.Roles, loaded.Profile)
 	}
 }

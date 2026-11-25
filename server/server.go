@@ -106,7 +106,7 @@ func New(opts Options) (*Server, error) {
 		runtimes:  map[runtimeKey]*config.Runtime{},
 		decorate:  opts.SessionTools,
 	}
-	qualified, err := qualifiedModelNames(effective, runtime)
+	qualified, err := qualifiedModelNames(effective, runtime.Models)
 	if err != nil {
 		return nil, err
 	}
@@ -130,7 +130,7 @@ func New(opts Options) (*Server, error) {
 // The index reads the effective settings — the post-override view the
 // settings/get reports. The overrides never touch models today; if one
 // ever renames a model, this index and the catalog must move together.
-func qualifiedModelNames(settings *config.Settings, runtime *config.Runtime) (map[string]string, error) {
+func qualifiedModelNames(settings *config.Settings, catalogModels map[string]poo.ModelInfo) (map[string]string, error) {
 	qualified := map[string]string{}
 	keys := make([]string, 0, len(settings.Models))
 	for key := range settings.Models {
@@ -146,7 +146,7 @@ func qualifiedModelNames(settings *config.Settings, runtime *config.Runtime) (ma
 		if candidate == key {
 			continue
 		}
-		if _, held := runtime.Models[candidate]; held {
+		if _, held := catalogModels[candidate]; held {
 			return nil, fmt.Errorf("config: the model name %q is ambiguous: the settings key %q and the catalog both answer to it", candidate, key)
 		}
 		if owner, seen := qualified[candidate]; seen {
@@ -196,6 +196,11 @@ type Server struct {
 
 	// mu guards the runtimes below.
 	mu sync.Mutex
+	// modelsMu guards the default runtime's model map and the qualified
+	// names built from it. A reprobe replaces what the catalog holds, and
+	// the names a session may switch to are rebuilt from it while another
+	// request may be reading them.
+	modelsMu sync.RWMutex
 	// runtimes are the runtimes the sessions run under, by profile and
 	// model.
 	runtimes map[runtimeKey]*config.Runtime
@@ -230,7 +235,9 @@ func (f *Server) servesModel(name string) bool {
 // one the endpoint and the model id name. A form two models answer to
 // never reaches here — New refuses the ambiguity.
 func (f *Server) modelFor(name string) (poo.ModelInfo, bool) {
+	f.modelsMu.RLock()
 	if model, ok := f.runtime.Models[name]; ok {
+		f.modelsMu.RUnlock()
 		return model, true
 	}
 	if key, ok := f.qualified[name]; ok {
@@ -239,9 +246,37 @@ func (f *Server) modelFor(name string) (poo.ModelInfo, bool) {
 		// with a warning, and an alias for it is unknown the way the
 		// bare key is.
 		model, ok := f.runtime.Models[key]
+		f.modelsMu.RUnlock()
 		return model, ok
 	}
+	f.modelsMu.RUnlock()
+	// The catalog is the wider answer: a probe reports models the settings never
+	// named, and one of those is a model a session may switch to before the next
+	// build. The map above is what the build put there; this is what the endpoints
+	// last said.
+	if model, err := f.runtime.Catalog.Resolve(name); err == nil {
+		return model, true
+	}
 	return poo.ModelInfo{}, false
+}
+
+// adoptCatalog rebuilds the names the session may switch to from what the catalog
+// holds now, after a reprobe.
+//
+// The model map and the qualified names are built once, from the settings and the
+// layers the build read. A reprobe reports models no layer declared, and a switch
+// resolves through these names, so a refreshed list that could not be switched to
+// would be a list of models the operator can see and not run.
+func (f *Server) adoptCatalog(runtime *config.Runtime) error {
+	f.modelsMu.Lock()
+	defer f.modelsMu.Unlock()
+	runtime.ReloadModels()
+	qualified, err := qualifiedModelNames(f.effective, runtime.Models)
+	if err != nil {
+		return err
+	}
+	f.qualified = qualified
+	return nil
 }
 
 type runtimeKey struct{ profile, model string }
@@ -713,6 +748,9 @@ func (f *Server) Models(ctx context.Context, refresh bool) ([]protocol.ModelInfo
 	}
 	if refresh {
 		if err := runtime.Catalog.Reprobe(ctx); err != nil {
+			return nil, err
+		}
+		if err := f.adoptCatalog(runtime); err != nil {
 			return nil, err
 		}
 	}
