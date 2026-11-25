@@ -65,6 +65,7 @@ Fetch:
 - Use bash and curl for what a plain read cannot do: another method, headers that authenticate, a body saved to a file.
 - The fetch runs in poo's own process, so a sandbox that cuts the network for bash does not cut it. The refusals above are what bounds it.
 --- tools.codemode ---
+Codemode:
 Use codemode when one tool result decides the next call or when you need
 only a small part of a large result. Intermediate results stay out of the
 conversation. Only what you print and return comes back. A call the
