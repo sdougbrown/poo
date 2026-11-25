@@ -638,8 +638,15 @@ func (s *Session) loop(run *runState) []candidate {
 		// usable turn, one with a call or answer text, ends a run of
 		// unusable turns; an unusable turn of one kind leaves the other
 		// kind's count alone.
+		//
+		// A truncated turn with no complete call is the turn the run cannot
+		// use: nothing ran, so the model gets the retry's note instead of the
+		// run settling output_truncated. A truncated turn whose call ran goes
+		// to the gate like any other turn with calls. The note would tell the
+		// model the run could not use calls it just ran.
 		empty := emptyToolCallTurn(resp)
-		if usableTurn(resp) {
+		noCompleteCall := truncated && !processed
+		if usableTurn(resp) && !(noCompleteCall && s.opts.TruncationRetries > 0) {
 			s.resetUnusableTurns(run)
 		}
 
@@ -648,11 +655,17 @@ func (s *Session) loop(run *runState) []candidate {
 		// that opened another turn is a continuation, like a steer. A
 		// run of unusable turns that reached a bound settles
 		// invalid_turns.
+		//
+		// The response's own failures come first: a response cut at the
+		// output limit can still carry a call that did not parse. The parse
+		// failure is the note the model can act on.
 		var note turnNote
 		var noteErr error
 		switch {
 		case len(resp.errors) > 0:
 			note, noteErr = s.reportResponseErrors(run, turn, resp.errors)
+		case noCompleteCall:
+			note, noteErr = s.reportTruncatedTurn(run, turn)
 		case empty:
 			note, noteErr = s.reportEmptyToolCallTurn(run, turn)
 		}
@@ -1790,8 +1803,9 @@ func emptyToolCallTurn(resp *response) bool {
 
 // The kinds of unusable turn, as the settle detail names them.
 const (
-	unparsedCallsSource = "unparsed_calls"
-	emptyTurnsSource    = "empty_turns"
+	unparsedCallsSource  = "unparsed_calls"
+	emptyTurnsSource     = "empty_turns"
+	truncatedTurnsSource = "truncated_turns"
 )
 
 // maxUnusableTurns bounds the consecutive turns a run may fail to use, of
@@ -1817,6 +1831,10 @@ func (s *Session) noteUnusableTurn(run *runState, kind string) turnNote {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	run.unusableTurns++
+	// The turn was unusable for another reason, so it ends a run of truncated
+	// turns: the settle that names such a run counts the turns that were cut,
+	// in a row.
+	run.truncatedTurns = 0
 	if kind == emptyTurnsSource {
 		run.emptyTurns++
 		if run.emptyTurns >= maxEmptyTurns {
@@ -1849,6 +1867,41 @@ func (s *Session) noteUnusableTurn(run *runState, kind string) turnNote {
 // and the run settles invalid_turns, the way a run of unparsed calls does.
 const maxEmptyTurns = 2
 
+// truncatedTurnNote is what the model reads when its response stopped at the
+// output-token limit before the turn carried anything the run could use.
+const truncatedTurnNote = "Your previous response reached the output limit before " +
+	"it finished, so the run could not use it. Say less: keep the reasoning brief " +
+	"and continue with one tool call if you still have work to do."
+
+// reportTruncatedTurn gives a truncated turn the model's own answer.
+//
+// A response that stopped on the output-token limit carries nothing the run can
+// use, and the cause is the model's verbosity rather than a malformed call. The
+// run asks the model to say less and opens another turn, up to the retries the
+// session was given. Past them it settles output_truncated, which is the reason
+// that names what the provider did; a session given no retries settles on the
+// first such turn.
+func (s *Session) reportTruncatedTurn(run *runState, turn int) (turnNote, error) {
+	if s.opts.TruncationRetries <= 0 {
+		return turnNote{}, nil
+	}
+	if err := s.appendModelNote(run, turn, truncatedTurnNote); err != nil {
+		return turnNote{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	run.truncatedTurns++
+	if run.truncatedTurns <= s.opts.TruncationRetries {
+		return turnNote{continued: true}, nil
+	}
+	c := newCandidate(ReasonOutputTruncated, SettleDetail{
+		Source: truncatedTurnsSource,
+		Text: fmt.Sprintf("the model's response reached the output limit on %d turns in a row",
+			run.truncatedTurns),
+	})
+	return turnNote{bound: &c}, nil
+}
+
 // resetUnusableTurns ends the run of unusable turns, of both kinds.
 //
 // Every unusable turn counts against both bounds, and a usable turn is the
@@ -1858,6 +1911,7 @@ func (s *Session) resetUnusableTurns(run *runState) {
 	defer s.mu.Unlock()
 	run.unusableTurns = 0
 	run.emptyTurns = 0
+	run.truncatedTurns = 0
 }
 
 // toolSpecs returns the tools the model may call, in offer order.

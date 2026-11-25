@@ -535,6 +535,11 @@ type Limits struct {
 	MaxTurns int `json:"max_turns,omitempty"`
 	// MaxContinuations is how many continuations a run may take.
 	MaxContinuations int `json:"max_continuations,omitempty"`
+	// TruncationRetries is how many consecutive truncated turns the run asks
+	// the model to retry, more concisely, before settling output_truncated.
+	// 0 turns the retry off; a settings file that names none gets
+	// DefaultTruncationRetries.
+	TruncationRetries *int `json:"truncation_retries,omitempty"`
 }
 
 // Jobs are the background jobs' settings.

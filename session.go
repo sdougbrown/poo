@@ -401,6 +401,11 @@ type runState struct {
 	// tool calls it never sent. It resets with unusableTurns and under the
 	// same rule, and its bound, maxEmptyTurns, is the stricter one.
 	emptyTurns int
+	// truncatedTurns counts the consecutive turns whose response stopped on
+	// the output-token limit with no complete call. It resets with
+	// unusableTurns, and a turn that counted as unusable for another reason
+	// ends it. It is only read when the session was given TruncationRetries.
+	truncatedTurns int
 	// lastRendered is the snapshot of the last main request, so a
 	// compactor can fork it.
 	lastRendered Rendered
@@ -655,6 +660,12 @@ type Options struct {
 	// MaxTurns is the turn limit. 0 means unlimited. A run that
 	// reaches it settles max_turns.
 	MaxTurns int
+	// TruncationRetries is how many consecutive turns whose response stopped
+	// on the output-token limit with no complete call the run asks the model
+	// to retry, more concisely, before it settles output_truncated. 0 settles
+	// on the first such turn; a session built from a settings file gets that
+	// file's limits.truncation_retries, which defaults to one retry.
+	TruncationRetries int
 	// MaxRunTokens is the run's token limit. 0 means unlimited. A run
 	// that reaches it settles budget_exhausted.
 	MaxRunTokens int

@@ -2715,3 +2715,41 @@ func TestFileToolRestrictionsAreIndependent(t *testing.T) {
 		})
 	}
 }
+
+// TestTheTruncationRetriesFollowTheSettings covers the retry as a settings
+// limit: a file that names none takes the default, and one that names 0 turns
+// the retry off.
+func TestTheTruncationRetriesFollowTheSettings(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		limits string
+		want   int
+	}{
+		{name: "unnamed takes the default", want: config.DefaultTruncationRetries},
+		{name: "zero turns it off", limits: "limits:\n  truncation_retries: 0\n", want: 0},
+		{name: "named", limits: "limits:\n  truncation_retries: 3\n", want: 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			settings, err := config.Parse([]byte(theModelSettings+tc.limits), config.FormatYAML)
+			if err != nil {
+				t.Fatalf("decoding the settings: %v", err)
+			}
+			if got := build(t, settings, config.Overrides{}).Options.TruncationRetries; got != tc.want {
+				t.Errorf("the run retries %d times, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestANegativeTruncationRetryIsRefused covers the settings check: a run
+// cannot ask for a negative number of retries, the way it cannot ask for a
+// negative turn limit.
+func TestANegativeTruncationRetryIsRefused(t *testing.T) {
+	_, err := config.Parse([]byte(theModelSettings+"limits:\n  truncation_retries: -1\n"), config.FormatYAML)
+	if err == nil {
+		t.Fatal("the settings accepted a negative retry count")
+	}
+	if !strings.Contains(err.Error(), "limits.truncation_retries must not be negative") {
+		t.Errorf("the settings refused it with %q, want the retry's own reason", err)
+	}
+}

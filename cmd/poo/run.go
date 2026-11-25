@@ -36,6 +36,12 @@ type runOptions struct {
 	maxTurns int
 	// maxOutput is the model's output-token limit.
 	maxOutput int
+	// truncationRetries is how many consecutive output-limit truncations
+	// the run asks the model to retry, more concisely, before settling.
+	truncationRetries int
+	// truncationRetriesGiven reports that the flag was on the command line,
+	// so 0 turns the retry off instead of taking the settings' default.
+	truncationRetriesGiven bool
 	// contextStrategy is the compaction strategy the run pins, when
 	// the flag names one.
 	contextStrategy string
@@ -67,6 +73,7 @@ func runFlagSpecs() []clicontract.Flag {
 		clicontract.Flag{Name: "reasoning-effort", Kind: clicontract.String, Usage: "The reasoning_effort to send, for models that think only when asked"},
 		clicontract.Flag{Name: "max-turns", Kind: clicontract.Int, Usage: "The turn limit"},
 		clicontract.Flag{Name: "max-output", Kind: clicontract.Int, Usage: "The model's output-token limit"},
+		clicontract.Flag{Name: "truncation-retries", Kind: clicontract.Int, Usage: "How many consecutive output-limit truncations the run retries, more concisely, before settling"},
 		clicontract.Flag{Name: "context-strategy", Kind: clicontract.String, Usage: "The compaction strategy: summary, mine, pointer, native, handoff or none"},
 		clicontract.Flag{Name: "context-keep-recent", Kind: clicontract.Int, Usage: "The verbatim tail the compaction keeps, in tokens"},
 		clicontract.Flag{Name: "log", Kind: clicontract.String, Usage: "The session log path"},
@@ -87,6 +94,8 @@ func (o *runOptions) bind(inv clicontract.Invocation) {
 	o.reasoningEffort = inv.Flags["reasoning-effort"]
 	o.maxTurns = inv.Ints["max-turns"]
 	o.maxOutput = inv.Ints["max-output"]
+	o.truncationRetries = inv.Ints["truncation-retries"]
+	o.truncationRetriesGiven = inv.Supplied["truncation-retries"]
 	o.contextStrategy = inv.Flags["context-strategy"]
 	o.contextKeepRecent = inv.Ints["context-keep-recent"]
 	o.logPath = inv.Flags["log"]
@@ -397,6 +406,9 @@ func (o *runOptions) validate(rest []string) error {
 	if o.maxOutput < 0 {
 		return errors.New("--max-output must not be negative")
 	}
+	if o.truncationRetries < 0 {
+		return errors.New("--truncation-retries must not be negative")
+	}
 	if o.contextStrategy != "" && !slices.Contains(contextStrategies, o.contextStrategy) {
 		return errors.New("--context-strategy must be one of " + strings.Join(contextStrategies, ", "))
 	}
@@ -442,6 +454,12 @@ func (o *runOptions) apply(settings *config.Settings) error {
 	o.endpointFlags.apply(settings)
 	if o.maxTurns > 0 {
 		settings.Limits.MaxTurns = o.maxTurns
+	}
+	if o.truncationRetriesGiven {
+		// The flag is the settings' field: 1 is one retry, and 0 turns the
+		// retry off, which the settings' own default would otherwise hide.
+		retries := o.truncationRetries
+		settings.Limits.TruncationRetries = &retries
 	}
 	if o.contextStrategy != "" {
 		strategy := o.contextStrategy

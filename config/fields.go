@@ -89,6 +89,7 @@ func fieldsOf(s *Settings) SettingsFields {
 	f.LimitsMaxDurationS = number(float64(s.Limits.MaxDurationS))
 	f.LimitsMaxTurns = number(float64(s.Limits.MaxTurns))
 	f.LimitsMaxContinuations = number(float64(s.Limits.MaxContinuations))
+	f.LimitsTruncationRetries = count(s.Limits.TruncationRetries)
 
 	f.JobsMaxRunning = number(float64(s.Jobs.MaxRunning))
 	f.JobsTimeoutS = number(float64(s.Jobs.TimeoutS))

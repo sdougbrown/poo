@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/sdougbrown/poo"
@@ -214,6 +215,279 @@ func TestAContextLengthErrorSettlesContextExhausted(t *testing.T) {
 	if res.Reason != poo.ReasonContextExhausted {
 		t.Errorf("the run settled %q, want context_exhausted", res.Reason)
 	}
+}
+
+func TestATruncationRetryGivesTheModelAnotherTurn(t *testing.T) {
+	// A turn the output limit cut short carries nothing the run can use. With
+	// retries the run asks the model to say less and opens another turn, so a
+	// model that overruns once can still finish the work.
+	tr := scripted([]fakeResponse{
+		{text: "a truncated ans", finish: poo.FinishLength},
+		{text: "done"},
+	})
+	sink := &recordingSink{}
+	tool := &echoTool{result: "echoed"}
+
+	opts := testOptions(t, tr, tool, sink)
+	opts.TruncationRetries = 1
+	s := newTestSession(t, opts)
+	res := runSession(t, s, "do the thing")
+	if res.Reason != poo.ReasonEndTurn {
+		t.Errorf("the run settled %q, want end_turn once the retry answered", res.Reason)
+	}
+	if n := len(tr.Requests()); n != 2 {
+		t.Errorf("the run made %d requests, want 2: the truncated turn and its retry", n)
+	}
+}
+
+func TestATruncationRetryStopsAtItsBound(t *testing.T) {
+	// A model that keeps overrunning its own limit settles output_truncated
+	// once the retries are spent, rather than looping forever.
+	tr := scripted([]fakeResponse{
+		{text: "a truncated ans", finish: poo.FinishLength},
+		{text: "another truncat", finish: poo.FinishLength},
+	})
+	sink := &recordingSink{}
+	tool := &echoTool{result: "echoed"}
+
+	opts := testOptions(t, tr, tool, sink)
+	opts.TruncationRetries = 1
+	s := newTestSession(t, opts)
+	res := runSession(t, s, "do the thing")
+	if res.Reason != poo.ReasonOutputTruncated {
+		t.Errorf("the run settled %q, want output_truncated after the retries", res.Reason)
+	}
+	// The settle is the retry's bound, not the natural stop a single cut
+	// turn reaches.
+	if res.Detail.Source != "truncated_turns" {
+		t.Errorf("the settle source is %q, want truncated_turns", res.Detail.Source)
+	}
+}
+
+// TestATruncatedTurnThatRanItsCallsKeepsGoing covers a truncated turn that
+// carried a complete call. The call runs, so the turn continues to the gate. The
+// run neither spends a retry on it nor tells the model its work was lost. Two
+// such turns in a row used to settle output_truncated on the second.
+func TestATruncatedTurnThatRanItsCallsKeepsGoing(t *testing.T) {
+	call := poo.ToolCall{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{call}, finish: poo.FinishLength},
+		{calls: []poo.ToolCall{call}, finish: poo.FinishLength},
+		{text: "done"},
+	})
+	sink := &recordingSink{}
+	opts := testOptions(t, tr, &echoTool{result: "echoed"}, sink)
+	opts.TruncationRetries = 1
+	s := newTestSession(t, opts)
+
+	res := runSession(t, s, "do the thing")
+	if res.Reason != poo.ReasonEndTurn {
+		t.Fatalf("the run settled %q (%s), want end_turn: the calls ran", res.Reason, res.Detail.Source)
+	}
+	if n := len(tr.Requests()); n != 3 {
+		t.Errorf("the run made %d requests, want 3: the truncated turns with calls ran and continued", n)
+	}
+	for i, req := range tr.Requests()[1:] {
+		for _, msg := range req.Messages {
+			if strings.Contains(msg.Text(), "reached the output limit") {
+				t.Errorf("request %d tells the model %q, want no note about a response whose calls ran",
+					i+1, msg.Text())
+			}
+		}
+	}
+}
+
+// TestATruncationRetryStartsOverAfterAUsableTurn covers the count's reset. A
+// turn the run could use ends the run of truncated turns, so a later
+// truncation gets the session's retries again.
+func TestATruncationRetryStartsOverAfterAUsableTurn(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{text: "a truncated ans", finish: poo.FinishLength},
+		{text: "done"},
+		{text: "another truncat", finish: poo.FinishLength},
+		{text: "done again"},
+	})
+	sink := &recordingSink{}
+	opts := testOptions(t, tr, &echoTool{result: "echoed"}, sink)
+	opts.TruncationRetries = 1
+	// The usable turn is a natural stop, so the settle hook sends the run
+	// back to the model once. The second truncation is what the reset is
+	// read from.
+	opts.BeforeSettle = []poo.BeforeSettleHook{&continuingBeforeSettle{stopAfter: 1}}
+	s := newTestSession(t, opts)
+
+	res := runSession(t, s, "do the thing")
+	if res.Reason != poo.ReasonEndTurn {
+		t.Fatalf("the run settled %q (%s), want end_turn: the second truncation got its retry",
+			res.Reason, res.Detail.Source)
+	}
+	if n := len(tr.Requests()); n != 4 {
+		t.Errorf("the run made %d requests, want 4: the usable turn reset the truncated count", n)
+	}
+}
+
+// TestATruncatedTurnThatIsNotRetriedEndsTheRunOfUnusableTurns covers the reset
+// with the retry off. The truncated turn carried usable text and the run was
+// not going to retry it, so it ends the run of unusable turns. The empty turn
+// before it and the two after it are then two runs, not three in a row.
+func TestATruncatedTurnThatIsNotRetriedEndsTheRunOfUnusableTurns(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		// One empty turn, so there is a run of unusable turns to carry.
+		{finish: poo.FinishToolCalls},
+		// The truncated turn carries usable text and is not retried: it is
+		// a usable turn for the counts.
+		{text: "a truncated ans", finish: poo.FinishLength},
+		// The settle hook sends the run back once, so the counts are read
+		// after the truncated turn.
+		{finish: poo.FinishToolCalls},
+		{finish: poo.FinishToolCalls},
+	})
+	sink := &recordingSink{}
+	opts := testOptions(t, tr, &echoTool{result: "echoed"}, sink)
+	opts.BeforeSettle = []poo.BeforeSettleHook{&continuingBeforeSettle{stopAfter: 1}}
+	s := newTestSession(t, opts)
+
+	res := runSession(t, s, "do the thing")
+	if res.Reason != poo.ReasonInvalidTurns {
+		t.Fatalf("the run settled %q (%s), want invalid_turns", res.Reason, res.Detail.Source)
+	}
+	if res.Detail.Source != "empty_turns" {
+		t.Errorf("the settle source is %q, want empty_turns", res.Detail.Source)
+	}
+	if n := len(tr.Requests()); n != 4 {
+		t.Errorf("the run made %d requests, want 4: the truncated turn reset the count", n)
+	}
+}
+
+// TestATruncationRetryCountsOnlyTurnsInARow covers the count's reset against
+// another unusable turn. The empty turn between the two truncations ends the
+// run the settle names, so the second truncation gets its retry instead of
+// spending a bound the log would then describe as "in a row".
+func TestATruncationRetryCountsOnlyTurnsInARow(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{text: "a truncated ans", finish: poo.FinishLength},
+		// An empty turn is unusable for another reason, so it breaks the run
+		// of truncated turns.
+		{finish: poo.FinishToolCalls},
+		{text: "another truncat", finish: poo.FinishLength},
+		{text: "done"},
+	})
+	sink := &recordingSink{}
+	opts := testOptions(t, tr, &echoTool{result: "echoed"}, sink)
+	opts.TruncationRetries = 1
+	s := newTestSession(t, opts)
+
+	res := runSession(t, s, "do the thing")
+	if res.Reason != poo.ReasonEndTurn {
+		t.Fatalf("the run settled %q (%s), want end_turn: the second truncation started a new run",
+			res.Reason, res.Detail.Source)
+	}
+	if n := len(tr.Requests()); n != 4 {
+		t.Errorf("the run made %d requests, want 4: the empty turn ended the run of truncations", n)
+	}
+}
+
+// TestATruncatedTurnKeepsItsParseFailureNote covers a response the provider cut
+// at the output limit that also carries a failure the parser reported. The
+// model wrote a call as text on the turn it overran. The parse failure is the
+// note the model can act on, so it is the one the turn carries. The turn counts
+// against the unusable bound either way.
+func TestATruncatedTurnKeepsItsParseFailureNote(t *testing.T) {
+	for _, retries := range []int{0, 1} {
+		t.Run(fmt.Sprintf("retries=%d", retries), func(t *testing.T) {
+			const note = "the call did not parse"
+			tr := &itemScriptTransport{scripts: [][]poo.StreamItem{
+				{
+					{Kind: "delta", Delta: &poo.Delta{Kind: "text", Text: `echo {"text":"hi"}`}},
+					{Kind: "error", Error: &poo.StreamError{Message: note, Recoverable: true}},
+					{Kind: "finish", FinishReason: poo.FinishLength},
+				},
+				{
+					{Kind: "delta", Delta: &poo.Delta{Kind: "text", Text: "done"}},
+					{Kind: "finish", FinishReason: poo.FinishStop},
+				},
+			}}
+			sink := &recordingSink{}
+			opts := testOptions(t, tr, &echoTool{result: "echoed"}, sink)
+			opts.TruncationRetries = retries
+			s := newTestSession(t, opts)
+
+			res := runSession(t, s, "do the thing")
+			if res.Reason != poo.ReasonEndTurn {
+				t.Fatalf("the run settled %q (%s), want end_turn: the parse failure is what the model hears",
+					res.Reason, res.Detail.Source)
+			}
+			if n := tr.Requests(); n != 2 {
+				t.Fatalf("the run made %d requests, want 2: the failed turn and the answer", n)
+			}
+			// The model is told about the parse failure, and not to say less:
+			// the retry note would replace the diagnosis it can act on.
+			told := tr.RequestText(1)
+			if !strings.Contains(told, note) {
+				t.Errorf("the next request carries %q, want the parse failure %q", told, note)
+			}
+			if strings.Contains(told, "reached the output limit") {
+				t.Errorf("the next request carries the truncation retry's note as well: %q", told)
+			}
+		})
+	}
+}
+
+// itemScriptTransport answers each request with the next script of stream
+// items.
+//
+// A response the core reads can carry the provider's own stop reason and a
+// failure the parser reported. No one provider's shape produces both, so the
+// scripts let a test write one.
+type itemScriptTransport struct {
+	// scripts are the stream items each request is answered with.
+	scripts [][]poo.StreamItem
+	mu      sync.Mutex
+	// served counts the requests the transport answered.
+	served int
+	// requests are the requests the transport answered, in order.
+	requests []poo.ChatRequest
+}
+
+// Stream answers the request with the next script.
+func (t *itemScriptTransport) Stream(ctx context.Context, req poo.ChatRequest) (poo.StreamReader, poo.Rendered, error) {
+	t.mu.Lock()
+	t.requests = append(t.requests, req)
+	n := t.served
+	t.served++
+	t.mu.Unlock()
+	rendered := poo.Rendered{API: poo.APIChatCompletions}
+	if n >= len(t.scripts) {
+		return nil, rendered, pootest.ErrScriptExhausted
+	}
+	return &fakeReader{events: t.scripts[n]}, rendered, nil
+}
+
+// Fork is not used by these tests.
+func (t *itemScriptTransport) Fork(context.Context, poo.Rendered, []poo.Message, int, poo.ForkOptions) (poo.StreamReader, error) {
+	return nil, errNoFork
+}
+
+// Requests returns how many requests the transport answered.
+func (t *itemScriptTransport) Requests() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return len(t.requests)
+}
+
+// RequestText returns the text of every message the nth request carried.
+func (t *itemScriptTransport) RequestText(n int) string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if n >= len(t.requests) {
+		return ""
+	}
+	var b strings.Builder
+	for _, msg := range t.requests[n].Messages {
+		b.WriteString(msg.Text())
+		b.WriteString("\n")
+	}
+	return b.String()
 }
 
 func TestAFinishReasonOfLengthReachesBeforeSettle(t *testing.T) {

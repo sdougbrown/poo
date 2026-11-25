@@ -779,6 +779,7 @@ before the model finished, and both settle `cancelled`.
 | `max_duration` | The run hit its wall-clock budget. |
 | `empty_turns` | The model reached the bound on consecutive turns that asked for tool calls and sent none. The detail's text says how many turns. A run that mixed the two kinds of unusable turn is named for its last turn. |
 | `unparsed_calls` | The model reached the bound on consecutive turns whose tool calls did not parse. The detail's text says how many turns. A run that mixed the two kinds of unusable turn is named for its last turn. |
+| `truncated_turns` | The model reached the bound on consecutive turns whose response stopped on the output-token limit before a complete call arrived, with `limits.truncation_retries` retries already spent. The detail's text says how many turns. |
 | `no_output_room` | The computed `max_tokens` was under 256, so the request was never sent. |
 | `prompt_limit` | The estimate plus the reserve was over the endpoint's input cap, so the request was never sent. |
 | `compaction_failed` | The compactor failed when the next request could not go out. |

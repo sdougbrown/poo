@@ -362,6 +362,7 @@ func TestTheRunFlagsReachTheOptions(t *testing.T) {
 		"--reasoning-effort", "low",
 		"--max-turns", "3",
 		"--max-output", "1024",
+		"--truncation-retries", "2",
 		"--log", "run.jsonl",
 		"--working-dir", "/tmp",
 		"--executor", "bwrap",
@@ -397,16 +398,18 @@ func TestTheRunFlagsReachTheOptions(t *testing.T) {
 			apiKeyEnv:    "POO_KEY",
 			toolsMode:    "text",
 		},
-		permissionFallback: "deny",
-		reasoningEffort:    "low",
-		maxTurns:           3,
-		maxOutput:          1024,
-		logPath:            "run.jsonl",
-		workingDir:         "/tmp",
-		executor:           "bwrap",
-		projectPrompt:      true,
-		timeout:            5 * time.Minute,
-		noWaitJobs:         true,
+		permissionFallback:     "deny",
+		reasoningEffort:        "low",
+		maxTurns:               3,
+		maxOutput:              1024,
+		truncationRetries:      2,
+		truncationRetriesGiven: true,
+		logPath:                "run.jsonl",
+		workingDir:             "/tmp",
+		executor:               "bwrap",
+		projectPrompt:          true,
+		timeout:                5 * time.Minute,
+		noWaitJobs:             true,
 	}
 	if !reflect.DeepEqual(o, want) {
 		t.Errorf("the bound options are\n%+v\nwant\n%+v", o, want)
@@ -705,4 +708,51 @@ func TestEveryCommandWithItsOwnFlagsHasABindingTest(t *testing.T) {
 	// The front doors are in the tree too: the app takes their commands
 	// from the declaration, so walking it reaches them.
 	walk("", app.Commands)
+}
+
+// TestTheTruncationRetryFlagIsValidatedAndReachesTheLimit covers the retry's
+// flag. A negative count is a usage error. A count the operator gave lands in
+// the settings' limit, where 0 is the setting's own value for no retries.
+func TestTheTruncationRetryFlagIsValidatedAndReachesTheLimit(t *testing.T) {
+	apply := func(args ...string) (*config.Settings, error) {
+		inv, err := clicontract.Parse(pooApp(io.Discard), append([]string{"run"}, args...))
+		if err != nil {
+			return nil, err
+		}
+		var o runOptions
+		o.bind(inv)
+		if err := o.validate(inv.Args); err != nil {
+			return nil, err
+		}
+		settings := &config.Settings{Version: 1}
+		if err := o.apply(settings); err != nil {
+			return nil, err
+		}
+		return settings, nil
+	}
+
+	_, err := apply("--truncation-retries=-1", "--", "a prompt")
+	if err == nil || !strings.Contains(err.Error(), "--truncation-retries must not be negative") {
+		t.Fatalf("a negative retry count is refused with %v, want the flag's own reason", err)
+	}
+
+	// Zero is the setting's own value for "no retries", so the flag can turn
+	// off the default.
+	settings, err := apply("--truncation-retries=0", "--", "a prompt")
+	if err != nil {
+		t.Fatalf("giving the retry count: %v", err)
+	}
+	if settings.Limits.TruncationRetries == nil || *settings.Limits.TruncationRetries != 0 {
+		t.Errorf("the settings hold %v, want the 0 the flag gave", settings.Limits.TruncationRetries)
+	}
+
+	// A run that gave no flag leaves the limit unset, so the build's default
+	// applies.
+	settings, err = apply("--", "a prompt")
+	if err != nil {
+		t.Fatalf("omitting the retry count: %v", err)
+	}
+	if settings.Limits.TruncationRetries != nil {
+		t.Errorf("the settings hold %v, want the limit left unset", settings.Limits.TruncationRetries)
+	}
 }

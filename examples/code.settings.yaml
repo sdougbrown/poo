@@ -213,6 +213,10 @@ limits:
   max_duration_s: 0
   max_turns: 0
   max_continuations: 3
+  # How many times a run asks a model that overran its output limit to say
+  # less before it settles output_truncated. A settings file that names no
+  # value gets one retry, and 0 settles on the first overrun.
+  truncation_retries: 1
 
 # The background jobs.
 jobs:
