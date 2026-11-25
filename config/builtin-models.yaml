@@ -14,6 +14,12 @@
 # speaks the Messages API beside the Chat Completions one, at its own base,
 # so the OpenCode endpoints come in pairs: one per API, one key for all.
 #
+# The ollama-cloud endpoint is the same shape reached with a key: Ollama
+# Cloud lists the models it serves to the key it was given, so the record
+# names the one model the loader requires and the probe fills in the rest.
+# The name is the provider's, not the API's, so the prefix an operator types
+# is the one the sign-in writes the credential under.
+#
 # The typesafe endpoint is a third shape: a decisions endpoint, not a chat
 # one. Jev answers the questions a run asks about its state and serves no
 # chat turns, so its models declare ops: [systemone] and can be the
@@ -136,6 +142,11 @@ endpoints:
           mode: effort
           param: reasoning_effort
         reasoning_levels: [low, medium, high, xhigh, max]
+  ollama-cloud:
+    endpoint: https://ollama.com/v1
+    api_key_env: OLLAMA_API_KEY
+    models:
+      minimax-m3.1-flash: {}
   opencode:
     endpoint: https://opencode.ai/inference/openai/v1
     api_key_env: OPENCODE_API_KEY

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -1103,5 +1104,164 @@ func TestAProbeThatFollowsTheCachedLayerWarnsOnce(t *testing.T) {
 	}
 	if got := strings.Count(log.String(), "the discovery cache could not be read"); got != 1 {
 		t.Errorf("the unreadable cache is reported %d times, want once:\n%s", got, log.String())
+	}
+}
+
+// keyedListServer serves an OpenAI-compatible list to a bearer key only.
+//
+// It is the shape a hosted provider answers with: a key that is not there
+// is a refusal, and the probe reads the models only when the request
+// carries the key the endpoint's credential resolves to.
+func keyedListServer(t *testing.T, key string, ids ...string) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer "+key {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		data := make([]map[string]any, 0, len(ids))
+		for _, id := range ids {
+			data = append(data, map[string]any{"id": id, "object": "model"})
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"object": "list", "data": data})
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	return server
+}
+
+// TestAProbeCarriesTheEndpointKey covers an endpoint whose list is served
+// to a key and to nothing else. The probe asks with the key the endpoint's
+// credential resolves to, so the models the list names reach the catalog;
+// a probe that asked anonymously would be refused and the endpoint would
+// offer nothing.
+func TestAProbeCarriesTheEndpointKey(t *testing.T) {
+	server := keyedListServer(t, "the-key", "glm-5.3", "kimi-k3")
+	asked := map[string]int{}
+	c := catalog.New(catalog.Options{
+		StateDir: t.TempDir(),
+		Settings: catalog.Settings{
+			Endpoints: map[string]catalog.EndpointSettings{
+				"cloud": {Endpoint: server.URL, APIKeyEnv: "CLOUD_API_KEY"},
+			},
+		},
+		EndpointKey: func(name string, credential catalog.Credential) string {
+			asked[name]++
+			if credential.Source != catalog.CredentialEnv || credential.Env != "CLOUD_API_KEY" {
+				t.Errorf("the probe asks for %q's key with %+v, want the endpoint's variable",
+					name, credential)
+			}
+			return "the-key"
+		},
+	})
+	if err := c.Refresh(context.Background()); err != nil {
+		t.Fatalf("the refresh: %v", err)
+	}
+	for _, name := range []string{"cloud/glm-5.3", "cloud/kimi-k3"} {
+		if _, err := c.Resolve(name); err != nil {
+			t.Errorf("the model %q the keyed list named did not resolve: %v", name, err)
+		}
+	}
+	if asked["cloud"] == 0 {
+		t.Errorf("the probe never asked for the endpoint's key")
+	}
+}
+
+// TestAProbeWhoseKeyIsNotThereAsksAnonymously covers the other half: an
+// endpoint with no key in reach is probed with no credential header, so an
+// operator's local server sees the plain request it has always seen.
+func TestAProbeWhoseKeyIsNotThereAsksAnonymously(t *testing.T) {
+	var seen []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r.Header.Get("Authorization"))
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"object": "list",
+			"data":   []map[string]any{{"id": "gemma4"}},
+		})
+	}))
+	t.Cleanup(server.Close)
+
+	c := catalog.New(catalog.Options{
+		StateDir: t.TempDir(),
+		Settings: catalog.Settings{
+			Endpoints: map[string]catalog.EndpointSettings{
+				"local": {Endpoint: server.URL, APIKeyEnv: "LOCAL_API_KEY"},
+			},
+		},
+		EndpointKey: func(string, catalog.Credential) string { return "" },
+	})
+	if err := c.Refresh(context.Background()); err != nil {
+		t.Fatalf("the refresh: %v", err)
+	}
+	for _, header := range seen {
+		if header != "" {
+			t.Errorf("a request carried %q, want no credential header", header)
+		}
+	}
+	if _, err := c.Resolve("local/gemma4"); err != nil {
+		t.Errorf("the list's model did not resolve: %v", err)
+	}
+}
+
+// TestTheShowProbeReadsEveryModelTheListServes covers a hosted endpoint
+// that serves more models than one probe used to ask about. Every id the
+// list named is asked about, so a model past the old request budget
+// arrives with the context window and the capabilities its own report
+// names rather than as a bare id.
+func TestTheShowProbeReadsEveryModelTheListServes(t *testing.T) {
+	const count = 25
+	ids := make([]string, 0, count)
+	for i := range count {
+		ids = append(ids, fmt.Sprintf("model-%02d", i))
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, r *http.Request) {
+		data := make([]map[string]any, 0, len(ids))
+		for _, id := range ids {
+			data = append(data, map[string]any{"id": id, "object": "model"})
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"object": "list", "data": data})
+	})
+	mux.HandleFunc("/api/show", func(w http.ResponseWriter, r *http.Request) {
+		var asked struct {
+			Model string `json:"model"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&asked)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"model_info":   map[string]any{"arch.context_length": 65536},
+			"capabilities": []string{"completion", "tools"},
+		})
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	c := catalog.New(catalog.Options{
+		StateDir: t.TempDir(),
+		Settings: catalog.Settings{
+			Endpoints: map[string]catalog.EndpointSettings{
+				"cloud": {Endpoint: server.URL},
+			},
+		},
+	})
+	if err := c.Refresh(context.Background()); err != nil {
+		t.Fatalf("the refresh: %v", err)
+	}
+	for _, id := range ids {
+		info, err := c.Resolve("cloud/" + id)
+		if err != nil {
+			t.Fatalf("the model %q the list named did not resolve: %v", id, err)
+		}
+		if info.ContextLimit != 65536 {
+			t.Errorf("%s has the context limit %d, want the 65536 its own report names",
+				id, info.ContextLimit)
+		}
+		if info.Tools.Mode != poo.ToolsNative {
+			t.Errorf("%s has the tools mode %q, want native", id, info.Tools.Mode)
+		}
 	}
 }

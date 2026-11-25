@@ -830,6 +830,9 @@ func commandName(line string) (name, arg string) {
 	if strings.HasPrefix(line, "/model ") {
 		return "/model", strings.TrimSpace(strings.TrimPrefix(line, "/model "))
 	}
+	if strings.HasPrefix(line, "/models ") {
+		return "/models", strings.TrimSpace(strings.TrimPrefix(line, "/models "))
+	}
 	if strings.HasPrefix(line, "/thinking ") {
 		return "/thinking", strings.TrimSpace(strings.TrimPrefix(line, "/thinking "))
 	}
@@ -854,6 +857,8 @@ func (m *machine) command(line string, input input) (int, bool) {
 /model <text>    switch to the model the text matches: one match switches,
                  several list ranked and numbered
 /model <number>  switch to a number of the last list
+/models          ask the endpoints what they serve now, and list it
+/models <text>   switch to a model of that fresh list
 /thinking        cycle the reasoning level (Shift+Tab)
 /thinking <lvl>  set the reasoning level: off, minimal, low, medium, high,
                  xhigh or a token budget
@@ -866,12 +871,23 @@ anything else    a prompt for the session`)
 			m.r.failure(err.Error())
 		}
 		return 0, false
-	case "/model", "/models":
+	case "/model":
 		if arg == "" {
 			m.listModels(m.catalogNames(), "/model <text> filters this list, /model <number> picks from it")
 			return 0, false
 		}
 		m.switchModel(arg)
+		return 0, false
+	case "/models":
+		// The command's own name is the ask: the endpoints are probed, and the
+		// list is what they say now, so a model a provider added since the
+		// session opened is one it can switch to.
+		m.refreshCatalog()
+		if arg != "" {
+			m.switchModel(arg)
+			return 0, false
+		}
+		m.listModels(m.catalogNames(), "/models lists what the endpoints say now — /models <text> filters it, /models <number> picks from it")
 		return 0, false
 	case "/cancel":
 		m.cancelRun(m.activeRun())
@@ -1137,6 +1153,28 @@ func (m *machine) endRun(input input) (int, bool) {
 		return 0, true
 	}
 	return 0, false
+}
+
+// refreshCatalog asks the server what the endpoints serve now, and holds the
+// answer.
+//
+// The catalog a session opens with is what the endpoints last reported, and a
+// provider that has added a model since is invisible to it. The ask is the wire's
+// reprobe: the endpoints are probed and the cache is written, so the session's
+// next turn and the next session's catalog both see it.
+//
+// A refresh that fails keeps the catalog the session holds: the models it may
+// switch to are the ones it already knew, which is a better answer than none.
+func (m *machine) refreshCatalog() {
+	var catalog protocol.ModelsResult
+	if err := m.conn.call(protocol.MethodModelsList, protocol.ModelsParams{Refresh: true}, &catalog); err != nil {
+		m.r.failure(fmt.Sprintf("the endpoints could not be asked what they serve: %v", err))
+		return
+	}
+	m.catalog = map[string]protocol.ModelInfo{}
+	for _, model := range catalog.Models {
+		m.catalog[model.Name] = model
+	}
 }
 
 // catalogNames returns the catalog's model names, in name order.

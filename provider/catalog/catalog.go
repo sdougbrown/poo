@@ -3,8 +3,9 @@
 // The catalog has four layers, and the later ones win, field by field.
 //
 //  1. The curated layer is embedded in the binary: the family rules in
-//     families.go describe the local models, and the hosted entries in
-//     modelsdev_gen.go are generated from the models.dev data.
+//     families.go describe families of local models. What a hosted provider
+//     serves is not here — a snapshot of it goes stale the day the provider
+//     adds or retires a model, and the provider's own list is one probe away.
 //  2. The discovery layer holds what the endpoints report about the
 //     models they serve.
 //  3. The models file layer is what the operator's models file declares.
@@ -97,13 +98,13 @@ type Options struct {
 	// client that says nothing is named by the HTTP library alone. Empty
 	// sends none.
 	UserAgent string
-	// KeyPresent reports whether the key an endpoint's credential reads is
-	// in reach. The curated layer is poo's word, and an entry whose key the
-	// operator cannot reach is not one to offer: poo models, the model
-	// switcher and the role checks all read the catalog's answer. Nil
-	// offers every entry: a binary that links no credential store offers
-	// what it embeds.
-	KeyPresent func(name string, credential Credential) bool
+	// EndpointKey resolves the key an endpoint's credential reads, and an
+	// endpoint whose key is not in reach resolves to the empty string. The
+	// probes ask with it: a hosted provider's model list is served to a key,
+	// and a probe that asked anonymously would be refused and would leave the
+	// endpoint offering nothing. Nil sends no credential, which is what a
+	// binary that links no credential store can do.
+	EndpointKey func(name string, credential Credential) string
 	// Cached says the catalog holds what the endpoints last reported, read from the
 	// discovery cache when it is built. It is how a model an endpoint served is a model a
 	// session can name without a probe: the build never reaches the network, and the cache
@@ -169,9 +170,6 @@ func New(opts Options) *Catalog {
 		endpoints:  map[string]Endpoint{},
 		roles:      map[Role]string{},
 	}
-	for name, endpoint := range c.curated.endpoints {
-		c.endpoints[name] = endpoint
-	}
 	for name, endpoint := range opts.File.Endpoints {
 		c.endpoints[name] = mergeEndpoint(c.endpoints[name], endpoint.endpoint(name))
 	}
@@ -180,7 +178,6 @@ func New(opts Options) *Catalog {
 	}
 	c.addFileModels()
 	c.addSettingsModels()
-	c.addCuratedModels()
 	if opts.Cached {
 		c.applyCached()
 	}
@@ -240,9 +237,7 @@ func (c *Catalog) addFileModels() {
 			modelID:  model.ModelID,
 		}
 		e.file = model.layer(name, endpoint.Endpoint)
-		curated, _, notes := c.curated.forModel(model.ModelID)
-		e.curated = curated
-		e.notes = notes
+		e.curated, e.notes = c.curated.forModel(model.ModelID)
 		c.entries[name] = e
 		c.modelIndex[modelRef{endpoint: model.Endpoint, modelID: model.ModelID}] = e
 	}
@@ -306,63 +301,8 @@ func (c *Catalog) addSettingsModels() {
 		e.endpoint = model.Endpoint
 		e.modelID = model.ModelID
 		e.settings = model.layer(name, endpoint.Endpoint)
-		curated, _, notes := c.curated.forModel(model.ModelID)
-		e.curated = curated
-		e.notes = notes
+		e.curated, e.notes = c.curated.forModel(model.ModelID)
 		c.modelIndex[modelRef{endpoint: model.Endpoint, modelID: model.ModelID}] = e
-	}
-}
-
-// addCuratedModels adds the curated models that no other layer named.
-//
-// A curated model that the settings or the discovery already named is
-// not added twice: the layers of the one model are merged instead.
-func (c *Catalog) addCuratedModels() {
-	for _, id := range c.curated.modelIDs() {
-		if c.hasModelID(id) {
-			continue
-		}
-		curated, endpoint, notes := c.curated.forModel(id)
-		// The curated model rides the endpoint a session resolves its key
-		// from: the merged one, whichever layer had the last word on the
-		// credential. A model whose key is not in reach is not one to
-		// offer — poo's word is the curated entry, and the operator's own
-		// models ride no gate.
-		served, ok := c.endpoints[endpoint]
-		if ok {
-			if c.opts.KeyPresent != nil && !c.opts.KeyPresent(endpoint, served.Credential) {
-				// The curated model is not offered. An endpoint only poo
-				// declares goes with it: an endpoint the operator declared
-				// is theirs, and stays for the models they wrote against
-				// it.
-				if _, declared := c.opts.File.Endpoints[endpoint]; !declared {
-					if _, declared := c.opts.Settings.Endpoints[endpoint]; !declared {
-						delete(c.endpoints, endpoint)
-					}
-				}
-				continue
-			}
-			curated.Endpoint = served.Endpoint
-		} else {
-			hosted, isHosted := c.curated.endpoints[endpoint]
-			if !isHosted {
-				continue
-			}
-			if c.opts.KeyPresent != nil && !c.opts.KeyPresent(endpoint, hosted.Credential) {
-				continue
-			}
-			c.endpoints[endpoint] = hosted
-			curated.Endpoint = hosted.Endpoint
-		}
-		e := &entry{
-			name:     id,
-			endpoint: endpoint,
-			modelID:  id,
-			curated:  curated,
-			notes:    notes,
-		}
-		c.entries[id] = e
-		c.modelIndex[modelRef{endpoint: endpoint, modelID: id}] = e
 	}
 }
 
@@ -377,19 +317,6 @@ func (c *Catalog) addRoles() {
 // endpoint, or nil when there is none.
 func (c *Catalog) entryForModel(endpoint, modelID string) *entry {
 	return c.modelIndex[modelRef{endpoint: endpoint, modelID: modelID}]
-}
-
-// hasModelID reports whether an entry already serves a model id.
-//
-// A model that the settings serve is not listed twice: the curated
-// entry of the same model is merged into the settings' one.
-func (c *Catalog) hasModelID(modelID string) bool {
-	for _, e := range c.entries {
-		if e.modelID == modelID {
-			return true
-		}
-	}
-	return false
 }
 
 // List returns the effective models, sorted by name.

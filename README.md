@@ -263,6 +263,37 @@ A key entry is read by the endpoint that declares the same environment
 variable: an endpoint reading `OLLAMA_API_KEY` takes the `ollama-cloud`
 key after the variable itself and ahead of a literal the settings carry.
 
+**The Ollama Cloud provider.** `poo login ollama-cloud` stores an Ollama
+Cloud key, and the built-in record declares the endpoint it serves:
+
+```yaml
+endpoints:
+  ollama-cloud:
+    endpoint: https://ollama.com/v1
+    api_key_env: OLLAMA_API_KEY
+    models:
+      minimax-m3.1-flash: {}
+```
+
+Ollama Cloud lists the models it serves to the key it was given, so the
+record names the one model the loader requires — an endpoint serves
+something, and the catalog resolves a chat role before anything is probed —
+and the probe supplies the rest. What arrives is the provider's own list,
+named `endpoint/id`, so the prefix an operator types is the one the
+sign-in wrote the credential under:
+
+```yaml
+roles:
+  chat: ollama-cloud/glm-5.3
+```
+
+The list is read when the key is stored, so the catalog a session opens
+after a sign-in already holds it; `poo models`, `/models` in the repl and
+a fresh refresh probe again. A model that vanishes or arrives later
+needs no release: it is the endpoint's answer, not a snapshot in the
+binary. The endpoint is offered only when its key is in reach, so a
+credential for another provider does not wake it.
+
 **The OpenCode providers.** The Console providers `opencode` and
 `opencode-go` are built in — pay-as-you-go and Go, at their own base
 URLs — and each has a Messages sibling, `opencode-anthropic` and
@@ -435,7 +466,10 @@ transposes the two characters before it. Ctrl-K kills to the end, Ctrl-U
 clears before the cursor, and Ctrl-W cuts the word behind it.
 `/less` shows the transcript through `less -R`, and
 permission asks use `y/n`. `/model` lists models, and `/model <name>`
-switches the chat model between runs. `/thinking` or Shift+Tab cycles
+switches the chat model between runs. `/models` asks the endpoints what
+they serve now and lists that, so a model a provider added since the
+session opened is one it can switch to without leaving the repl.
+`/thinking` or Shift+Tab cycles
 reasoning levels; `/thinking <level>` selects one. The repl is a wire
 client, and the
 server runs the session.

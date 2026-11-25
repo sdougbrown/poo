@@ -87,3 +87,76 @@ func TestTheEndpointKeyRungs(t *testing.T) {
 		t.Errorf("an endpoint that reads no key is not present")
 	}
 }
+
+// TestTheBuiltinOllamaCloudEndpointIsOfferedOnItsKey covers the built-in hosted
+// provider the record declares: the endpoint is offered once the key it reads is
+// in reach, under the provider's own name, and the model the record names is one a
+// role can pick before anything is probed — a list is the provider's answer, and a
+// catalog resolves a chat role without one. A credential for another provider
+// leaves it unoffered, and a key in the environment wakes it the same way.
+func TestTheBuiltinOllamaCloudEndpointIsOfferedOnItsKey(t *testing.T) {
+	t.Setenv("OLLAMA_API_KEY", "")
+	dir := t.TempDir()
+	authPath := filepath.Join(dir, "auth.json")
+	settingsPath := filepath.Join(dir, "settings.yaml")
+	body := "version: 1\nauth_file: " + authPath + "\nsession:\n  mode: ephemeral\n"
+	if err := os.WriteFile(settingsPath, []byte(body), 0o644); err != nil {
+		t.Fatalf("writing the settings: %v", err)
+	}
+	if err := os.WriteFile(authPath, []byte("version: 1\ncredentials: {}\n"), 0o600); err != nil {
+		t.Fatalf("writing the credential file: %v", err)
+	}
+	settings, err := config.Load(settingsPath)
+	if err != nil {
+		t.Fatalf("loading the settings: %v", err)
+	}
+	if _, ok := catalog.New(settings.CatalogOptions()).Endpoints()["ollama-cloud"]; ok {
+		t.Errorf("the endpoint is offered with no key in reach")
+	}
+
+	// The key the operator signs in with is the one the endpoint reads, and the
+	// credential file is the rung that answers.
+	credentials := auth.Credentials{Path: authPath}
+	if _, err := credentials.Set(context.Background(), auth.OllamaCloud,
+		auth.Credential{Kind: auth.KindAPIKey, Key: "the-stored-key"}, true); err != nil {
+		t.Fatalf("writing the credential fixture: %v", err)
+	}
+	settings, err = config.Load(settingsPath)
+	if err != nil {
+		t.Fatalf("loading the settings again: %v", err)
+	}
+	endpoint, ok := catalog.New(settings.CatalogOptions()).Endpoints()["ollama-cloud"]
+	if !ok {
+		t.Fatalf("the endpoint is not offered with its key stored")
+	}
+	if endpoint.Endpoint != "https://ollama.com/v1" {
+		t.Errorf("the endpoint is %q, want the record's Ollama Cloud one", endpoint.Endpoint)
+	}
+	if endpoint.Credential.Source != catalog.CredentialEnv || endpoint.Credential.Env != "OLLAMA_API_KEY" {
+		t.Errorf("the credential reads %+v, want the record's variable", endpoint.Credential)
+	}
+	model, err := catalog.New(settings.CatalogOptions()).Resolve("ollama-cloud/minimax-m3.1-flash")
+	if err != nil {
+		t.Fatalf("the model the record declares did not resolve: %v", err)
+	}
+	if model.Provider != "ollama-cloud" {
+		t.Errorf("the model is served by %q, want the endpoint's name", model.Provider)
+	}
+
+	// The variable is the rung above the file, so a key set in the environment wakes
+	// the endpoint with no credential stored.
+	if err := os.Remove(authPath); err != nil {
+		t.Fatalf("removing the credential fixture: %v", err)
+	}
+	if err := os.WriteFile(authPath, []byte("version: 1\ncredentials: {}\n"), 0o600); err != nil {
+		t.Fatalf("writing the empty credential file: %v", err)
+	}
+	t.Setenv("OLLAMA_API_KEY", "the-env-key")
+	settings, err = config.Load(settingsPath)
+	if err != nil {
+		t.Fatalf("loading the settings with the variable set: %v", err)
+	}
+	if _, err := catalog.New(settings.CatalogOptions()).Resolve("ollama-cloud/minimax-m3.1-flash"); err != nil {
+		t.Errorf("the endpoint's model did not resolve on the variable: %v", err)
+	}
+}

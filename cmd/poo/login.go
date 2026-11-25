@@ -22,6 +22,7 @@ import (
 	"github.com/sdougbrown/poo/config"
 	"github.com/sdougbrown/poo/internal/term"
 	"github.com/sdougbrown/poo/provider/auth"
+	"github.com/sdougbrown/poo/provider/catalog"
 )
 
 // ollamaCloud is the second way in: a key, with no browser and no redirect.
@@ -46,6 +47,11 @@ var typesafe = auth.Flow{
 	Provider: auth.Typesafe,
 	Method:   auth.MethodKey,
 }
+
+// probeClient is the client a sign-in's probe uses. The binary leaves it nil, and
+// the catalog makes its own; a test stands a fixture in its place, the way listenOn
+// stands in for a listener, because a probe reaches a provider and no test does.
+var probeClient *http.Client
 
 // logins are the sign-ins this command offers, in the order the picker shows them.
 func logins() []auth.Flow {
@@ -158,7 +164,72 @@ func (o *loginOptions) signInAndStore(ctx context.Context, flow auth.Flow, setti
 	if reads := settings.CredentialFile(); reads != "" && !sameFile(reads, status.Path) {
 		fmt.Fprintf(stdout, "\nThe settings still resolve the credential to %s. Point poo at the copy:\n  auth_file: %s\n", reads, status.Path)
 	}
+	o.probeSignedIn(ctx, flow, settingsPath, stdout)
 	return status, false
+}
+
+// probeSignedIn asks the endpoints the provider serves what they serve, now that its
+// credential is stored.
+//
+// A hosted provider's models are its own list, so the key is worth nothing to a session
+// until the list is read: without this the first `poo models`, or a `/models` in the repl,
+// is what teaches the catalog what the operator just bought. The settings are read again
+// because the offering is decided when they load, and the key that wakes an endpoint was
+// not there when the caller loaded them.
+//
+// A provider whose endpoints declare their models — Codex, TypeSafe — has nothing to ask,
+// and a probe that fails leaves the catalog as it was: a sign-in that stored the credential
+// is a success whatever the endpoint answers.
+func (o *loginOptions) probeSignedIn(ctx context.Context, flow auth.Flow, settingsPath string, stdout io.Writer) {
+	settings, err := o.reloadSettings(settingsPath)
+	if err != nil {
+		return
+	}
+	options := settings.CatalogOptions()
+	options.HTTPClient = probeClient
+	cat := catalog.New(options)
+	served := make([]string, 0, 4)
+	for name, endpoint := range cat.Endpoints() {
+		if endpoint.SkipProbe || !servesProvider(settings, name, flow.Provider) {
+			continue
+		}
+		_ = cat.ReprobeEndpoint(ctx, name)
+		served = append(served, name)
+	}
+	if len(served) == 0 {
+		return
+	}
+	count := 0
+	for _, model := range cat.List() {
+		if slices.Contains(served, model.Provider) {
+			count++
+		}
+	}
+	if count == 0 {
+		return
+	}
+	fmt.Fprintf(stdout, "\n%s serves %d model(s), and they are in the catalog.\n", strings.Join(served, ", "), count)
+}
+
+// reloadSettings reads the settings the sign-in wrote a credential for. A caller with no
+// settings file of its own — the welcome front door — reads the defaults discovery finds.
+func (o *loginOptions) reloadSettings(settingsPath string) (*config.Settings, error) {
+	if settingsPath == "" {
+		return config.LoadDefaults()
+	}
+	return config.Load(settingsPath)
+}
+
+// servesProvider reports whether an endpoint reads the key the given provider stores.
+//
+// The environment variable's name is the join: a provider stores its key under a name, and
+// the endpoint that reads the same variable is the one the key serves.
+func servesProvider(settings *config.Settings, endpoint string, provider auth.Provider) bool {
+	declared, ok := settings.Endpoints[endpoint]
+	if !ok {
+		return false
+	}
+	return provider.Env != "" && declared.APIKeyEnv == provider.Env
 }
 
 // refuseBrowserFlags refuses the flags a browser sign-in takes when the chosen sign-in is not one.
