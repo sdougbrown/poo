@@ -520,8 +520,9 @@ func TestAStaleSuspensionReportIsDropped(t *testing.T) {
 		t.Fatalf("subscribing to the feed: started=%v err=%v", started, err)
 	}
 	waitForSink(t, sink, "the first fault's report", func() bool { return len(faultReportTexts(sink)) >= 1 })
-	// The first attempt's report is done before the re-arm: a report still
-	// reserved would fold into it rather than stand apart.
+	// The assertion below reads the reservation, and the report path retires
+	// it after the record lands. Wait for the retire: otherwise the first
+	// attempt's leftover reads as one the stale report took.
 	waitForNoFaultReservation(t, s, origin)
 
 	// The instance is started again after its suspension, and the second
@@ -558,9 +559,6 @@ func TestAStaleSuspensionReportIsDropped(t *testing.T) {
 	if strings.Contains(reports[1], "more arrived") {
 		t.Errorf("the second report %q folded into the stale one", reports[1])
 	}
-	// The second attempt's report is retired before the feed stops, so the
-	// report below reaches the stopped check rather than a reservation.
-	waitForNoFaultReservation(t, s, origin)
 
 	// A stopped instance has nothing to remedy either, even for the attempt
 	// that suspended it.
