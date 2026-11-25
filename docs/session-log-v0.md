@@ -94,6 +94,11 @@ A record that someone produced also carries an `origin`:
 | `job.ended` | Once per background job, when it finishes. |
 | `feed.started` | Once per attempt of a feed, when the attempt starts. |
 | `feed.ended` | Once per attempt of a feed, when the attempt ends. |
+| `tool.started` | Once per tool call, when the call starts. |
+| `run.resumed` | Once per run that resumes after a crash. |
+| `turn.hook` | Once per turn hook, at its start and at its end. |
+| `feed.subscribed` | Once per feed instance, when it subscribes. |
+| `feed.unsubscribed` | Once per feed instance, when it unsubscribes. |
 | `observer.dropped` | Once a second at most, per observer that fell behind. |
 | `turn.interrupted` | Once per turn an interrupt cut short. |
 | `compaction` | Once per compaction a compactor produced. |
@@ -165,6 +170,7 @@ Each entry of `tools` holds:
 | `name` | string | The tool's identifier. |
 | `class` | string | The tool's side-effect class: `"read_only"` or `"side_effecting"`. |
 | `background` | string | The tool's background mode: `"allowed"` or `"always"`. Absent when the tool never runs in the background. |
+| `idempotent` | boolean | `true` for a `"side_effecting"` tool whose repeated execution is safe, so a durable session may replay an interrupted call. Absent when the tool does not declare it, and on a log written before the field existed. |
 
 `build` holds:
 
@@ -521,6 +527,71 @@ the filter's diagnostics for the attempt. Those diagnostics never ride the
 input. One suspension is one wake: a further fault that arrives before the
 report is delivered joins it, and the report counts it.
 
+## `tool.started`
+
+A tool call started. The record is written when the call starts, so a
+log shows what the model asked for even when the call never finished, and
+a durable session sees the interrupted call it may replay.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `run_id` | string | The run the call belongs to. |
+| `turn` | integer | The turn the call belongs to. |
+| `handle` | string | The call's handle within the turn, e.g. `"r1"`. |
+| `call_id` | string | The provider's id of the call. The id the call answers, so a reader pairs the start with the call and the result by it. |
+| `tool` | string | The name of the tool the call names. |
+
+## `run.resumed`
+
+A run resumed after a crash. The record names the phase the run stopped
+in, so a reader of the log sees where the run picked up.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `run_id` | string | The run that resumed. |
+| `resumption_attempt` | integer | The resumption's number, counting from 1. |
+| `from_phase` | string | The phase the run was in when it stopped: one of the session's states, e.g. `"executing"`. |
+| `turn` | integer | The turn the run was in when it stopped. |
+
+## `turn.hook`
+
+A turn hook's start or end. The record is written when the hook starts
+and when it ends, so a reader of the log sees a hook that a crash cut
+short: its start has no end, and its end may say it was interrupted.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `run_id` | string | The run the hook belongs to. |
+| `turn` | integer | The turn the hook runs in. |
+| `phase` | string | The hook's phase: `"after_turn"` or `"before_settle"`. |
+| `status` | string | The record's status: `"started"` or `"ended"`. |
+| `hook_index` | integer | The hook's position in the chain, counting from 0. |
+| `interrupted` | boolean | `true` when the hook's turn was ended by an interrupt. Set on the hook's records along the interrupted path, so a crash between them keeps the fact on the started record. Absent when it was not. |
+
+## `feed.subscribed`
+
+A feed instance subscribed. The record is written when the instance
+subscribes, so a reader of the log sees the instances a session ran, and
+a durable session knows which to take on again.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `feed` | string | The feed's name, e.g. `"inbox"`. |
+| `instance` | string | The instance's identifier. |
+| `scope` | string | The instance's scope. |
+| `prompt` | string | The prompt the instance was started with. Absent when the instance was started without one. |
+
+## `feed.unsubscribed`
+
+A feed instance unsubscribed. The record is written when the instance
+unsubscribes, so a reader of the log sees the instances a session let
+go, and a durable session does not take them on again.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `feed` | string | The feed's name, e.g. `"inbox"`. |
+| `instance` | string | The instance's identifier. |
+
 ## `observer.dropped`
 
 The events an observer missed. The record is written at most once a
@@ -667,6 +738,8 @@ waiting, before any asker has answered.
 | `class` | string | The tool's class: `"read_only"` or `"side_effecting"`. **Absent** when the tool names none. |
 | `reason` | string | Why the call is being asked about: `"policy"` or `"doom_loop"`. **Absent** when there is none. |
 | `repeat_count` | object | The doom loop's counts, for a doom-loop ask: `exact` and `near`. **Absent** for a policy ask. |
+| `deadline` | string | The wall-clock time, RFC 3339 with nanosecond precision, when the ask expires. **Absent** when the ask has no deadline, and on a log written before the field existed. |
+| `fallback` | string | The decision an expired ask resolves to: `"allow"` or `"deny"`. **Absent** when the ask names none, and on a log written before the field existed. |
 
 ## `permission.answered`
 

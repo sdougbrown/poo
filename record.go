@@ -343,6 +343,14 @@ type PermissionAskedRecord struct {
 	Reason AskReason `json:"reason,omitempty"`
 	// RepeatCount holds the doom loop's counts, when the ask is one.
 	RepeatCount *RepeatCounts `json:"repeat_count,omitempty"`
+	// Deadline is the wall-clock time, RFC 3339 with nanosecond
+	// precision, when the ask expires. It is absent when the ask has
+	// no deadline, and on a log written before the field existed.
+	Deadline string `json:"deadline,omitempty"`
+	// Fallback is the decision ("allow" or "deny") an expired ask
+	// resolves to. It is absent when the ask names none, and on a log
+	// written before the field existed.
+	Fallback string `json:"fallback,omitempty"`
 }
 
 // PermissionAnsweredRecord records the answer that resolved an ask, or a
@@ -365,6 +373,99 @@ type PermissionAnsweredRecord struct {
 	// Message is the note the answer carried for the model. It is
 	// absent when the answer carried none.
 	Message string `json:"message,omitempty"`
+}
+
+// ToolStartedRecord records that a tool call started.
+//
+// The record is written when the call starts, so a log shows what the
+// model asked for even when the call never finished, and a durable
+// session sees the interrupted call it may replay.
+type ToolStartedRecord struct {
+	RecordMeta
+	// RunID identifies the run the call belongs to.
+	RunID string `json:"run_id"`
+	// Turn is the turn the call belongs to.
+	Turn int `json:"turn"`
+	// Handle is the call's identifier within the turn, e.g. "r1".
+	Handle string `json:"handle"`
+	// CallID is the provider's id of the call. It is the id the call
+	// answers, so a reader pairs the start with the call and the result
+	// by this id.
+	CallID string `json:"call_id"`
+	// Tool is the name of the tool the call names.
+	Tool string `json:"tool"`
+}
+
+// RunResumedRecord records that a run resumed after a crash.
+//
+// The record names the phase the run stopped in, so a reader of the
+// log sees where the run picked up.
+type RunResumedRecord struct {
+	RecordMeta
+	// RunID identifies the run that resumed.
+	RunID string `json:"run_id"`
+	// ResumptionAttempt is the resumption's number, counting from one.
+	ResumptionAttempt int `json:"resumption_attempt"`
+	// FromPhase is the phase the run was in when it stopped.
+	FromPhase State `json:"from_phase"`
+	// Turn is the turn the run was in when it stopped.
+	Turn int `json:"turn"`
+}
+
+// TurnHookRecord records a turn hook's start or end.
+//
+// The record is written when the hook starts and when it ends, so a
+// reader of the log sees a hook that a crash cut short: its start has
+// no end, and its end may say it was interrupted.
+type TurnHookRecord struct {
+	RecordMeta
+	// RunID identifies the run the hook belongs to.
+	RunID string `json:"run_id"`
+	// Turn is the turn the hook runs in.
+	Turn int `json:"turn"`
+	// Phase is the hook's phase: "after_turn" or "before_settle".
+	Phase string `json:"phase"`
+	// Status is the record's status: "started" or "ended".
+	Status string `json:"status"`
+	// HookIndex is the hook's position in the chain, counting from
+	// zero.
+	HookIndex int `json:"hook_index"`
+	// Interrupted reports that the hook's turn was ended by an
+	// interrupt. It is set on the hook's records along the
+	// interrupted path, so a crash between them keeps the fact on the
+	// started record.
+	Interrupted bool `json:"interrupted,omitempty"`
+}
+
+// FeedSubscribedRecord records that a feed instance subscribed.
+//
+// The record is written when the instance subscribes, so a reader of
+// the log sees the instances a session ran, and a durable session
+// knows which to take on again.
+type FeedSubscribedRecord struct {
+	RecordMeta
+	// Feed is the feed's name, e.g. "inbox".
+	Feed string `json:"feed"`
+	// Instance is the instance's identifier.
+	Instance string `json:"instance"`
+	// Scope is the instance's scope.
+	Scope string `json:"scope"`
+	// Prompt is the prompt the instance was started with. It is
+	// absent when the instance was started without one.
+	Prompt string `json:"prompt,omitempty"`
+}
+
+// FeedUnsubscribedRecord records that a feed instance unsubscribed.
+//
+// The record is written when the instance unsubscribes, so a reader
+// of the log sees the instances a session let go, and a durable
+// session does not take them on again.
+type FeedUnsubscribedRecord struct {
+	RecordMeta
+	// Feed is the feed's name, e.g. "inbox".
+	Feed string `json:"feed"`
+	// Instance is the instance's identifier.
+	Instance string `json:"instance"`
 }
 
 // ToolResultData is a tool result's own data.

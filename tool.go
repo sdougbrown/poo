@@ -22,6 +22,11 @@ type ToolInfo struct {
 	// the record is incompatible with the current build when a tool's
 	// mode changed.
 	Background Background `json:"background,omitempty"`
+	// Idempotent marks a SideEffecting tool whose repeated execution
+	// is safe, so a durable session may replay an interrupted call.
+	// A record written before the tool declared itself idempotent says
+	// nothing about it, so gaining the flag is not a difference.
+	Idempotent bool `json:"idempotent,omitempty"`
 }
 
 // ToolSpec describes a tool to the model and to the core.
@@ -40,6 +45,9 @@ type ToolSpec struct {
 	// Background says whether the model may run the tool in the
 	// background.
 	Background Background `json:"background,omitempty"`
+	// Idempotent marks a SideEffecting tool whose repeated execution
+	// is safe, so a durable session may replay an interrupted call.
+	Idempotent bool `json:"idempotent,omitempty"`
 }
 
 // ToolKind is the side-effect class of a tool.

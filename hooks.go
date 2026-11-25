@@ -466,6 +466,21 @@ type BeforeSettleHook interface {
 // whether the call runs at all, not what it returns.
 type PolicyHook = BeforeToolHook
 
+// IdempotentHook is a hook that may opt into re-execution after a
+// crash in the middle of the hook.
+type IdempotentHook interface {
+	// Idempotent reports whether running the hook again is safe.
+	Idempotent() bool
+}
+
+// isIdempotentHook reports whether the hook opted into
+// re-execution after a mid-hook crash. Hooks that do not implement
+// IdempotentHook are never re-run.
+func isIdempotentHook(h any) bool {
+	hook, ok := h.(IdempotentHook)
+	return ok && hook.Idempotent()
+}
+
 // Observer sees every event.
 //
 // An observer never settles a run. Its error is logged, and its events

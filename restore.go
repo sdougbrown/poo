@@ -502,6 +502,11 @@ func toolDifferences(recorded []ToolInfo, current map[string]Tool) []string {
 			diffs = append(diffs, fmt.Sprintf("the tool %q changed its background mode from %q to %q",
 				info.Name, info.Background, spec.Background))
 		}
+		// A record written before the tool declared itself idempotent says
+		// nothing about it, so gaining the flag is not a difference.
+		if info.Idempotent && !spec.Idempotent {
+			diffs = append(diffs, fmt.Sprintf("the tool %q is no longer idempotent", info.Name))
+		}
 	}
 	return diffs
 }
