@@ -445,6 +445,12 @@ profiles:
     prompt_append: Stay focused.
     tools:
       disabled: [edit]
+  sister:
+    base: coder
+    feeds: [gamma]
+    prompt_append: Sister note.
+    tools:
+      disabled: [grep]
   quiet-donkey:
     base: donkey
     model_family: false
@@ -476,8 +482,22 @@ profiles:
 	if baseAt < 0 || coderAt < 0 || donkeyAt < 0 || !(baseAt < coderAt && coderAt < donkeyAt) {
 		t.Errorf("expected base -> coder -> donkey prompt order, got base=%d coder=%d donkey=%d", baseAt, coderAt, donkeyAt)
 	}
+	if strings.Contains(render, "Sister note.") {
+		t.Errorf("donkey prompt leaked sibling sister prompt")
+	}
 	if !strings.Contains(render, "the user's first look at your work") {
 		t.Errorf("donkey did not render inherited model_family guidance")
+	}
+
+	// Sibling profile sharing coder stays isolated from donkey's additions.
+	settings.Profile = "sister"
+	sister := buildIn(t, settings, config.Overrides{}, dir, theExecutors())
+	if !slices.Equal(sister.Profile.Feeds, []string{"alpha", "gamma"}) {
+		t.Errorf("sister feeds = %v, want [alpha gamma]", sister.Profile.Feeds)
+	}
+	sisterRender := theSessionPrompt(t, sister, dir)
+	if !strings.Contains(sisterRender, "Coder discipline.") || !strings.Contains(sisterRender, "Sister note.") || strings.Contains(sisterRender, "Stay focused.") {
+		t.Errorf("sister prompt did not stay isolated from donkey: %s", sisterRender)
 	}
 
 	// Child overriding model_family: false turns off inherited model_family: true.
@@ -485,6 +505,59 @@ profiles:
 	quiet := buildIn(t, settings, config.Overrides{}, dir, theExecutors())
 	if quiet.Options.ModelFamily {
 		t.Errorf("quiet-donkey did not override inherited model_family to false")
+	}
+}
+
+func TestCompositionalProfileInheritsManifestDefaults(t *testing.T) {
+	pooDir := theDefaultsPooDir(t)
+	theDefaultFeedManifest(t, pooDir)
+	theDefaultRegistry(t, pooDir)
+
+	settings, err := config.Parse([]byte(theModelSettings+`
+profiles:
+  coder:
+    base: code
+    feeds_defaults: false
+    cli_registry_defaults: false
+  donkey:
+    base: coder
+  loud-donkey:
+    base: donkey
+    feeds_defaults: true
+    cli_registry_defaults: true
+`), config.FormatYAML)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	settings.Profile = "donkey"
+	donkey := buildIn(t, settings, config.Overrides{}, t.TempDir(), theExecutors())
+	if donkey.Feeds.Len() != 0 {
+		t.Errorf("donkey loaded %d default feeds, want 0 (inherited feeds_defaults: false)", donkey.Feeds.Len())
+	}
+	if donkey.Registry != nil {
+		t.Errorf("donkey loaded default registry, want nil (inherited cli_registry_defaults: false)")
+	}
+	// Non-active loud-donkey in runtime.Profiles still gets registry tools from its own override.
+	var loudTools []string
+	for _, p := range donkey.Profiles {
+		if p.Name == "loud-donkey" {
+			for _, tool := range p.Tools {
+				loudTools = append(loudTools, tool.Name)
+			}
+		}
+	}
+	if !slices.Contains(loudTools, "ticker") && !slices.Contains(loudTools, "call_cli") {
+		t.Errorf("non-active loud-donkey profile tools = %v, want default registry tool", loudTools)
+	}
+
+	settings.Profile = "loud-donkey"
+	loud := buildIn(t, settings, config.Overrides{}, t.TempDir(), theExecutors())
+	if !loud.Feeds.Has("broker") {
+		t.Errorf("loud-donkey did not override inherited feeds_defaults back to true")
+	}
+	if loud.Registry == nil {
+		t.Errorf("loud-donkey did not override inherited cli_registry_defaults back to true")
 	}
 }
 
@@ -517,22 +590,41 @@ func TestCompositionalProfilePromptFileReplacesAncestorPrompt(t *testing.T) {
 
 func TestCompositionalProfileMissingAncestorFileAttributesAncestor(t *testing.T) {
 	dir := t.TempDir()
-	settings, err := config.Parse([]byte(theModelSettings), config.FormatYAML)
-	if err != nil {
-		t.Fatal(err)
-	}
-	settings.Profile = "child"
-	settings.Profiles = map[string]config.ProfileSettings{
-		"parent": {Base: "code", PromptAppendFile: filepath.Join(dir, "absent.md")},
-		"child":  {Base: "parent"},
-	}
-	runtime := buildIn(t, settings, config.Overrides{}, dir, theExecutors())
-	_, err = runtime.SessionPrompt(dir)
-	if err == nil {
-		t.Fatal("expected error for missing ancestor prompt_append_file")
-	}
-	if field, _ := config.FieldOf(err); field != "profiles.parent.prompt_append_file" {
-		t.Errorf("got field %q (%v), want profiles.parent.prompt_append_file", field, err)
+	for _, tt := range []struct {
+		name   string
+		parent config.ProfileSettings
+		want   string
+	}{
+		{
+			name:   "missing prompt_append_file",
+			parent: config.ProfileSettings{Base: "code", PromptAppendFile: filepath.Join(dir, "absent.md")},
+			want:   "profiles.parent.prompt_append_file",
+		},
+		{
+			name:   "missing prompt_file",
+			parent: config.ProfileSettings{Base: "code", PromptFile: filepath.Join(dir, "absent.md")},
+			want:   "profiles.parent.prompt_file",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			settings, err := config.Parse([]byte(theModelSettings), config.FormatYAML)
+			if err != nil {
+				t.Fatal(err)
+			}
+			settings.Profile = "child"
+			settings.Profiles = map[string]config.ProfileSettings{
+				"parent": tt.parent,
+				"child":  {Base: "parent"},
+			}
+			runtime := buildIn(t, settings, config.Overrides{}, dir, theExecutors())
+			_, err = runtime.SessionPrompt(dir)
+			if err == nil {
+				t.Fatalf("expected error for %s", tt.name)
+			}
+			if field, _ := config.FieldOf(err); field != tt.want {
+				t.Errorf("got field %q (%v), want %s", field, err, tt.want)
+			}
+		})
 	}
 }
 

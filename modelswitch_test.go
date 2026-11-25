@@ -708,7 +708,7 @@ func TestAModelSwitchKeepsTheCompactedInputItStillMeasures(t *testing.T) {
 // section's ride: a session whose prompt carries the section switches
 // to a model whose variant names no family the prompt ships, and the
 // switch warns instead of dropping the guidance silently. A model that
-// names no variant at all draws the same note.
+// names no variant at all stays quiet unless POO_DEBUG is enabled.
 func TestASwitchWarnsWhenTheFamilyGuidanceCannotFollow(t *testing.T) {
 	oldServer := newBodyServer(t)
 	nextServer := newBodyServer(t)
