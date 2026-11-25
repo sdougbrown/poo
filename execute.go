@@ -1360,15 +1360,32 @@ func Fatalf(format string, args ...any) error {
 // argument. A Prepare failure counts toward the near key, because the
 // same malformed call repeated is the same loop.
 //
-// The counters are kept per tool, and a call to another tool does not
+// The counters are kept per tool, and a few calls to other tools do not
 // break the streak: a run that reads the same file five times with
 // another tool in between is still a loop. A call with a different key
 // for the same tool starts the streak over, which is what makes the
 // repeats consecutive.
+//
+// A streak only lives inside a window of recent calls. A loop repeats
+// inside a short stretch of the run's work, so a tool the run returns to
+// after more calls to other tools than maxRepeatGap has not been
+// repeating: it has been working, and its streak starts over. Without
+// the window a poll the run makes every few dozen calls, or a malformed
+// call it made long ago, would collect a count that no loop earned.
 type repeatCounter struct {
 	// streaks are the per-tool streaks.
 	streaks map[string]*toolStreak
+	// calls counts the calls the counter has seen.
+	calls int
 }
+
+// maxRepeatGap is how many calls to other tools may separate two calls
+// of the same tool and still count as consecutive repeats.
+//
+// The count is in calls, not turns, so an alternating A, B, A, B, A loop
+// keeps its streak: its gap is one. A gap this small is the run's own
+// work around a repeat; a longer one is a different moment of the run.
+const maxRepeatGap = 4
 
 // toolStreak is one tool's consecutive repeats.
 type toolStreak struct {
@@ -1380,6 +1397,9 @@ type toolStreak struct {
 	nearKey string
 	// near is how many times that key repeated consecutively.
 	near int
+	// last is the number of the call that last joined the streak, in
+	// the counter's own numbering.
+	last int
 }
 
 // repeatCounts is what a call's repeat counters hold.
@@ -1402,11 +1422,20 @@ func newRepeatCounter() *repeatCounter {
 // consecutively, and the number of times it has made a call with the
 // same primary argument consecutively, in the run.
 func (c *repeatCounter) count(tool, exactKey, nearKey string) repeatCounts {
+	c.calls++
 	streak, ok := c.streaks[tool]
+	if ok && c.calls-streak.last-1 > maxRepeatGap {
+		// More calls to other tools separate this one from the last
+		// than the window allows: the streak is stale, and this call
+		// starts a new one.
+		delete(c.streaks, tool)
+		ok = false
+	}
 	if !ok {
 		streak = &toolStreak{}
 		c.streaks[tool] = streak
 	}
+	streak.last = c.calls
 	if streak.exactKey == exactKey {
 		streak.exact++
 	} else {

@@ -294,10 +294,10 @@ type ToolCallInfo struct {
 	// empty when the call runs in the turn.
 	JobID string
 	// RepeatCount is how many times the model has made this exact call
-	// in the run.
+	// consecutively, within the streak's window of recent calls.
 	RepeatCount int
 	// NearRepeatCount is how many times the model has made a call with
-	// the same primary argument.
+	// the same primary argument, within the same window.
 	NearRepeatCount int
 	// BatchIndex is the call's position in its batch, counting from
 	// zero.
