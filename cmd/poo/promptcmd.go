@@ -11,6 +11,7 @@ import (
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/config"
 	"github.com/sdougbrown/poo/prompt"
+	"github.com/sdougbrown/poo/skill"
 )
 
 // promptOptions are the flags of `poo prompt`.
@@ -33,8 +34,9 @@ func (o *promptOptions) bind(inv clicontract.Invocation) {
 
 // handlePrompt executes `poo prompt`.
 //
-// The command prints the prompt a session would send, with the sections
-// marked, so an operator can see what the model is told.
+// By default it prints the exact rendered system prompt a session would send
+// to the model. With --pretty it formats each section under a header and
+// summarizes the skill catalog for reading.
 func handlePrompt(inv clicontract.Invocation, stdout, stderr io.Writer) exit {
 	var o promptOptions
 	o.bind(inv)
@@ -103,7 +105,7 @@ func handlePrompt(inv clicontract.Invocation, stdout, stderr io.Writer) exit {
 func writePrettyPrompt(w io.Writer, sections []prompt.SectionText) {
 	for _, section := range sections {
 		text := section.Text
-		if section.Name == "skills" {
+		if section.Name == skill.SectionName {
 			text = prettySkillsSection(text)
 		}
 		fmt.Fprintf(w, "--- %s ---\n%s\n", section.Name, text)
@@ -119,7 +121,7 @@ func prettySkillsSection(text string) string {
 	if start < 0 {
 		return text
 	}
-	end := strings.Index(text[start:], closeTag)
+	end := strings.LastIndex(text[start:], closeTag)
 	if end < 0 {
 		return text
 	}
