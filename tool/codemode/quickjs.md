@@ -1,3 +1,4 @@
+Codemode:
 Use codemode when one tool result decides the next call or when you need
 only a small part of a large result. Intermediate results stay out of the
 conversation. Only what you print and return comes back. A call the

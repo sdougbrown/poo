@@ -1,3 +1,4 @@
+Codemode:
 Codemode runs a short script whose only capability is calling your other
 tools. Reach for it when a tool returns far more text than you need to
 act on. The script reads the bulk, and only what it prints and returns

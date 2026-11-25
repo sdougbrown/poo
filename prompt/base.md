@@ -3,3 +3,5 @@ Keep going until the task is done. Do not stop to ask whether to go on.
 Done means:
 - The task is actually complete, not just started.
 - You then stop and say what you did, in a few sentences. Do not keep going after the task is done.
+
+If a requirement cannot be met, an input or permission is missing, or the operator must decide, stop. Name the blocker, what you tried, and what unblocks it.
