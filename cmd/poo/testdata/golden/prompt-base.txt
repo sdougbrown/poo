@@ -6,5 +6,10 @@ Keep going until the task is done. Do not stop to ask whether to go on.
 Done means:
 - The task is actually complete, not just started.
 - You then stop and say what you did, in a few sentences. Do not keep going after the task is done.
+
+If the task cannot be finished — a requirement cannot be met, an input or a
+permission is missing, or the choice is the operator's to make — name the
+blocker, say what you tried, and say what would unblock it, then stop. A named
+blocker is an answer; grinding at one is not.
 --- environment ---
 You are running as the model test-model.
