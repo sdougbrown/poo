@@ -1063,3 +1063,35 @@ func TestALoginWithNoCredentialFileNamedWritesPooOwnName(t *testing.T) {
 		t.Errorf("the sign-in also wrote an auth.json beside its own file")
 	}
 }
+
+// TestAKeyLoginCountsTheModelTheRecordDeclares covers the count a sign-in prints when
+// the endpoint answers with the one model the built-in record names and nothing else.
+// The record's placeholder is the provider's model until a probe describes it, so a
+// count that only reads the layer a field came from reports nothing at the moment the
+// probe just answered — success looks the same as a refused key.
+func TestAKeyLoginCountsTheModelTheRecordDeclares(t *testing.T) {
+	isolatedConfigHome(t)
+	t.Setenv("OLLAMA_API_KEY", "")
+	dir := t.TempDir()
+	authPath := filepath.Join(dir, "auth.json")
+	if err := os.WriteFile(authPath, []byte("version: 1\ncredentials: {}\n"), 0o600); err != nil {
+		t.Fatalf("writing the credential file: %v", err)
+	}
+	settings := filepath.Join(dir, "settings.yaml")
+	body := "version: 1\nauth_file: " + authPath + "\nsession:\n  mode: ephemeral\n"
+	if err := os.WriteFile(settings, []byte(body), 0o644); err != nil {
+		t.Fatalf("writing the settings: %v", err)
+	}
+
+	// The endpoint serves exactly the model the record names for it.
+	probesThrough(t, &http.Client{Transport: &providerTransport{list: []string{"minimax-m3.1-flash"}}})
+	withoutATerminal(t)
+	withStdin(t, "the-key\n")
+	code, stderr, stdout := runCLIWithStdout(t, "login", "ollama-cloud", "--settings", settings)
+	if code != 0 {
+		t.Fatalf("poo login exited with %d: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "serves 1 model(s)") {
+		t.Errorf("the sign-in says nothing about what the endpoint serves:\n%s", stdout)
+	}
+}

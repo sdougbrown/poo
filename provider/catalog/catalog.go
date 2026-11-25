@@ -543,6 +543,24 @@ func (c *Catalog) CheckRoles() error {
 	return nil
 }
 
+// Reported returns how many models an endpoint's last report described.
+//
+// A model a layer declares and a probe also described counts once: the report is the
+// entry's own discovery layer, which only a probe sets, so the answer is what the
+// endpoint said and not what a layer above it left in place. A caller reporting what a
+// sign-in bought asks this, because a placeholder a layer declares is not an answer.
+func (c *Catalog) Reported(endpoint string) int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	count := 0
+	for _, e := range c.entries {
+		if e.endpoint == endpoint && e.discovery.ModelID != "" {
+			count++
+		}
+	}
+	return count
+}
+
 // Endpoints returns the endpoints, by name.
 func (c *Catalog) Endpoints() map[string]Endpoint {
 	out := make(map[string]Endpoint, len(c.endpoints))

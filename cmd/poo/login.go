@@ -19,7 +19,6 @@ import (
 
 	clicontract "github.com/sdougbrown/cli-contract"
 
-	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/config"
 	"github.com/sdougbrown/poo/internal/term"
 	"github.com/sdougbrown/poo/provider/auth"
@@ -188,6 +187,10 @@ func (o *loginOptions) probeSignedIn(ctx context.Context, flow auth.Flow, settin
 	}
 	options := settings.CatalogOptions()
 	options.HTTPClient = probeClient
+	// The cached layer is not applied here: this catalog probes below, and a refresh
+	// reads the cache itself, so applying it twice reads the file twice and warns
+	// twice when it cannot be read. catalog.Build strips it for the same reason.
+	options.Cached = false
 	cat := catalog.New(options)
 	served := make([]string, 0, 4)
 	for name, endpoint := range cat.Endpoints() {
@@ -204,10 +207,8 @@ func (o *loginOptions) probeSignedIn(ctx context.Context, flow auth.Flow, settin
 	// endpoint refuses leaves the record's placeholder model in place, and a sign-in
 	// that says the provider serves one model at that moment says nothing useful.
 	count := 0
-	for _, model := range cat.List() {
-		if slices.Contains(served, model.Provider) && reported(model) {
-			count++
-		}
+	for _, name := range served {
+		count += cat.Reported(name)
 	}
 	if count == 0 {
 		return
@@ -236,15 +237,6 @@ func servesProvider(endpoint catalog.Endpoint, provider auth.Provider) bool {
 	}
 	return endpoint.Credential.Env == provider.Env
 }
-
-// reported reports whether an endpoint's own answer is what describes a model, rather than
-// a layer that declared it.
-func reported(model poo.ModelInfo) bool {
-	return model.Source[servedByField] == catalog.LayerDiscovery
-}
-
-// servedByField is the model field whose layer names where a model came from.
-const servedByField = "endpoint"
 
 // refuseBrowserFlags refuses the flags a browser sign-in takes when the chosen sign-in is not one.
 //
