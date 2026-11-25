@@ -197,6 +197,24 @@ func (b ContextBudget) OutputRoom() int {
 	return room
 }
 
+// OutputRoomFor returns the output limit a fork may claim: the ask,
+// clamped to the room the window leaves after the prompt, the input the
+// fork appends, and the reserve, floored at the gate's minimum. The
+// appended input arrives in tokens, measured the way the fit rule
+// measures a turn. A fork that asks for no limit keeps asking for
+// none, and a model that declares no window has nothing to clamp
+// against.
+func (b ContextBudget) OutputRoomFor(appended, maxTokens int) int {
+	if maxTokens <= 0 || b.ContextLimit <= 0 {
+		return maxTokens
+	}
+	room := b.ContextLimit - b.EstimatedInput - appended - OutputReserve
+	if maxTokens <= room {
+		return maxTokens
+	}
+	return max(room, MinOutputTokens)
+}
+
 // HookContext is what a hook is given.
 //
 // The context carries the run's identity, the turn, the model's history

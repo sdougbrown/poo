@@ -3,6 +3,7 @@ package poo_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -629,6 +630,152 @@ func TestACompactorsForkCountsTowardTheRunBudget(t *testing.T) {
 	}
 	if len(forks[0].Appended) != 1 || forks[0].Appended[0].Content[0].Text != "write the handoff" {
 		t.Errorf("the fork's appended message is %+v, want the handoff request", forks[0].Appended)
+	}
+}
+
+// forkLimitCompactor forks once with a fixed output limit and replaces
+// the first turn with the handoff, so the session accepts the
+// compaction. ShouldCompact compacts on the run's second gate.
+type forkLimitCompactor struct {
+	gates int
+	limit int
+	// note is the appended message's text; empty means the default
+	// handoff ask.
+	note string
+}
+
+func (c *forkLimitCompactor) ShouldCompact(view poo.View, budget poo.ContextBudget) bool {
+	c.gates++
+	return c.gates == 2
+}
+
+func (c *forkLimitCompactor) Compact(ctx context.Context, in poo.CompactionEnv) (poo.Compaction, error) {
+	note := c.note
+	if note == "" {
+		note = "write the handoff"
+	}
+	_, err := in.Fork(ctx, []poo.Message{{Role: poo.RoleUser, Content: []poo.ContentBlock{{Kind: poo.ContentText, Text: note}}}}, c.limit, poo.ForkOptions{})
+	if err != nil {
+		return poo.Compaction{}, err
+	}
+	return poo.Compaction{
+		Strategy: "forky",
+		Replace: &poo.RangeReplacement{
+			Cut:      poo.TurnRange{First: 1, Last: 1},
+			Messages: []poo.Message{{Role: poo.RoleUser, Content: []poo.ContentBlock{{Kind: poo.ContentText, Text: "the handoff"}}}},
+		},
+	}, nil
+}
+
+// TestAForkOverTheRoomClampsToTheRoom covers the rule that a fork's
+// output limit never exceeds the room the window leaves: the fork
+// re-sends the whole window, so a limit over the room is a refusal at
+// the provider. The clamped limit stays inside the room the main
+// request's own clamp computed.
+func TestAForkOverTheRoomClampsToTheRoom(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{text: "the answer"},
+		{text: "the second answer"},
+	})
+	tr.SetForkTurns(pootest.Turn{Text: "the handoff"})
+	compactor := &forkLimitCompactor{limit: 20000}
+
+	opts := testOptions(t, tr, &echoTool{result: "echoed"}, &recordingSink{})
+	opts.Compactor = compactor
+	opts.Model.ContextLimit = 4096
+	opts.BeforeSettle = []poo.BeforeSettleHook{&continuingBeforeSettle{stopAfter: 1}}
+
+	s := newTestSession(t, opts)
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	if _, err := s.Wait(context.Background()); err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+
+	forks := tr.Forks()
+	if len(forks) != 1 {
+		t.Fatalf("the transport served %d forks, want 1", len(forks))
+	}
+	if forks[0].MaxTokens >= compactor.limit {
+		t.Errorf("the fork asked for %d tokens, want a limit clamped under the %d ask", forks[0].MaxTokens, compactor.limit)
+	}
+	if room := tr.Requests()[0].MaxTokens; forks[0].MaxTokens > room {
+		t.Errorf("the fork asked for %d tokens, want at most the %d the main request's own clamp computed", forks[0].MaxTokens, room)
+	}
+}
+
+// TestAForksAppendedInputCountsAgainstTheRoom covers the appended
+// messages: the fork re-sends them after the window, so their input,
+// converted to tokens the way the fit rule converts one, narrows the
+// room the fork's limit may claim. A conversion that dropped the
+// appended count lands near the main request's own clamp, and one that
+// counted characters floors at the gate's minimum; the asserted band
+// excludes both.
+func TestAForksAppendedInputCountsAgainstTheRoom(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{text: "the answer"},
+		{text: "the second answer"},
+	})
+	tr.SetForkTurns(pootest.Turn{Text: "the handoff"})
+	compactor := &forkLimitCompactor{limit: 20000, note: strings.Repeat("x", 7000)}
+
+	opts := testOptions(t, tr, &echoTool{result: "echoed"}, &recordingSink{})
+	opts.Compactor = compactor
+	opts.Model.ContextLimit = 4096
+	opts.BeforeSettle = []poo.BeforeSettleHook{&continuingBeforeSettle{stopAfter: 1}}
+
+	s := newTestSession(t, opts)
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	if _, err := s.Wait(context.Background()); err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+
+	forks := tr.Forks()
+	if len(forks) != 1 {
+		t.Fatalf("the transport served %d forks, want 1", len(forks))
+	}
+	appended := []poo.Message{{Role: poo.RoleUser, Content: []poo.ContentBlock{{Kind: poo.ContentText, Text: compactor.note}}}}
+	appendedTokens := int(float64(poo.EstimateHistoryChars(appended)) / poo.CharsPerToken)
+	// The room is the window less the input, the appended input and the
+	// reserve: the estimator's own input is a few dozen tokens, so the
+	// limit sits just under 4096 - appendedTokens - 256 and well above
+	// the floor.
+	if got := forks[0].MaxTokens; got <= 1000 || got >= 4096-appendedTokens-poo.OutputReserve {
+		t.Errorf("the fork asked for %d tokens, want the room with %d appended tokens counted", got, appendedTokens)
+	}
+}
+
+// TestAForkWithinTheRoomKeepsItsLimit covers a fork whose ask fits the
+// window: the limit goes out as the strategy asked it.
+func TestAForkWithinTheRoomKeepsItsLimit(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{text: "the answer"},
+		{text: "the second answer"},
+	})
+	tr.SetForkTurns(pootest.Turn{Text: "the handoff"})
+	compactor := &forkLimitCompactor{limit: 2048}
+
+	opts := testOptions(t, tr, &echoTool{result: "echoed"}, &recordingSink{})
+	opts.Compactor = compactor
+	opts.BeforeSettle = []poo.BeforeSettleHook{&continuingBeforeSettle{stopAfter: 1}}
+
+	s := newTestSession(t, opts)
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	if _, err := s.Wait(context.Background()); err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+
+	forks := tr.Forks()
+	if len(forks) != 1 {
+		t.Fatalf("the transport served %d forks, want 1", len(forks))
+	}
+	if forks[0].MaxTokens != compactor.limit {
+		t.Errorf("the fork asked for %d tokens, want the %d it asked for", forks[0].MaxTokens, compactor.limit)
 	}
 }
 

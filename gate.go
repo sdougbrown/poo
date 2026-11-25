@@ -375,10 +375,20 @@ func (s *Session) forkFunc(run *runState) ForkFunc {
 		// The fork's own size is the view it re-sends plus what it
 		// appends, measured the way the run's requests are.
 		chars := s.historyCharsLocked()
+		budget := s.budgetLocked()
+		// The fork's appended messages ride after the window, so their
+		// input counts against the room the limit may claim, measured the
+		// way the fit rule measures a turn.
+		ratio := budget.CharsPerToken
+		if ratio <= 0 {
+			ratio = CharsPerToken
+		}
+		appendedTokens := int(float64(EstimateHistoryChars(appended)) / ratio)
 		s.mu.Unlock()
 		if !has {
 			return Reply{}, fmt.Errorf("poo: there is no request to fork")
 		}
+		maxTokens = budget.OutputRoomFor(appendedTokens, maxTokens)
 		reader, err := s.opts.Transport.Fork(ctx, rendered, appended, maxTokens, opts)
 		if err != nil {
 			return Reply{}, err
