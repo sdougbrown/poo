@@ -1496,3 +1496,46 @@ func TestOneEndpointsKeyDoesNotReachAnother(t *testing.T) {
 		}
 	}
 }
+
+// TestAShowTheServerDoesNotServeStopsTheProbeAtOnce covers the endpoint that lists its
+// models and answers nothing about them: a 404 on the first model show is the whole
+// answer, and the probe must not spend the rest of its budget queueing ids nothing will
+// read. Every hosted gateway that is not Ollama's own shape answers this way.
+func TestAShowTheServerDoesNotServeStopsTheProbeAtOnce(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		data := make([]map[string]any, 0, 12)
+		for i := range 12 {
+			data = append(data, map[string]any{"id": fmt.Sprintf("model-%02d", i)})
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"object": "list", "data": data})
+	})
+	mux.HandleFunc("/api/show", func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	c := catalog.New(catalog.Options{
+		StateDir: t.TempDir(),
+		// The budget is the stall's ceiling: a probe that waits it out is the bug.
+		ProbeTimeout: 2 * time.Second,
+		Settings: catalog.Settings{
+			Endpoints: map[string]catalog.EndpointSettings{"gateway": {Endpoint: server.URL}},
+		},
+	})
+	start := time.Now()
+	if err := c.Refresh(context.Background()); err != nil {
+		t.Fatalf("the refresh: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Errorf("the probe took %s, want the shape's absence to end it at once", elapsed)
+	}
+	// The list's own answer stands: the models are there, described by the list alone.
+	for _, id := range []string{"model-00", "model-11"} {
+		if _, err := c.Resolve("gateway/" + id); err != nil {
+			t.Errorf("the model %q the list named did not resolve: %v", id, err)
+		}
+	}
+}

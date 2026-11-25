@@ -5,6 +5,8 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+
+	"github.com/sdougbrown/poo/wire/protocol"
 )
 
 // TestTheStatuslineNamesWhatTheSessionKnows covers the line: the
@@ -123,4 +125,32 @@ func runGitOut(t *testing.T, dir string, args ...string) string {
 		t.Fatalf("git %v: %v", args, err)
 	}
 	return string(out)
+}
+
+// TestInstallingACatalogSyncsThePromptLimit covers the one place a catalog answer
+// becomes the session's: a refresh that brings a corrected window for the model the
+// session runs must move the statusline's prompt limit with it, the same way the list
+// the session opened with did.
+func TestInstallingACatalogSyncsThePromptLimit(t *testing.T) {
+	m := &machine{status: &status{}}
+	m.installCatalog([]protocol.ModelInfo{
+		{Name: "gemma4", ContextLimit: 131072},
+		{Name: "other", ContextLimit: 8192},
+	}, "gemma4")
+	if got := m.status.promptLimit; got != 131072 {
+		t.Errorf("the prompt limit is %d, want the chat model's 131072", got)
+	}
+
+	// A refresh reports the model's real window, which is smaller than the one the
+	// session opened with.
+	m.installCatalog([]protocol.ModelInfo{
+		{Name: "gemma4", ContextLimit: 32768},
+		{Name: "other", ContextLimit: 8192},
+	}, "gemma4")
+	if got := m.status.promptLimit; got != 32768 {
+		t.Errorf("the prompt limit is %d after the refresh, want the corrected 32768", got)
+	}
+	if _, ok := m.catalog["other"]; !ok {
+		t.Error("the refreshed catalog does not hold the models the session may switch to")
+	}
 }

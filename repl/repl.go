@@ -557,14 +557,7 @@ func (m *machine) start() error {
 	if err := m.conn.call(protocol.MethodModelsList, protocol.ModelsParams{}, &catalog); err != nil {
 		return err
 	}
-	m.catalog = map[string]protocol.ModelInfo{}
-	for _, model := range catalog.Models {
-		m.catalog[model.Name] = model
-		if model.Name == session.Models.Chat {
-			limit := poo.PromptLimitOf(model.ContextLimit, model.InputLimit)
-			m.mutateStatus(func(s *status) { s.setPromptLimit(limit) })
-		}
-	}
+	m.installCatalog(catalog.Models, session.Models.Chat)
 
 	// The session's state names the reasoning level it runs at, so
 	// the statusline names the level a session opened with. The read
@@ -1171,9 +1164,22 @@ func (m *machine) refreshCatalog() {
 		m.r.failure(fmt.Sprintf("the endpoints could not be asked what they serve: %v", err))
 		return
 	}
-	m.catalog = map[string]protocol.ModelInfo{}
-	for _, model := range catalog.Models {
+	m.installCatalog(catalog.Models, m.status.chatModel())
+}
+
+// installCatalog holds the models a session may switch to.
+//
+// It is the one place a catalog answer becomes the session's: the opening list and a
+// refresh both land here, so a field either path maintains — the window the statusline
+// bounds the prompt fill by — cannot be maintained by one of them and not the other.
+func (m *machine) installCatalog(models []protocol.ModelInfo, chat string) {
+	m.catalog = make(map[string]protocol.ModelInfo, len(models))
+	for _, model := range models {
 		m.catalog[model.Name] = model
+		if model.Name == chat {
+			limit := poo.PromptLimitOf(model.ContextLimit, model.InputLimit)
+			m.mutateStatus(func(s *status) { s.setPromptLimit(limit) })
+		}
 	}
 }
 

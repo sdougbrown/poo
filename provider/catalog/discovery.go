@@ -615,7 +615,11 @@ func (c *Catalog) probeOllama(ctx context.Context, client *http.Client, endpoint
 		asked   int
 		missing bool
 	)
-	ids := make(chan string)
+	// The queue holds every id before the workers start, so a worker that stops early
+	// — the shape is not served, so nothing more is worth asking — cannot leave the
+	// feeder blocked on an id no one will read. Waiting that out would cost the probe's
+	// whole budget on an endpoint that answered at once.
+	ids := make(chan string, len(modelIDs))
 	workers := sync.WaitGroup{}
 	for range min(showWorkers, len(modelIDs)) {
 		workers.Add(1)
