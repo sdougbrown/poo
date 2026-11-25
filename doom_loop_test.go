@@ -105,7 +105,7 @@ func handleOf(i int) string {
 func TestAZeroArgumentPollDoesNotAccumulateAcrossOtherCalls(t *testing.T) {
 	tool := &echoTool{result: "the effect"}
 	other := &namedTool{name: "other", echoTool: echoTool{result: "the other effect"}}
-	calls, polls := pollWithWork(t, 3)
+	calls, polls := pollWithWork(t, 3, pollWork)
 	opts := testOptions(t, oneCallTurns(calls...), tool, &recordingSink{})
 	opts.Tools["other"] = other
 	opts.ToolOrder = []string{"echo", "other"}
@@ -120,16 +120,56 @@ func TestAZeroArgumentPollDoesNotAccumulateAcrossOtherCalls(t *testing.T) {
 	}
 }
 
+// TestPollsMaxRepeatGapApartShareAStreak covers the window's near edge:
+// when exactly maxRepeatGap calls to other tools separate two polls,
+// the gap is not over the window, and the streak continues.
+func TestPollsMaxRepeatGapApartShareAStreak(t *testing.T) {
+	tool := &echoTool{result: "the effect"}
+	other := &namedTool{name: "other", echoTool: echoTool{result: "the other effect"}}
+	calls, polls := pollWithWork(t, 2, 4) // 4 is maxRepeatGap
+	opts := testOptions(t, oneCallTurns(calls...), tool, &recordingSink{})
+	opts.Tools["other"] = other
+	opts.ToolOrder = []string{"echo", "other"}
+	s := newTestSession(t, opts)
+
+	runSession(t, s, "start")
+
+	second := s.RepeatCountsFor(handleOf(polls[1]))
+	if second.Exact != 2 {
+		t.Errorf("the second poll's exact count is %d, want 2: a gap of exactly the window keeps the streak", second.Exact)
+	}
+}
+
+// TestAPollOneCallPastTheWindowStartsOver covers the window's far edge:
+// one more separating call puts the gap over the window, and the second
+// poll starts a new streak.
+func TestAPollOneCallPastTheWindowStartsOver(t *testing.T) {
+	tool := &echoTool{result: "the effect"}
+	other := &namedTool{name: "other", echoTool: echoTool{result: "the other effect"}}
+	calls, polls := pollWithWork(t, 2, 5) // maxRepeatGap + 1
+	opts := testOptions(t, oneCallTurns(calls...), tool, &recordingSink{})
+	opts.Tools["other"] = other
+	opts.ToolOrder = []string{"echo", "other"}
+	s := newTestSession(t, opts)
+
+	runSession(t, s, "start")
+
+	second := s.RepeatCountsFor(handleOf(polls[1]))
+	if second.Exact != 1 {
+		t.Errorf("the second poll's exact count is %d, want 1: a gap over the window starts a new streak", second.Exact)
+	}
+}
+
 // pollWithWork returns a zero-argument poll of one tool separated from
-// the next poll by pollWork calls to another tool, and the indexes of
-// the polls.
-func pollWithWork(t *testing.T, polls int) ([]poo.ToolCall, []int) {
+// the next poll by gap calls to another tool, and the indexes of the
+// polls.
+func pollWithWork(t *testing.T, polls, gap int) ([]poo.ToolCall, []int) {
 	t.Helper()
 	var calls []poo.ToolCall
 	var indexes []int
 	for i := 0; i < polls; i++ {
 		if i > 0 {
-			for j := 0; j < pollWork; j++ {
+			for j := 0; j < gap; j++ {
 				// The arguments are distinct, so each of these calls
 				// is a call of its own and never a loop.
 				calls = append(calls, poo.ToolCall{
@@ -170,7 +210,7 @@ func TestConsecutiveZeroArgumentPollsAreALoop(t *testing.T) {
 func TestAnInvalidCallDoesNotAccumulateAcrossOtherCalls(t *testing.T) {
 	tool := &echoTool{prepareErr: poo.InvalidArgsf("the arguments are not a call")}
 	other := &namedTool{name: "other", echoTool: echoTool{result: "the other effect"}}
-	calls, invalid := pollWithWork(t, 3)
+	calls, invalid := pollWithWork(t, 3, pollWork)
 	opts := testOptions(t, oneCallTurns(calls...), tool, &recordingSink{})
 	opts.Tools["other"] = other
 	opts.ToolOrder = []string{"echo", "other"}

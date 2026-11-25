@@ -1102,10 +1102,11 @@ func (s *Session) lastRepeatCountsLocked() RepeatCounts {
 
 // RepeatCounts are the repeat counters of one call.
 type RepeatCounts struct {
-	// Exact is how many times the model made this exact call.
+	// Exact is how many times the model made this exact call
+	// consecutively, within the streak's window of recent calls.
 	Exact int `json:"exact"`
 	// Near is how many times the model made a call with the same
-	// primary argument.
+	// primary argument, consecutively within the window.
 	Near int `json:"near"`
 }
 
