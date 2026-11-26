@@ -154,6 +154,49 @@ func TestMCPSelectionLaunchesWithTheSessionValues(t *testing.T) {
 	}
 }
 
+// TestMCPSelectedMissingServerWarnsAndStartsTheRest covers the lookup
+// skip at the session level: a profile may select a server the
+// manifests do not load, the build already warned about it, and the
+// session still runs — with the servers that did load, or with none
+// when every selection is missing.
+func TestMCPSelectedMissingServerWarnsAndStartsTheRest(t *testing.T) {
+	path := mcpManifest(t, map[string]any{"one": stdioServer()}, nil)
+	launch := func(t *testing.T, profile, servers string) *recordingLauncher {
+		t.Helper()
+		document := theMCPSettings(path) + "session:\n  dir: " + t.TempDir() + "\nprofiles:\n  " + profile + ":\n    base: code\n    mcp_servers: [" + servers + "]\nprofile: " + profile + "\n"
+		settings, err := config.Parse([]byte(document), config.FormatYAML)
+		if err != nil {
+			t.Fatalf("decoding the settings: %v", err)
+		}
+		launcher := &recordingLauncher{}
+		runtime := buildWith(t, config.BuildOptions{Settings: settings, MCPLauncher: launcher.launch, WorkingDir: t.TempDir()})
+		t.Cleanup(func() { runtime.Store.Close() })
+
+		sess, err := runtime.CreateSession(context.Background(), runtime.Store, theCreatedRecord(profile, t.TempDir()))
+		if err != nil {
+			t.Fatalf("creating the session: %v", err)
+		}
+		if err := sess.Close(); err != nil {
+			t.Fatalf("closing the session: %v", err)
+		}
+		return launcher
+	}
+
+	// One loadable and one missing: the session runs the loadable one
+	// and carries on without the missing one.
+	launcher := launch(t, "picky", "one, ghost")
+	if starts := launcher.recorded(); len(starts) != 1 || !strings.HasPrefix(starts[0], "one@s1@") {
+		t.Errorf("the mixed selection launched %q, want only the loadable one", starts)
+	}
+
+	// Every selection is missing: the session builds and starts
+	// nothing, the way the build's warning said.
+	launcher = launch(t, "ghostly", "ghost")
+	if starts := launcher.recorded(); len(starts) != 0 {
+		t.Errorf("the missing-only selection launched %q, want nothing", starts)
+	}
+}
+
 // fixtureServer builds the mcp package's fixture server and returns its
 // path. The test asks a real server what environment it runs with, so
 // the server is a process the client can start.
