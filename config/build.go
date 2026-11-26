@@ -609,8 +609,8 @@ func (r *Runtime) resolveProfile(opts BuildOptions, workingDir string) error {
 // feeds, and the resource feeds the selected MCP servers declare, for a
 // resource feed is a feed the session runs. Each entry is the feed's
 // name and whether the model may start it: a manifest's feed by its own
-// word, and a resource feed always, for it is one the model subscribes
-// to.
+// word, and a resource feed never, for the session starts it beside
+// itself and the subscribe tool is not the model's to call for one.
 func (r *Runtime) sessionFeeds() map[string]bool {
 	feeds := map[string]bool{}
 	for _, spec := range r.Feeds.Specs() {
@@ -618,7 +618,7 @@ func (r *Runtime) sessionFeeds() map[string]bool {
 	}
 	for _, server := range r.MCPServers {
 		for _, decl := range r.mcpSet.Feeds(server) {
-			feeds[decl.Name] = true
+			feeds[decl.Name] = false
 		}
 	}
 	return feeds
@@ -1859,6 +1859,12 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 		feedSource := ""
 		if r.hasFeeds() {
 			switch {
+			case len(r.Feeds.Specs()) == 0:
+				// The feed manifests named nothing, so the feed the session
+				// runs is a resource feed a selected mcp server declares:
+				// the source is the selection, not the feeds the settings
+				// never named.
+				feedSource = "a selected mcp server declares a feed, and "
 			case r.feedsFromDefaults:
 				feedSource = "the default feeds directory names a feed, and "
 			default:

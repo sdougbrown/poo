@@ -2,6 +2,7 @@ package config_test
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -199,6 +200,111 @@ func TestAProfileRefusesAnEmptySelectedServer(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "mcp_servers") {
 		t.Errorf("the failure does not name the field: %v", err)
+	}
+}
+
+// TestAMCPPathThatDoesNotLoadNamesTheField covers the failure: an
+// mcp.paths entry the loader cannot read fails the build, and the failure
+// names the settings field the operator wrote.
+func TestAMCPPathThatDoesNotLoadNamesTheField(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "mcp.json")
+	settings, err := config.Parse([]byte(theMCPSettings(missing)), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	_, err = config.Build(config.BuildOptions{
+		Settings:       settings,
+		WorkingDir:     t.TempDir(),
+		DefaultProfile: "code",
+		Tools:          theTools(),
+		Profiles:       theProfiles(),
+		Executors:      theExecutors(),
+	})
+	if err == nil {
+		t.Fatal("the build accepted an mcp path that is not there")
+	}
+	var failure *config.Error
+	if !errors.As(err, &failure) {
+		t.Fatalf("the failure is %T, want a config error", err)
+	}
+	if failure.Code != config.CodeInvalid {
+		t.Errorf("the failure is %+v, want invalid", failure)
+	}
+	if failure.Field != "mcp.paths" {
+		t.Errorf("the failure names %q, want mcp.paths", failure.Field)
+	}
+	if !strings.Contains(err.Error(), "no such file") {
+		t.Errorf("the failure %q does not keep the cause", err)
+	}
+}
+
+// TestASelectedResourceFeedShapesTheProfileTools covers the tool side of
+// the counting: a selected server's resource feed is a feed the session
+// runs, so a profile that offers no background tool of its own still offers
+// the job tools — but the feed is one the session starts beside itself, not
+// one the model subscribes to, so the subscribe tool stays out. The
+// optional-feed side of the contract is feeds_optional_test.go's.
+func TestASelectedResourceFeedShapesTheProfileTools(t *testing.T) {
+	poo := map[string]any{"servers": map[string]any{"avenor": map[string]any{"feeds": map[string]any{
+		"inbox": map[string]any{"resource": "avenor://inbox"},
+	}}}}
+	path := mcpManifest(t, map[string]any{"avenor": stdioServer()}, poo)
+	document := theMCPSettings(path) + "profiles:\n  watcher:\n    base: base\n    mcp_servers: [avenor]\nprofile: watcher\n"
+	settings, err := config.Parse([]byte(document), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+	offered := map[string]bool{}
+	for _, tool := range runtime.Profile.Tools {
+		offered[tool.Name] = true
+	}
+	for _, name := range []string{"jobs", "cancel_job"} {
+		if !offered[name] {
+			t.Errorf("the profile does not offer the %q tool, and the selected server declares a feed the session runs", name)
+		}
+	}
+	if offered["subscribe_feed"] {
+		t.Errorf("the profile offers the subscribe tool, and the resource feed is one the session starts beside itself, not one the model subscribes to")
+	}
+}
+
+// TestASelectedResourceFeedNamesItsSourceWithoutAnExecutor covers the
+// diagnostic: a binary that links no executor fails a session whose only
+// feed is a selected server's resource feed, and the failure names the mcp
+// manifest — not the feeds the settings never named.
+func TestASelectedResourceFeedNamesItsSourceWithoutAnExecutor(t *testing.T) {
+	poo := map[string]any{"servers": map[string]any{"avenor": map[string]any{"feeds": map[string]any{
+		"inbox": map[string]any{"resource": "avenor://inbox"},
+	}}}}
+	path := mcpManifest(t, map[string]any{"avenor": stdioServer()}, poo)
+	document := theMCPSettings(path) + "profiles:\n  watcher:\n    base: base\n    mcp_servers: [avenor]\nprofile: watcher\n"
+	settings, err := config.Parse([]byte(document), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	_, err = config.Build(config.BuildOptions{
+		Settings:       settings,
+		WorkingDir:     t.TempDir(),
+		DefaultProfile: "code",
+		Tools:          theTools(),
+		Profiles:       theProfiles(),
+	})
+	if err == nil {
+		t.Fatal("the binary links no executor, and the build took the session anyway")
+	}
+	var failure *config.Error
+	if !errors.As(err, &failure) {
+		t.Fatalf("the failure is %T, want a config error", err)
+	}
+	if failure.Code != config.CodeUnsupported || failure.Field != "tools.bash.executor" {
+		t.Errorf("the failure is %+v, want unsupported on tools.bash.executor", failure)
+	}
+	if !strings.Contains(failure.Message, "a selected mcp server declares a feed") {
+		t.Errorf("the message %q does not name the mcp manifest as the source", failure.Message)
+	}
+	if strings.Contains(failure.Message, "the settings name a feed") {
+		t.Errorf("the message %q blames the feeds the settings never named", failure.Message)
 	}
 }
 
