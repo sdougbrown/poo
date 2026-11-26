@@ -34,6 +34,28 @@ func (r *Runtime) offeredCatalog() *cli.Catalog {
 	return r.Registry
 }
 
+// offeredEntries returns the session's snapshot: every entry the model reaches
+// through a tool that calls it.
+//
+// The catalog's entries come first, then the tools of the servers the session
+// started, each naming the call that runs it. One value serves the search, the
+// prompt's catalogs and the refusals, so none of them can name a dispatcher
+// another does not offer.
+//
+// An elevated catalog contributes nothing: its entries are tools of their own
+// by now, so a hit for one would name a call the session does not offer, and
+// the model already reads each entry in the tool list.
+func offeredEntries(catalog *cli.Catalog, elevated []poo.ToolInfo, started []MCPRunning) []cli.Offered {
+	var entries []cli.Offered
+	if len(elevated) == 0 {
+		entries = catalog.Offered()
+	}
+	for _, running := range started {
+		entries = append(entries, running.Offered()...)
+	}
+	return entries
+}
+
 // offeredRegistry returns the registry entries a profile offering tools may
 // see, or nil when it may see none.
 //

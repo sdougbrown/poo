@@ -70,6 +70,15 @@ func tool(name, description string, readOnly bool) mcp.Tool {
 	}
 }
 
+// newTool returns the tool over the servers a session started, listing the
+// entries their tools become.
+//
+// The session's snapshot holds the same entries, which is what the search over
+// them reads.
+func newTool(servers ...callmcp.Server) *callmcp.Tool {
+	return callmcp.New(servers, callmcp.Offered(servers))
+}
+
 // call prepares and runs one call_mcp call.
 func call(t *testing.T, tool *callmcp.Tool, args string, env poo.ToolEnv) (poo.ToolResult, error) {
 	t.Helper()
@@ -84,7 +93,7 @@ func call(t *testing.T, tool *callmcp.Tool, args string, env poo.ToolEnv) (poo.T
 // may change anything, so it is side-effecting with the qualified name as its
 // primary argument, and it may leave the turn as a background job.
 func TestTheCallIsSideEffectingAndNamed(t *testing.T) {
-	spec := callmcp.New(nil).Spec()
+	spec := callmcp.New(nil, nil).Spec()
 	if spec.Name != callmcp.CallToolName {
 		t.Errorf("the tool calls itself %q, want %q", spec.Name, callmcp.CallToolName)
 	}
@@ -112,7 +121,7 @@ func TestTheCallIsSideEffectingAndNamed(t *testing.T) {
 // a tool's qualified name, and nothing else is accepted in its place.
 func TestPrepareValidatesTheQualifiedName(t *testing.T) {
 	server := &fakeServer{name: "fixture", tools: []mcp.Tool{tool("echo", "answers", true)}}
-	toolCalled := callmcp.New([]callmcp.Server{server})
+	toolCalled := newTool(server)
 	for _, args := range []string{
 		`{}`,
 		`{"name":""}`,
@@ -150,8 +159,8 @@ func TestAnUnknownToolPointsAtWhereTheNamesAre(t *testing.T) {
 		tool *callmcp.Tool
 		want string
 	}{
-		{name: "searched", tool: callmcp.New([]callmcp.Server{server}).WithSearch(true), want: "find_tool"},
-		{name: "listed", tool: callmcp.New([]callmcp.Server{server}), want: "MCP catalog in the prompt"},
+		{name: "searched", tool: newTool(server).WithSearch(true), want: "find_tool"},
+		{name: "listed", tool: newTool(server), want: "MCP catalog in the prompt"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := call(t, tc.tool, `{"name":"fixture/nope"}`, poo.ToolEnv{})
@@ -175,7 +184,7 @@ func TestAnUnknownToolPointsAtWhereTheNamesAre(t *testing.T) {
 // the session started no server by that name, and the call says so.
 func TestAnUnknownServerNamesTheServer(t *testing.T) {
 	server := &fakeServer{name: "fixture", tools: []mcp.Tool{tool("echo", "answers", true)}}
-	_, err := call(t, callmcp.New([]callmcp.Server{server}), `{"name":"elsewhere/echo"}`, poo.ToolEnv{})
+	_, err := call(t, newTool(server), `{"name":"elsewhere/echo"}`, poo.ToolEnv{})
 	if err == nil || !strings.Contains(err.Error(), `"elsewhere"`) {
 		t.Fatalf("the refusal is %v, want it to name the server", err)
 	}
@@ -186,12 +195,35 @@ func TestAnUnknownServerNamesTheServer(t *testing.T) {
 // failed call, and a later call may succeed.
 func TestAStoppedServerIsAResult(t *testing.T) {
 	server := &fakeServer{name: "fixture", tools: []mcp.Tool{tool("echo", "answers", true)}, err: fmt.Errorf("%w: fixture/echo", mcp.ErrServerDown)}
-	res, err := call(t, callmcp.New([]callmcp.Server{server}), `{"name":"fixture/echo"}`, poo.ToolEnv{})
+	res, err := call(t, newTool(server), `{"name":"fixture/echo"}`, poo.ToolEnv{})
 	if err != nil {
 		t.Fatalf("the stopped server came back as an error: %v", err)
 	}
 	if !res.IsError || res.Text != "server fixture is not running" {
 		t.Errorf("the model reads %q (an error: %v), want the server named as not running", res.Text, res.IsError)
+	}
+}
+
+// TestATransportFailureIsTheCallsOwnError covers the failure that is neither
+// the tool's nor the server's: a transport that broke mid-call reached the
+// server, so the call may have had effects, and it is reported as the call's
+// own error rather than as a result the model can retry. The call is made
+// once: a repeat would be a second effect the model never asked for.
+func TestATransportFailureIsTheCallsOwnError(t *testing.T) {
+	broken := errors.New("the transport broke")
+	server := &fakeServer{name: "fixture", tools: []mcp.Tool{tool("echo", "answers", true)}, err: broken}
+	res, err := call(t, newTool(server), `{"name":"fixture/echo"}`, poo.ToolEnv{})
+	if err == nil {
+		t.Fatalf("a transport failure came back as the result %+v", res)
+	}
+	if !errors.Is(err, broken) {
+		t.Errorf("the failure %v does not carry the cause", err)
+	}
+	if !strings.Contains(err.Error(), callmcp.CallToolName) {
+		t.Errorf("the failure %q does not name the call", err)
+	}
+	if len(server.calls) != 1 {
+		t.Errorf("the server was called %d times, want one delivery for one call", len(server.calls))
 	}
 }
 
@@ -203,7 +235,7 @@ func TestTheToolsOwnFailureIsTheResult(t *testing.T) {
 		tools:  []mcp.Tool{tool("fail", "answers with the protocol's error flag", true)},
 		result: mcp.CallResult{IsError: true, Text: []string{"the tool refused"}},
 	}
-	res, err := call(t, callmcp.New([]callmcp.Server{server}), `{"name":"fixture/fail"}`, poo.ToolEnv{})
+	res, err := call(t, newTool(server), `{"name":"fixture/fail"}`, poo.ToolEnv{})
 	if err != nil {
 		t.Fatalf("the tool's own failure came back as an error: %v", err)
 	}
@@ -220,7 +252,7 @@ func TestTheTextContentsJoin(t *testing.T) {
 		tools:  []mcp.Tool{tool("echo", "answers", true)},
 		result: mcp.CallResult{Text: []string{"first", "second"}},
 	}
-	res, err := call(t, callmcp.New([]callmcp.Server{server}), `{"name":"fixture/echo"}`, poo.ToolEnv{})
+	res, err := call(t, newTool(server), `{"name":"fixture/echo"}`, poo.ToolEnv{})
 	if err != nil {
 		t.Fatalf("calling: %v", err)
 	}
@@ -243,7 +275,7 @@ func TestTheStructuredContentFitsOrIsLeftOut(t *testing.T) {
 		tools:  []mcp.Tool{tool("echo", "answers", true)},
 		result: mcp.CallResult{Text: []string{"one"}, Structured: structured},
 	}
-	res, err := call(t, callmcp.New([]callmcp.Server{server}), `{"name":"fixture/echo"}`, poo.ToolEnv{
+	res, err := call(t, newTool(server), `{"name":"fixture/echo"}`, poo.ToolEnv{
 		Settings: poo.ToolSettings{ObservationCapChars: 100},
 	})
 	if err != nil {
@@ -255,7 +287,7 @@ func TestTheStructuredContentFitsOrIsLeftOut(t *testing.T) {
 
 	big := json.RawMessage(`{"text":"` + strings.Repeat("x", 200) + `"}`)
 	server.result.Structured = big
-	res, err = call(t, callmcp.New([]callmcp.Server{server}), `{"name":"fixture/echo"}`, poo.ToolEnv{
+	res, err = call(t, newTool(server), `{"name":"fixture/echo"}`, poo.ToolEnv{
 		Settings: poo.ToolSettings{ObservationCapChars: 100},
 	})
 	if err != nil {
@@ -278,7 +310,7 @@ func TestInvalidStructuredContentIsLeftOut(t *testing.T) {
 		tools:  []mcp.Tool{tool("echo", "answers", true)},
 		result: mcp.CallResult{Text: []string{"one"}, Structured: json.RawMessage(`{"count":`)},
 	}
-	res, err := call(t, callmcp.New([]callmcp.Server{server}), `{"name":"fixture/echo"}`, poo.ToolEnv{})
+	res, err := call(t, newTool(server), `{"name":"fixture/echo"}`, poo.ToolEnv{})
 	if err != nil {
 		t.Fatalf("calling: %v", err)
 	}
@@ -299,7 +331,7 @@ func TestTheTextIsCapped(t *testing.T) {
 		tools:  []mcp.Tool{tool("echo", "answers", true)},
 		result: mcp.CallResult{Text: []string{answer}},
 	}
-	res, err := call(t, callmcp.New([]callmcp.Server{server}), `{"name":"fixture/echo"}`, poo.ToolEnv{
+	res, err := call(t, newTool(server), `{"name":"fixture/echo"}`, poo.ToolEnv{
 		Settings: poo.ToolSettings{ObservationCapChars: 200},
 	})
 	if err != nil {
@@ -329,7 +361,7 @@ func TestAnImageReachesAModelThatReadsOne(t *testing.T) {
 		tools:  []mcp.Tool{tool("shot", "takes a screenshot", true)},
 		result: mcp.CallResult{Images: []mcp.CallImage{image}},
 	}
-	toolCalled := callmcp.New([]callmcp.Server{server})
+	toolCalled := newTool(server)
 
 	res, err := call(t, toolCalled, `{"name":"fixture/shot"}`, poo.ToolEnv{
 		Model: poo.ModelInfo{Inputs: []poo.Modality{poo.ModalityText, poo.ModalityImage}},
@@ -345,7 +377,7 @@ func TestAnImageReachesAModelThatReadsOne(t *testing.T) {
 	}
 
 	// The tool's own answer is the fallback for a caller that names no model.
-	built := callmcp.New([]callmcp.Server{server}).WithInputs(poo.ModalityImage)
+	built := newTool(server).WithInputs(poo.ModalityImage)
 	if res, err := call(t, built, `{"name":"fixture/shot"}`, poo.ToolEnv{}); err != nil || len(res.Attachments) != 1 {
 		t.Errorf("a caller with no model lost the tool's own answer: %+v (%v)", res, err)
 	}
@@ -376,7 +408,7 @@ func TestAnImageTypeProvidersRefuseIsLeftOut(t *testing.T) {
 		tools:  []mcp.Tool{tool("shot", "takes a screenshot", true)},
 		result: mcp.CallResult{Images: []mcp.CallImage{{MediaType: "image/tiff", Data: []byte{1, 2}}}},
 	}
-	res, err := call(t, callmcp.New([]callmcp.Server{server}), `{"name":"fixture/shot"}`, poo.ToolEnv{
+	res, err := call(t, newTool(server), `{"name":"fixture/shot"}`, poo.ToolEnv{
 		Model: poo.ModelInfo{Inputs: []poo.Modality{poo.ModalityText, poo.ModalityImage}},
 	})
 	if err != nil {
@@ -394,13 +426,13 @@ func TestAnImageTypeProvidersRefuseIsLeftOut(t *testing.T) {
 // names each tool by its qualified name with its arguments and the server's own
 // hint, and a session with no server carries no catalog.
 func TestTheCatalogListsWhatTheSessionCanCall(t *testing.T) {
-	listed := callmcp.New([]callmcp.Server{
+	listed := newTool(
 		&fakeServer{name: "fixture", tools: []mcp.Tool{
 			tool("echo", "answers with what it is given", false),
 			tool("count", "reads the counter", true),
 		}},
 		&fakeServer{name: "notes", tools: []mcp.Tool{tool("add", "adds a note", false)}},
-	})
+	)
 	section := listed.PromptSection(prompt.Env{})
 	for _, want := range []string{
 		"fixture/count (args: text*) (read-only): reads the counter",
@@ -419,7 +451,7 @@ func TestTheCatalogListsWhatTheSessionCanCall(t *testing.T) {
 		t.Errorf("the section does not say what calls a tool:\n%s", section)
 	}
 
-	empty := callmcp.New(nil)
+	empty := callmcp.New(nil, nil)
 	if text := empty.PromptSection(prompt.Env{}); strings.Contains(text, "MCP tools:") {
 		t.Errorf("a session with no server carries a catalog: %q", text)
 	}
@@ -438,7 +470,7 @@ func TestALongOfferingIsLeftToTheSearch(t *testing.T) {
 	}
 	server := &fakeServer{name: "fixture", tools: tools}
 
-	searched := callmcp.New([]callmcp.Server{server}).WithSearch(true).PromptSection(prompt.Env{})
+	searched := newTool(server).WithSearch(true).PromptSection(prompt.Env{})
 	if !strings.Contains(searched, "too many to list") || !strings.Contains(searched, "find_tool") {
 		t.Errorf("the section does not leave the offering to the search:\n%s", searched)
 	}
@@ -446,7 +478,7 @@ func TestALongOfferingIsLeftToTheSearch(t *testing.T) {
 		t.Errorf("the section lists an offering it should search:\n%s", searched)
 	}
 
-	listed := callmcp.New([]callmcp.Server{server}).PromptSection(prompt.Env{})
+	listed := newTool(server).PromptSection(prompt.Env{})
 	if strings.Contains(listed, "too many to list") {
 		t.Errorf("the section names a search the session does not offer:\n%s", listed)
 	}

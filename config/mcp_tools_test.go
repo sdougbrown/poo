@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/cli"
 	"github.com/sdougbrown/poo/config"
 	"github.com/sdougbrown/poo/decide"
 	"github.com/sdougbrown/poo/mcp"
@@ -39,6 +40,11 @@ func (s *testMCPServer) Tools() []mcp.Tool {
 	return tools
 }
 
+// Offered returns the server's tools as the entries the model reads.
+func (s *testMCPServer) Offered() []cli.Offered {
+	return callmcp.Entries(s.name, s.Tools())
+}
+
 // CallTool calls one of them.
 func (s *testMCPServer) CallTool(ctx context.Context, tool string, args json.RawMessage) (mcp.CallResult, error) {
 	return s.group.CallTool(ctx, s.name+"/"+tool, args)
@@ -56,28 +62,6 @@ func mcpServers(running []config.MCPRunning) []callmcp.Server {
 		servers = append(servers, session.servers()...)
 	}
 	return servers
-}
-
-// offeredMCP keeps the MCP tools a session started as entries a search returns.
-func offeredMCP(running []config.MCPRunning) []cliregistry.Offered {
-	var offered []cliregistry.Offered
-	for _, server := range mcpServers(running) {
-		for _, tool := range server.Tools() {
-			entry := cliregistry.Offered{
-				Name:        server.Name() + "/" + tool.Name,
-				Description: tool.Description,
-				Dispatcher:  callmcp.CallToolName,
-				Argument:    callmcp.NameArgument,
-				ReadOnly:    tool.Annotations.ReadOnlyHint,
-				Destructive: tool.Annotations.DestructiveHint,
-			}
-			if len(tool.InputSchema) > 0 {
-				_ = json.Unmarshal(tool.InputSchema, &entry.Schema)
-			}
-			offered = append(offered, entry)
-		}
-	}
-	return offered
 }
 
 // offersTool reports whether a session's tool list holds a name.
@@ -193,7 +177,7 @@ func TestMCPSelectionWithoutTheCallToolFailsTheBuild(t *testing.T) {
 // none either — a hit the model cannot call is worse than no hit.
 func TestADisabledMCPCallOffersTheServersToNobody(t *testing.T) {
 	path := mcpManifest(t, map[string]any{"fixture": stdioServer()}, nil)
-	settings, err := config.Parse([]byte(withDecider+"tools:\n  disabled: ["+config.ToolCallMCP+"]\n"+
+	settings, err := config.Parse([]byte(withDecider+"tools:\n  disabled: ["+config.ToolCallMCP+"]\n"+theSessionDir(t)+
 		theMCPPaths(path)+theMCPProfile("picky", "fixture")), config.FormatYAML)
 	if err != nil {
 		t.Fatalf("decoding the settings: %v", err)
@@ -291,6 +275,11 @@ func (s *listedServer) Name() string { return s.name }
 // Tools returns the tools the server lists.
 func (s *listedServer) Tools() []mcp.Tool { return s.tools }
 
+// Offered returns the server's tools as the entries the model reads.
+func (s *listedServer) Offered() []cli.Offered {
+	return callmcp.Entries(s.name, s.tools)
+}
+
 // CallTool finds no process to call.
 func (s *listedServer) CallTool(context.Context, string, json.RawMessage) (mcp.CallResult, error) {
 	return mcp.CallResult{}, mcp.ErrServerDown
@@ -305,6 +294,10 @@ type listedSession struct {
 
 // Close stops nothing: the listed servers hold no process.
 func (h *listedSession) Close() error { return nil }
+
+// Offered returns every entry the servers hold: the package's own derivation
+// over the same per-server views the dispatch reads.
+func (h *listedSession) Offered() []cli.Offered { return callmcp.Offered(h.views) }
 
 // servers are the views the tools read.
 func (h *listedSession) servers() []callmcp.Server { return h.views }
@@ -466,6 +459,16 @@ func TestTheMCPRoutingMatrixOffersWhatTheSessionCanReach(t *testing.T) {
 			unwanted: []string{cliregistry.FindToolName, "entry-000"},
 		},
 		{
+			// The elevated entries are tools of their own, so the search the
+			// servers brought narrows only what call_mcp reaches.
+			name:     "an elevated catalog leaves the search to the servers",
+			settings: withDecider,
+			registry: small,
+			servers:  "fixture",
+			want:     []string{"deploy", "logs", cliregistry.FindToolName, config.ToolCallMCP},
+			unwanted: []string{cliregistry.CallToolName},
+		},
+		{
 			name:     "a long catalog is searched beside the servers",
 			settings: withDecider,
 			registry: large,
@@ -512,6 +515,169 @@ func TestTheMCPRoutingMatrixOffersWhatTheSessionCanReach(t *testing.T) {
 				t.Errorf("the session offers %d searches: %v", searches, runtime.Options.ToolOrder)
 			}
 		})
+	}
+}
+
+// TestASearchDoesNotReturnAnElevatedEntry covers the view: a catalog short
+// enough to show is offered entry by entry, so it contributes nothing to the
+// search. A hit for one of its entries would tell the model to call call_cli,
+// a tool the session does not offer; what is left to search is what call_mcp
+// reaches.
+func TestASearchDoesNotReturnAnElevatedEntry(t *testing.T) {
+	path := mcpManifest(t, map[string]any{"fixture": stdioServer()}, nil)
+	settings, err := config.Parse([]byte(withDecider+theSessionDir(t)+
+		"cli_registry:\n  paths: [\""+registry(t, "deploy", "logs")+"\"]\n"+
+		theMCPPaths(path)+theMCPProfile("picky", "fixture")), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := buildWith(t, config.BuildOptions{
+		Settings:    settings,
+		MCPLauncher: listedLauncher(map[string][]mcp.Tool{"fixture": {mcpTool("echo", "answers with what it is given", true)}}),
+		WorkingDir:  t.TempDir(),
+	})
+	defer runtime.Store.Close()
+	for _, name := range []string{"deploy", "logs", config.ToolCallMCP, cliregistry.FindToolName} {
+		if !hasTool(runtime.Options.ToolOrder, name) {
+			t.Fatalf("the session offers %v, and not %q", runtime.Options.ToolOrder, name)
+		}
+	}
+	if hasTool(runtime.Options.ToolOrder, cliregistry.CallToolName) {
+		t.Fatalf("the session offers %v, and the entries are already its own", runtime.Options.ToolOrder)
+	}
+	runtime.Options.Decider = yesDecider{}
+	transport := pootest.NewTransport(
+		pootest.Turn{Calls: []pootest.Call{{
+			Name:      cliregistry.FindToolName,
+			ID:        "c1",
+			Arguments: json.RawMessage(`{"intent":"show me where I am running"}`),
+		}}},
+		pootest.Turn{Text: "done"},
+	)
+	runtime.Options.Transport = transport
+
+	sess, err := runtime.CreateSession(context.Background(), runtime.Store, theCreatedRecord("picky", t.TempDir()))
+	if err != nil {
+		t.Fatalf("creating the session: %v", err)
+	}
+	defer sess.Close()
+	if _, err := sess.Prompt(context.Background(), "show me where I am running"); err != nil {
+		t.Fatalf("prompting: %v", err)
+	}
+	if _, err := sess.Wait(context.Background()); err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+
+	// The answer is what the search returned; the prompt's guidance names both
+	// calls whatever the session offers, so the hit list is what the test reads.
+	text := requestText(transport)
+	answer := text[strings.Index(text, "best first:"):]
+	for _, want := range []string{"fixture/echo", config.ToolCallMCP} {
+		if !strings.Contains(answer, want) {
+			t.Errorf("the search's answer does not carry %q:\n%s", want, answer)
+		}
+	}
+	// The elevated entries are tools of their own, and no call of the catalog's
+	// is offered, so a hit for one would point the model at nothing.
+	for _, unwanted := range []string{"deploy", "logs", cliregistry.CallToolName} {
+		if strings.Contains(answer, unwanted) {
+			t.Errorf("the search's answer names %q, which the session does not call:\n%s", unwanted, answer)
+		}
+	}
+}
+
+// TestACatalogBehindTheCallIsListedBesideTheSearchedServers covers the prompt's
+// two catalogs: a search the MCP offering brought says nothing about the
+// catalog's own, which is short enough to list. A catalog that vanished behind
+// a search would cost a decision-model round trip for a list the model could
+// read, and its entries would be nowhere at all.
+func TestACatalogBehindTheCallIsListedBesideTheSearchedServers(t *testing.T) {
+	// Twenty entries are short enough to list, and the elevation rule declines
+	// them because one entry's name is a tool the session already offers.
+	names := make([]string, 0, 20)
+	names = append(names, "bash")
+	for i := 0; i < 19; i++ {
+		names = append(names, fmt.Sprintf("entry-%03d", i))
+	}
+	path := mcpManifest(t, map[string]any{"fixture": stdioServer()}, nil)
+	settings, err := config.Parse([]byte(withDecider+theSessionDir(t)+
+		"cli_registry:\n  paths: [\""+registry(t, names...)+"\"]\n"+
+		theMCPPaths(path)+theMCPProfile("picky", "fixture")), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := buildWith(t, config.BuildOptions{
+		Settings:    settings,
+		MCPLauncher: listedLauncher(map[string][]mcp.Tool{"fixture": {mcpTool("echo", "answers with what it is given", true)}}),
+		WorkingDir:  t.TempDir(),
+	})
+	defer runtime.Store.Close()
+	if !hasTool(runtime.Options.ToolOrder, cliregistry.FindToolName) {
+		t.Fatalf("the session offers %v, and the case is about the search it carries", runtime.Options.ToolOrder)
+	}
+
+	text := sessionPrompt(t, runtime, "picky", t.TempDir())
+	if !strings.Contains(text, "These are the only commands call_cli runs") || !strings.Contains(text, "entry-000") {
+		t.Errorf("the prompt does not list the catalog the session can call:\n%s", text)
+	}
+	if strings.Contains(text, "too many to list") {
+		t.Errorf("the prompt leaves a twenty-entry catalog to the search the servers brought:\n%s", text)
+	}
+}
+
+// TestEachSessionCarriesItsOwnMCPCatalog covers the split between what the
+// header records and what a session reads: the tool offering is the build's and
+// every session of it offers the same tools, while the catalog behind the call
+// is the one the session's own servers listed.
+func TestEachSessionCarriesItsOwnMCPCatalog(t *testing.T) {
+	path := mcpManifest(t, map[string]any{"fixture": stdioServer()}, nil)
+	settings, err := config.Parse([]byte(withDecider+theMCPPaths(path)+theSessionDir(t)+theMCPProfile("picky", "fixture")), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	// Each session starts a server that lists one tool of its own, so a catalog
+	// that belonged to the build would show one session the other's tool.
+	launcher := func(_ context.Context, values config.MCPLaunchSelection) (config.MCPRunning, error) {
+		servers := make([]callmcp.Server, 0, len(values.Servers))
+		for _, server := range values.Servers {
+			name := values.SessionID + "-tool"
+			servers = append(servers, &listedServer{name: server.Name, tools: []mcp.Tool{mcpTool(name, "does the "+name+" job", true)}})
+		}
+		return &listedSession{views: servers}, nil
+	}
+	runtime := buildWith(t, config.BuildOptions{Settings: settings, MCPLauncher: launcher, WorkingDir: t.TempDir()})
+	defer runtime.Store.Close()
+
+	// The header records the offering, and the build's own instance lists no
+	// tool: a build starts no server.
+	if !hasTool(runtime.Options.ToolOrder, config.ToolCallMCP) {
+		t.Fatalf("the session offers %v, and not call_mcp", runtime.Options.ToolOrder)
+	}
+	if section := mcpCatalogOf(t, runtime); strings.Contains(section, "MCP (Model Context Protocol) tools:") {
+		t.Errorf("the build's own call carries a catalog:\n%s", section)
+	}
+
+	for _, id := range []string{"s1", "s2"} {
+		created := theCreatedRecord("picky", t.TempDir())
+		created.SessionID = id
+		sess, err := runtime.CreateSession(context.Background(), runtime.Store, created)
+		if err != nil {
+			t.Fatalf("creating the session %s: %v", id, err)
+		}
+		text := sess.PromptState().Text
+		if err := sess.Close(); err != nil {
+			t.Fatalf("closing the session %s: %v", id, err)
+		}
+		if !strings.Contains(text, "fixture/"+id+"-tool") {
+			t.Errorf("the session %s does not list the tool its own server offered:\n%s", id, text)
+		}
+		other := "s1"
+		if id == "s1" {
+			other = "s2"
+		}
+		if strings.Contains(text, "fixture/"+other+"-tool") {
+			t.Errorf("the session %s lists the tool another session's server offered:\n%s", id, text)
+		}
 	}
 }
 

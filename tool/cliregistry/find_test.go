@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/cli"
 	"github.com/sdougbrown/poo/decide"
 	"github.com/sdougbrown/poo/pootest"
 	"github.com/sdougbrown/poo/provider/openai"
@@ -150,7 +151,7 @@ func TestFindToolAsksFourRequests(t *testing.T) {
 		Model:    "test-model",
 	})
 
-	res, err := preparedCall(t, cliregistry.NewFind(catalog), `{"intent":"print the words I give it"}`, poo.ToolEnv{Decider: model})
+	res, err := preparedCall(t, cliregistry.NewFind(catalog.Offered()), `{"intent":"print the words I give it"}`, poo.ToolEnv{Decider: model})
 	if err != nil {
 		t.Fatalf("searching: %v", err)
 	}
@@ -217,7 +218,7 @@ func TestOneSearchWritesOneDecisionRecord(t *testing.T) {
 	sink := &recordingSink{}
 	model := decide.Recorded(&searcher{probability: indexProbability}, sink, "session")
 
-	if _, err := preparedCall(t, cliregistry.NewFind(wideCatalog(t)), `{"intent":"print the words"}`, poo.ToolEnv{Decider: model}); err != nil {
+	if _, err := preparedCall(t, cliregistry.NewFind(wideCatalog(t).Offered()), `{"intent":"print the words"}`, poo.ToolEnv{Decider: model}); err != nil {
 		t.Fatalf("searching: %v", err)
 	}
 
@@ -260,8 +261,8 @@ func malformedDecider(kind string) decide.Decider {
 func TestMalformedAnswersAreRecoverable(t *testing.T) {
 	for _, kind := range []string{"missing", "duplicate", "bad-distribution"} {
 		t.Run(kind, func(t *testing.T) {
-			res, err := preparedCall(t, cliregistry.NewFind(fixtureCatalog(t)), `{"intent":"say hello"}`, poo.ToolEnv{Decider: malformedDecider(kind)})
-			if err != nil || !res.IsError || res.Text != cliregistry.UnavailableText || len(res.Structured) != 0 {
+			res, err := preparedCall(t, cliregistry.NewFind(fixtureCatalog(t).Offered()), `{"intent":"say hello"}`, poo.ToolEnv{Decider: malformedDecider(kind)})
+			if err != nil || !res.IsError || res.Text != catalogUnavailable || len(res.Structured) != 0 {
 				t.Fatalf("bad answers produced result=%+v err=%v", res, err)
 			}
 		})
@@ -281,7 +282,7 @@ func TestMalformedAnswersKeepDiagnostic(t *testing.T) {
 	session, err := poo.New(poo.Options{
 		Transport: transport, Sink: sink, SessionID: "s1",
 		Model:     poo.ModelInfo{ModelID: "test-model", ContextLimit: 32768},
-		Tools:     map[string]poo.Tool{cliregistry.FindToolName: cliregistry.NewFind(fixtureCatalog(t))},
+		Tools:     map[string]poo.Tool{cliregistry.FindToolName: cliregistry.NewFind(fixtureCatalog(t).Offered())},
 		ToolOrder: []string{cliregistry.FindToolName},
 		Decider:   malformedDecider("bad-distribution"),
 	})
@@ -295,7 +296,7 @@ func TestMalformedAnswersKeepDiagnostic(t *testing.T) {
 	if _, err := session.Wait(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if got := lastToolResult(t, transport); got != poo.HandleLine("r1", cliregistry.FindToolName)+"\n"+cliregistry.UnavailableText {
+	if got := lastToolResult(t, transport); got != poo.HandleLine("r1", cliregistry.FindToolName)+"\n"+catalogUnavailable {
 		t.Fatalf("wrong model result %q", got)
 	}
 	var records []*poo.DecisionRecord
@@ -324,7 +325,7 @@ func TestTheSearchRanksByProbability(t *testing.T) {
 		return 0.1
 	}}
 
-	res, err := preparedCall(t, cliregistry.NewFind(catalog).WithTopK(3), `{"intent":"print the words"}`, poo.ToolEnv{Decider: model})
+	res, err := preparedCall(t, cliregistry.NewFind(catalog.Offered()).WithTopK(3), `{"intent":"print the words"}`, poo.ToolEnv{Decider: model})
 	if err != nil {
 		t.Fatalf("searching: %v", err)
 	}
@@ -356,11 +357,66 @@ func TestTheSearchRanksByProbability(t *testing.T) {
 	}
 }
 
+// catalogUnavailable is what a failed search over the catalog alone reads: the
+// one dispatcher its view holds, named with the argument that carries an
+// entry's name.
+const catalogUnavailable = `tool search unavailable; call_cli takes "command"`
+
+// TestAFailedSearchPointsAtTheCallsInView covers the words a failed search
+// leaves the model with: every dispatcher the view holds is named with its
+// argument, so the model can make the call itself, and a view that holds no
+// entry points at the prompt instead of at a tool the session does not offer.
+func TestAFailedSearchPointsAtTheCallsInView(t *testing.T) {
+	catalogOnly := cliregistry.NewFind(fixtureCatalog(t).Offered())
+	both := cliregistry.NewFind(append(fixtureCatalog(t).Offered(), cli.Offered{
+		Name:        "fixture/echo",
+		Description: "answers with what it is given",
+		Dispatcher:  callmcpName,
+		Argument:    "name",
+	}))
+	for _, tc := range []struct {
+		name   string
+		tool   *cliregistry.FindTool
+		want   string
+		unwant string
+	}{
+		{
+			name:   "the catalog alone",
+			tool:   catalogOnly,
+			want:   catalogUnavailable,
+			unwant: callmcpName,
+		},
+		{
+			name: "the catalog and the servers",
+			tool: both,
+			want: `tool search unavailable; call_cli takes "command", or ` + callmcpName + ` takes "name"`,
+		},
+		{
+			name: "no entry at all",
+			tool: cliregistry.NewFind(nil),
+			want: cliregistry.UnavailableText,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			res, err := preparedCall(t, tc.tool, `{"intent":"say hello"}`, poo.ToolEnv{Decider: &searcher{err: errors.New("the decision model is down")}})
+			if err != nil {
+				t.Fatalf("the failure came back as an error: %v", err)
+			}
+			if !res.IsError || res.Text != tc.want {
+				t.Errorf("the model reads %q (an error: %v), want %q", res.Text, res.IsError, tc.want)
+			}
+			if tc.unwant != "" && strings.Contains(res.Text, tc.unwant) {
+				t.Errorf("the failure names %q, which the view does not hold: %q", tc.unwant, res.Text)
+			}
+		})
+	}
+}
+
 // TestFindToolFailsRecoverably covers a search the decision model could
 // not answer: the model is told the search is unavailable and how to go
 // on, in exactly those words, and no list of entries takes its place.
 func TestFindToolFailsRecoverably(t *testing.T) {
-	tool := cliregistry.NewFind(wideCatalog(t))
+	tool := cliregistry.NewFind(wideCatalog(t).Offered())
 	model := &searcher{err: errors.New("the decision model is down")}
 
 	res, err := preparedCall(t, tool, `{"intent":"print something"}`, poo.ToolEnv{Decider: model})
@@ -370,8 +426,8 @@ func TestFindToolFailsRecoverably(t *testing.T) {
 	if !res.IsError {
 		t.Error("the failure is not an error result")
 	}
-	if res.Text != cliregistry.UnavailableText {
-		t.Errorf("the model reads %q, want %q", res.Text, cliregistry.UnavailableText)
+	if res.Text != catalogUnavailable {
+		t.Errorf("the model reads %q, want %q", res.Text, catalogUnavailable)
 	}
 	if strings.Contains(res.Text, wideName(0)) || strings.Contains(string(res.Structured), wideName(0)) {
 		t.Errorf("the failure carries a fallback list: %q", res.Text)
@@ -382,13 +438,13 @@ func TestFindToolFailsRecoverably(t *testing.T) {
 // without a decision model: the search says so rather than answering
 // with a made-up ranking.
 func TestFindToolNeedsADecider(t *testing.T) {
-	tool := cliregistry.NewFind(fixtureCatalog(t))
+	tool := cliregistry.NewFind(fixtureCatalog(t).Offered())
 	res, err := preparedCall(t, tool, `{"intent":"say hello"}`, poo.ToolEnv{})
 	if err != nil {
 		t.Fatalf("the failure came back as an error: %v", err)
 	}
-	if !res.IsError || res.Text != cliregistry.UnavailableText {
-		t.Errorf("the model reads %q (an error: %v), want %q", res.Text, res.IsError, cliregistry.UnavailableText)
+	if !res.IsError || res.Text != catalogUnavailable {
+		t.Errorf("the model reads %q (an error: %v), want %q", res.Text, res.IsError, catalogUnavailable)
 	}
 }
 
@@ -406,7 +462,7 @@ func TestAFailedSearchIsNotFatal(t *testing.T) {
 	)
 	session, err := poo.New(poo.Options{
 		Transport: transport,
-		Tools:     map[string]poo.Tool{cliregistry.FindToolName: cliregistry.NewFind(wideCatalog(t))},
+		Tools:     map[string]poo.Tool{cliregistry.FindToolName: cliregistry.NewFind(wideCatalog(t).Offered())},
 		ToolOrder: []string{cliregistry.FindToolName},
 		Sink:      pootest.NewSink(),
 		SessionID: "s1",
@@ -430,14 +486,14 @@ func TestAFailedSearchIsNotFatal(t *testing.T) {
 	}
 	// The model saw the search's own text and nothing of the cause.
 	got := lastToolResult(t, transport)
-	if want := poo.HandleLine("r1", cliregistry.FindToolName) + "\n" + cliregistry.UnavailableText; got != want {
+	if want := poo.HandleLine("r1", cliregistry.FindToolName) + "\n" + catalogUnavailable; got != want {
 		t.Errorf("the model reads %q, want %q", got, want)
 	}
 }
 
 // TestFindToolRefusesAnEmptyIntent covers the arguments.
 func TestFindToolRefusesAnEmptyIntent(t *testing.T) {
-	tool := cliregistry.NewFind(fixtureCatalog(t))
+	tool := cliregistry.NewFind(fixtureCatalog(t).Offered())
 	for _, args := range []string{`{"intent":""}`, `{"intent":"  "}`, `{}`, `{"intent":5}`, `{"nope":"x"}`} {
 		if _, err := tool.Prepare(json.RawMessage(args), poo.PrepareEnv{}); err == nil {
 			t.Errorf("%s prepared a search", args)
@@ -450,7 +506,7 @@ func TestFindToolRefusesAnEmptyIntent(t *testing.T) {
 // did not return is still callable.
 func TestCallStillWorksForANameTheSearchMissed(t *testing.T) {
 	catalog := wideCatalog(t)
-	find := cliregistry.NewFind(catalog)
+	find := cliregistry.NewFind(catalog.Offered())
 	model := &searcher{probability: indexProbability}
 	res, err := preparedCall(t, find, `{"intent":"print the words"}`, poo.ToolEnv{Decider: model})
 	if err != nil {
@@ -499,14 +555,14 @@ func indexProbability(name string) float64 {
 // each hit names the tool that runs it and the argument that names it, because a
 // name alone does not say whether call_cli or call_mcp reaches it.
 func TestAHitNamesTheToolThatCallsIt(t *testing.T) {
-	find := cliregistry.NewFind(fixtureCatalog(t)).WithOffered([]cliregistry.Offered{{
+	find := cliregistry.NewFind(append(fixtureCatalog(t).Offered(), cli.Offered{
 		Name:        "fixture/echo",
 		Description: "answers with what it is given",
 		Schema:      map[string]any{"type": "object", "properties": map[string]any{"text": map[string]any{"type": "string"}}},
 		Dispatcher:  callmcpName,
 		Argument:    "name",
 		ReadOnly:    true,
-	}})
+	}))
 	res, err := preparedCall(t, find, `{"intent":"say something"}`, poo.ToolEnv{Decider: &searcher{probability: indexProbability}})
 	if err != nil {
 		t.Fatalf("searching: %v", err)
@@ -541,7 +597,7 @@ func TestAHitNamesTheToolThatCallsIt(t *testing.T) {
 	for _, hit := range body.Results {
 		found[hit.Name] = struct{ dispatcher, argument string }{hit.Dispatcher, hit.Argument}
 	}
-	if got := found["say"]; got.dispatcher != cliregistry.CallToolName || got.argument != cliregistry.CommandArgument {
+	if got := found["say"]; got.dispatcher != cliregistry.CallToolName || got.argument != cli.CommandArgument {
 		t.Errorf("the catalog's hit routes through %+v, want the call and its command", got)
 	}
 	if got := found["fixture/echo"]; got.dispatcher != callmcpName || got.argument != "name" {
@@ -554,15 +610,13 @@ func TestAHitNamesTheToolThatCallsIt(t *testing.T) {
 // returns both, each with the call that runs it.
 func TestTwoEntriesOfOneNameAreBothReachable(t *testing.T) {
 	// The intent fits both, so the ranking cannot hide one of them.
-	find := cliregistry.NewFind(fixtureCatalog(t)).WithOffered([]cliregistry.Offered{
-		{
-			Name:        "say",
-			Description: "an MCP tool that answers too",
-			Schema:      map[string]any{"type": "object", "properties": map[string]any{}},
-			Dispatcher:  callmcpName,
-			Argument:    "name",
-		},
-	})
+	find := cliregistry.NewFind(append(fixtureCatalog(t).Offered(), cli.Offered{
+		Name:        "say",
+		Description: "an MCP tool that answers too",
+		Schema:      map[string]any{"type": "object", "properties": map[string]any{}},
+		Dispatcher:  callmcpName,
+		Argument:    "name",
+	}))
 	res, err := preparedCall(t, find, `{"intent":"say something"}`, poo.ToolEnv{Decider: &searcher{probability: func(string) float64 { return 0.9 }}})
 	if err != nil {
 		t.Fatalf("searching: %v", err)
@@ -583,11 +637,11 @@ func TestTwoEntriesOfOneNameAreBothReachable(t *testing.T) {
 // name every entry the search returns.
 func TestOneSearchAsksOneQuestionPerEntry(t *testing.T) {
 	counting := &countingDecider{}
-	find := cliregistry.NewFind(fixtureCatalog(t)).WithOffered([]cliregistry.Offered{{
+	find := cliregistry.NewFind(append(fixtureCatalog(t).Offered(), cli.Offered{
 		Name:       "say",
 		Dispatcher: callmcpName,
 		Argument:   "name",
-	}})
+	}))
 	if _, err := preparedCall(t, find, `{"intent":"say something"}`, poo.ToolEnv{Decider: counting}); err != nil {
 		t.Fatalf("searching: %v", err)
 	}

@@ -271,6 +271,12 @@ type MCPLaunchSelection struct {
 type MCPRunning interface {
 	// Close stops the server and waits for its process to end.
 	Close() error
+	// Offered returns the tools the server listed at startup, as the
+	// entries the model reaches through the MCP call: one per tool,
+	// qualified with the server's name, naming the call that runs it and
+	// the argument that names it. The build reads them once, at attach,
+	// so the session's search and its prompt list the same value.
+	Offered() []cli.Offered
 }
 
 // Runtime is what a build produced.
@@ -494,6 +500,14 @@ type ToolOptions struct {
 	// whose refusal points at another tool offers that tool only when
 	// this list holds its name.
 	ToolNames []string
+	// Offered are the entries the session's models reach through a tool that
+	// calls them: the catalog's registered commands, which the call tool runs,
+	// and the MCP tools the session's servers listed, which the MCP call runs.
+	// It is one snapshot, so a search hit, a prompt line and a refusal name the
+	// same dispatcher and the same argument. A build's snapshot holds no MCP
+	// entry, because a build starts no server; the attach the build set
+	// rebuilds the tools over the servers with the session's own.
+	Offered []cli.Offered
 	// MCP are the MCP servers a live session started, in selection order:
 	// the handles the binary's own launcher returned, which the binary's own
 	// tools over them read. The settings pass them through and never read
@@ -1286,12 +1300,15 @@ func (r *Runtime) mcpAttach(ctx context.Context, a *poo.Attach) (func() error, e
 	}
 	// The tools over the servers read what this session started, so they are
 	// built again now: the build's instances describe the offering, and these
-	// describe what this session can reach. The search is bound with the call,
-	// so a session without the call returns no MCP entry at all — a search
-	// that named a tool the model cannot call would be worse than no hit.
+	// describe what this session can reach. The entries are the session's
+	// snapshot, built once for both dispatchers, so a search hit and a catalog
+	// line name the same call. The search is bound with the call, so a session
+	// without the call returns no MCP entry at all — a search that named a
+	// tool the model cannot call would be worse than no hit.
 	if _, offered := a.Options.Tools[ToolCallMCP]; offered {
 		sessionOptions := r.toolOptions
 		sessionOptions.MCP = []MCPRunning{running}
+		sessionOptions.Offered = offeredEntries(r.offeredCatalog(), r.elevatedTools, []MCPRunning{running})
 		for _, name := range []string{ToolCallMCP, cli.FindToolName} {
 			factory := r.toolFactories[name]
 			if factory == nil {
@@ -1427,14 +1444,17 @@ func (r *Runtime) modelInputs() []poo.Modality {
 	return model.Inputs
 }
 
-// offersSearch reports whether the session offers the search over the catalog.
+// offersSearch reports whether the session searches the catalog.
 //
-// The count decides whether a search is worth offering, and the operator's
-// disabled list decides whether the session has one: a session that turned
-// find_tool off lists the catalog its prompt shows, and points the model at
-// nothing it cannot call.
+// The catalog's own count decides it, and the operator's disabled list decides
+// whether the session has the search at all: a session that turned find_tool
+// off lists the catalog its prompt shows, and points the model at nothing it
+// cannot call. A search another offering brought — the one over the MCP tools
+// — says nothing about this catalog: its entries are few enough to list, and a
+// catalog that vanished behind a search would cost a decision-model round trip
+// for a list the model could read.
 func (r *Runtime) offersSearch() bool {
-	return slices.Contains(r.toolNames, cli.FindToolName)
+	return r.findTool() && slices.Contains(r.toolNames, cli.FindToolName)
 }
 
 // offersRegistry reports whether the session offers the registry's tools.
@@ -2258,6 +2278,7 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 		Scrub:          credentialScrub,
 		ProtectedPaths: protected,
 		Registry:       r.offeredCatalog(),
+		Offered:        offeredEntries(r.offeredCatalog(), r.elevatedTools, nil),
 		Search:         r.offersSearch(),
 		Inputs:         r.modelInputs(),
 		// A file that names an engine keeps it; an unset one gets the

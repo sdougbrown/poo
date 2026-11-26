@@ -5,12 +5,14 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/cli"
 	"github.com/sdougbrown/poo/decide"
-	"github.com/sdougbrown/poo/internal/schematext"
 	"github.com/sdougbrown/poo/prompt"
 )
 
@@ -18,7 +20,8 @@ import (
 // otherwise.
 const DefaultTopK = 8
 
-// UnavailableText is what the model reads when the search cannot run.
+// UnavailableText is what the model reads when the search cannot run and its
+// view names no entry at all.
 //
 // A failed search does not fall back to the whole offering: a list of
 // hundreds of entries is what the search was there to avoid, and a model
@@ -30,99 +33,34 @@ const UnavailableText = "tool search unavailable; call a tool the prompt lists"
 const FindInstructions = "Each question names one tool and asks whether that tool fits the intent. " +
 	"Answer yes when the tool does the work the intent asks for, and no when it does something else."
 
-// CommandArgument is the call tool's argument that names a registered command.
-const CommandArgument = "command"
-
-// Offered is one entry the model reaches through a dispatcher.
-//
-// A session offers two kinds of entry: the catalog's registered commands,
-// which the call tool runs, and the MCP tools its servers listed, which
-// call_mcp runs. The search narrows both, and a hit says which tool can call
-// it, because the model cannot tell from the name alone.
-type Offered struct {
-	// Name is the name the model passes to the dispatcher.
-	Name string
-	// Description is what the entry does.
-	Description string
-	// Schema is the JSON schema of the entry's arguments.
-	Schema map[string]any
-	// Args renders the schema's top-level arguments for a hit, in name
-	// order, or an empty string when the entry declares no arguments. A
-	// caller that leaves it empty gets the schema's own hint.
-	Args string
-	// Dispatcher is the tool that calls this entry.
-	Dispatcher string
-	// Argument is the dispatcher's argument that names the entry.
-	Argument string
-	// ReadOnly and Destructive are the entry's own hints about itself, and
-	// zero for an entry that gives none. They are hints, never a permission
-	// class.
-	ReadOnly    bool
-	Destructive bool
-}
-
 // FindTool searches the offered entries for the tools that fit an intent.
 //
 // The search is a decision-model question per entry, so it needs a
 // decision model: a session without one shows the whole catalog instead.
 type FindTool struct {
 	// offered are the entries the search narrows, in name order.
-	offered []Offered
+	offered []cli.Offered
 	// topK is how many entries a search returns. Zero means
 	// DefaultTopK.
 	topK int
 }
 
-// NewFind returns the tool that searches the catalog.
+// NewFind returns the tool that searches the entries the model can reach.
 //
-// A catalog is offered behind the call tool: every entry the search can
-// return is run with call_cli, naming it as its "command".
-func NewFind(catalog *Catalog) *FindTool {
-	return &FindTool{offered: catalogOffered(catalog)}
+// The entries are the session's snapshot: the catalog's registered commands,
+// which call_cli runs, and the MCP tools its servers listed, which call_mcp
+// runs. Each hit names the tool that calls it, so the search never points the
+// model at a call the session does not offer.
+func NewFind(offered []cli.Offered) *FindTool {
+	return &FindTool{offered: sortOffered(offered)}
 }
 
-// WithOffered adds the entries another dispatcher calls to the search.
-//
-// The MCP tools a session's servers listed reach the model through call_mcp,
-// so the search returns them beside the catalog's entries and says which tool
-// calls each hit. The entries are copies: a search never writes into the
-// offering it was given.
-func (t *FindTool) WithOffered(entries []Offered) *FindTool {
-	combined := make([]Offered, 0, len(t.offered)+len(entries))
-	combined = append(combined, t.offered...)
-	combined = append(combined, entries...)
-	t.offered = normalizeOffered(combined)
-	return t
-}
-
-// catalogOffered is the catalog as the entries the call tool runs.
-func catalogOffered(catalog *Catalog) []Offered {
-	entries := catalog.Entries()
-	out := make([]Offered, 0, len(entries))
-	for _, entry := range entries {
-		out = append(out, Offered{
-			Name:        entry.Name,
-			Description: entry.Description,
-			Schema:      entry.Schema,
-			Args:        entry.Args,
-			Dispatcher:  CallToolName,
-			Argument:    CommandArgument,
-		})
-	}
-	return out
-}
-
-// normalizeOffered fills the argument hints a caller left out and orders the
-// entries by name, so two searches over the same offering return the same
-// list.
-func normalizeOffered(entries []Offered) []Offered {
-	out := make([]Offered, len(entries))
+// sortOffered orders the entries by name, so two searches over the same
+// offering return the same list. The list is a copy: a search never writes
+// into the offering it was given.
+func sortOffered(entries []cli.Offered) []cli.Offered {
+	out := make([]cli.Offered, len(entries))
 	copy(out, entries)
-	for i, entry := range out {
-		if entry.Args == "" && len(entry.Schema) > 0 {
-			out[i].Args = schematext.ArgsHint(entry.Schema)
-		}
-	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
 }
@@ -203,7 +141,7 @@ func (t *FindTool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepare
 // ranked is one entry with the model's answer about it.
 type ranked struct {
 	// entry is the offered entry.
-	entry Offered
+	entry cli.Offered
 	// probability is the model's probability that the entry fits.
 	probability float64
 }
@@ -222,7 +160,7 @@ func (t *FindTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (
 		return poo.ToolResult{}, fmt.Errorf("%s: prepared value is not a %s call", FindToolName, FindToolName)
 	}
 	if env.Decider == nil {
-		return unavailable(), nil
+		return t.unavailable(), nil
 	}
 	entries := t.offered
 	// Two entries of different dispatchers may share a name, and a question
@@ -240,7 +178,7 @@ func (t *FindTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (
 		err = decide.ValidateAnswers(questions, answers)
 	}
 	if err != nil {
-		return unavailable(), nil
+		return t.unavailable(), nil
 	}
 
 	best := make([]ranked, 0, len(entries))
@@ -281,7 +219,7 @@ func (t *FindTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (
 // The name identifies the entry, and two entries of different dispatchers may
 // share one: the second is asked under the dispatcher's own name, so the
 // answers tell the two apart and each hit still reads by its own name.
-func questionIDs(entries []Offered) []string {
+func questionIDs(entries []cli.Offered) []string {
 	ids := make([]string, len(entries))
 	seen := make(map[string]bool, len(entries))
 	for i, entry := range entries {
@@ -301,8 +239,34 @@ func questionIDs(entries []Offered) []string {
 // unavailable and how to go on without it, and the cause stays in the
 // decision record. The result is the same whatever went wrong, so a
 // search never settles a run.
-func unavailable() poo.ToolResult {
-	return poo.ToolResult{Text: UnavailableText, IsError: true}
+func (t *FindTool) unavailable() poo.ToolResult {
+	return poo.ToolResult{Text: t.unavailableText(), IsError: true}
+}
+
+// unavailableText says where the names are when the search cannot answer.
+//
+// The view is what the session can reach, so each dispatcher it holds is
+// named with the argument that carries an entry's name: a model sent to a
+// tool the session does not offer, or to a search that just failed, has
+// nowhere to go. A view that holds no entry names no tool, and the prompt's
+// catalog is all that is left.
+func (t *FindTool) unavailableText() string {
+	var parts []string
+	for _, entry := range t.offered {
+		part := entry.Dispatcher + " takes " + strconv.Quote(entry.Argument)
+		if slices.Contains(parts, part) {
+			continue
+		}
+		parts = append(parts, part)
+	}
+	if len(parts) == 0 {
+		return UnavailableText
+	}
+	// The offering's order is the entries' own, so the words are ordered by the
+	// call: the same dispatchers read the same way whatever the entries are
+	// called.
+	sort.Strings(parts)
+	return "tool search unavailable; " + strings.Join(parts, ", or ")
 }
 
 // findQuestion asks whether one entry fits the intent.
@@ -310,7 +274,7 @@ func unavailable() poo.ToolResult {
 // The question names the entry the way the model writes it, and says what
 // calls it: a model that answered for the wrong dispatcher would still have
 // chosen the same tool.
-func findQuestion(entry Offered, id, intent string) decide.Question {
+func findQuestion(entry cli.Offered, id, intent string) decide.Question {
 	return decide.Question{
 		ID: id,
 		Instructions: fmt.Sprintf("Does %q fit this intent? The intent is %q. The tool: %s It is called with %s.",
@@ -343,7 +307,7 @@ func result(intent string, total int, hits []ranked) poo.ToolResult {
 	fmt.Fprintf(&b, "%d of %d tools fit %q, best first:\n", len(hits), total, intent)
 	for _, r := range hits {
 		fmt.Fprintf(&b, "%s%s: %s\n  args: %s\n  call it with %s, passing %q as %q.\n",
-			r.entry.Name, hintOf(r.entry), r.entry.Description, string(marshal(r.entry.Schema)),
+			r.entry.Name, r.entry.Hint(), r.entry.Description, string(marshal(r.entry.Schema)),
 			r.entry.Dispatcher, r.entry.Name, r.entry.Argument)
 	}
 
@@ -356,18 +320,6 @@ func result(intent string, total int, hits []ranked) poo.ToolResult {
 		structured = []byte("{}")
 	}
 	return poo.ToolResult{Text: strings.TrimRight(b.String(), "\n"), Structured: structured}
-}
-
-// hintOf renders an entry's own claim about itself, or nothing when it makes
-// none.
-func hintOf(entry Offered) string {
-	switch {
-	case entry.ReadOnly:
-		return " (read-only)"
-	case entry.Destructive:
-		return " (destructive)"
-	}
-	return ""
 }
 
 // found is one entry of a search's structured result.

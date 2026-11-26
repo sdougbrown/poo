@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/cli"
 	"github.com/sdougbrown/poo/config"
 	"github.com/sdougbrown/poo/exec"
 	"github.com/sdougbrown/poo/mcp"
@@ -76,6 +77,9 @@ func (g *stubGroup) Close() error {
 	}
 	return errors.Join(errs...)
 }
+
+// Offered returns the entries the servers hold: the tests' stubs list none.
+func (g *stubGroup) Offered() []cli.Offered { return nil }
 
 // recorded returns the launches the launcher saw.
 func (l *recordingLauncher) recorded() []string {
@@ -418,6 +422,10 @@ type childCloser struct {
 
 // Close stops the child.
 func (c childCloser) Close() error { return c.kill() }
+
+// Offered returns no entry: the handle stands for a child process, and the
+// test reads none of its tools.
+func (childCloser) Offered() []cli.Offered { return nil }
 
 // failingSessionStart is a session-start hook that always fails.
 type failingSessionStart struct{}

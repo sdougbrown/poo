@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/cli"
 	"github.com/sdougbrown/poo/codemode/quickjs"
 	codemodestarlark "github.com/sdougbrown/poo/codemode/starlark"
 	"github.com/sdougbrown/poo/config"
@@ -112,15 +113,18 @@ func linkedTools() map[string]config.ToolFactory {
 			return cliregistry.NewCall(opts.Registry).WithSearch(opts.Search).WithSessionTools(opts.ToolNames).WithExecutor(opts.Executor)
 		},
 		"find_tool": func(opts config.ToolOptions) poo.Tool {
-			// The catalog the settings hand over is the one behind call_cli: a
-			// catalog short enough to show is offered entry by entry instead,
-			// and a session that offers its entries directly offers no search
-			// over them. The MCP tools behind call_mcp join it here.
-			find := cliregistry.NewFind(opts.Registry)
-			return find.WithOffered(offeredMCP(opts.MCP))
+			// The search narrows the session's snapshot: the catalog's entries,
+			// and the MCP tools behind call_mcp. Those are already the entries
+			// the session can reach, so the search offers nothing the model
+			// cannot call.
+			return cliregistry.NewFind(opts.Offered)
 		},
 		"call_mcp": func(opts config.ToolOptions) poo.Tool {
-			return callmcp.New(mcpServers(opts.MCP)).WithInputs(opts.Inputs...).WithSearch(offersTool(opts.ToolNames, cliregistry.FindToolName))
+			// The call lists the MCP entries of the same snapshot, and its
+			// refusal points at the search only when the session offers one.
+			return callmcp.New(mcpServers(opts.MCP), opts.Offered).
+				WithInputs(opts.Inputs...).
+				WithSearch(offersTool(opts.ToolNames, cliregistry.FindToolName))
 		},
 	}
 }
@@ -142,6 +146,13 @@ func (h *mcpSession) servers() []callmcp.Server {
 		servers = append(servers, &mcpServer{group: h.group, name: name})
 	}
 	return servers
+}
+
+// Offered returns every entry the servers hold: the package's own derivation
+// over the same per-server views the dispatch reads, so a handle is never
+// listed without being dispatchable.
+func (h *mcpSession) Offered() []cli.Offered {
+	return callmcp.Offered(h.servers())
 }
 
 // Close stops the servers and waits for their processes to end.
@@ -169,6 +180,11 @@ func (s *mcpServer) Tools() []mcp.Tool {
 	return tools
 }
 
+// Offered returns the server's tools as the entries the model reads.
+func (s *mcpServer) Offered() []cli.Offered {
+	return callmcp.Entries(s.name, s.Tools())
+}
+
 // CallTool calls one of them, qualifying the name the way the model writes it.
 func (s *mcpServer) CallTool(ctx context.Context, tool string, args json.RawMessage) (mcp.CallResult, error) {
 	return s.group.CallTool(ctx, s.name+"/"+tool, args)
@@ -191,35 +207,6 @@ func mcpServers(running []config.MCPRunning) []callmcp.Server {
 		servers = append(servers, session.servers()...)
 	}
 	return servers
-}
-
-// offeredMCP keeps the MCP tools a session started as entries a search can
-// return, each naming the call that runs it.
-//
-// The search is the one tool over both offerings: a hit for an MCP tool says
-// call_mcp and the tool's qualified name, the way a hit for a registered
-// command says call_cli and its command.
-func offeredMCP(running []config.MCPRunning) []cliregistry.Offered {
-	var offered []cliregistry.Offered
-	for _, server := range mcpServers(running) {
-		for _, tool := range server.Tools() {
-			entry := cliregistry.Offered{
-				Name:        server.Name() + "/" + tool.Name,
-				Description: tool.Description,
-				Dispatcher:  callmcp.CallToolName,
-				Argument:    callmcp.NameArgument,
-				ReadOnly:    tool.Annotations.ReadOnlyHint,
-				Destructive: tool.Annotations.DestructiveHint,
-			}
-			if len(tool.InputSchema) > 0 {
-				// A schema that does not parse is no hint at all: the entry is
-				// still callable, and the server judges the arguments.
-				_ = json.Unmarshal(tool.InputSchema, &entry.Schema)
-			}
-			offered = append(offered, entry)
-		}
-	}
-	return offered
 }
 
 // offersTool reports whether a session's tool list holds a name.

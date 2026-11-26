@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/cli"
 	"github.com/sdougbrown/poo/codemode"
 	"github.com/sdougbrown/poo/compact/mine"
 	"github.com/sdougbrown/poo/compact/pointer"
@@ -64,10 +65,10 @@ func theTools() map[string]config.ToolFactory {
 			return cliregistry.NewCall(opts.Registry).WithSearch(opts.Search).WithExecutor(opts.Executor)
 		},
 		"find_tool": func(opts config.ToolOptions) poo.Tool {
-			return cliregistry.NewFind(opts.Registry).WithOffered(offeredMCP(opts.MCP))
+			return cliregistry.NewFind(opts.Offered)
 		},
 		"call_mcp": func(opts config.ToolOptions) poo.Tool {
-			return callmcp.New(mcpServers(opts.MCP)).
+			return callmcp.New(mcpServers(opts.MCP), opts.Offered).
 				WithInputs(opts.Inputs...).
 				WithSearch(offersTool(opts.ToolNames, cliregistry.FindToolName))
 		},
@@ -1715,6 +1716,9 @@ func (r *stubRunning) Close() error {
 	r.closed++
 	return nil
 }
+
+// Offered returns no entry: a handle that starts nothing lists no tool.
+func (r *stubRunning) Offered() []cli.Offered { return nil }
 
 // closes returns how many times the handle was closed.
 func (r *stubRunning) closes() int {

@@ -47,7 +47,7 @@ func TestServersKeepTheirEnvironmentForLaterSessions(t *testing.T) {
 		"call_cli": func(o config.ToolOptions) poo.Tool {
 			return cliregistry.NewCall(o.Registry).WithSearch(o.Search).WithExecutor(o.Executor)
 		},
-		"find_tool": func(o config.ToolOptions) poo.Tool { return cliregistry.NewFind(o.Registry) },
+		"find_tool": func(o config.ToolOptions) poo.Tool { return cliregistry.NewFind(o.Offered) },
 	}}
 	servers := make([]*server.Server, 0, 2)
 	seen := make([][]string, 2)

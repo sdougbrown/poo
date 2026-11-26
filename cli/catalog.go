@@ -32,6 +32,9 @@ const (
 	// SectionName is the name of the prompt section that lists the
 	// catalog.
 	SectionName = "catalog"
+	// CommandArgument is the call tool's argument that names a registered
+	// command.
+	CommandArgument = "command"
 )
 
 // FindThreshold is the number of entries above which a session with a
@@ -54,6 +57,52 @@ type Entry struct {
 	// name order, required ones marked, an enum's values in brackets,
 	// or an empty string when the schema declares no properties.
 	Args string
+}
+
+// Offered is one entry the model reaches through a tool that calls it.
+//
+// A session offers two kinds of entry: the catalog's registered commands,
+// which the call tool runs, and the MCP tools its servers listed, which the
+// MCP call runs. A search narrows both, and a session's prompt lists both the
+// same way, so both become this one shape and each entry names the tool that
+// calls it: a name alone does not say which call reaches it.
+//
+// A session's snapshot is this shape. The catalog's own entries are its
+// registered commands, and the binary's MCP client supplies the rest through
+// the launcher's handles. What the model reads is one value, built once.
+type Offered struct {
+	// Name is the name the model passes to the dispatcher.
+	Name string
+	// Description is what the entry does.
+	Description string
+	// Schema is the JSON schema of the entry's arguments.
+	Schema map[string]any
+	// Args renders the schema's top-level arguments for a prompt line or a
+	// hit, in name order, or an empty string when the entry declares no
+	// arguments.
+	Args string
+	// Dispatcher is the tool that calls this entry.
+	Dispatcher string
+	// Argument is the dispatcher's argument that names the entry.
+	Argument string
+	// ReadOnly and Destructive are the entry's own hints about itself, and
+	// zero for an entry that gives none. They are hints, never a permission
+	// class.
+	ReadOnly    bool
+	Destructive bool
+}
+
+// Hint renders the entry's own claim about itself, parenthesized and ready for
+// a line, or empty when it makes none. It says what the entry claims, never
+// what calling it is allowed to do.
+func (o Offered) Hint() string {
+	switch {
+	case o.ReadOnly:
+		return " (read-only)"
+	case o.Destructive:
+		return " (destructive)"
+	}
+	return ""
 }
 
 // Catalog is the set of registered tools a session offers.
@@ -118,6 +167,26 @@ func (c *Catalog) Entries() []Entry {
 		return nil
 	}
 	return append([]Entry(nil), c.entries...)
+}
+
+// Offered returns the registered tools as the entries the call tool runs.
+//
+// A catalog the profile's rules withdrew is nil, and its entries are no
+// entries: a session that offers none of it reaches none of it.
+func (c *Catalog) Offered() []Offered {
+	entries := c.Entries()
+	out := make([]Offered, 0, len(entries))
+	for _, entry := range entries {
+		out = append(out, Offered{
+			Name:        entry.Name,
+			Description: entry.Description,
+			Schema:      entry.Schema,
+			Args:        entry.Args,
+			Dispatcher:  CallToolName,
+			Argument:    CommandArgument,
+		})
+	}
+	return out
 }
 
 // Lookup returns the entry for a name, and whether there is one.

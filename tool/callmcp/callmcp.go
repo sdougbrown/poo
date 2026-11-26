@@ -78,6 +78,9 @@ type Server interface {
 type Tool struct {
 	// servers are the servers the session started, in selection order.
 	servers []Server
+	// offered are this call's own entries, read from the session's snapshot
+	// when the tool is built and in qualified-name order.
+	offered []cli.Offered
 	// search reports that the session offers find_tool over the MCP tools,
 	// so an unknown name can point at the search, and a long offering can be
 	// left to it.
@@ -89,9 +92,73 @@ type Tool struct {
 
 // New returns the tool over the servers a session started.
 //
-// A session with no server gets a tool that calls nothing: the build's own
-// instance is that one, and the attach replaces it with the session's.
-func New(servers []Server) *Tool { return &Tool{servers: servers} }
+// The offered entries are the session's snapshot, the one value the search
+// over the same offering reads: this call lists the entries it dispatches, and
+// find_tool searches all of them. A build hands it an empty snapshot, because
+// a build starts no server; the attach replaces the tool with the session's
+// own.
+func New(servers []Server, offered []cli.Offered) *Tool {
+	return &Tool{servers: servers, offered: dispatched(offered)}
+}
+
+// Entries returns the entries one server's listed tools become.
+//
+// This is the one place a server's tools become what the model reads: the
+// entries a search returns, a hit names, and a catalog line lists are the same
+// value, so the two never disagree about a tool's name, arguments or hints.
+//
+// A tool's schema is the server's own and may be absent. A schema that does not
+// parse is no hint at all, so the entry carries the description alone and the
+// call is still the server's to judge.
+func Entries(server string, tools []mcp.Tool) []cli.Offered {
+	entries := make([]cli.Offered, 0, len(tools))
+	for _, tool := range tools {
+		entry := cli.Offered{
+			Name:        qualify(server, tool.Name),
+			Description: tool.Description,
+			Dispatcher:  CallToolName,
+			Argument:    NameArgument,
+			ReadOnly:    tool.Annotations.ReadOnlyHint,
+			Destructive: tool.Annotations.DestructiveHint,
+		}
+		if len(tool.InputSchema) > 0 {
+			if err := json.Unmarshal(tool.InputSchema, &entry.Schema); err != nil {
+				entry.Schema = nil
+			}
+		}
+		entry.Args = schematext.ArgsHint(entry.Schema)
+		entries = append(entries, entry)
+	}
+	return entries
+}
+
+// Offered returns every entry the servers hold, in selection order.
+//
+// It is Entries over a list of servers, for a caller that holds the servers and
+// not a launcher's handles: the session's snapshot asks each handle for its own
+// entries with Entries, and the two agree because they are one adapter.
+func Offered(servers []Server) []cli.Offered {
+	var entries []cli.Offered
+	for _, server := range servers {
+		entries = append(entries, Entries(server.Name(), server.Tools())...)
+	}
+	return entries
+}
+
+// dispatched returns the entries this call dispatches, in qualified-name order.
+// The snapshot also holds the entries another call runs, and they are that
+// tool's to describe.
+func dispatched(entries []cli.Offered) []cli.Offered {
+	own := make([]cli.Offered, 0, len(entries))
+	for _, entry := range entries {
+		if entry.Dispatcher != CallToolName {
+			continue
+		}
+		own = append(own, entry)
+	}
+	sort.SliceStable(own, func(i, j int) bool { return own[i].Name < own[j].Name })
+	return own
+}
 
 // WithSearch says whether the session offers a search over the MCP tools.
 func (t *Tool) WithSearch(search bool) *Tool {
@@ -192,67 +259,15 @@ type catalogData struct {
 	Call     string
 	Argument string
 	// Tools are the tools, in qualified-name order.
-	Tools []catalogTool
-}
-
-// catalogTool is one line of the catalog.
-type catalogTool struct {
-	// Name is the tool's qualified name, as the model writes it.
-	Name string
-	// Description is what the server said the tool does.
-	Description string
-	// Args renders the tool's arguments for the line.
-	Args string
-	// Hint is the server's own claim about the tool, parenthesized and
-	// ready for the line, or empty when the server made none. It is a hint
-	// about the tool and never a permission class.
-	Hint string
+	Tools []cli.Offered
 }
 
 // listing returns every tool the session's servers offer, by qualified name.
-func (t *Tool) listing() []catalogTool {
-	var tools []catalogTool
-	for _, server := range t.servers {
-		for _, tool := range server.Tools() {
-			// A tool's schema is the server's own and may be absent. A schema
-			// that does not parse is no hint at all, so the line carries the
-			// description alone and the call is still the server's to judge.
-			var schema map[string]any
-			if len(tool.InputSchema) > 0 {
-				_ = json.Unmarshal(tool.InputSchema, &schema)
-			}
-			tools = append(tools, catalogTool{
-				Name:        qualify(server.Name(), tool.Name),
-				Description: tool.Description,
-				Args:        schematext.ArgsHint(schema),
-				Hint:        hintOf(tool.Annotations),
-			})
-		}
-	}
-	sort.Slice(tools, func(i, j int) bool { return tools[i].Name < tools[j].Name })
-	return tools
-}
+func (t *Tool) listing() []cli.Offered { return t.offered }
 
 // qualify names one tool the way the model writes it: its server's name, a
 // slash, its own.
 func qualify(server, tool string) string { return server + "/" + tool }
-
-// hintOf renders the server's own claim about a tool, or nothing when it made
-// none.
-//
-// A read-only tool is one a call cannot change anything with; a destructive one
-// may destroy what it touches, and the protocol reads a server that said
-// nothing as one whose tool is destructive. The hint says what the server
-// claims, never what this call is allowed to do.
-func hintOf(annotations mcp.ToolAnnotations) string {
-	switch {
-	case annotations.ReadOnlyHint:
-		return " (read-only)"
-	case annotations.DestructiveHint:
-		return " (destructive)"
-	}
-	return ""
-}
 
 // callArgs are the tool's arguments.
 type callArgs struct {
