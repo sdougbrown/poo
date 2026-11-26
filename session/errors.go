@@ -100,6 +100,13 @@ func (e *Error) Is(target error) bool {
 	return other.Code == e.Code
 }
 
+// LeaseLost reports whether the failure is the lost lease.
+//
+// The core names this failure through the method, not the type: the
+// core cannot import this package, and a method is the one shape both
+// sides can name without the cycle.
+func (e *Error) LeaseLost() bool { return e.Code == CodeLeaseLost }
+
 // CodeOf returns the code an error carries, and whether it carried one.
 //
 // An error that is not a store error carries no code.

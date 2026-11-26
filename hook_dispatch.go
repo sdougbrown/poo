@@ -246,6 +246,17 @@ func (s *Session) appendStartMessages(run *runState, decisions startDecisions) {
 // The hooks run on every turn, tool-free turns included, and every hook
 // still runs even when one of them asks the run to stop.
 func (s *Session) runAfterTurn(run *runState, turn int, interrupted bool) (appended bool, stop *candidate) {
+	return s.runAfterTurnFrom(run, turn, interrupted, 0, false)
+}
+
+// runAfterTurnFrom runs the AfterTurn hooks from the position a resumed run
+// stopped at.
+//
+// A continuation re-runs only the hooks that declared themselves safe to
+// run twice: a hook whose start the log cut short may have changed
+// something the session cannot see. A hook the run skips is noted on the
+// log, so a reader knows the turn's chain was not run in full.
+func (s *Session) runAfterTurnFrom(run *runState, turn int, interrupted bool, from int, resumed bool) (appended bool, stop *candidate) {
 	if len(s.opts.AfterTurn) == 0 {
 		return false, nil
 	}
@@ -256,6 +267,15 @@ func (s *Session) runAfterTurn(run *runState, turn int, interrupted bool) (appen
 	defer s.endActivity(run)
 	ctx := s.activityContext(&run.callOwner)
 	for i, h := range s.opts.AfterTurn {
+		if i < from {
+			continue
+		}
+		if resumed && !isIdempotentHook(h) {
+			// The hook may have run before the crash, and running it
+			// again is not safe, so the run skips it and says so.
+			s.writeHookSkipped(run, turn, "after_turn", i, interrupted)
+			continue
+		}
 		if !s.writeTurnHook(run, turn, "after_turn", "started", i, interrupted) {
 			// The hook's start did not land, so the hook must not run: a
 			// durable session reads the record as the log of what ran. A
@@ -313,6 +333,16 @@ func (s *Session) runAfterTurn(run *runState, turn int, interrupted bool) (appen
 // Continue sends the run back to the model, and the run's continuation
 // count decides how many of those it may take.
 func (s *Session) runBeforeSettle(run *runState, turn int, natural Reason) (SettleDecision, bool, error) {
+	return s.runBeforeSettleFrom(run, turn, natural, 0, false)
+}
+
+// runBeforeSettleFrom runs the BeforeSettle hooks from the position a
+// resumed run stopped at.
+//
+// The rules are the AfterTurn chain's: a hook the log cut short runs again
+// only when it declared itself safe to, and one that does not is noted and
+// skipped.
+func (s *Session) runBeforeSettleFrom(run *runState, turn int, natural Reason, from int, resumed bool) (SettleDecision, bool, error) {
 	if len(s.opts.BeforeSettle) == 0 {
 		return SettleDecision{Accepted: true}, false, nil
 	}
@@ -324,6 +354,13 @@ func (s *Session) runBeforeSettle(run *runState, turn int, natural Reason) (Sett
 	ctx := s.activityContext(&run.callOwner)
 	var continues []hookAppend
 	for i, h := range s.opts.BeforeSettle {
+		if i < from {
+			continue
+		}
+		if resumed && !isIdempotentHook(h) {
+			s.writeHookSkipped(run, turn, "before_settle", i, false)
+			continue
+		}
 		if !s.writeTurnHook(run, turn, "before_settle", "started", i, false) {
 			// The hook's start did not land, so the hook must not run: a
 			// durable session reads the record as the log of what ran. A
@@ -412,6 +449,36 @@ func (s *Session) writeTurnHook(run *runState, turn int, phase, status string, i
 		return false
 	}
 	return true
+}
+
+// hookStatusSkipped is the status of a hook a continuation did not run.
+//
+// The record is not a start and not an end: it says the hook was left out
+// of a resumed turn, so a reader of the log does not read the turn's chain
+// as complete.
+const hookStatusSkipped = "skipped"
+
+// writeHookSkipped notes a hook a continuation left out of a resumed turn.
+//
+// The note goes through the same claimed-write gate as a hook's own
+// records. A refused write has already settled the run broken.
+func (s *Session) writeHookSkipped(run *runState, turn int, phase string, index int, interrupted bool) {
+	gate, ok := s.beginWrite("turn.hook")
+	if !ok {
+		return
+	}
+	rec := &TurnHookRecord{
+		RecordMeta:  NewRecordMeta("turn.hook"),
+		RunID:       run.id,
+		Turn:        turn,
+		Phase:       phase,
+		Status:      hookStatusSkipped,
+		HookIndex:   index,
+		Interrupted: interrupted,
+	}
+	if err := s.writeClaimed(context.Background(), rec, gate); err != nil {
+		s.noteStoreError(&run.callOwner, err)
+	}
 }
 
 // hookContinueLimitError reports that a run asked for more

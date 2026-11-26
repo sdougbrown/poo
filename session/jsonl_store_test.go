@@ -275,14 +275,37 @@ func (m migratingCodec) Migrate(from string, lines [][]byte) ([][]byte, error) {
 	return lines, nil
 }
 
-// TestADurableSessionIsRefused covers the reserved mode.
-func TestADurableSessionIsRefused(t *testing.T) {
-	_, store := newTestStore(t)
+// TestADurableSessionIsCreatedAndLoaded covers the mode: the store creates
+// one, and the load reads it back as a session whose mode the check accepts.
+func TestADurableSessionIsCreatedAndLoaded(t *testing.T) {
+	dir, store := newTestStore(t)
 	ctx := context.Background()
 
 	header := createdRecord("s1")
 	header.Mode = string(ModeDurable)
-	_, err := store.Create(ctx, header)
+	if _, err := store.Create(ctx, header); err != nil {
+		t.Fatalf("the creation returned %v, want a durable session", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("closing the store: %v", err)
+	}
+	reopened, err := NewStore(dir)
+	if err != nil {
+		t.Fatalf("opening the store: %v", err)
+	}
+	defer reopened.Close()
+	loaded, err := reopened.Load(ctx, "s1")
+	if err != nil {
+		t.Fatalf("the load returned %v, want the durable session", err)
+	}
+	if loaded.Metadata.Mode != ModeDurable {
+		t.Errorf("the loaded mode is %q, want %q", loaded.Metadata.Mode, ModeDurable)
+	}
+
+	// An unknown mode is still refused, with the code the wire reads.
+	other := createdRecord("s2")
+	other.Mode = "nonsense"
+	_, err = reopened.Create(ctx, other)
 	if !errors.Is(err, ErrUnsupportedMode) {
 		t.Fatalf("the creation returned %v, want an unsupported mode", err)
 	}

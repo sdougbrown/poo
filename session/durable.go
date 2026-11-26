@@ -2,7 +2,6 @@ package session
 
 import (
 	"context"
-	"encoding/json"
 	"time"
 
 	"github.com/sdougbrown/poo"
@@ -48,6 +47,23 @@ const (
 const (
 	decisionAllow = "allow"
 	decisionDeny  = "deny"
+)
+
+// The continuation's own types live in the core, because the core is what
+// carries one out: the plan a store makes is the plan a restore resumes.
+// The names are the session package's, so a caller of the store and a
+// caller of the core talk about the same values.
+type (
+	// ContinuationPlan is what a durable session does next.
+	ContinuationPlan = poo.ContinuationPlan
+	// PlannedCall is a call the continuation runs again.
+	PlannedCall = poo.PlannedCall
+	// PlannedAsk is a permission ask the continuation waits on again.
+	PlannedAsk = poo.PlannedAsk
+	// PlannedInput is an input the continuation delivers.
+	PlannedInput = poo.PlannedInput
+	// HookResume is the turn hook a run resumes inside.
+	HookResume = poo.HookResume
 )
 
 // DurableOptions configures the durable planner.
@@ -96,127 +112,6 @@ func (o DurableOptions) lookup(tool string) (poo.ToolInfo, bool) {
 		}
 	}
 	return poo.ToolInfo{}, false
-}
-
-// ContinuationPlan is what a durable session does next.
-//
-// The plan names the work a continuation resumes, and the state it resumes
-// in. It is what the recovery leaves: the records that had to be resolved
-// without the model are already on the log, and everything here is the
-// continuation's.
-type ContinuationPlan struct {
-	// SessionID identifies the session.
-	SessionID string
-	// RunID identifies the run that continues.
-	RunID string
-	// Turn is the last turn the run recorded a record in.
-	Turn int
-	// Phase is where the run resumes.
-	Phase poo.State
-	// Hook is the turn hook the run resumes inside, and nil when the run
-	// did not stop in one.
-	Hook *HookResume
-	// ReplayCalls are the calls to run again, in the order the model made
-	// them.
-	ReplayCalls []PlannedCall
-	// LiveAsks are the asks the run still waits on, in the order it asked
-	// them.
-	LiveAsks []PlannedAsk
-	// PendingInputs are the inputs that never reached the model, in the
-	// order they were queued. The continuation delivers them; the plan
-	// writes no record for them, so an input a crash left queued is still
-	// the user's message.
-	PendingInputs []PlannedInput
-	// Subscriptions are the feed instances to take on again, in the order
-	// they first subscribed.
-	Subscriptions []PendingSubscription
-	// Resumptions is how many times the run was resumed before this plan:
-	// the count the resumption budget is spent from.
-	Resumptions int
-	// PartialDiscarded reports that the run's last reply was cut short,
-	// and that the continuation drops it.
-	PartialDiscarded bool
-	// CompactionDiscarded reports that the run stopped with a compaction
-	// as its last record, and that the continuation discards it and
-	// decides again at the next request.
-	CompactionDiscarded bool
-}
-
-// PlannedCall is a call the continuation runs again.
-type PlannedCall struct {
-	// RunID identifies the run the call belongs to.
-	RunID string
-	// Turn is the turn the call belongs to.
-	Turn int
-	// Handle is the call's identifier within the turn.
-	Handle string
-	// CallID is the provider's id of the call.
-	CallID string
-	// Tool is the name of the tool the model called.
-	Tool string
-	// Arguments are the call's arguments, as the model gave them.
-	Arguments json.RawMessage
-	// Class is the tool's class, and Idempotent says whether the tool
-	// declared that running it twice is safe. Both are zero for a tool the
-	// session no longer knows.
-	Class      poo.ToolKind
-	Idempotent bool
-	// Reason says why the call is replayed: PlanReasonReadOnly,
-	// PlanReasonIdempotent or PlanReasonNotStarted.
-	Reason string
-}
-
-// PlannedAsk is a permission ask the continuation waits on again.
-type PlannedAsk struct {
-	// RunID identifies the run that is waiting.
-	RunID string
-	// AskID names the ask.
-	AskID string
-	// Tool is the name of the tool the model called.
-	Tool string
-	// Summary describes the call.
-	Summary string
-	// Class is the tool's class.
-	Class poo.ToolKind
-	// Reason is why the call is being asked about.
-	Reason poo.AskReason
-	// Deadline is the wall-clock time the ask expires, and the zero time
-	// when it has none; the continuation asks again with this deadline,
-	// not with a fresh one.
-	Deadline time.Time
-	// Fallback is the decision the ask resolves to when the deadline
-	// passes.
-	Fallback string
-}
-
-// PlannedInput is an input the continuation delivers.
-type PlannedInput struct {
-	// InputID is the input's identifier.
-	InputID string
-	// RunID identifies the run the input belongs to.
-	RunID string
-	// Mode is how the input was accepted.
-	Mode poo.InputMode
-	// Text is the message the input carries.
-	Text string
-	// DeliveryNote says how much of the previous reply the user had seen,
-	// when the input carries one.
-	DeliveryNote *poo.DeliveryNote
-	// Attachments are the files the input carries beside its text.
-	Attachments []poo.Attachment
-}
-
-// HookResume is the turn hook a run resumes inside.
-type HookResume struct {
-	// Phase is the hook's phase: hookPhaseAfterTurn or
-	// hookPhaseBeforeSettle.
-	Phase string
-	// HookIndex is the position in the chain the run resumes at: the hook
-	// whose start the log never ended.
-	HookIndex int
-	// Interrupted reports that the turn was being interrupted as the hook
-	// ran.
-	Interrupted bool
 }
 
 // DurablePlanner plans what a durable session does next, instead of
@@ -306,17 +201,26 @@ func (p DurablePlanner) Plan(ctx context.Context, sink poo.RecordSink, pend *Pen
 	var expired []expiredAsk
 	for _, ask := range run.Asks {
 		if live(now, ask) {
-			plan.LiveAsks = append(plan.LiveAsks, PlannedAsk{
+			// A live ask carries the call it is about, so the
+			// continuation asks about the same call
+			// (pendingAskCall) and so the restore knows the call the
+			// resumed run answers.
+			planned := PlannedAsk{
 				RunID:    ask.RunID,
 				AskID:    ask.AskID,
+				Handle:   ask.Handle,
+				CallID:   ask.CallID,
 				Tool:     ask.Tool,
 				Summary:  ask.Summary,
 				Class:    ask.Class,
 				Reason:   ask.Reason,
 				Deadline: ask.Deadline,
 				Fallback: ask.Fallback,
-			})
-			claimCall(run, ask, claimed)
+			}
+			if call, ok := claimCall(run, ask, claimed); ok {
+				planned.Arguments = call.Arguments
+			}
+			plan.LiveAsks = append(plan.LiveAsks, planned)
 			continue
 		}
 		if askDecision(ask) == decisionAllow {

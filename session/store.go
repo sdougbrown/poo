@@ -30,21 +30,23 @@ const (
 	// length of the process. Nothing is written, and there is nothing
 	// to load.
 	ModeEphemeral Mode = "ephemeral"
-	// ModeDurable is reserved. v1 marks an interrupted run and moves
-	// on; a durable session continues it.
+	// ModeDurable stores the session's records in a file and continues a
+	// run a crash left unsettled. The file is the session's, locked and
+	// recovered the way a logged one is; where a logged session settles
+	// the pending operations it finds, a durable session plans a
+	// continuation and the restored session resumes the run.
 	ModeDurable Mode = "durable"
 )
 
 // CheckMode returns the failure a mode names, when this build does not
 // support it.
 //
-// A durable session is refused with ErrUnsupportedMode.
+// The three modes are the ones this build offers. An unknown mode is
+// refused with CodeUnsupportedMode.
 func CheckMode(mode Mode) error {
 	switch mode {
-	case ModeLogged, ModeEphemeral:
+	case ModeLogged, ModeEphemeral, ModeDurable:
 		return nil
-	case ModeDurable:
-		return ErrUnsupportedMode
 	}
 	return &Error{Code: CodeUnsupportedMode, Message: "unknown persistence mode: " + string(mode)}
 }
@@ -285,8 +287,7 @@ func (s *FileStore) path(id string) string {
 // never a session. The store's authority is taken before the first
 // record is written, and it is held until the store closes.
 //
-// The created record's mode must be a mode this build supports: a
-// durable session is refused with ErrUnsupportedMode.
+// The created record's mode must be a mode this build supports.
 func (s *FileStore) Create(ctx context.Context, created *poo.SessionCreatedRecord) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -433,11 +434,13 @@ func (s *FileStore) writeSessionFile(ctx context.Context, path string, created *
 // taken for a load that failed is given up before the failure is
 // returned.
 //
-// The load recovers the session: a torn tail is truncated, an unsettled
-// run is marked interrupted, an unfinished job is ended, and an input
-// that never reached the model is dropped. The recovery is idempotent,
-// so a load that failed partway is finished by the next one, without
-// writing a record twice.
+// The load recovers the session: a torn tail is truncated, an
+// unfinished job is ended, and an input that never reached the model is
+// dropped. A logged session's unsettled run is marked interrupted; a
+// durable session's is planned for a continuation, which the load
+// returns as the session's plan. The recovery is idempotent, so a load
+// that failed partway is finished by the next one, without writing a
+// record twice.
 func (s *FileStore) Load(ctx context.Context, id string) (*Loaded, error) {
 	if err := ValidateID(id); err != nil {
 		return nil, err
@@ -681,6 +684,22 @@ func (s *FileStore) Append(ctx context.Context, rec poo.Record) error {
 		}
 	}
 	return nil
+}
+
+// LeaseLost is the channel that closes when the open session's lease is
+// lost, and nil when the session's ownership is not a lease.
+//
+// A session that writes through a lease watches the channel: the lease it
+// lost fences every write, and the session's run stops at once. The flock
+// authority is never lost, so a store that holds one answers nil and the
+// session watches nothing.
+func (s *FileStore) LeaseLost() <-chan struct{} {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.open == nil || s.open.owner == nil {
+		return nil
+	}
+	return s.open.owner.LeaseLost()
 }
 
 // Flush pushes the open session's records out.

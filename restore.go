@@ -1,6 +1,7 @@
 package poo
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -162,6 +163,10 @@ type Restored struct {
 	Turns int `json:"turns"`
 	// Compactions is how many recorded compactions were applied.
 	Compactions int `json:"compactions"`
+	// PendingRun is the run a durable session has left to continue, and
+	// nil when there is none. The run is not carried out by the restore:
+	// ResumeRun does that.
+	PendingRun *PendingRunInfo `json:"pending_run,omitempty"`
 }
 
 // Restore rebuilds a session from the records of an earlier one.
@@ -175,6 +180,11 @@ type Restored struct {
 // inputs, are queued again, so they follow the session's idle policy
 // like any other result.
 //
+// A continuation the restore was given is stored on the session, not
+// carried out: the session holds the run, idle, until ResumeRun resumes
+// it, and the calls the plan replays are the only unanswered calls a
+// restore accepts. With WithAutoResume the restore resumes it itself.
+//
 // The session's feeds start once those results are queued, so a feed's
 // first input joins them instead of racing the hold.
 //
@@ -186,9 +196,6 @@ func Restore(opts Options, records []Record, fns ...Option) (*Session, Restored,
 	}
 	if created.Format != "" && created.Format != FormatVersion {
 		return nil, Restored{}, &CodecError{Format: created.Format, Expected: FormatVersion}
-	}
-	if created.Mode == "durable" {
-		return nil, Restored{}, &UnsupportedModeError{Mode: created.Mode}
 	}
 	restored := Restored{Metadata: created.Metadata()}
 
@@ -311,6 +318,12 @@ func Restore(opts Options, records []Record, fns ...Option) (*Session, Restored,
 		s.Close()
 		return nil, Restored{}, err
 	}
+	// The continuation is the session's to carry out, not the restore's:
+	// the run it resumes starts when the caller asks for it.
+	if plan := opts.continuation; plan != nil {
+		s.setPendingRun(plan)
+		restored.PendingRun = s.PendingRun()
+	}
 	if callID := s.unansweredCall(); callID != "" {
 		s.Close()
 		return nil, Restored{}, &UnansweredCallError{CallID: callID}
@@ -322,6 +335,12 @@ func Restore(opts Options, records []Record, fns ...Option) (*Session, Restored,
 		restored.Jobs = append(restored.Jobs, publicJobResult(job))
 	}
 	s.startFeeds()
+	if opts.autoResume && restored.PendingRun != nil {
+		// A caller that wants the run carried on without asking for it
+		// gets the run's id; a resume that settles at once (a store
+		// failure, say) is not the restore's to report as a failure.
+		_, _ = s.ResumeRun(context.Background())
+	}
 	return s, restored, nil
 }
 
@@ -631,6 +650,9 @@ func (s *Session) rebuild(records []Record, out *Restored) error {
 	s.turnSeq = offset
 	s.turns = make([]TurnSummary, 0, offset)
 	s.spans = make([]turnSpan, 0, offset)
+	// The numbering is kept: a resumed run reads the number of the turn it
+	// stopped in, and continues the session's counter from there.
+	s.sessionTurns = sessionTurn
 	for _, id := range runs {
 		for t := 1; t <= runTurns[id]; t++ {
 			// The map is the numbering the records were written with, so
@@ -1009,7 +1031,13 @@ func handleInText(text string) string {
 // A request carries the view, so an unanswered call is a request the
 // provider rejects. The restore refuses it rather than handing back a
 // session whose first request fails.
+//
+// A continuation is the one exception: the calls it replays and the asks
+// it re-asks are answered by the run it resumes, so they are paired by
+// the resumed run rather than by the records. The calls the plan covers
+// are left out of the check.
 func (s *Session) unansweredCall() string {
+	covered, _ := s.pendingCoveredCalls()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var calls []string
@@ -1025,9 +1053,10 @@ func (s *Session) unansweredCall() string {
 		}
 	}
 	for _, id := range calls {
-		if !results[id] {
-			return id
+		if results[id] || covered[id] {
+			continue
 		}
+		return id
 	}
 	return ""
 }

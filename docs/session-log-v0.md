@@ -564,7 +564,7 @@ short: its start has no end, and its end may say it was interrupted.
 | `run_id` | string | The run the hook belongs to. |
 | `turn` | integer | The turn the hook runs in. |
 | `phase` | string | The hook's phase: `"after_turn"` or `"before_settle"`. |
-| `status` | string | The record's status: `"started"` or `"ended"`. |
+| `status` | string | The record's status: `"started"`, `"ended"`, or `"skipped"` for a hook a resumed turn left out because it is not safe to run twice. |
 | `hook_index` | integer | The hook's position in the chain, counting from 0. |
 | `interrupted` | boolean | `true` when the hook's turn was ended by an interrupt. Set on the hook's records along the interrupted path, so a crash between them keeps the fact on the started record. Absent when it was not. |
 

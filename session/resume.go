@@ -23,11 +23,17 @@ type Resumed struct {
 // Resume loads a session from a store and restores it.
 //
 // The load takes the session's authority, recovers the session and
-// reads its records: a torn tail is truncated, an unsettled run is
-// marked interrupted, an unfinished job is ended, and an input that
-// never reached the model is dropped. The restore rebuilds a session
-// from those records, and the job results that were never delivered are
-// queued again.
+// reads its records: a torn tail is truncated, an unfinished job is
+// ended, and an input that never reached the model is dropped. A logged
+// session's unsettled run is marked interrupted; a durable session's is
+// planned for a continuation. The restore rebuilds a session from those
+// records, and the job results that were never delivered are queued
+// again.
+//
+// A durable session's continuation is threaded into the restore, which
+// stores it on the session: the session holds it, idle, until ResumeRun
+// carries it out. poo.WithAutoResume makes the restore resume it before
+// returning.
 //
 // The restored session writes to the store it was loaded from. The
 // store holds the session's authority until it is closed, so a caller
@@ -47,6 +53,11 @@ func Resume(ctx context.Context, store Store, id string, opts poo.Options, fns .
 	}
 	opts.Sink = store
 	opts.SessionID = loaded.ID
+	// The plan is what the load left to carry on. It is the restore's,
+	// because the core is what drives a run: the store plans, and the
+	// session resumes. The slice is the caller's, so the option is added
+	// to a copy.
+	fns = append(append([]poo.Option(nil), fns...), poo.WithContinuation(loaded.Continuation))
 	sess, restored, err := poo.Restore(opts, loaded.Records, fns...)
 	if err != nil {
 		return nil, err

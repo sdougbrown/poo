@@ -1495,6 +1495,13 @@ func (s *Session) handleIdleJobResults() {
 		s.mu.Unlock()
 		return
 	}
+	// A session that holds a run to continue does not wake for a result:
+	// the result belongs to that run, and the resumption is what takes it.
+	// A woken run beside it would be a second run started on its behalf.
+	if s.pending != nil {
+		s.mu.Unlock()
+		return
+	}
 	if len(s.jobQueue) == 0 {
 		s.mu.Unlock()
 		return

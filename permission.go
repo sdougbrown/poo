@@ -124,6 +124,8 @@ func (r *permissionReporter) BeginPermission(ask PermissionAsk, opts PermissionR
 // seal either sees it or refuses it, and a request that arrives after
 // the seal resolves as cancelled without writing anything.
 func (s *Session) beginPermission(owner *callOwner, ask PermissionAsk, opts PermissionRequestOptions) *PermissionRequest {
+	askedBy := ask.AskID
+	ask, opts = s.armResumedAsk(ask, opts)
 	p := NewPermissionRequest(ask, opts)
 	p.logDrop = func(in PermissionTransition) {
 		s.logWarn("stale permission input dropped", slog.String("run_id", owner.id), slog.String("ask_id", ask.AskID), slog.Uint64("attempt", in.Attempt))
@@ -142,9 +144,67 @@ func (s *Session) beginPermission(owner *callOwner, ask PermissionAsk, opts Perm
 		return held
 	}
 	owner.asks[ask.AskID] = p
+	if askedBy != "" && askedBy != ask.AskID {
+		// A re-asked call takes the log's id, and the policy that asked
+		// knows this ask by its own. The request is one, so both names
+		// reach it: the policy's answer is not left looking for a request
+		// nothing registered.
+		owner.asks[askedBy] = p
+	}
 	s.mu.Unlock()
 	s.persistPermission(owner, p)
 	return p
+}
+
+// armResumedAsk gives a re-asked call the ask the log recorded.
+//
+// A continued run re-asks the question its records left unanswered, and
+// the question is the one the crashed run asked: the ask keeps the log's id
+// and the wall-clock deadline it was given, so an answer that arrives after
+// the restart answers the ask the client was already shown, and a deadline
+// that has not passed still has the time it had left. The plan's ask is
+// taken once, so the next ask of the same tool is a fresh one.
+func (s *Session) armResumedAsk(ask PermissionAsk, opts PermissionRequestOptions) (PermissionAsk, PermissionRequestOptions) {
+	s.mu.Lock()
+	index := -1
+	for i, planned := range s.resumedAsks {
+		if planned.Tool == ask.Tool {
+			index = i
+			break
+		}
+	}
+	if index < 0 {
+		s.mu.Unlock()
+		return ask, opts
+	}
+	planned := s.resumedAsks[index]
+	s.resumedAsks = append(s.resumedAsks[:index], s.resumedAsks[index+1:]...)
+	if planned.AskID != "" {
+		ask.AskID = planned.AskID
+	}
+	if !planned.Deadline.IsZero() {
+		opts.Deadline = planned.Deadline
+	}
+	if planned.Fallback != "" {
+		opts.Fallback = planned.Fallback
+	}
+	if s.awaiting == nil || s.awaiting.AskID == "" {
+		s.awaiting = &AwaitingInfo{Kind: AskKindPermission, AskID: ask.AskID, Deadline: opts.Deadline}
+	}
+	s.mu.Unlock()
+	return ask, opts
+}
+
+// clearAwaiting drops the published wait when the ask it names is answered.
+func (s *Session) clearAwaiting(askID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.awaiting == nil {
+		return
+	}
+	if askID == "" || s.awaiting.AskID == askID {
+		s.awaiting = nil
+	}
 }
 
 // reportPermissionAsked registers an ask with the run and records it.
@@ -269,6 +329,8 @@ func (s *Session) persistPermission(owner *callOwner, p *PermissionRequest) {
 		payload["message"] = answer.Message
 	}
 	s.events.emit(EventPermissionAnswered, payload)
+	// The wait the ask published is over: the answer is the run's.
+	s.clearAwaiting(answer.AskID)
 }
 
 // settlePendingAsks drains every request's single writer before settlement.

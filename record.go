@@ -426,7 +426,8 @@ type TurnHookRecord struct {
 	Turn int `json:"turn"`
 	// Phase is the hook's phase: "after_turn" or "before_settle".
 	Phase string `json:"phase"`
-	// Status is the record's status: "started" or "ended".
+	// Status is the record's status: "started", "ended", or "skipped"
+	// for a hook a resumed turn left out.
 	Status string `json:"status"`
 	// HookIndex is the hook's position in the chain, counting from
 	// zero.

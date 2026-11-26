@@ -1496,6 +1496,111 @@ func (s *Session) subscribeFeed(name string, scope map[string]string, prompt *Fe
 	}
 }
 
+// restoreSubscriptions takes the feed instances a crash left subscribed on
+// again.
+//
+// A subscription is the state a session had, not work it left undone: the
+// records name the instances that were running, and the resumed run starts
+// their supervisors before it delivers a queue. A feed this build no longer
+// offers is left out (missingFeedWarnings already told the caller the feed
+// set changed), and so is an instance the session already runs.
+//
+// The instance is not subscribed again: its feed.subscribed record is on
+// the log, and a second one would say the same thing twice.
+func (s *Session) restoreSubscriptions(ctx context.Context, subs []PendingSubscription) {
+	for _, sub := range subs {
+		if ctx.Err() != nil {
+			return
+		}
+		spec, ok := s.optionalFeeds[sub.Feed]
+		if !ok {
+			continue
+		}
+		values, err := parseFeedInstanceScope(sub.Scope)
+		if err != nil {
+			// A scope this build cannot read is a record it cannot honour:
+			// the instance is left out rather than started against the
+			// wrong values.
+			s.logWarn("a subscription's scope is unreadable",
+				slog.String("feed", sub.Feed),
+				slog.String("instance", sub.Instance))
+			continue
+		}
+		if _, err := checkFeedScope(spec, values); err != nil {
+			s.logWarn("a subscription's scope no longer fits the feed",
+				slog.String("feed", sub.Feed),
+				slog.String("instance", sub.Instance))
+			continue
+		}
+		instance := sub.Instance
+		if instance == "" {
+			instance = feedInstanceLabel(spec.Name, values)
+		}
+		id := string(FeedOrigin(instance))
+
+		s.mu.Lock()
+		if s.closed || s.broken {
+			s.mu.Unlock()
+			return
+		}
+		f, known := s.feeds[id]
+		if known && f.starting != nil {
+			// A subscription is writing this instance's record. The
+			// resumption leaves it to that call, which is the one that
+			// starts the supervisor.
+			s.mu.Unlock()
+			continue
+		}
+		if known && f.status != feedStopped && f.status != feedSuspended {
+			// The instance is already running: the store's own session
+			// may have taken it on before the resumption ran.
+			s.mu.Unlock()
+			continue
+		}
+		if !known {
+			f = s.newFeedState(spec, values)
+			s.feeds[id] = f
+			s.feedOrder = append(s.feedOrder, f)
+		} else {
+			// The instance's supervisor is gone with its context, so the
+			// resumption is a fresh context and a fresh supervisor.
+			f.cancel(ErrJobCancelled)
+			f.ctx, f.cancel = context.WithCancelCause(s.jobCtx)
+			f.done = make(chan struct{})
+		}
+		if sub.Prompt != "" {
+			f.filterPrompt = FeedFilterPrompt{Question: sub.Prompt}
+		}
+		f.startedAt = time.Now()
+		f.status = feedRunning
+		f.started = true
+		s.mu.Unlock()
+
+		go s.runFeed(f)
+	}
+}
+
+// parseFeedInstanceScope reads the canonical scope a subscription record
+// holds back into the values it named.
+func parseFeedInstanceScope(scope string) (map[string]string, error) {
+	if scope == "" {
+		return nil, nil
+	}
+	values := map[string]string{}
+	for _, field := range strings.Split(scope, ",") {
+		name, value, ok := strings.Cut(field, "=")
+		if !ok || name == "" {
+			return nil, fmt.Errorf("poo: the feed scope %q does not name a field", scope)
+		}
+		decoded, err := url.QueryUnescape(value)
+		if err != nil {
+			return nil, fmt.Errorf("poo: the feed scope %q holds an unreadable value: %w", scope, err)
+		}
+		values[name] = decoded
+	}
+	return values, nil
+}
+
 // writeFeedSubscribed records that an optional feed instance subscribed.
 //
 // The write goes through the session's claimed-write gate. A record the

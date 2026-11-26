@@ -111,19 +111,10 @@ type PendingHookPhase struct {
 }
 
 // PendingSubscription is a feed instance that is still subscribed.
-type PendingSubscription struct {
-	// Feed is the feed's name, e.g. "inbox".
-	Feed string
-	// Instance is the instance's identifier.
-	Instance string
-	// Scope is the instance's scope.
-	Scope string
-	// Prompt is the prompt the instance was started with, when it has
-	// one.
-	Prompt string
-	// Origin is the origin the instance's records carry.
-	Origin poo.Origin
-}
+//
+// The type is the core's: a durable session's continuation takes the
+// instances on again, and the plan that names them is the core's.
+type PendingSubscription = poo.PendingSubscription
 
 // PendingToolLookup resolves a tool's class and idempotency by name.
 //

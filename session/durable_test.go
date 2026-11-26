@@ -1101,42 +1101,47 @@ func TestDurableModeLeavesALoggedCrashSettledInterrupted(t *testing.T) {
 	}
 }
 
-// TestDurableLoadWiringStaysDormantBehindCheckMode covers where the load's
-// wiring is: CheckMode still refuses a durable session, so the planner is
-// reachable only through the resolver the load uses.
-func TestDurableLoadWiringStaysDormantBehindCheckMode(t *testing.T) {
+// TestDurableLoadPlansAContinuation covers where the load's wiring is: a
+// durable session's load plans the continuation and returns it, and the same
+// records under the logged mode are settled interrupted.
+func TestDurableLoadPlansAContinuation(t *testing.T) {
 	dir, store := newTestStore(t)
 	ctx := context.Background()
 	header := durableHeader("s1")
 	recs := []poo.Record{header, runStarted("r1"), toolCall("r1", 1, "r1", "read")}
 	writeSession(t, dir, "s1", recs...)
 
-	if _, err := store.Load(ctx, "s1"); !errors.Is(err, ErrUnsupportedMode) {
-		t.Fatalf("the load failed with %v, want %v", err, ErrUnsupportedMode)
+	loaded, err := store.Load(ctx, "s1")
+	if err != nil {
+		t.Fatalf("loading the durable session: %v", err)
+	}
+	if loaded.Continuation == nil {
+		t.Fatal("the load planned nothing, want a continuation")
+	}
+	if len(loaded.Continuation.ReplayCalls) != 1 ||
+		loaded.Continuation.ReplayCalls[0].Reason != PlanReasonReadOnly {
+		t.Errorf("the plan replays %+v, want the header's read-only call",
+			loaded.Continuation.ReplayCalls)
+	}
+	if loaded.Continuation.RunID != "r1" {
+		t.Errorf("the plan continues the run %q, want %q", loaded.Continuation.RunID, "r1")
+	}
+	for _, rec := range loaded.Records {
+		if settled, ok := rec.(*poo.RunSettledRecord); ok {
+			t.Errorf("the load settled the run %s, want it continued", settled.RunID)
+		}
 	}
 	meta := metadataOfRecord(header)
 
-	// The resolver the load calls picks the planner for a durable
-	// session, and the planner reads the header's tools.
-	sink := &planSink{}
-	plan, err := store.resolve(ctx, sink, pendingOf("s1", recs), ModeDurable, meta)
-	if err != nil {
-		t.Fatalf("resolving the durable session: %v", err)
-	}
-	if plan == nil {
-		t.Fatal("the durable resolve planned nothing, want a continuation")
-	}
-	if len(plan.ReplayCalls) != 1 || plan.ReplayCalls[0].Reason != PlanReasonReadOnly {
-		t.Errorf("the plan replays %+v, want the header's read-only call", plan.ReplayCalls)
-	}
-	if len(recordNamed(sink.records, "run.settled")) != 0 {
-		t.Error("the durable resolve settled the run, want it continued")
-	}
-
-	// The same records under the logged mode are settled interrupted.
+	// The same records under the logged mode are settled interrupted, and
+	// the interrupt policy is what the resolver picks for them.
 	settled := &planSink{}
-	if _, err := store.resolve(ctx, settled, pendingOf("s1", recs), ModeLogged, meta); err != nil {
+	plan, err := store.resolve(ctx, settled, pendingOf("s1", recs), ModeLogged, meta)
+	if err != nil {
 		t.Fatalf("resolving the logged session: %v", err)
+	}
+	if plan != nil {
+		t.Errorf("the logged resolve planned %+v, want nothing", plan)
 	}
 	if len(recordNamed(settled.records, "run.settled")) != 1 {
 		t.Errorf("the logged resolve wrote %v, want one settle", recordNames(settled.records))
@@ -1153,5 +1158,14 @@ func TestDurableLoadWiringStaysDormantBehindCheckMode(t *testing.T) {
 	}
 	if len(other.durablePlanner(meta).Options.Tools) != len(meta.Tools) {
 		t.Error("the store's planner does not carry the session's tools")
+	}
+
+	// The check mode accepts the mode the load now serves, and still
+	// refuses one it does not know.
+	if err := CheckMode(ModeDurable); err != nil {
+		t.Errorf("the check refuses the durable mode: %v", err)
+	}
+	if err := CheckMode(Mode("nonsense")); !errors.Is(err, ErrUnsupportedMode) {
+		t.Errorf("the check on an unknown mode returned %v, want %v", err, ErrUnsupportedMode)
 	}
 }
