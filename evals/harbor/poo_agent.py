@@ -118,8 +118,10 @@ def parse_session_log(path: Path) -> SessionSummary:
     cache_reported = False
     cache_total = 0
     # usage_turns counts what eval/log.go's Turns() counts when a log has no
-    # settle record: the requests the run made, not the ones a compaction made
-    # (a compaction request is numbered 0).
+    # usable settle record: the requests the run made, not the ones a
+    # compaction made. A compaction is a request and not a turn, and its usage
+    # record is marked by its origin rather than by its request number, which is
+    # the marker poo.IsCompactionRequest reads.
     usage_turns = 0
 
     for idx, line in enumerate(lines):
@@ -142,7 +144,7 @@ def parse_session_log(path: Path) -> SessionSummary:
         if kind == "usage":
             summary.input_tokens += int(rec.get("input_tokens") or 0)
             summary.output_tokens += int(rec.get("output_tokens") or 0)
-            if int(rec.get("request") or 0) != 0:
+            if rec.get("origin") != "compaction":
                 usage_turns += 1
             cache_val = rec.get("cache_read_tokens")
             if cache_val is not None:
@@ -165,7 +167,10 @@ def parse_session_log(path: Path) -> SessionSummary:
 
     if cache_reported:
         summary.cache_read_tokens = cache_total
-    if not summary.settle_seen:
+    # eval/log.go's Turns() trusts a settle record only when its turn count is
+    # positive, so a settle record that carries none falls back the same way a
+    # missing one does.
+    if not summary.settle_seen or summary.turns <= 0:
         summary.turns = usage_turns
 
     return summary

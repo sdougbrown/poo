@@ -276,7 +276,7 @@ class PooAgentMetadataTests(unittest.TestCase):
     def test_turns_fall_back_to_the_usage_records_when_no_settle_exists(self) -> None:
         # A killed run writes no settle record. poo's own Turns() counts the
         # requests the run made in that case, skipping the ones a compaction
-        # made (numbered 0), and the adapter must report the same number.
+        # made, and the adapter must report the same number.
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             agent = self._agent(tmp_path)
@@ -285,8 +285,11 @@ class PooAgentMetadataTests(unittest.TestCase):
             lines = [
                 json.dumps({"record": "usage", "request": 1, "input_tokens": 10, "output_tokens": 1}),
                 json.dumps({"record": "usage", "request": 2, "input_tokens": 10, "output_tokens": 1}),
-                # A compaction's own request is numbered 0 and is not a turn.
-                json.dumps({"record": "usage", "request": 0, "input_tokens": 10, "output_tokens": 1}),
+                # A compaction's request is marked by its origin, which is the
+                # marker poo.IsCompactionRequest reads, so it is not a turn.
+                json.dumps(
+                    {"record": "usage", "origin": "compaction", "request": 0, "input_tokens": 10, "output_tokens": 1}
+                ),
                 json.dumps({"record": "usage", "request": 3, "input_tokens": 10, "output_tokens": 1}),
             ]
             (agent.logs_dir / "session.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -295,6 +298,27 @@ class PooAgentMetadataTests(unittest.TestCase):
 
             self.assertIsNone(ctx.metadata["return_code"])
             self.assertEqual(ctx.metadata["turns"], 3)
+
+    def test_a_settle_record_without_a_turn_count_still_falls_back(self) -> None:
+        # eval/log.go's Turns() trusts a settle record only when its turn count
+        # is positive. A recovery-written settle carries none, and the two
+        # readers of one log must not disagree about how many turns it held.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            agent = self._agent(tmp_path)
+            ctx = FakeContext()
+            agent.logs_dir.mkdir(parents=True, exist_ok=True)
+            lines = [
+                json.dumps({"record": "usage", "request": 1, "input_tokens": 1, "output_tokens": 1}),
+                json.dumps({"record": "usage", "request": 2, "input_tokens": 1, "output_tokens": 1}),
+                json.dumps({"record": "run.settled", "reason": "interrupted"}),
+            ]
+            (agent.logs_dir / "session.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+            agent.populate_context_post_run(ctx)
+
+            self.assertEqual(ctx.metadata["turns"], 2)
+            self.assertEqual(ctx.metadata["settle_reason"], "interrupted")
 
     def test_the_settle_record_still_wins_over_the_fallback(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
