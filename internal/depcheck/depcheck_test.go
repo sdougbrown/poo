@@ -180,6 +180,7 @@ func wantSkipped(m string, extra ...string) []string {
 		m + "/server (does not exist yet)",
 		m + "/session (does not exist yet)",
 		m + "/skill (does not exist yet)",
+		m + "/tool/callmcp (does not exist yet)",
 		m + "/tool/cliregistry (does not exist yet)",
 		m + "/tool/fetch (does not exist yet)",
 		m + "/wire (does not exist yet)",

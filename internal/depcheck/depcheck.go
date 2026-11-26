@@ -23,6 +23,10 @@
 //     package, the cli package, the prompt package, the decide package, the
 //     bash package and the packages outside the module that hold a cli
 //     registry
+//   - the tool/callmcp package may import the standard library, the core
+//     package, the cli package, the prompt package, the mcp client and the
+//     cap and schema renderers, for it is the tool over the client and names
+//     the entries a session's search returns
 //   - the cli package may import the standard library, the prompt package
 //     and the packages outside the module that hold a cli registry
 //   - the feed package may import the standard library, the exec package,
@@ -231,6 +235,15 @@ func (c Checker) rules() []rule {
 		{
 			path:     m + "/tool/cliregistry",
 			allowed:  []string{m, m + "/cli", m + "/decide", m + "/exec", m + "/internal/caps", m + "/internal/envelope", m + "/internal/schematext", m + "/prompt", m + "/tool/bash"},
+			external: true,
+		},
+		{
+			// The tool over the client: it reads the servers a session
+			// started and the MCP names the model writes, so it links the
+			// client and the settings' own vocabulary, and nothing of the
+			// session it is called in.
+			path:     m + "/tool/callmcp",
+			allowed:  []string{m, m + "/cli", m + "/internal/caps", m + "/internal/schematext", m + "/mcp", m + "/prompt"},
 			external: true,
 		},
 		{
