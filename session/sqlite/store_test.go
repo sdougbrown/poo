@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -739,5 +740,163 @@ func TestAPruneSkipsALiveLeasedSessionAndTakesAnExpiredOne(t *testing.T) {
 	}
 	if !skipped {
 		t.Errorf("the live session was not skipped, want it skipped")
+	}
+}
+
+// TestTheDatabaseFilesArePrivate covers the database's permissions: the
+// database and the WAL files the driver keeps beside it hold the user's
+// conversation, so they are private to the owner, like the file store's
+// logs.
+func TestTheDatabaseFilesArePrivate(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "test.db")
+	store, err := New(path)
+	if err != nil {
+		t.Fatalf("opening the store: %v", err)
+	}
+	t.Cleanup(func() { store.Close() })
+	ctx := context.Background()
+	if _, err := store.Create(ctx, createdRecord("s1")); err != nil {
+		t.Fatalf("creating the session: %v", err)
+	}
+	if err := store.Append(ctx, runStarted("r1")); err != nil {
+		t.Fatalf("appending: %v", err)
+	}
+	for _, p := range []string{path, path + "-wal", path + "-shm"} {
+		info, err := os.Stat(p)
+		if err != nil {
+			t.Fatalf("reading %s: %v", p, err)
+		}
+		if got := info.Mode().Perm(); got != 0o600 {
+			t.Errorf("%s has mode %04o, want 0600", filepath.Base(p), got)
+		}
+	}
+}
+
+// TestAnExistingDatabasesWidePermissionsAreNarrowed covers a database an
+// older run left readable: reopening it corrects the mode.
+func TestAnExistingDatabasesWidePermissionsAreNarrowed(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "test.db")
+	store, err := New(path)
+	if err != nil {
+		t.Fatalf("opening the store: %v", err)
+	}
+	if _, err := store.Create(context.Background(), createdRecord("s1")); err != nil {
+		t.Fatalf("creating the session: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("closing the store: %v", err)
+	}
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatalf("widening the database's mode: %v", err)
+	}
+
+	reopened, err := New(path)
+	if err != nil {
+		t.Fatalf("reopening the store: %v", err)
+	}
+	t.Cleanup(func() { reopened.Close() })
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("reading the database's mode: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Errorf("the reopened database has mode %04o, want 0600", got)
+	}
+}
+
+// TestConcurrentOpensMigrateOnce covers the migration's race: several
+// stores opened at once on a fresh database all migrate it, and none of
+// them fails on the version row.
+func TestConcurrentOpensMigrateOnce(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "test.db")
+	const openers = 8
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	errs := make([]error, openers)
+	stores := make([]*Store, openers)
+	for i := 0; i < openers; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			stores[i], errs[i] = New(path)
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Errorf("opener %d: %v", i, err)
+			continue
+		}
+		if err := stores[i].Close(); err != nil {
+			t.Errorf("closing opener %d: %v", i, err)
+		}
+	}
+	if t.Failed() {
+		return
+	}
+
+	// The schema is whole: a store opened on the migrated database
+	// creates a session and reads it back.
+	ctx := context.Background()
+	store := newTestStoreAt(t, path)
+	if _, err := store.Create(ctx, createdRecord("s1")); err != nil {
+		t.Fatalf("creating a session on the migrated database: %v", err)
+	}
+	if err := store.Append(ctx, runStarted("r1")); err != nil {
+		t.Fatalf("appending on the migrated database: %v", err)
+	}
+	recs, err := store.ReadRecords(ctx)
+	if err != nil {
+		t.Fatalf("reading the migrated database's records: %v", err)
+	}
+	names := recordNames(recs)
+	want := []string{"session.created", "run.started"}
+	if strings.Join(names, ",") != strings.Join(want, ",") {
+		t.Errorf("the migrated database holds %v, want %v", names, want)
+	}
+}
+
+// TestAnAppendAfterALoadContinuesTheSequence covers the open session's
+// running sequence: a session loaded with records continues their
+// numbering, and every record's stamp is the one the store's count
+// produced.
+func TestAnAppendAfterALoadContinuesTheSequence(t *testing.T) {
+	path, store := newTestStore(t)
+	ctx := context.Background()
+	if _, err := store.Create(ctx, createdRecord("s1")); err != nil {
+		t.Fatalf("creating the session: %v", err)
+	}
+	if err := store.Append(ctx, runStarted("r1")); err != nil {
+		t.Fatalf("appending: %v", err)
+	}
+	if err := store.Append(ctx, runSettled("r1")); err != nil {
+		t.Fatalf("appending: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("closing the store: %v", err)
+	}
+
+	other := newTestStoreAt(t, path)
+	if _, err := other.Load(ctx, "s1"); err != nil {
+		t.Fatalf("loading the session: %v", err)
+	}
+	if err := other.Append(ctx, runStarted("r2")); err != nil {
+		t.Fatalf("appending after the load: %v", err)
+	}
+	recs, err := other.ReadRecords(ctx)
+	if err != nil {
+		t.Fatalf("reading the records: %v", err)
+	}
+	names := recordNames(recs)
+	want := []string{"session.created", "run.started", "run.settled", "run.started"}
+	if strings.Join(names, ",") != strings.Join(want, ",") {
+		t.Errorf("the session holds %v, want %v", names, want)
+	}
+	for i, rec := range recs {
+		if got, want := rec.Meta().Seq, int64(i+1); got != want {
+			t.Errorf("the record %d is stamped %d, want %d", i, got, want)
+		}
 	}
 }

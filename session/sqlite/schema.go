@@ -15,9 +15,12 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
+	"time"
 
-	_ "modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite"
+	sqlite3lib "modernc.org/sqlite/lib"
 )
 
 // The schema's version. A migration is applied when the database's
@@ -29,11 +32,20 @@ const schemaVersion = 1
 // refuse a writer.
 const busyTimeoutMS = 5000
 
+// openRetryInterval is how long an open waits between attempts while
+// another opener converts a fresh database to WAL mode.
+const openRetryInterval = 2 * time.Millisecond
+
 // ErrSchema is the failure a schema migration reports.
 var ErrSchema = errors.New("session/sqlite: the schema could not be migrated")
 
 // Open opens the SQLite database at path, sets WAL mode and the busy
 // timeout, and runs the schema migrations.
+//
+// The database is private to its owner: it holds the user's conversation,
+// so the database file and the WAL files the driver keeps beside it are
+// created 0600 before the driver touches them, and a database an older run
+// left readable is narrowed.
 //
 // The database is opened with WAL journaling, so a reader never blocks a
 // writer and a writer never blocks a reader. The busy timeout lets a
@@ -43,7 +55,14 @@ var ErrSchema = errors.New("session/sqlite: the schema could not be migrated")
 // synced: the store promises a needs-sync record is on the disk before
 // the append returns, and WAL's own default would leave that to the
 // next checkpoint.
+//
+// Open may be called concurrently, including from other processes: a
+// fresh database is migrated once, and an opener that races another's
+// journal-mode change waits it out.
 func Open(path string) (*sql.DB, error) {
+	if err := ensurePrivate(path); err != nil {
+		return nil, err
+	}
 	dsn := path
 	if strings.Contains(path, "?") {
 		dsn += "&"
@@ -61,7 +80,7 @@ func Open(path string) (*sql.DB, error) {
 	// database's — one immediate transaction at a time, waited out by
 	// the busy timeout — and WAL keeps the readers out of the writer's
 	// way.
-	if err := db.Ping(); err != nil {
+	if err := openConnection(db); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -72,31 +91,100 @@ func Open(path string) (*sql.DB, error) {
 	return db, nil
 }
 
+// openConnection opens the database's first connection.
+//
+// The connection applies the DSN's journal mode, and SQLite changes a
+// fresh database's journal mode without invoking the busy handler: an
+// opener that races another opener's conversion is refused at once
+// instead of waiting the busy timeout. The wait is retried here, for that
+// same timeout, so opener races on a fresh database all come up.
+func openConnection(db *sql.DB) error {
+	deadline := time.Now().Add(busyTimeoutMS * time.Millisecond)
+	for {
+		err := db.Ping()
+		if err == nil {
+			return nil
+		}
+		if !isBusy(err) || !time.Now().Before(deadline) {
+			return err
+		}
+		time.Sleep(openRetryInterval)
+	}
+}
+
+// isBusy reports whether an error is SQLite refusing a lock.
+func isBusy(err error) bool {
+	var sqliteErr *sqlite3.Error
+	if !errors.As(err, &sqliteErr) {
+		return false
+	}
+	switch sqliteErr.Code() & 0xff {
+	case sqlite3lib.SQLITE_BUSY, sqlite3lib.SQLITE_LOCKED:
+		return true
+	}
+	return false
+}
+
+// ensurePrivate makes the database's files private to their owner.
+//
+// The driver would create a missing database with its own mode, so each
+// file the database and its WAL journal use is created here instead:
+// 0600, and not truncated when it already exists. A zero-length WAL is a
+// fresh one to the driver. A file an older run left readable is narrowed.
+func ensurePrivate(path string) error {
+	for _, p := range []string{path, path + "-wal", path + "-shm"} {
+		f, err := os.OpenFile(p, os.O_CREATE|os.O_WRONLY, 0o600)
+		if err != nil {
+			return fmt.Errorf("session/sqlite: making %s private: %w", p, err)
+		}
+		if err := f.Close(); err != nil {
+			return fmt.Errorf("session/sqlite: making %s private: %w", p, err)
+		}
+		if err := os.Chmod(p, 0o600); err != nil {
+			return fmt.Errorf("session/sqlite: making %s private: %w", p, err)
+		}
+	}
+	return nil
+}
+
 // migrate runs the schema migrations the database has not had.
 //
-// The migrations are applied in a single transaction, so a failure
-// leaves the schema whole: either the database is at the new version, or
-// it is at the old one, never half.
+// The version is read and the migration applied inside one immediate
+// transaction, so a concurrent open serializes on the write lock: the
+// second reader sees the version the first wrote and applies nothing. A
+// failure leaves the schema whole: either the database is at the new
+// version, or it is at the old one, never half.
 func migrate(db *sql.DB) error {
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY)`); err != nil {
 		return err
-	}
-	var current int
-	if err := db.QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_migrations`).Scan(&current); err != nil {
-		return err
-	}
-	if current >= schemaVersion {
-		return nil
 	}
 	tx, err := db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	// The version is read under the transaction's write lock, so the read
+	// the migration decides on is the one every other writer sees.
+	var current int
+	if err := tx.QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_migrations`).Scan(&current); err != nil {
+		return err
+	}
+	if current >= schemaVersion {
+		return tx.Commit()
+	}
 	if err := applyV1(tx); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(`INSERT INTO schema_migrations (version) VALUES (?)`, schemaVersion); err != nil {
+		// A version row that landed another way is not a failure: the
+		// migration is done when the version is current.
+		tx.Rollback()
+		if readErr := db.QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_migrations`).Scan(&current); readErr != nil {
+			return err
+		}
+		if current >= schemaVersion {
+			return nil
+		}
 		return err
 	}
 	return tx.Commit()
