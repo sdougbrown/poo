@@ -366,6 +366,20 @@ class PooAgentMetadataTests(unittest.TestCase):
             self.assertEqual(ctx.metadata["settle_reason"], "finished")
 
 
+    def test_existing_metadata_is_preserved(self) -> None:
+        # The trial may carry keys set before the poo run. Dropping them would
+        # silently delete another agent's report from the trial.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            agent = self._agent(tmp_path)
+            ctx = FakeContext()
+            ctx.metadata = {"pre_existing": "value"}
+
+            agent.populate_context_post_run(ctx, return_code=0)
+
+            self.assertEqual(ctx.metadata["pre_existing"], "value")
+            self.assertEqual(ctx.metadata["return_code"], 0)
+
 class PooAgentFlagTests(unittest.TestCase):
     """The flags the run is given, and the ones it must never be given."""
 
@@ -514,6 +528,43 @@ class PooAgentFlagTests(unittest.TestCase):
                 self.assertIn("--api-key-env OPENAI_API_KEY", joined)
 
 
+    def test_the_optional_flags_reach_the_command(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            agent = self._agent(
+                tmp_path,
+                model_name="openai/gpt-4o",
+                context_limit=65536,
+                profile="search",
+                max_output=2000,
+                truncation_retries=1,
+                context_strategy="summary",
+                context_keep_recent=3,
+                timeout="30m",
+                append_system_prompt="You are a helpful assistant.",
+            )
+
+            joined = " ".join(agent.build_run_args())
+            for expected in (
+                "--profile search",
+                "--max-output 2000",
+                "--truncation-retries 1",
+                "--context-strategy summary",
+                "--context-keep-recent 3",
+                "--timeout 30m",
+                "--append-system-prompt You are a helpful assistant.",
+            ):
+                self.assertIn(expected, joined)
+
+    def test_a_partial_model_is_refused(self) -> None:
+        # The third refusal path: one of the pair without the other. Falling
+        # through it would proceed with half a model.
+        with tempfile.TemporaryDirectory() as tmp:
+            agent = self._agent(Path(tmp), endpoint="http://localhost:4000/v1")
+            with self.assertRaises(ValueError) as ctx:
+                agent.build_run_args()
+            self.assertIn("must be given together", str(ctx.exception))
+
 def _built_binary() -> Path | None:
     """The static Linux poo binary, when this checkout has built one."""
     candidate = Path(__file__).resolve().parent / "bin" / f"poo-linux-{ARCH}"
@@ -586,6 +637,30 @@ class PooAgentCommandValidationTests(unittest.TestCase):
             )
             proc = self._run(agent, tmp_path)
             self.assertNotEqual(proc.returncode, self.USAGE_EXIT, proc.stderr)
+
+    def test_a_run_with_the_optional_flags_is_accepted(self) -> None:
+        # Presence in the arg list does not prove poo accepts a flag's value, so
+        # this runs the binary with the whole optional set against a dead
+        # endpoint and asserts it got past argument validation.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            agent = PooAgent(
+                logs_dir=tmp_path / "logs",
+                poo_bin=str(_built_binary()),
+                endpoint="http://127.0.0.1:1/v1",
+                model_id="unused",
+                context_limit=4096,
+                profile="search",
+                max_output=2000,
+                truncation_retries=1,
+                context_strategy="summary",
+                context_keep_recent=3,
+                timeout="30s",
+                append_system_prompt="You are a helpful assistant.",
+            )
+            proc = self._run(agent, tmp_path)
+            self.assertNotEqual(proc.returncode, self.USAGE_EXIT, proc.stderr)
+
 
 def _harbor_installed() -> bool:
     try:
