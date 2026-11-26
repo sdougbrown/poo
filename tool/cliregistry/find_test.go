@@ -493,3 +493,133 @@ func indexProbability(name string) float64 {
 	}
 	return float64(index) / 199
 }
+
+// TestAHitNamesTheToolThatCallsIt covers the routing: the search returns the
+// catalog's entries and the MCP tools a session's servers listed together, and
+// each hit names the tool that runs it and the argument that names it, because a
+// name alone does not say whether call_cli or call_mcp reaches it.
+func TestAHitNamesTheToolThatCallsIt(t *testing.T) {
+	find := cliregistry.NewFind(fixtureCatalog(t)).WithOffered([]cliregistry.Offered{{
+		Name:        "fixture/echo",
+		Description: "answers with what it is given",
+		Schema:      map[string]any{"type": "object", "properties": map[string]any{"text": map[string]any{"type": "string"}}},
+		Dispatcher:  callmcpName,
+		Argument:    "name",
+		ReadOnly:    true,
+	}})
+	res, err := preparedCall(t, find, `{"intent":"say something"}`, poo.ToolEnv{Decider: &searcher{probability: indexProbability}})
+	if err != nil {
+		t.Fatalf("searching: %v", err)
+	}
+
+	// The catalog's entries are called through call_cli, the MCP tool through
+	// the call the entry names.
+	for _, want := range []string{
+		"call it with " + cliregistry.CallToolName + `, passing "say" as "command".`,
+		"call it with " + callmcpName + `, passing "fixture/echo" as "name".`,
+		"fixture/echo (read-only): answers with what it is given",
+	} {
+		if !strings.Contains(res.Text, want) {
+			t.Errorf("the text %q does not carry %q", res.Text, want)
+		}
+	}
+	// The structured result carries the same routing, so a consumer reads what
+	// the model reads.
+	var body struct {
+		Results []struct {
+			Name        string `json:"name"`
+			Dispatcher  string `json:"dispatcher"`
+			Argument    string `json:"argument"`
+			ReadOnly    bool   `json:"read_only"`
+			Destructive bool   `json:"destructive"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(res.Structured, &body); err != nil {
+		t.Fatalf("decoding the result %q: %v", res.Structured, err)
+	}
+	found := map[string]struct{ dispatcher, argument string }{}
+	for _, hit := range body.Results {
+		found[hit.Name] = struct{ dispatcher, argument string }{hit.Dispatcher, hit.Argument}
+	}
+	if got := found["say"]; got.dispatcher != cliregistry.CallToolName || got.argument != cliregistry.CommandArgument {
+		t.Errorf("the catalog's hit routes through %+v, want the call and its command", got)
+	}
+	if got := found["fixture/echo"]; got.dispatcher != callmcpName || got.argument != "name" {
+		t.Errorf("the MCP hit routes through %+v, want the call and its name", got)
+	}
+}
+
+// TestTwoEntriesOfOneNameAreBothReachable covers the collision: a server may
+// list a tool whose name a registered command already holds, and the search
+// returns both, each with the call that runs it.
+func TestTwoEntriesOfOneNameAreBothReachable(t *testing.T) {
+	// The intent fits both, so the ranking cannot hide one of them.
+	find := cliregistry.NewFind(fixtureCatalog(t)).WithOffered([]cliregistry.Offered{
+		{
+			Name:        "say",
+			Description: "an MCP tool that answers too",
+			Schema:      map[string]any{"type": "object", "properties": map[string]any{}},
+			Dispatcher:  callmcpName,
+			Argument:    "name",
+		},
+	})
+	res, err := preparedCall(t, find, `{"intent":"say something"}`, poo.ToolEnv{Decider: &searcher{probability: func(string) float64 { return 0.9 }}})
+	if err != nil {
+		t.Fatalf("searching: %v", err)
+	}
+	if !strings.Contains(res.Text, "call it with "+cliregistry.CallToolName+`, passing "say" as "command".`) {
+		t.Errorf("the catalog's entry of the name is missing: %q", res.Text)
+	}
+	if !strings.Contains(res.Text, "call it with "+callmcpName+`, passing "say" as "name".`) {
+		t.Errorf("the MCP tool of the name is missing: %q", res.Text)
+	}
+	if got := strings.Count(res.Text, "\nsay"); got < 2 {
+		t.Errorf("the text carries the name %d times, want both entries: %q", got, res.Text)
+	}
+}
+
+// TestOneSearchAsksOneQuestionPerEntry covers the questions: each entry is one
+// question, and two entries of one name are asked apart, so a decider's answers
+// name every entry the search returns.
+func TestOneSearchAsksOneQuestionPerEntry(t *testing.T) {
+	counting := &countingDecider{}
+	find := cliregistry.NewFind(fixtureCatalog(t)).WithOffered([]cliregistry.Offered{{
+		Name:       "say",
+		Dispatcher: callmcpName,
+		Argument:   "name",
+	}})
+	if _, err := preparedCall(t, find, `{"intent":"say something"}`, poo.ToolEnv{Decider: counting}); err != nil {
+		t.Fatalf("searching: %v", err)
+	}
+	if len(counting.questions) != 3 {
+		t.Fatalf("the search asked %d questions, want one per entry and per offering", len(counting.questions))
+	}
+	seen := map[string]bool{}
+	for _, question := range counting.questions {
+		if seen[question.ID] {
+			t.Errorf("two questions share the identifier %q", question.ID)
+		}
+		seen[question.ID] = true
+	}
+}
+
+// countingDecider answers every question and keeps them.
+type countingDecider struct {
+	// questions are the questions it was asked, in order.
+	questions []decide.Question
+}
+
+// Decide answers yes to every question.
+func (d *countingDecider) Decide(_ context.Context, _ any, _ string, questions []decide.Question) ([]decide.Answer, error) {
+	d.questions = append(d.questions, questions...)
+	answers := make([]decide.Answer, 0, len(questions))
+	for _, question := range questions {
+		answers = append(answers, decide.Answer{ID: question.ID, Probabilities: map[string]float64{"yes": 0.5, "no": 0.5}})
+	}
+	return answers, nil
+}
+
+// callmcpName is the name of the tool that calls an MCP tool. The search does
+// not link the package the tool lives in, so the name a session offers is the
+// caller's to pass.
+const callmcpName = "call_mcp"

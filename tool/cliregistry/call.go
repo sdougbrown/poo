@@ -142,7 +142,7 @@ type callArgs struct {
 // size. cmd/poo's test pins the list to the tools the binary builds.
 var builtinToolNames = []string{
 	"bash", "read", "grep", "history", "edit", "write", "fetch", "codemode",
-	"jobs", "cancel_job", "find_tool", "subscribe_feed", "finish",
+	"jobs", "cancel_job", "find_tool", "call_mcp", "subscribe_feed", "finish",
 }
 
 // preparedCall is a validated call_cli call.
