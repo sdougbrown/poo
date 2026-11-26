@@ -466,6 +466,10 @@ type feedState struct {
 	done chan struct{}
 	// started reports that the supervisor has been started.
 	started bool
+	// starting is the subscription whose feed.subscribed record is in
+	// flight, nil when there is none. A second subscription for the same
+	// instance waits on it rather than starting a second supervisor.
+	starting chan struct{}
 	// attempt is the number of the latest attempt, from 1.
 	attempt int
 	// ended is the attempt whose end is claimed. The single terminal path
@@ -1244,13 +1248,27 @@ func (r *feedFault) remedy() string {
 // attempt's end record is already in the log. A suspended feed has no
 // supervisor left to record the stop, so the cancel records it here.
 func (s *Session) cancelFeed(instanceID string) error {
-	s.mu.Lock()
-	f, ok := s.feeds[instanceID]
-	if !ok || f.status == feedStopped {
+	var f *feedState
+	var ok bool
+	for {
+		s.mu.Lock()
+		f, ok = s.feeds[instanceID]
+		if ok && f.starting != nil {
+			// A subscription for this instance is writing its record. Wait
+			// for that start to land or to be abandoned, so the cancel
+			// decides against the instance the log will hold.
+			starting := f.starting
+			s.mu.Unlock()
+			<-starting
+			continue
+		}
+		if !ok || f.status == feedStopped {
+			s.mu.Unlock()
+			return ErrUnknownJob
+		}
 		s.mu.Unlock()
-		return ErrUnknownJob
+		break
 	}
-	s.mu.Unlock()
 	if err := s.writeFeedUnsubscribed(f); err != nil {
 		// The log cannot say the instance let go, so the session does not
 		// stop it behind the record's back: a durable session would take
@@ -1292,12 +1310,15 @@ func (s *Session) listedFeedsLocked() []*feedState {
 	return out
 }
 
-// listedFeedCountLocked returns how many feeds the job lists show. The
-// caller holds the session's lock.
+// listedFeedCountLocked returns how many instances count against the
+// cap: the ones the job lists show, and the ones whose subscription
+// record is being written. The caller holds the session's lock.
 func (s *Session) listedFeedCountLocked() int {
 	n := 0
 	for _, f := range s.feedOrder {
-		if f.listed() {
+		// An instance whose subscription record is in flight is one the
+		// session is about to run, so the cap counts it.
+		if f.listed() || f.starting != nil {
 			n++
 		}
 	}
@@ -1321,6 +1342,10 @@ func (s *Session) listedFeedCountLocked() int {
 // the question the decision model is asked about each record, so it replaces
 // the manifest's while it is set, and a feed that cannot be asked the
 // question refuses it.
+//
+// The instance becomes active only once its feed.subscribed record durably
+// lands: a record the store refuses, or a close that fences the write,
+// leaves no instance behind for the session's own state to call active.
 //
 // A new instance is refused once the session runs MaxFeedInstances of them:
 // the instances are processes, and a call with a fresh scope value each time
@@ -1349,77 +1374,126 @@ func (s *Session) subscribeFeed(name string, scope map[string]string, prompt *Fe
 	instance := feedInstanceLabel(spec.Name, values)
 	id := string(FeedOrigin(instance))
 
-	s.mu.Lock()
-	if s.broken {
-		s.mu.Unlock()
-		return "", false, ErrSessionBroken
-	}
-	if s.closed {
-		s.mu.Unlock()
-		return "", false, ErrSessionClosed
-	}
-	f, ok := s.feeds[id]
-	started := true
-	switch {
-	case ok && f.status != feedStopped && f.status != feedSuspended:
-		// The instance is there and running: the call reaches it, and the
-		// prompt below is the whole of what it changes.
-		started = false
-	case ok:
-		// The instance stopped or is suspended: its supervisor is gone with
-		// its context, so a re-arm is a fresh context and a fresh
-		// supervisor. The prompt is the instance's own, and stays with it.
-		// The context being replaced is released here, because its
-		// supervisor is not the only holder of it: leaving it to the
-		// garbage collector would keep a child of the job context alive per
-		// re-arm.
-		f.cancel(ErrJobCancelled)
-		f.ctx, f.cancel = context.WithCancelCause(s.jobCtx)
-		f.done = make(chan struct{})
-		f.startedAt = time.Now()
-		f.status = feedRunning
-	default:
-		// The instances a session runs at once are capped: a call is the
-		// model's to make, and one subscribed with a fresh scope value each
-		// time would otherwise start a process per value without bound.
-		if running := s.listedFeedCountLocked(); running >= MaxFeedInstances {
+	for {
+		s.mu.Lock()
+		if s.broken {
 			s.mu.Unlock()
-			return "", false, InvalidArgsf("%s: the session already runs %d feeds at once, which is the most it runs; stop one with cancel_job first", SubscribeFeedToolName, MaxFeedInstances)
+			return "", false, ErrSessionBroken
 		}
-		f = s.newFeedState(spec, values)
-		s.feeds[id] = f
-		s.feedOrder = append(s.feedOrder, f)
-	}
-	if change != nil {
-		f.filterPrompt = *change
-	}
-	f.started = true
-	instanceLabel := f.instance
-	promptQuestion := f.filterPrompt.Question
-	s.mu.Unlock()
-	if change != nil && spec.FilterQuestion != "" {
-		// The prompt is the model's screening policy, and it replaces the
-		// one the operator configured. The tool's result says the same; the
-		// operator's log carries it too, because a feed's content may be
-		// what talked the model into the call.
-		s.logWarn("the subscribe call overrides the feed's manifest filter question",
-			slog.String("feed", instanceLabel),
-			slog.Bool("cleared", change.Question == ""))
-	}
-	if started || change != nil {
-		// The instance is on the log before its supervisor runs, and a
-		// prompt the call set rides with it: a durable session reads the
-		// record as the instance to take on again and the question it
-		// screens its records with. An instance the log cannot name does
-		// not start.
-		if err := s.writeFeedSubscribed(f, feedInstanceScope(values), promptQuestion); err != nil {
-			return "", false, err
+		if s.closed {
+			s.mu.Unlock()
+			return "", false, ErrSessionClosed
 		}
+		f, known := s.feeds[id]
+		if known && f.starting != nil {
+			// Another subscription for this instance is writing its record.
+			// Wait for that start to land or to be abandoned, then decide
+			// against the state it left.
+			starting := f.starting
+			s.mu.Unlock()
+			<-starting
+			continue
+		}
+		started := true
+		switch {
+		case known && f.status != feedStopped && f.status != feedSuspended:
+			// The instance is there and running: the call reaches it, and the
+			// prompt below is the whole of what it changes.
+			started = false
+		case !known:
+			// The instances a session runs at once are capped: a call is the
+			// model's to make, and one subscribed with a fresh scope value each
+			// time would otherwise start a process per value without bound.
+			if running := s.listedFeedCountLocked(); running >= MaxFeedInstances {
+				s.mu.Unlock()
+				return "", false, InvalidArgsf("%s: the session already runs %d feeds at once, which is the most it runs; stop one with cancel_job first", SubscribeFeedToolName, MaxFeedInstances)
+			}
+			f = s.newFeedState(spec, values)
+			// The instance is registered but not running: its record below is
+			// what makes it active. A stopped status keeps it out of the job
+			// list and out of the close's teardown while the write is in
+			// flight.
+			f.status = feedStopped
+			s.feeds[id] = f
+			s.feedOrder = append(s.feedOrder, f)
+		}
+		// The reservation is what a concurrent subscription for the same
+		// instance waits on, so one instance never starts two supervisors.
+		starting := make(chan struct{})
+		f.starting = starting
+		promptQuestion := f.filterPrompt.Question
+		if change != nil {
+			promptQuestion = change.Question
+		}
+		instanceLabel := f.instance
+		fresh := !known
+		s.mu.Unlock()
+		if change != nil && spec.FilterQuestion != "" {
+			// The prompt is the model's screening policy, and it replaces the
+			// one the operator configured. The tool's result says the same; the
+			// operator's log carries it too, because a feed's content may be
+			// what talked the model into the call.
+			s.logWarn("the subscribe call overrides the feed's manifest filter question",
+				slog.String("feed", instanceLabel),
+				slog.Bool("cleared", change.Question == ""))
+		}
+		if started || change != nil {
+			// The instance is on the log before it is active, and a prompt the
+			// call set rides with it: a durable session reads the record as the
+			// instance to take on again and the question it screens its records
+			// with. An instance the log cannot name runs no supervisor and
+			// stays out of the session's state.
+			if err := s.writeFeedSubscribed(f, feedInstanceScope(values), promptQuestion); err != nil {
+				s.mu.Lock()
+				f.starting = nil
+				if fresh {
+					// The instance was registered for this record alone, so it
+					// is rolled back and its context released.
+					delete(s.feeds, id)
+					for i, listed := range s.feedOrder {
+						if listed == f {
+							s.feedOrder = append(s.feedOrder[:i], s.feedOrder[i+1:]...)
+							break
+						}
+					}
+					f.cancel(ErrJobCancelled)
+				}
+				s.mu.Unlock()
+				close(starting)
+				return "", false, err
+			}
+		}
+
+		s.mu.Lock()
+		f.starting = nil
+		if started {
+			if !fresh {
+				// The instance stopped or is suspended: its supervisor is gone
+				// with its context, so a re-arm is a fresh context and a fresh
+				// supervisor. The prompt is the instance's own, and stays with
+				// it. The context being replaced is released here, because its
+				// supervisor is not the only holder of it: leaving it to the
+				// garbage collector would keep a child of the job context alive
+				// per re-arm.
+				f.cancel(ErrJobCancelled)
+				f.ctx, f.cancel = context.WithCancelCause(s.jobCtx)
+				f.done = make(chan struct{})
+			}
+			f.startedAt = time.Now()
+			f.status = feedRunning
+			f.started = true
+		}
+		if change != nil {
+			f.filterPrompt = *change
+		}
+		s.mu.Unlock()
+		close(starting)
+
+		if started {
+			go s.runFeed(f)
+		}
+		return id, started, nil
 	}
-	if started {
-		go s.runFeed(f)
-	}
-	return id, started, nil
 }
 
 // writeFeedSubscribed records that an optional feed instance subscribed.

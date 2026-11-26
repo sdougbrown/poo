@@ -745,9 +745,14 @@ func (s *Session) runJob(job *jobState, prepared Prepared, live *liveCall) {
 	// the job's own goroutine: the record is durable before the job's
 	// effect can start, whatever the model's turn is doing. A job that
 	// never launches writes none, because the write is here and not at
-	// the admission.
+	// the admission. A record that did not land starts nothing.
 	if tool.Spec().Class == ClassSideEffecting {
-		s.writeToolStarted(job.owner, job.turn, job.handle, job.callID, job.tool)
+		if !s.writeToolStarted(job.owner, job.turn, job.handle, job.callID, job.tool) {
+			// The job's effect cannot be accounted for, so it does not
+			// run: its end record reports the refusal.
+			s.completeJob(job, ToolResult{Text: fmt.Sprintf("the start of the %s job could not be recorded, so it did not run", job.tool), IsError: true}, OutcomeError, false, false, "")
+			return
+		}
 	}
 
 	env := s.jobToolEnv(job)

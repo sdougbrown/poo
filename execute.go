@@ -725,9 +725,16 @@ func (s *Session) executeOne(owner *callOwner, turn int, plan callPlan) {
 	env := s.toolEnv(owner, turn, handle, plan)
 	// A side-effecting call is on the log before the tool can change
 	// anything, so a crash that cuts the call short leaves a durable
-	// record of the effect that may have happened.
+	// record of the effect that may have happened. A record that did not
+	// land starts nothing: the run trusts the log as the record of what
+	// may have happened.
 	if tool.Spec().Class == ClassSideEffecting {
-		s.writeToolStarted(owner, turn, handle, call.CallID, call.Name)
+		if !s.writeToolStarted(owner, turn, handle, call.CallID, call.Name) {
+			// The call was claimed started, so the finalization owns its
+			// result: a refused record has already settled the run broken,
+			// and a close that fenced the write has cancelled the activity.
+			return
+		}
 	}
 	var result ToolResult
 	if owner.run != nil && s.backgroundableCall(call.Name, plan.parent) {
@@ -1357,11 +1364,15 @@ func (s *Session) startCall(owner *callOwner, handle string) bool {
 // is on disk: the log says the effect may have happened, and a durable
 // session replays the call or reports it. A read-only call writes none,
 // because a crashed read has nothing to replay.
-func (s *Session) writeToolStarted(owner *callOwner, turn int, handle, callID, tool string) {
+//
+// It reports whether the record durably landed. A call whose record did
+// not land must not start: the log is what a durable session trusts, so
+// an effect beside no record is one nothing can account for.
+func (s *Session) writeToolStarted(owner *callOwner, turn int, handle, callID, tool string) bool {
 	gate, ok := s.beginWrite("tool.started")
 	if !ok {
 		// The close has fenced the session: the record is abandoned.
-		return
+		return false
 	}
 	rec := &ToolStartedRecord{
 		RecordMeta: NewRecordMetaFrom("tool.started", OriginModel),
@@ -1373,7 +1384,9 @@ func (s *Session) writeToolStarted(owner *callOwner, turn int, handle, callID, t
 	}
 	if err := s.writeClaimed(context.Background(), rec, gate); err != nil {
 		s.noteStoreError(owner, err)
+		return false
 	}
+	return true
 }
 
 // claimResult claims a call's result.

@@ -256,7 +256,12 @@ func (s *Session) runAfterTurn(run *runState, turn int, interrupted bool) (appen
 	defer s.endActivity(run)
 	ctx := s.activityContext(&run.callOwner)
 	for i, h := range s.opts.AfterTurn {
-		s.writeTurnHook(run, turn, "after_turn", "started", i, interrupted)
+		if !s.writeTurnHook(run, turn, "after_turn", "started", i, interrupted) {
+			// The hook's start did not land, so the hook must not run: a
+			// durable session reads the record as the log of what ran. A
+			// refused record has already settled the run broken.
+			return appended, nil
+		}
 		out, err := s.callHook(ctx, h, func(hctx context.Context) (any, error) {
 			return h.AfterTurn(s.hookContext(hctx, turn, interrupted))
 		})
@@ -319,7 +324,12 @@ func (s *Session) runBeforeSettle(run *runState, turn int, natural Reason) (Sett
 	ctx := s.activityContext(&run.callOwner)
 	var continues []hookAppend
 	for i, h := range s.opts.BeforeSettle {
-		s.writeTurnHook(run, turn, "before_settle", "started", i, false)
+		if !s.writeTurnHook(run, turn, "before_settle", "started", i, false) {
+			// The hook's start did not land, so the hook must not run: a
+			// durable session reads the record as the log of what ran. A
+			// refused record has already settled the run broken.
+			return SettleDecision{}, false, nil
+		}
 		out, err := s.callHook(ctx, h, func(hctx context.Context) (any, error) {
 			return h.BeforeSettle(s.hookContext(hctx, turn, false), natural)
 		})
@@ -378,11 +388,15 @@ func (s *Session) runBeforeSettle(run *runState, turn int, natural Reason) (Sett
 // after it returns, so a hook a crash cut short leaves a start with no
 // end: the log says which hook the run was inside. The write goes
 // through the session's claimed-write gate.
-func (s *Session) writeTurnHook(run *runState, turn int, phase, status string, index int, interrupted bool) {
+//
+// It reports whether the record durably landed. A start that did not land
+// runs no hook: the log is what a durable session trusts, so a hook
+// beside no record is one nothing can account for.
+func (s *Session) writeTurnHook(run *runState, turn int, phase, status string, index int, interrupted bool) bool {
 	gate, ok := s.beginWrite("turn.hook")
 	if !ok {
 		// The close has fenced the session: the record is abandoned.
-		return
+		return false
 	}
 	rec := &TurnHookRecord{
 		RecordMeta:  NewRecordMeta("turn.hook"),
@@ -395,7 +409,9 @@ func (s *Session) writeTurnHook(run *runState, turn int, phase, status string, i
 	}
 	if err := s.writeClaimed(context.Background(), rec, gate); err != nil {
 		s.noteStoreError(&run.callOwner, err)
+		return false
 	}
+	return true
 }
 
 // hookContinueLimitError reports that a run asked for more
