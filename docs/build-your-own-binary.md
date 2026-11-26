@@ -569,8 +569,9 @@ The filter runs the way the feed's own command runs: the same executor,
 the same directory, and the same environment, the manifest's `env`
 entries and the library's benign names. A record is at most 1 MiB on both
 sides of the filter, and one run's whole output is at most 4 MiB and 256
-records. Past either of the run's caps the attempt fails closed, the way
-it does for a record past 1 MiB.
+records — the bound on how many records one source record becomes. Past
+either of the run's caps the attempt fails closed, the way it does for a
+record past 1 MiB.
 
 The command filter fails closed. An empty standard output drops the
 record, which is how a filter withholds one. A nonzero exit, output that

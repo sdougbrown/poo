@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -169,5 +170,82 @@ func TestTheFilterRecordDoesNotEscapeItsWayPastTheLineCap(t *testing.T) {
 	}
 	if record.Text != text || record.From != "alice" {
 		t.Errorf("the record round trip lost the message: %d bytes of text, from %q", len(record.Text), record.From)
+	}
+}
+
+// TestTheFilterOutputPinsTheEdgeCases covers the decoder's edges: a
+// value that is not a record, a null, trailing garbage, whitespace, a
+// stream that mixes pretty-printed and compact values, and the record
+// cap's boundary.
+func TestTheFilterOutputPinsTheEdgeCases(t *testing.T) {
+	oneLine := func(n int) string {
+		var b strings.Builder
+		for i := 0; i < n; i++ {
+			fmt.Fprintf(&b, `{"text":"record %d"}`, i)
+		}
+		return b.String()
+	}
+	cases := []struct {
+		// name names the case.
+		name string
+		// out is what the filter wrote.
+		out string
+		// wantFault reports that the output is refused.
+		wantFault bool
+		// wantCode is the fault's code, when it is refused.
+		wantCode string
+		// wantText is a substring of the fault's message, when it is
+		// refused.
+		wantText string
+		// wantCount is how many records the output holds, when it is not
+		// refused.
+		wantCount int
+		// wantTexts are the records' texts, in order, when the case
+		// names them.
+		wantTexts []string
+	}{
+		{name: "a value that is not a record", out: "5", wantFault: true, wantCode: poo.FeedFaultOutput, wantText: "is not a record"},
+		{name: "a null", out: "null", wantFault: true, wantCode: poo.FeedFaultOutput, wantText: "has no text"},
+		{name: "trailing garbage after a record", out: `{"text":"a"} x`, wantFault: true, wantCode: poo.FeedFaultOutput, wantText: "is not a record"},
+		{name: "whitespace only", out: "  \n  ", wantCount: 0},
+		{
+			name:      "a stream that mixes pretty-printed and compact values",
+			out:       "{\n  \"text\": \"the pretty message\",\n  \"from\": \"alice\"\n}\n{\"text\":\"the compact message\",\"from\":\"alice\"}",
+			wantCount: 2,
+			wantTexts: []string{"the pretty message", "the compact message"},
+		},
+		{name: "the record cap's boundary", out: oneLine(maxFilterRecords), wantCount: maxFilterRecords},
+		{name: "one record past the cap", out: oneLine(maxFilterRecords + 1), wantFault: true, wantCode: poo.FeedFaultOutput, wantText: fmt.Sprintf("more than the %d records", maxFilterRecords)},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			messages, fault := filterOutput([]byte(c.out))
+			if c.wantFault {
+				if fault == nil {
+					t.Fatalf("the output was not refused")
+				}
+				if fault.Code != c.wantCode {
+					t.Errorf("the fault's code is %q, want %q", fault.Code, c.wantCode)
+				}
+				if !strings.Contains(fault.Message, c.wantText) {
+					t.Errorf("the fault's message is %q, want it to say %q", fault.Message, c.wantText)
+				}
+				if len(messages) != 0 {
+					t.Errorf("the output holds %d records, want none", len(messages))
+				}
+				return
+			}
+			if fault != nil {
+				t.Fatalf("the output was refused: %v", fault)
+			}
+			if len(messages) != c.wantCount {
+				t.Fatalf("the output holds %d records, want %d", len(messages), c.wantCount)
+			}
+			for i, want := range c.wantTexts {
+				if messages[i].Text != want {
+					t.Errorf("the record %d is %q, want %q", i, messages[i].Text, want)
+				}
+			}
+		})
 	}
 }

@@ -156,8 +156,9 @@ const maxFilterStderrBytes = 64 << 10
 const maxFilterOutputBytes = 4 << 20
 
 // maxFilterRecords is the most records one filter run may write. The cap
-// bounds what one source record becomes, so a filter cannot flood the
-// feed's backlog from a single record.
+// bounds what one source record becomes, a bound on the fan-out size per
+// run; it does not protect the feed's backlog, which is smaller and
+// drops its oldest input.
 const maxFilterRecords = 256
 
 // commandFilterEmit wraps delivery for a feed with a validated manifest
@@ -171,10 +172,12 @@ const maxFilterRecords = 256
 // them; empty output drops the record; and a nonzero exit or output that is
 // not a record is the fault that suspends the feed.
 //
-// One run's output is all or nothing: if any value in it is not a record,
-// none of the run's records is delivered. What was emitted stands, though:
-// a session that refuses one record partway through the run keeps the ones
-// before it, and the attempt ends with that refusal.
+// Validation is all or nothing: if any value in a run's output is not a
+// record, none of the run's records is delivered. Delivery is at most
+// once, though: a record that fails at the session's emit — an image
+// that cannot be read, for one — ends the attempt with the records
+// already emitted standing, as a plain error rather than a fault, and
+// the feed's restart policy may re-fan the same source.
 func commandFilterEmit(ctx context.Context, io poo.FeedIO, spec feed.Spec, ex exec.Executor, env func(string) (string, bool), session func(scope, name string) (string, error)) func(string, string, *poo.FeedImage, json.RawMessage) error {
 	filter := *spec.Filter
 	// The environment resolves once per attempt, the way the feed's own

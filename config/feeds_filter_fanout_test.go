@@ -1,10 +1,13 @@
 package config_test
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/config"
 	"github.com/sdougbrown/poo/feed"
 	"github.com/sdougbrown/poo/pootest"
 )
@@ -176,5 +179,67 @@ func TestFilterOutputTotalCap(t *testing.T) {
 	}
 	if queued := queuedRecords(sink); len(queued) != 0 {
 		t.Fatalf("the session queued %d records, want none: the run wrote past its cap", len(queued))
+	}
+}
+
+// TestFilterFanOutEmitFailure covers the delivery's at-most-once half:
+// a record that fails at the session's emit — the one whose image does
+// not read — ends the attempt with the records before it standing, and
+// the error is the attempt's, not a fault: the feed's restart policy
+// applies, not the suspension.
+func TestFilterFanOutEmitFailure(t *testing.T) {
+	dir := t.TempDir()
+	manifest := `{
+  "version": 1,
+  "feeds": {
+    "chat": {
+      "command": ["` + feedScript(t, "filterless-data") + `"],
+      "on_idle": "wake",
+      "filter": {"command": ["` + filterScript(t, "filter-fanout-badimage") + `"]}
+    }
+  }
+}`
+	path := filepath.Join(dir, "feeds.json")
+	if err := os.WriteFile(path, []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	settings, err := config.Parse([]byte(theFeedsSettings(path)), config.FormatYAML)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+	// The session's model reads images, so the record's image is the
+	// session's to read, and the file that is not there is the emit's
+	// failure.
+	runtime.Options.Model.Inputs = []poo.Modality{poo.ModalityText, poo.ModalityImage}
+	sink := pootest.NewSink()
+	runtime.Options.Transport = pootest.NewTransport(pootest.Turn{Text: "ack"}, pootest.Turn{Text: "ack"})
+	runtime.Options.Sink = sink
+	sess, err := poo.New(runtime.Options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sess.Close() })
+
+	waitUntil(t, "the failed attempt to end", func() bool {
+		return feedEndsOf(sink) != nil
+	})
+	// The record before the failure stands: it is the one the session
+	// queued, and the one after the failure never is.
+	queued := queuedRecords(sink)
+	if len(queued) != 1 {
+		t.Fatalf("the session queued %d records, want the one before the failure", len(queued))
+	}
+	if queued[0].Text != `<feed name="chat" from="alice">the first message</feed>` {
+		t.Errorf("the record is %q, want the filter's first", queued[0].Text)
+	}
+	// The attempt ends with the error, not a fault: the feed's restart
+	// policy applies, not the suspension, and the error names the image.
+	ends := feedEndsOf(sink)
+	if len(ends) != 1 || ends[0].Outcome != poo.FeedFailed {
+		t.Fatalf("the attempts ended %+v, want one failed attempt", ends)
+	}
+	if !strings.Contains(ends[0].Error, "missing.png") {
+		t.Errorf("the attempt's error is %q, want it to name the image", ends[0].Error)
 	}
 }
