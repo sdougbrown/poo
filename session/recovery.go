@@ -425,6 +425,77 @@ func (p InterruptPolicy) Resolve(ctx context.Context, sink poo.RecordSink, pend 
 	return nil
 }
 
+// Recovery is what a load reads to recover a session and to say what
+// changed since it was written.
+//
+// Every store that loads a session composes it, so the dispatch has one
+// owner: a durable session is planned and a logged one settled the same
+// way whether its records are lines in a file or rows in a table, and
+// both stores warn in the same words.
+type Recovery struct {
+	// Policy resolves a logged or ephemeral session's pending
+	// operations. The default is the interrupt policy.
+	Policy RecoveryPolicy
+	// Durable is how a durable session's continuation is planned.
+	Durable DurableOptions
+	// Now is the store's clock, which a policy or planner given none
+	// inherits. The default is time.Now.
+	Now func() time.Time
+	// Build names the binary that owns the store. A session written by
+	// another build is loaded with a warning.
+	Build poo.BuildInfo
+	// SettingsHash is the hash of the settings the store was made with.
+	// A session written with other settings is loaded with a warning.
+	SettingsHash string
+}
+
+// Resolve picks the resolver a session's mode names and resolves the
+// session's pending operations with it.
+//
+// A durable session's run is planned for a continuation; every other
+// session's pending operations are settled, which is what this build does
+// for a logged session.
+func (r Recovery) Resolve(ctx context.Context, sink poo.RecordSink, pending *Pending, mode Mode, meta Metadata) (*ContinuationPlan, error) {
+	if mode == ModeDurable {
+		return r.planner(meta).Plan(ctx, sink, pending)
+	}
+	policy := r.Policy
+	if policy == nil {
+		policy = InterruptPolicy{Now: r.Now}
+	}
+	return nil, policy.Resolve(ctx, sink, pending)
+}
+
+// planner returns the planner a session is loaded with.
+//
+// The planner reads the session's own tools as its fallback lookup: the
+// header is what the session was created with, and a live tool set is the
+// caller's to supply.
+func (r Recovery) planner(meta Metadata) DurablePlanner {
+	opts := r.Durable
+	opts.Tools = meta.Tools
+	if opts.Now == nil {
+		opts.Now = r.Now
+	}
+	return DurablePlanner{Options: opts}
+}
+
+// Warnings reports what changed since the session was written.
+//
+// A different build or different settings are not failures: the records
+// are still readable. A caller that cares reports them.
+func (r Recovery) Warnings(meta Metadata) []string {
+	var out []string
+	if r.Build.Name != "" && meta.Build.Name != "" && r.Build != meta.Build {
+		out = append(out, "the session was made by "+meta.Build.Name+" "+meta.Build.Version+
+			", and this build is "+r.Build.Name+" "+r.Build.Version)
+	}
+	if r.SettingsHash != "" && meta.SettingsHash != "" && r.SettingsHash != meta.SettingsHash {
+		out = append(out, "the settings changed since the session was created")
+	}
+	return out
+}
+
 // recoveredInputID returns the id of the input a recovered job's result
 // is queued under.
 //

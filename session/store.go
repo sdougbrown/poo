@@ -115,20 +115,10 @@ type FileStore struct {
 	dir string
 	// codec reads and writes the records.
 	codec Codec
-	// now is the store's clock.
-	now func() time.Time
-	// build names the binary that owns the store. A session written
-	// by another build is loaded with a warning.
-	build poo.BuildInfo
-	// settingsHash is the hash of the settings the store was made
-	// with. A session written with other settings is loaded with a
-	// warning.
-	settingsHash string
-	// policy resolves the pending operations of a session that is
-	// loaded.
-	policy RecoveryPolicy
-	// durable is how a durable session's continuation is planned.
-	durable DurableOptions
+	// recovery is what a load reads to recover a session and to say what
+	// changed since it was written: the policy, the durable options, the
+	// store's clock, and the build and settings the warnings compare.
+	recovery Recovery
 	// lease, when set, opens sessions with a lease instead of the
 	// flock: the session's owner is renewed by a heartbeat, and a dead
 	// owner is taken over after the lease expires.
@@ -183,7 +173,7 @@ func WithCodec(codec Codec) Option {
 func WithClock(now func() time.Time) Option {
 	return func(s *FileStore) {
 		if now != nil {
-			s.now = now
+			s.recovery.Now = now
 		}
 	}
 }
@@ -194,7 +184,7 @@ func WithClock(now func() time.Time) Option {
 // records are still readable, but the binary that wrote them is not
 // this one.
 func WithBuild(build poo.BuildInfo) Option {
-	return func(s *FileStore) { s.build = build }
+	return func(s *FileStore) { s.recovery.Build = build }
 }
 
 // WithSettingsHash sets the hash of the settings the store was made
@@ -202,7 +192,7 @@ func WithBuild(build poo.BuildInfo) Option {
 //
 // A session written with other settings is loaded with a warning.
 func WithSettingsHash(hash string) Option {
-	return func(s *FileStore) { s.settingsHash = hash }
+	return func(s *FileStore) { s.recovery.SettingsHash = hash }
 }
 
 // WithRecoveryPolicy sets the policy that resolves a loaded session's
@@ -214,7 +204,7 @@ func WithSettingsHash(hash string) Option {
 func WithRecoveryPolicy(policy RecoveryPolicy) Option {
 	return func(s *FileStore) {
 		if policy != nil {
-			s.policy = policy
+			s.recovery.Policy = policy
 		}
 	}
 }
@@ -226,7 +216,7 @@ func WithRecoveryPolicy(policy RecoveryPolicy) Option {
 // recorded, whatever the store was opened with. A ToolLookup in the
 // options outranks it.
 func WithDurableOptions(opts DurableOptions) Option {
-	return func(s *FileStore) { s.durable = opts }
+	return func(s *FileStore) { s.recovery.Durable = opts }
 }
 
 // WithLeaseOptions sets the lease options the store opens sessions
@@ -248,10 +238,12 @@ func WithLeaseOptions(opts LeaseOptions) Option {
 // prompts and answers, so it is created private to its owner.
 func NewStore(dir string, opts ...Option) (*FileStore, error) {
 	s := &FileStore{
-		dir:    dir,
-		codec:  NewCodec(),
-		now:    time.Now,
-		policy: InterruptPolicy{},
+		dir:   dir,
+		codec: NewCodec(),
+		recovery: Recovery{
+			Policy: InterruptPolicy{},
+			Now:    time.Now,
+		},
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -264,6 +256,9 @@ func NewStore(dir string, opts ...Option) (*FileStore, error) {
 
 // Dir returns the directory the store keeps its sessions in.
 func (s *FileStore) Dir() string { return s.dir }
+
+// now returns the store's clock.
+func (s *FileStore) now() time.Time { return s.recovery.Now() }
 
 // DirStore is a store that keeps its sessions in a directory.
 //
@@ -571,7 +566,7 @@ func (s *FileStore) loadLocked(ctx context.Context, id string, owner sessionOwne
 		RecoveredTail: torn,
 		Jobs:          poo.PendingJobResults(recs),
 		Continuation:  continuation,
-		Warnings:      s.warnings(meta),
+		Warnings:      s.recovery.Warnings(meta),
 	}, nil
 }
 
@@ -583,7 +578,7 @@ func (s *FileStore) loadLocked(ctx context.Context, id string, owner sessionOwne
 // The recovery appends only what is missing, so it is idempotent: a
 // recovery that failed partway is finished by the next load.
 func (s *FileStore) recover(ctx context.Context, log *Log, pending *Pending, mode Mode, meta Metadata) (*ContinuationPlan, error) {
-	continuation, err := s.resolve(ctx, log, pending, mode, meta)
+	continuation, err := s.recovery.Resolve(ctx, log, pending, mode, meta)
 	if err != nil {
 		return nil, &Error{Code: CodeStoreError, Message: "recovering the session", Err: err}
 	}
@@ -591,52 +586,6 @@ func (s *FileStore) recover(ctx context.Context, log *Log, pending *Pending, mod
 		return nil, &Error{Code: CodeStoreError, Message: "syncing the session", Err: err}
 	}
 	return continuation, nil
-}
-
-// resolve picks the resolver a session's mode names.
-//
-// A durable session's run is planned for a continuation; every other
-// session's pending operations are settled, which is what this build does
-// for a logged session.
-func (s *FileStore) resolve(ctx context.Context, sink poo.RecordSink, pending *Pending, mode Mode, meta Metadata) (*ContinuationPlan, error) {
-	if mode == ModeDurable {
-		return s.durablePlanner(meta).Plan(ctx, sink, pending)
-	}
-	policy := s.policy
-	if policy == nil {
-		policy = InterruptPolicy{Now: s.now}
-	}
-	return nil, policy.Resolve(ctx, sink, pending)
-}
-
-// durablePlanner returns the planner a session is loaded with.
-//
-// The planner reads the session's own tools as its fallback lookup: the
-// header is what the session was created with, and a live tool set is the
-// caller's to supply.
-func (s *FileStore) durablePlanner(meta Metadata) DurablePlanner {
-	opts := s.durable
-	opts.Tools = meta.Tools
-	if opts.Now == nil {
-		opts.Now = s.now
-	}
-	return DurablePlanner{Options: opts}
-}
-
-// warnings reports what changed since the session was written.
-//
-// A different build or different settings are not failures: the records
-// are still readable. A caller that cares reports them.
-func (s *FileStore) warnings(meta Metadata) []string {
-	var out []string
-	if s.build.Name != "" && meta.Build.Name != "" && s.build != meta.Build {
-		out = append(out, "the session was made by "+meta.Build.Name+" "+meta.Build.Version+
-			", and this build is "+s.build.Name+" "+s.build.Version)
-	}
-	if s.settingsHash != "" && meta.SettingsHash != "" && s.settingsHash != meta.SettingsHash {
-		out = append(out, "the settings changed since the session was created")
-	}
-	return out
 }
 
 // readLog reads a session's records.

@@ -135,7 +135,7 @@ func AcquireLease(db *sql.DB, sessionID string, opts LeaseOptions) (*LeaseAuthor
 			tx.Rollback()
 			return nil, session.ErrSessionLocked
 		}
-		warning = fmt.Sprintf("the lease was taken over from %s, which expired at %s",
+		warning = fmt.Sprintf(session.LeaseTakeoverFormat,
 			existingOwner, existingExp.Format(time.RFC3339))
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		tx.Rollback()

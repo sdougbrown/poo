@@ -1136,7 +1136,7 @@ func TestDurableLoadPlansAContinuation(t *testing.T) {
 	// The same records under the logged mode are settled interrupted, and
 	// the interrupt policy is what the resolver picks for them.
 	settled := &planSink{}
-	plan, err := store.resolve(ctx, settled, pendingOf("s1", recs), ModeLogged, meta)
+	plan, err := store.recovery.Resolve(ctx, settled, pendingOf("s1", recs), ModeLogged, meta)
 	if err != nil {
 		t.Fatalf("resolving the logged session: %v", err)
 	}
@@ -1153,10 +1153,10 @@ func TestDurableLoadPlansAContinuation(t *testing.T) {
 		t.Fatalf("opening the store: %v", err)
 	}
 	defer other.Close()
-	if other.durablePlanner(meta).Options.MaxResumptions != 1 {
+	if other.recovery.planner(meta).Options.MaxResumptions != 1 {
 		t.Error("the store's planner does not carry its options")
 	}
-	if len(other.durablePlanner(meta).Options.Tools) != len(meta.Tools) {
+	if len(other.recovery.planner(meta).Options.Tools) != len(meta.Tools) {
 		t.Error("the store's planner does not carry the session's tools")
 	}
 

@@ -32,20 +32,10 @@ type Store struct {
 	path string
 	// codec reads and writes the records.
 	codec session.Codec
-	// now is the store's clock.
-	now func() time.Time
-	// build names the binary that owns the store. A session written
-	// by another build is loaded with a warning.
-	build poo.BuildInfo
-	// settingsHash is the hash of the settings the store was made
-	// with. A session written with other settings is loaded with a
-	// warning.
-	settingsHash string
-	// policy resolves the pending operations of a session that is
-	// loaded.
-	policy session.RecoveryPolicy
-	// durable is how a durable session's continuation is planned.
-	durable session.DurableOptions
+	// recovery is what a load reads to recover a session and to say what
+	// changed since it was written: the policy, the durable options, the
+	// store's clock, and the build and settings the warnings compare.
+	recovery session.Recovery
 	// lease is how the store opens a session: every open session's owner
 	// is a lease, renewed by a heartbeat, and a dead owner is taken over
 	// after the lease expires. A store given no lease options opens
@@ -96,7 +86,7 @@ func WithCodec(codec session.Codec) Option {
 func WithClock(now func() time.Time) Option {
 	return func(s *Store) {
 		if now != nil {
-			s.now = now
+			s.recovery.Now = now
 		}
 	}
 }
@@ -107,7 +97,7 @@ func WithClock(now func() time.Time) Option {
 // records are still readable, but the binary that wrote them is not
 // this one.
 func WithBuild(build poo.BuildInfo) Option {
-	return func(s *Store) { s.build = build }
+	return func(s *Store) { s.recovery.Build = build }
 }
 
 // WithSettingsHash sets the hash of the settings the store was made
@@ -115,7 +105,7 @@ func WithBuild(build poo.BuildInfo) Option {
 //
 // A session written with other settings is loaded with a warning.
 func WithSettingsHash(hash string) Option {
-	return func(s *Store) { s.settingsHash = hash }
+	return func(s *Store) { s.recovery.SettingsHash = hash }
 }
 
 // WithRecoveryPolicy sets the policy that resolves a loaded session's
@@ -127,7 +117,7 @@ func WithSettingsHash(hash string) Option {
 func WithRecoveryPolicy(policy session.RecoveryPolicy) Option {
 	return func(s *Store) {
 		if policy != nil {
-			s.policy = policy
+			s.recovery.Policy = policy
 		}
 	}
 }
@@ -139,7 +129,7 @@ func WithRecoveryPolicy(policy session.RecoveryPolicy) Option {
 // recorded, whatever the store was opened with. A ToolLookup in the
 // options outranks it.
 func WithDurableOptions(opts session.DurableOptions) Option {
-	return func(s *Store) { s.durable = opts }
+	return func(s *Store) { s.recovery.Durable = opts }
 }
 
 // WithLeaseOptions sets the lease options the store opens sessions
@@ -171,10 +161,12 @@ func WithLeaseOptions(opts LeaseOptions) Option {
 // process holds is refused, whatever the store was opened with.
 func New(path string, opts ...Option) (*Store, error) {
 	s := &Store{
-		codec:  session.NewCodec(),
-		now:    time.Now,
-		policy: session.InterruptPolicy{},
-		lease:  LeaseOptions{TTL: session.DefaultLeaseTTL},
+		codec: session.NewCodec(),
+		recovery: session.Recovery{
+			Policy: session.InterruptPolicy{},
+			Now:    time.Now,
+		},
+		lease: LeaseOptions{TTL: session.DefaultLeaseTTL},
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -190,6 +182,9 @@ func New(path string, opts ...Option) (*Store, error) {
 
 // Path returns the database's path.
 func (s *Store) Path() string { return s.path }
+
+// now returns the store's clock.
+func (s *Store) now() time.Time { return s.recovery.Now() }
 
 // Create starts a session in the store.
 //
@@ -401,7 +396,7 @@ func (s *Store) loadLocked(ctx context.Context, id string, owner *LeaseAuthority
 	// session's are planned instead, so its run continues. A failure
 	// partway leaves the records with what it wrote, and the next load
 	// finishes the job.
-	continuation, err := s.resolve(ctx, sink, pending, meta.Mode, meta)
+	continuation, err := s.recovery.Resolve(ctx, sink, pending, meta.Mode, meta)
 	if err != nil {
 		return nil, &session.Error{Code: session.CodeStoreError, Message: "recovering the session", Err: err}
 	}
@@ -429,7 +424,7 @@ func (s *Store) loadLocked(ctx context.Context, id string, owner *LeaseAuthority
 		Records:      final,
 		Jobs:         poo.PendingJobResults(final),
 		Continuation: continuation,
-		Warnings:     s.warnings(meta),
+		Warnings:     s.recovery.Warnings(meta),
 	}, nil
 }
 
@@ -492,52 +487,6 @@ func (r *recordSink) Append(ctx context.Context, rec poo.Record) error {
 // Every record is written as it comes, so there is nothing buffered.
 func (r *recordSink) Flush(ctx context.Context) error {
 	return ctx.Err()
-}
-
-// resolve picks the resolver a session's mode names.
-//
-// A durable session's run is planned for a continuation; every other
-// session's pending operations are settled, which is what this build does
-// for a logged session.
-func (s *Store) resolve(ctx context.Context, sink poo.RecordSink, pending *session.Pending, mode session.Mode, meta session.Metadata) (*session.ContinuationPlan, error) {
-	if mode == session.ModeDurable {
-		return s.durablePlanner(meta).Plan(ctx, sink, pending)
-	}
-	policy := s.policy
-	if policy == nil {
-		policy = session.InterruptPolicy{Now: s.now}
-	}
-	return nil, policy.Resolve(ctx, sink, pending)
-}
-
-// durablePlanner returns the planner a session is loaded with.
-//
-// The planner reads the session's own tools as its fallback lookup: the
-// header is what the session was created with, and a live tool set is the
-// caller's to supply.
-func (s *Store) durablePlanner(meta session.Metadata) session.DurablePlanner {
-	opts := s.durable
-	opts.Tools = meta.Tools
-	if opts.Now == nil {
-		opts.Now = s.now
-	}
-	return session.DurablePlanner{Options: opts}
-}
-
-// warnings reports what changed since the session was written.
-//
-// A different build or different settings are not failures: the records
-// are still readable. A caller that cares reports them.
-func (s *Store) warnings(meta session.Metadata) []string {
-	var out []string
-	if s.build.Name != "" && meta.Build.Name != "" && s.build != meta.Build {
-		out = append(out, "the session was made by "+meta.Build.Name+" "+meta.Build.Version+
-			", and this build is "+s.build.Name+" "+s.build.Version)
-	}
-	if s.settingsHash != "" && meta.SettingsHash != "" && s.settingsHash != meta.SettingsHash {
-		out = append(out, "the settings changed since the session was created")
-	}
-	return out
 }
 
 // Append writes one record to the open session.

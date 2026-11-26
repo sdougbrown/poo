@@ -3412,7 +3412,7 @@ type DurableSettings struct {
 func (s *Settings) DurableSettings() DurableSettings {
 	out := DurableSettings{
 		MaxResumptions: session.DefaultMaxResumptions,
-		LeaseTTL:       30 * time.Second,
+		LeaseTTL:       session.DefaultLeaseTTL,
 		Store:          "file",
 	}
 	durable := s.Session.Durable
