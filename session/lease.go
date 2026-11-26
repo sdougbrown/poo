@@ -21,11 +21,12 @@ import (
 // is created with the session's own mode.
 const leaseFileMode = 0o600
 
-// The default lease TTL.
+// DefaultLeaseTTL is how long a lease lasts before it expires when the
+// options set no TTL.
 //
 // A lease that is not renewed within this long is expired, and a dead
 // owner is taken over.
-const defaultLeaseTTL = 30 * time.Second
+const DefaultLeaseTTL = 30 * time.Second
 
 // leaseState is the lease's on-disk form.
 //
@@ -71,7 +72,7 @@ func LeaseLocked(path string, now time.Time) (bool, error) {
 type LeaseOptions struct {
 	// TTL is how long a lease lasts before it expires.
 	//
-	// The default is 30s.
+	// The default is DefaultLeaseTTL.
 	TTL time.Duration
 	// HeartbeatInterval is how often the owner renews the lease.
 	//
@@ -129,7 +130,7 @@ type LeaseAuthority struct {
 func AcquireLease(dir, id string, opts LeaseOptions) (*LeaseAuthority, error) {
 	ttl := opts.TTL
 	if ttl <= 0 {
-		ttl = defaultLeaseTTL
+		ttl = DefaultLeaseTTL
 	}
 	interval := opts.HeartbeatInterval
 	if interval <= 0 {

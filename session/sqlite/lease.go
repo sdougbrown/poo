@@ -14,22 +14,16 @@ import (
 	"github.com/sdougbrown/poo/session"
 )
 
-// The default lease TTL.
-//
-// A lease that is not renewed within this long is expired, and a dead
-// owner is taken over.
-const defaultLeaseTTL = 30 * time.Second
-
 // LeaseOptions configures a lease.
 //
 // It mirrors the file store's lease options: the TTL, the heartbeat
 // interval, the owner's name, and the clock. The defaults are the
-// file store's: a 30s TTL, a heartbeat at the TTL divided by three,
-// the process's id for the owner, and the wall clock.
+// file store's: the TTL session.DefaultLeaseTTL, a heartbeat at the TTL
+// divided by three, the process's id for the owner, and the wall clock.
 type LeaseOptions struct {
 	// TTL is how long a lease lasts before it expires.
 	//
-	// The default is 30s.
+	// The default is session.DefaultLeaseTTL.
 	TTL time.Duration
 	// HeartbeatInterval is how often the owner renews the lease.
 	//
@@ -67,11 +61,14 @@ type LeaseAuthority struct {
 	now       func() time.Time
 	lost      chan struct{}
 	stop      chan struct{}
-	lostOnce  sync.Once
-	stopOnce  sync.Once
-	mu        sync.Mutex
-	released  bool
-	warning   string
+	// done closes when the heartbeat has ended, so a release can wait for
+	// the renewal loop instead of letting it outlive the authority.
+	done     chan struct{}
+	lostOnce sync.Once
+	stopOnce sync.Once
+	mu       sync.Mutex
+	released bool
+	warning  string
 }
 
 // AcquireLease takes the lease on a session.
@@ -87,7 +84,7 @@ type LeaseAuthority struct {
 func AcquireLease(db *sql.DB, sessionID string, opts LeaseOptions) (*LeaseAuthority, error) {
 	ttl := opts.TTL
 	if ttl <= 0 {
-		ttl = defaultLeaseTTL
+		ttl = session.DefaultLeaseTTL
 	}
 	interval := opts.HeartbeatInterval
 	if interval <= 0 {
@@ -154,6 +151,7 @@ func AcquireLease(db *sql.DB, sessionID string, opts LeaseOptions) (*LeaseAuthor
 		now:       now,
 		lost:      make(chan struct{}),
 		stop:      make(chan struct{}),
+		done:      make(chan struct{}),
 		warning:   warning,
 	}
 	go a.heartbeat()
@@ -171,9 +169,6 @@ func (a *LeaseAuthority) Warning() string { return a.warning }
 //
 // Once the authority is lost, a write fails with ErrLeaseLost.
 func (a *LeaseAuthority) CheckHeld() error {
-	if a == nil {
-		return nil
-	}
 	if a.isLost() {
 		return session.ErrLeaseLost
 	}
@@ -193,10 +188,12 @@ func (a *LeaseAuthority) LeaseLost() <-chan struct{} {
 // lease.
 //
 // The heartbeat stops at the first release, whatever happens to the
-// cleanup, and the authority counts as released only once the lease is
-// gone: a release that fails at the read or the removal leaves the
-// authority retryable, and a later release tries again. A lease whose
-// cleanup never succeeds expires on its own.
+// cleanup, and the release waits for it to end: no renewal runs behind
+// the cleanup, and no heartbeat outlives the release. The authority
+// counts as released only once the lease is gone: a release that fails
+// at the read or the removal leaves the authority retryable, and a later
+// release tries again. A lease whose cleanup never succeeds expires on
+// its own.
 func (a *LeaseAuthority) Release() error {
 	if a == nil {
 		return nil
@@ -204,6 +201,7 @@ func (a *LeaseAuthority) Release() error {
 	// The heartbeat stops at once: a tick that renewed a lease the
 	// cleanup could not remove would keep it live.
 	a.stopOnce.Do(func() { close(a.stop) })
+	<-a.done
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -265,10 +263,12 @@ func (a *LeaseAuthority) Close() error {
 //
 // The heartbeat's lifetime is the lease's own: it takes no context from
 // the caller, so a request-scoped context that ends does not stop the
-// renewal.
+// renewal. It closes the authority's done channel when it ends, so a
+// release never returns while a tick can still write.
 func (a *LeaseAuthority) heartbeat() {
 	ticker := time.NewTicker(a.interval)
 	defer ticker.Stop()
+	defer close(a.done)
 	for {
 		select {
 		case <-a.stop:

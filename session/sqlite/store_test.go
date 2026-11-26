@@ -556,6 +556,108 @@ func TestALiveLeaseBlocksASecondOpen(t *testing.T) {
 	}
 }
 
+// TestADefaultStoreRefusesASecondOpen covers the default authority: a
+// store opened with no lease options still opens its session with a
+// lease, so a second store over the same database is refused the
+// session, and the owner keeps writing through it.
+func TestADefaultStoreRefusesASecondOpen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "test.db")
+	ctx := context.Background()
+	owner, err := New(path)
+	if err != nil {
+		t.Fatalf("opening the store: %v", err)
+	}
+	t.Cleanup(func() { owner.Close() })
+	if _, err := owner.Create(ctx, createdRecord("s1")); err != nil {
+		t.Fatalf("creating the session: %v", err)
+	}
+
+	other, err := New(path)
+	if err != nil {
+		t.Fatalf("opening the other store: %v", err)
+	}
+	t.Cleanup(func() { other.Close() })
+	if _, err := other.Load(ctx, "s1"); !errors.Is(err, session.ErrSessionLocked) {
+		t.Fatalf("the second load returned %v, want the session locked", err)
+	}
+
+	// The owner still holds the session, and its writes still land: the
+	// refusal did not fence the owner's lease.
+	if err := owner.open.owner.CheckHeld(); err != nil {
+		t.Fatalf("the owner's lease is %v, want it held", err)
+	}
+	if err := owner.Append(ctx, runStarted("r1")); err != nil {
+		t.Fatalf("the owner's append returned %v, want it to hold", err)
+	}
+	recs, err := owner.ReadRecords(ctx)
+	if err != nil {
+		t.Fatalf("reading the records: %v", err)
+	}
+	names := recordNames(recs)
+	want := []string{"session.created", "run.started"}
+	if strings.Join(names, ",") != strings.Join(want, ",") {
+		t.Errorf("the session holds %v, want %v", names, want)
+	}
+}
+
+// TestADefaultStoresLeaseRenewsAndReleases covers the default lease's
+// lifecycle: a store opened with no lease options owns the session by a
+// lease, a renewal extends it, and the close releases it and ends the
+// heartbeat.
+func TestADefaultStoresLeaseRenewsAndReleases(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "test.db")
+	clk := &testClock{t: time.Now()}
+	store, err := New(path, WithClock(clk.Now))
+	if err != nil {
+		t.Fatalf("opening the store: %v", err)
+	}
+	ctx := context.Background()
+	if _, err := store.Create(ctx, createdRecord("s1")); err != nil {
+		t.Fatalf("creating the session: %v", err)
+	}
+	authority := store.open.owner
+	if authority == nil {
+		t.Fatal("the default store opened the session with no owner, want a lease")
+	}
+	if authority.ttl != session.DefaultLeaseTTL {
+		t.Errorf("the default lease's TTL is %s, want %s", authority.ttl, session.DefaultLeaseTTL)
+	}
+	if err := authority.CheckHeld(); err != nil {
+		t.Fatalf("the default store's lease is %v, want it held", err)
+	}
+	// The session's lease is live, and it expires when its TTL runs out.
+	if live, err := LeaseLocked(store.db, "s1", clk.Now()); err != nil || !live {
+		t.Fatalf("the default lease is live = %v, %v, want it live", live, err)
+	}
+	clk.Advance(session.DefaultLeaseTTL + time.Second)
+	if live, err := LeaseLocked(store.db, "s1", clk.Now()); err != nil || live {
+		t.Fatalf("the lease is live = %v, %v after its TTL, want it expired", live, err)
+	}
+	// A renewal is the tick the heartbeat runs: it puts the lease back on
+	// its full TTL.
+	authority.heartbeatTick()
+	if live, err := LeaseLocked(store.db, "s1", clk.Now()); err != nil || !live {
+		t.Fatalf("the renewed lease is live = %v, %v, want it live", live, err)
+	}
+	// The close releases the lease and ends the heartbeat.
+	if err := store.Close(); err != nil {
+		t.Fatalf("closing the store returned %v, want nil", err)
+	}
+	select {
+	case <-authority.done:
+	default:
+		t.Error("the heartbeat outlived the close")
+	}
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatalf("reopening the database: %v", err)
+	}
+	defer reopened.Close()
+	if live, err := LeaseLocked(reopened, "s1", clk.Now()); err != nil || live {
+		t.Errorf("the lease is live = %v, %v after the close, want it released", live, err)
+	}
+}
+
 // TestAnExpiredLeaseIsTakenOverWithAWarning covers the takeover: a
 // lease that has expired is taken over, and the takeover carries a
 // warning naming the previous owner and its expiry.

@@ -47,10 +47,11 @@ type Store struct {
 	policy session.RecoveryPolicy
 	// durable is how a durable session's continuation is planned.
 	durable session.DurableOptions
-	// lease, when set, opens sessions with a lease: the session's
-	// owner is renewed by a heartbeat, and a dead owner is taken over
-	// after the lease expires.
-	lease *LeaseOptions
+	// lease is how the store opens a session: every open session's owner
+	// is a lease, renewed by a heartbeat, and a dead owner is taken over
+	// after the lease expires. A store given no lease options opens
+	// sessions with the default lease.
+	lease LeaseOptions
 	// mu guards the store's state.
 	mu sync.Mutex
 	// open is the session the store has open, if any.
@@ -61,8 +62,8 @@ type Store struct {
 type openSession struct {
 	// id identifies the session.
 	id string
-	// owner is the session's authority: the lease, when the store
-	// opens sessions with a lease.
+	// owner is the session's authority: the lease it was opened with,
+	// held until the store closes.
 	owner *LeaseAuthority
 	// tools are the tool classes the session was created with, by
 	// name. A tool that is not named here has no class, and its
@@ -145,12 +146,15 @@ func WithDurableOptions(opts session.DurableOptions) Option {
 // WithLeaseOptions sets the lease options the store opens sessions
 // with.
 //
-// When set, a session's owner is a lease: the owner is renewed by a
+// Every open session's owner is a lease: the owner is renewed by a
 // heartbeat, and a dead owner is taken over after the lease expires. A
 // session that is fenced is refused: its writes fail with ErrLeaseLost.
+//
+// The default is the default lease: the TTL session.DefaultLeaseTTL and
+// the other options at their defaults.
 func WithLeaseOptions(opts LeaseOptions) Option {
 	return func(s *Store) {
-		s.lease = &opts
+		s.lease = opts
 	}
 }
 
@@ -159,11 +163,16 @@ func WithLeaseOptions(opts LeaseOptions) Option {
 // The database is created when it is missing, and the schema is
 // migrated. The store opens with WAL journaling and a busy timeout, and
 // every transaction it begins is an immediate one.
+//
+// Every session the store opens is owned by a lease: a store given no
+// lease options opens sessions with the default lease. A session another
+// process holds is refused, whatever the store was opened with.
 func New(path string, opts ...Option) (*Store, error) {
 	s := &Store{
 		codec:  session.NewCodec(),
 		now:    time.Now,
 		policy: session.InterruptPolicy{},
+		lease:  LeaseOptions{TTL: session.DefaultLeaseTTL},
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -183,7 +192,7 @@ func (s *Store) Path() string { return s.path }
 // Create starts a session in the store.
 //
 // The session's row and its header record are built in one transaction,
-// so a failure leaves no session behind. The store's authority is taken
+// so a failure leaves no session behind. The session's lease is taken
 // before the first record is written, and it is held until the store
 // closes.
 //
@@ -304,23 +313,28 @@ func (s *Store) Metadata(ctx context.Context, id string) (session.Metadata, erro
 	return meta, nil
 }
 
-// takeOwner takes the owner on a session: the lease, when the store
-// opens sessions with a lease. The authority is held for the store's own
-// life — a lease's heartbeat ends only at its release — so it takes no
-// context from the open call.
+// takeOwner takes the owner on a session: its lease. Every open session
+// has one, and a store given no lease options opens sessions with the
+// default lease, so a session another process holds is refused whatever
+// the store was opened with.
+//
+// The authority is held for the store's own life — a lease's heartbeat
+// ends only at its release — so it takes no context from the open call.
+// The lease runs on the store's clock unless its options name one, so a
+// store given a clock leases, and prunes, on that one timeline.
 func (s *Store) takeOwner(id string) (*LeaseAuthority, error) {
-	if s.lease != nil {
-		return AcquireLease(s.db, id, *s.lease)
+	opts := s.lease
+	if opts.Now == nil {
+		opts.Now = s.now
 	}
-	return nil, nil
+	return AcquireLease(s.db, id, opts)
 }
 
 // Load reads a session's records, recovers the session, and opens it.
 //
-// The load takes the authority on the session, so a session another
-// process holds is refused with ErrSessionLocked, and a lock that was
-// taken for a load that failed is given up before the failure is
-// returned.
+// The load takes the lease on the session, so a session another process
+// holds is refused with ErrSessionLocked, and the lease that was taken
+// for a load that failed is given up before the failure is returned.
 //
 // The load recovers the session: an unfinished job is ended, and an
 // input that never reached the model is dropped. A logged session's
@@ -575,14 +589,15 @@ func (s *Store) Append(ctx context.Context, rec poo.Record) error {
 }
 
 // LeaseLost is the channel that closes when the open session's lease is
-// lost, and nil when the session's ownership is not a lease.
+// lost, and nil when the store has no open session.
 //
-// A session that writes through a lease watches the channel: the lease it
-// lost fences every write, and the session's run stops at once.
+// Every open session is leased, so a session that writes watches the
+// channel: the lease it lost fences every write, and the session's run
+// stops at once.
 func (s *Store) LeaseLost() <-chan struct{} {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.open == nil || s.open.owner == nil {
+	if s.open == nil {
 		return nil
 	}
 	return s.open.owner.LeaseLost()
