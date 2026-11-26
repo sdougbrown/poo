@@ -658,6 +658,55 @@ func TestADefaultStoresLeaseRenewsAndReleases(t *testing.T) {
 	}
 }
 
+// TestACloseWaitsForATickInFlight covers the release's wait: a close
+// does not return while a heartbeat tick can still write, and it returns
+// once the tick is done.
+func TestACloseWaitsForATickInFlight(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "test.db")
+	store, err := New(path, WithLeaseOptions(LeaseOptions{HeartbeatInterval: 5 * time.Millisecond}))
+	if err != nil {
+		t.Fatalf("opening the store: %v", err)
+	}
+	t.Cleanup(func() { store.Close() })
+	if _, err := store.Create(context.Background(), createdRecord("s1")); err != nil {
+		t.Fatalf("creating the session: %v", err)
+	}
+	authority := store.open.owner
+
+	// The tick is held before it touches the database, so the close has
+	// nothing to wait for but the tick itself.
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	authority.mu.Lock()
+	authority.tickHook = func() {
+		once.Do(func() {
+			close(entered)
+			<-release
+		})
+	}
+	authority.mu.Unlock()
+	<-entered
+
+	closed := make(chan error, 1)
+	go func() { closed <- store.Close() }()
+	select {
+	case err := <-closed:
+		t.Fatalf("the close returned %v while a tick was in flight, want it to wait", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(release)
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Fatalf("the close returned %v after the tick ended, want nil", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("the close did not return after the tick ended")
+	}
+}
+
 // TestAnExpiredLeaseIsTakenOverWithAWarning covers the takeover: a
 // lease that has expired is taken over, and the takeover carries a
 // warning naming the previous owner and its expiry.
@@ -874,6 +923,39 @@ func TestTheDatabaseFilesArePrivate(t *testing.T) {
 	}
 }
 
+// TestASymlinkedSiblingIsRefused covers the private files' refusal: a
+// WAL sibling that is a symlink would make the store chmod and write
+// through to a file it does not own, so the open refuses it.
+func TestASymlinkedSiblingIsRefused(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.db")
+	victim := filepath.Join(dir, "victim")
+	if err := os.WriteFile(victim, []byte("not the store's"), 0o644); err != nil {
+		t.Fatalf("writing the victim file: %v", err)
+	}
+	if err := os.Symlink(victim, path+"-wal"); err != nil {
+		t.Fatalf("planting the symlink: %v", err)
+	}
+
+	if _, err := New(path); err == nil {
+		t.Fatal("the store opened over a symlinked sibling, want an error")
+	}
+	data, err := os.ReadFile(victim)
+	if err != nil {
+		t.Fatalf("reading the victim file: %v", err)
+	}
+	if string(data) != "not the store's" {
+		t.Errorf("the victim holds %q, want it untouched", data)
+	}
+	info, err := os.Stat(victim)
+	if err != nil {
+		t.Fatalf("reading the victim's mode: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o644 {
+		t.Errorf("the victim has mode %04o, want its own 0644", got)
+	}
+}
+
 // TestAnExistingDatabasesWidePermissionsAreNarrowed covers a database an
 // older run left readable: reopening it corrects the mode.
 func TestAnExistingDatabasesWidePermissionsAreNarrowed(t *testing.T) {
@@ -909,39 +991,44 @@ func TestAnExistingDatabasesWidePermissionsAreNarrowed(t *testing.T) {
 // TestConcurrentOpensMigrateOnce covers the migration's race: several
 // stores opened at once on a fresh database all migrate it, and none of
 // them fails on the version row.
+//
+// The race is statistical: the repetition makes a regression near-certain
+// to trip it.
 func TestConcurrentOpensMigrateOnce(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "test.db")
-	const openers = 8
-	var wg sync.WaitGroup
-	start := make(chan struct{})
-	errs := make([]error, openers)
-	stores := make([]*Store, openers)
-	for i := 0; i < openers; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			<-start
-			stores[i], errs[i] = New(path)
-		}(i)
-	}
-	close(start)
-	wg.Wait()
-	for i, err := range errs {
-		if err != nil {
-			t.Errorf("opener %d: %v", i, err)
-			continue
+	const (
+		databases = 10
+		openers   = 8
+	)
+	ctx := context.Background()
+	var path string
+	for d := 0; d < databases; d++ {
+		path = filepath.Join(t.TempDir(), "test.db")
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		errs := make([]error, openers)
+		stores := make([]*Store, openers)
+		for i := 0; i < openers; i++ {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				<-start
+				stores[i], errs[i] = New(path)
+			}(i)
 		}
-		if err := stores[i].Close(); err != nil {
-			t.Errorf("closing opener %d: %v", i, err)
+		close(start)
+		wg.Wait()
+		for i, err := range errs {
+			if err != nil {
+				t.Fatalf("database %d, opener %d: %v", d, i, err)
+			}
+			if err := stores[i].Close(); err != nil {
+				t.Fatalf("database %d, closing opener %d: %v", d, i, err)
+			}
 		}
-	}
-	if t.Failed() {
-		return
 	}
 
-	// The schema is whole: a store opened on the migrated database
+	// The schema is whole: a store opened on the last migrated database
 	// creates a session and reads it back.
-	ctx := context.Background()
 	store := newTestStoreAt(t, path)
 	if _, err := store.Create(ctx, createdRecord("s1")); err != nil {
 		t.Fatalf("creating a session on the migrated database: %v", err)

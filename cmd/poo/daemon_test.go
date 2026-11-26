@@ -241,15 +241,14 @@ func TestTheDaemonStaysAliveOnAFeed(t *testing.T) {
 	}
 	waitRecord(t, sessionLog(dir, sessionID), "run.settled")
 
-	// The daemon is still alive over a window, not at one moment: an
-	// idle shutdown or a late-exit bug fires after a single check
-	// would have passed.
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		if !daemon.alive() {
-			t.Fatalf("the daemon exited after its wake: %v", daemon.allLines())
-		}
-		time.Sleep(100 * time.Millisecond)
+	// The daemon is still alive over the observation window, not at one
+	// moment: an idle shutdown or a late-exit bug fires after a single
+	// check would have passed. The 3 s bound is the window, and an exit
+	// is the event itself rather than a poll the loop could miss.
+	select {
+	case <-daemon.stderrDone:
+		t.Fatalf("the daemon exited after its wake: %v", daemon.allLines())
+	case <-time.After(3 * time.Second):
 	}
 	if err := daemon.cmd.Process.Signal(syscall.SIGTERM); err != nil {
 		t.Fatalf("signalling the daemon: %v", err)

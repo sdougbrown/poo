@@ -3604,13 +3604,16 @@ func (r *Runtime) resolveUserPrompt(opts BuildOptions) error {
 //
 // The header is the runtime's own facts: the mode the session runs in,
 // the directory it works in, and the build, settings, tools and models
-// the runtime was built with. A role names a model only when the
-// runtime has it: a decider the build could not construct is no model
-// the session talks to, and a session whose header recorded one would
-// be refused by the load that cannot build it.
+// the runtime was built with. The record is stamped with the wall clock,
+// so a store given its own clock still gets a header on the wall clock.
 //
-// What belongs to one invocation rather than to the runtime — a run's
-// reasoning effort — the caller sets on the record this returns.
+// A role names a model only when the runtime has it: a decider the build
+// could not construct is no model the session talks to, and a session
+// whose header recorded one would be refused by the load that cannot
+// build it. A caller may change the returned record: the server replaces
+// the decider role with the model the request names, which the runtime
+// does not hold, and a run sets the reasoning effort, which belongs to
+// one invocation.
 func (r *Runtime) CreatedRecord(mode, workDir, sessionID string) *poo.SessionCreatedRecord {
 	model := r.Options.Model
 	chat := session.LoggedModel(model)

@@ -131,11 +131,33 @@ func isBusy(err error) bool {
 // file the database and its WAL journal use is created here instead:
 // 0600, and not truncated when it already exists. A zero-length WAL is a
 // fresh one to the driver. A file an older run left readable is narrowed.
+//
+// The path may carry a DSN query, which the driver receives whole: only
+// the database file and its siblings are touched here. An existing entry
+// that is not a regular file is refused: a symlink planted in a directory
+// another user can write would otherwise be chmod'd and written through.
 func ensurePrivate(path string) error {
-	for _, p := range []string{path, path + "-wal", path + "-shm"} {
+	dbPath, _, _ := strings.Cut(path, "?")
+	for _, p := range []string{dbPath, dbPath + "-wal", dbPath + "-shm"} {
+		info, err := os.Lstat(p)
+		if err == nil && !info.Mode().IsRegular() {
+			return fmt.Errorf("session/sqlite: making %s private: it is not a regular file", p)
+		}
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("session/sqlite: making %s private: %w", p, err)
+		}
 		f, err := os.OpenFile(p, os.O_CREATE|os.O_WRONLY, 0o600)
 		if err != nil {
 			return fmt.Errorf("session/sqlite: making %s private: %w", p, err)
+		}
+		info, err = f.Stat()
+		if err != nil {
+			f.Close()
+			return fmt.Errorf("session/sqlite: making %s private: %w", p, err)
+		}
+		if !info.Mode().IsRegular() {
+			f.Close()
+			return fmt.Errorf("session/sqlite: making %s private: it is not a regular file", p)
 		}
 		if err := f.Close(); err != nil {
 			return fmt.Errorf("session/sqlite: making %s private: %w", p, err)

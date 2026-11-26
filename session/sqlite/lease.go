@@ -19,7 +19,8 @@ import (
 // It mirrors the file store's lease options: the TTL, the heartbeat
 // interval, the owner's name, and the clock. The defaults are the
 // file store's: the TTL session.DefaultLeaseTTL, a heartbeat at the TTL
-// divided by three, the process's id for the owner, and the wall clock.
+// divided by three, the process's id for the owner, and the store's
+// clock.
 type LeaseOptions struct {
 	// TTL is how long a lease lasts before it expires.
 	//
@@ -35,7 +36,7 @@ type LeaseOptions struct {
 	OwnerID string
 	// Now is the lease's clock.
 	//
-	// The default is time.Now.
+	// The default is the store's clock: WithClock sets it.
 	Now func() time.Time
 }
 
@@ -69,6 +70,9 @@ type LeaseAuthority struct {
 	mu       sync.Mutex
 	released bool
 	warning  string
+	// tickHook is called at the top of heartbeatTick. It is a test hook:
+	// unset in production, it lets a test hold a tick in flight.
+	tickHook func()
 }
 
 // AcquireLease takes the lease on a session.
@@ -169,6 +173,9 @@ func (a *LeaseAuthority) Warning() string { return a.warning }
 //
 // Once the authority is lost, a write fails with ErrLeaseLost.
 func (a *LeaseAuthority) CheckHeld() error {
+	if a == nil {
+		return nil
+	}
 	if a.isLost() {
 		return session.ErrLeaseLost
 	}
@@ -287,6 +294,12 @@ func (a *LeaseAuthority) heartbeat() {
 // disk, loses the authority: the lease was taken over, and the
 // authority is fenced.
 func (a *LeaseAuthority) heartbeatTick() {
+	a.mu.Lock()
+	hook := a.tickHook
+	a.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
 	if a.isLost() {
 		return
 	}

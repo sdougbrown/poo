@@ -145,12 +145,15 @@ func WithDurableOptions(opts session.DurableOptions) Option {
 // WithLeaseOptions sets the lease options the store opens sessions
 // with.
 //
-// Every open session's owner is a lease: the owner is renewed by a
-// heartbeat, and a dead owner is taken over after the lease expires. A
-// session that is fenced is refused: its writes fail with ErrLeaseLost.
+// Leases are not optional: the options tune the lease every session
+// opens under. Every open session's owner is a lease: the owner is
+// renewed by a heartbeat, and a dead owner is taken over after the lease
+// expires. A session that is fenced is refused: its writes fail with
+// ErrLeaseLost.
 //
-// The default is the default lease: the TTL session.DefaultLeaseTTL and
-// the other options at their defaults.
+// The default is the default lease: the TTL session.DefaultLeaseTTL, the
+// heartbeat at the TTL divided by three, the process's id for the owner,
+// and the store's clock.
 func WithLeaseOptions(opts LeaseOptions) Option {
 	return func(s *Store) {
 		s.lease = opts
