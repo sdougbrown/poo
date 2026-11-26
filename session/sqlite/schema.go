@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"syscall"
 	"time"
 
 	sqlite3 "modernc.org/sqlite"
@@ -134,8 +135,10 @@ func isBusy(err error) bool {
 //
 // The path may carry a DSN query, which the driver receives whole: only
 // the database file and its siblings are touched here. An existing entry
-// that is not a regular file is refused: a symlink planted in a directory
-// another user can write would otherwise be chmod'd and written through.
+// that is not a regular file is refused, and each file is opened without
+// following a link and narrowed through its descriptor: a symlink planted
+// in a directory another user can write would otherwise be chmod'd and
+// written through.
 func ensurePrivate(path string) error {
 	dbPath, _, _ := strings.Cut(path, "?")
 	for _, p := range []string{dbPath, dbPath + "-wal", dbPath + "-shm"} {
@@ -146,8 +149,13 @@ func ensurePrivate(path string) error {
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("session/sqlite: making %s private: %w", p, err)
 		}
-		f, err := os.OpenFile(p, os.O_CREATE|os.O_WRONLY, 0o600)
+		// O_NOFOLLOW refuses a symlink the Lstat did not see, one planted
+		// between the check and the open.
+		f, err := os.OpenFile(p, os.O_CREATE|os.O_WRONLY|syscall.O_NOFOLLOW, 0o600)
 		if err != nil {
+			if errors.Is(err, syscall.ELOOP) {
+				return fmt.Errorf("session/sqlite: making %s private: it is not a regular file", p)
+			}
 			return fmt.Errorf("session/sqlite: making %s private: %w", p, err)
 		}
 		info, err = f.Stat()
@@ -159,10 +167,13 @@ func ensurePrivate(path string) error {
 			f.Close()
 			return fmt.Errorf("session/sqlite: making %s private: it is not a regular file", p)
 		}
-		if err := f.Close(); err != nil {
+		// The descriptor is the file that was verified: the mode is set
+		// through it, so no path is resolved a second time.
+		if err := f.Chmod(0o600); err != nil {
+			f.Close()
 			return fmt.Errorf("session/sqlite: making %s private: %w", p, err)
 		}
-		if err := os.Chmod(p, 0o600); err != nil {
+		if err := f.Close(); err != nil {
 			return fmt.Errorf("session/sqlite: making %s private: %w", p, err)
 		}
 	}

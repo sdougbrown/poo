@@ -101,19 +101,6 @@ func (h *daemonHandle) allLines() []string {
 	return out
 }
 
-// alive reports whether the daemon is still running. Its stderr ends
-// with the process — the pipe the scanner reads closes when the only
-// writer exits — so this sees an exit that a Signal(0) check cannot:
-// the signal succeeds on a process that exited but was not reaped.
-func (h *daemonHandle) alive() bool {
-	select {
-	case <-h.stderrDone:
-		return false
-	default:
-		return true
-	}
-}
-
 // waitExit waits for the daemon to exit and returns its exit code.
 func (h *daemonHandle) waitExit() int {
 	h.t.Helper()

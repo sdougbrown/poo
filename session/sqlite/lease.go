@@ -17,10 +17,13 @@ import (
 // LeaseOptions configures a lease.
 //
 // It mirrors the file store's lease options: the TTL, the heartbeat
-// interval, the owner's name, and the clock. The defaults are the
-// file store's: the TTL session.DefaultLeaseTTL, a heartbeat at the TTL
-// divided by three, the process's id for the owner, and the store's
-// clock.
+// interval, the owner's name, and the clock. The defaults are this
+// package's: the TTL session.DefaultLeaseTTL, a heartbeat at the TTL
+// divided by three, the process's id for the owner, and an unset Now is
+// the store's clock, which WithClock sets.
+//
+// The file store's lease does not follow its store's clock: it hands its
+// options to AcquireLease, whose nil-Now default is time.Now.
 type LeaseOptions struct {
 	// TTL is how long a lease lasts before it expires.
 	//

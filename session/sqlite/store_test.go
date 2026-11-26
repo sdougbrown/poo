@@ -686,7 +686,11 @@ func TestACloseWaitsForATickInFlight(t *testing.T) {
 		})
 	}
 	authority.mu.Unlock()
-	<-entered
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the heartbeat did not enter the hooked tick within 5s")
+	}
 
 	closed := make(chan error, 1)
 	go func() { closed <- store.Close() }()
@@ -933,6 +937,10 @@ func TestASymlinkedSiblingIsRefused(t *testing.T) {
 	if err := os.WriteFile(victim, []byte("not the store's"), 0o644); err != nil {
 		t.Fatalf("writing the victim file: %v", err)
 	}
+	before, err := os.Stat(victim)
+	if err != nil {
+		t.Fatalf("reading the victim's mode: %v", err)
+	}
 	if err := os.Symlink(victim, path+"-wal"); err != nil {
 		t.Fatalf("planting the symlink: %v", err)
 	}
@@ -947,12 +955,48 @@ func TestASymlinkedSiblingIsRefused(t *testing.T) {
 	if string(data) != "not the store's" {
 		t.Errorf("the victim holds %q, want it untouched", data)
 	}
-	info, err := os.Stat(victim)
+	after, err := os.Stat(victim)
 	if err != nil {
 		t.Fatalf("reading the victim's mode: %v", err)
 	}
-	if got := info.Mode().Perm(); got != 0o644 {
-		t.Errorf("the victim has mode %04o, want its own 0644", got)
+	if got, want := after.Mode().Perm(), before.Mode().Perm(); got != want {
+		t.Errorf("the victim has mode %04o, want its own %04o", got, want)
+	}
+}
+
+// TestADatabasePathWithADSNQueryKeepsItsFilesPrivate covers the DSN cut:
+// a path that carries a query names the database file plus its siblings,
+// and all three are private. A store that missed the cut would leave the
+// query in a file's name and let the driver create the database with its
+// own mode.
+func TestADatabasePathWithADSNQueryKeepsItsFilesPrivate(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.db")
+	store := newTestStoreAt(t, path+"?_journal_mode=WAL")
+	ctx := context.Background()
+	if _, err := store.Create(ctx, createdRecord("s1")); err != nil {
+		t.Fatalf("creating the session: %v", err)
+	}
+	if err := store.Append(ctx, runStarted("r1")); err != nil {
+		t.Fatalf("appending: %v", err)
+	}
+	for _, p := range []string{path, path + "-wal", path + "-shm"} {
+		info, err := os.Stat(p)
+		if err != nil {
+			t.Fatalf("reading %s: %v", p, err)
+		}
+		if got := info.Mode().Perm(); got != 0o600 {
+			t.Errorf("%s has mode %04o, want 0600", filepath.Base(p), got)
+		}
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("reading the session directory: %v", err)
+	}
+	for _, entry := range entries {
+		if strings.Contains(entry.Name(), "?") {
+			t.Errorf("the session directory holds %q, want no file named for the DSN query", entry.Name())
+		}
 	}
 }
 
