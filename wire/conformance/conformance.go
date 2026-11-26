@@ -450,7 +450,7 @@ func newEndpoint(t interface{ Cleanup(func()) }, turns []ScriptedAnswer) *FakeEn
 // against the kinds the config package loads, so a kind added there
 // without a switch here fails the suite.
 func turnManifestDefaultsOff(document map[string]any) {
-	for _, kind := range []string{"feeds", "cli_registry"} {
+	for _, kind := range []string{"feeds", "mcp", "cli_registry"} {
 		block, _ := document[kind].(map[string]any)
 		if block == nil {
 			block = map[string]any{}

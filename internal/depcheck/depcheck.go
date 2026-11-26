@@ -166,6 +166,9 @@ func (c Checker) rules() []rule {
 				m + "/exec",
 				m + "/feed",
 				m + "/internal/caps",
+				// The mcp manifests the settings load: the declarations a
+				// session's servers are selected from.
+				m + "/mcp/manifest",
 				m + "/perm",
 				m + "/perm/decide",
 				m + "/profile",

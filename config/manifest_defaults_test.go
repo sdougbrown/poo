@@ -62,6 +62,21 @@ func theDefaultRegistry(t *testing.T, pooDir string) string {
 	return dir
 }
 
+// theDefaultMCPServer writes one stdio server into the default mcp
+// directory and returns the directory.
+func theDefaultMCPServer(t *testing.T, pooDir string) string {
+	t.Helper()
+	dir := filepath.Join(pooDir, "mcp")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("making the default mcp directory: %v", err)
+	}
+	body := `{"mcpServers": {"avenor": {"command": "true"}}}`
+	if err := os.WriteFile(filepath.Join(dir, "mcp.json"), []byte(body), 0o600); err != nil {
+		t.Fatalf("writing the manifest: %v", err)
+	}
+	return dir
+}
+
 // TestTheDefaultManifestDirectoriesLoad covers the defaults: manifests
 // in poo's own feeds and cli-registry directories load beside the
 // settings' paths, and a settings file that names neither loads them
@@ -258,6 +273,8 @@ func TestEveryDefaultManifestKindHasItsOffSwitch(t *testing.T) {
 		switch m.SettingsKey {
 		case "feeds":
 			theDefaultFeedManifest(t, pooDir)
+		case "mcp":
+			theDefaultMCPServer(t, pooDir)
 		case "cli_registry":
 			theDefaultRegistry(t, pooDir)
 		default:
@@ -270,9 +287,9 @@ func TestEveryDefaultManifestKindHasItsOffSwitch(t *testing.T) {
 			if off.Feeds != nil && off.Feeds.Len() != 0 {
 				t.Errorf("the %q switch left feeds loaded: %v", m.SettingsKey, off.Feeds)
 			}
-		case "cli_registry":
-			if off.Registry != nil && off.Registry.Len() != 0 {
-				t.Errorf("the %q switch left a registry loaded: %v", m.SettingsKey, off.Registry)
+		case "mcp":
+			if names := off.MCPServerNames(); len(names) != 0 {
+				t.Errorf("the %q switch left mcp servers loaded: %v", m.SettingsKey, names)
 			}
 		}
 	}

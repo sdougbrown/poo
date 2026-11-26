@@ -81,6 +81,8 @@ type Settings struct {
 	CLIRegistry CLIRegistry `json:"cli_registry,omitempty"`
 	// Feeds are the feed manifests' settings.
 	Feeds Feeds `json:"feeds,omitempty"`
+	// MCP are the mcp.json manifests' settings.
+	MCP MCP `json:"mcp,omitempty"`
 	// Skills are the skills' settings.
 	Skills Skills `json:"skills,omitempty"`
 	// Session are the session's settings.
@@ -308,6 +310,18 @@ type Decide struct {
 // defined profile.
 type ProfileSettings struct {
 	Base string `json:"base"`
+	// MCPDefaults says whether the default mcp.json directory loads for a
+	// session under this profile. The profile's word wins over the
+	// settings' mcp.defaults; a key the profile does not name leaves the
+	// settings' word standing.
+	MCPDefaults *bool `json:"mcp_defaults,omitempty"`
+	// MCPServers are the MCP servers the profile's sessions start, by
+	// server name. They add to the base's selection, kept once each, in
+	// the order of first appearance. The settings' mcp.paths still
+	// control which servers load, and a selected server the settings do
+	// not load is skipped with a warning. Nothing starts without a
+	// selection.
+	MCPServers []string `json:"mcp_servers,omitempty"`
 	// Feeds are the feeds the profile declares it needs, by manifest
 	// name. They add to the base's declared feeds, kept once each.
 	// The settings' feeds.paths still control which feeds load, and
@@ -624,6 +638,23 @@ type Feeds struct {
 	// directory load beside the paths. They load when the key is absent
 	// or true; a false turns them off, so a binary or a test runs with
 	// exactly the manifests it names.
+	Defaults *bool `json:"defaults,omitempty"`
+}
+
+// MCP are the mcp.json manifests' settings.
+//
+// A manifest declares the MCP servers a session may start. The settings
+// name which files to read; the profile a session runs under selects the
+// servers it starts, and nothing starts without a selection.
+type MCP struct {
+	// Paths are the manifest files and directories, resolved against the
+	// working directory; a path that starts with ~/ is under the home
+	// directory instead.
+	Paths []string `json:"paths,omitempty"`
+	// Defaults says whether the manifests in poo's default mcp directory
+	// load beside the paths. They load when the key is absent or true; a
+	// false turns them off, so a binary or a test runs with exactly the
+	// manifests it names.
 	Defaults *bool `json:"defaults,omitempty"`
 }
 

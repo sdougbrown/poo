@@ -85,6 +85,8 @@
     "cli_registry.defaults": { "isEmpty": "boolean" },
     "feeds.paths": { "isEmpty": "array" },
     "feeds.defaults": { "isEmpty": "boolean" },
+    "mcp.paths": { "isEmpty": "array" },
+    "mcp.defaults": { "isEmpty": "boolean" },
     "skills.default": { "isEmpty": "boolean" },
     "skills.user_path": { "isEmpty": "string" },
     "skills.paths": { "isEmpty": "array" },

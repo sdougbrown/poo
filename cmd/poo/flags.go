@@ -41,6 +41,8 @@ type sharedFlags struct {
 	profile string
 	// feedsPaths are feed manifest paths added to the settings' paths.
 	feedsPaths []string
+	// mcpPaths are mcp manifest paths added to the settings' paths.
+	mcpPaths []string
 	// cliRegistryPaths are cli registry manifest paths added to the
 	// settings' paths.
 	cliRegistryPaths []string
@@ -59,6 +61,7 @@ func sharedFlagSpecs() []clicontract.Flag {
 		{Name: "ephemeral", Kind: clicontract.Bool, Usage: "Run without writing a session"},
 		{Name: "profile", Kind: clicontract.String, Usage: "The profile to run under: base, code or search"},
 		{Name: "feeds-path", Kind: clicontract.Repeat, Usage: "Additional feed manifest path (repeatable)"},
+		{Name: "mcp-path", Kind: clicontract.Repeat, Usage: "Additional mcp manifest path (repeatable)"},
 		{Name: "cli-registry-path", Kind: clicontract.Repeat, Usage: "Additional cli registry manifest path (repeatable)"},
 	}
 }
@@ -78,6 +81,7 @@ func (f *sharedFlags) bind(inv clicontract.Invocation) {
 	f.ephemeral = inv.Bools["ephemeral"]
 	f.profile = inv.Flags["profile"]
 	f.feedsPaths = nonEmpty(inv.Repeated["feeds-path"])
+	f.mcpPaths = nonEmpty(inv.Repeated["mcp-path"])
 	f.cliRegistryPaths = nonEmpty(inv.Repeated["cli-registry-path"])
 }
 
@@ -165,6 +169,7 @@ func (f *sharedFlags) overrides() (config.Overrides, error) {
 		SystemPrompt:        systemPrompt,
 		AppendSystemPrompt:  appended,
 		FeedsPaths:          f.feedsPaths,
+		MCPPaths:            f.mcpPaths,
 		CLIRegistryPaths:    f.cliRegistryPaths,
 	}
 	if f.ephemeral {
