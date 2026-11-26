@@ -1119,13 +1119,17 @@ func (m *machine) startRun(text string) error {
 		m.r.takeHint()
 		return err
 	}
+	m.trackRun(res.RunID)
+	return nil
+}
+
+func (m *machine) trackRun(runID string) {
 	m.runIDMu.Lock()
-	m.runID = res.RunID
+	m.runID = runID
 	m.runIDMu.Unlock()
 	m.state = &runState{}
 	m.steers = nil
 	m.armFrame()
-	return nil
 }
 
 // endRun closes the settled run and restores the prompt.
@@ -1329,8 +1333,12 @@ func (m *machine) flushPending() {
 // endRun's contract lands in one place.
 func (m *machine) handleEvent(evt protocol.Event, input input) (int, bool) {
 	if m.state == nil {
-		// Nothing of the session's own streams: a job's or a feed's
-		// event is not the conversation.
+		if evt.Type == "run.started" && evt.SessionID == m.sessionID {
+			if runID, _ := evt.Payload["run_id"].(string); runID != "" {
+				m.trackRun(runID)
+				m.r.hint()
+			}
+		}
 		return 0, false
 	}
 	if m.event(evt, m.activeRun(), m.state) {
