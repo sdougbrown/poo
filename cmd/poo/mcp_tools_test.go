@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -174,10 +175,11 @@ func TestTheBinaryFindsAndCallsAnMCPTool(t *testing.T) {
 	}
 }
 
-// TestTheHandleOffersOnlyWhatTheCallDispatches covers the one offering: every
-// entry a launcher's handle lists in the session's snapshot is a name the call
-// over the same handle dispatches, so a handle can never be listed without
-// being dispatchable.
+// TestTheHandleOffersOnlyWhatTheCallDispatches covers the one offering: the
+// entries a launcher's handle lists in the session's snapshot are names the
+// call over the same handle dispatches — each names a server the handle
+// holds, and the call reaches the server the handle keeps, which answers with
+// the fixture's own echo output.
 func TestTheHandleOffersOnlyWhatTheCallDispatches(t *testing.T) {
 	group, err := mcp.Launch(context.Background(), mcp.LaunchOptions{
 		SessionID: "s1",
@@ -197,16 +199,25 @@ func TestTheHandleOffersOnlyWhatTheCallDispatches(t *testing.T) {
 	if len(off) == 0 {
 		t.Fatal("the handle lists no entry, and the case is about the entries it lists")
 	}
-	tool := callmcp.New(mcpServers([]config.MCPRunning{handle}), off)
 	for _, entry := range off {
-		prepared, err := tool.Prepare(json.RawMessage(`{"name":"`+entry.Name+`"}`), poo.PrepareEnv{})
-		if err != nil {
-			t.Fatalf("preparing %s: %v", entry.Name, err)
+		if server, _, ok := strings.Cut(entry.Name, "/"); !ok || !slices.Contains(handle.names, server) {
+			t.Errorf("the handle lists %q, a server it does not hold: %v", entry.Name, handle.names)
 		}
-		if _, err := tool.Call(context.Background(), prepared, poo.ToolEnv{}); err != nil &&
-			strings.Contains(err.Error(), "the session started no mcp server named") {
-			t.Errorf("the call refuses %q, an entry the handle lists in the session's snapshot: %v", entry.Name, err)
-		}
+	}
+	// The echo entry is the one the test can drive without a side effect the
+	// server's other tools would leave: the call reaches the process the
+	// handle keeps, and the answer is the fixture's own.
+	tool := callmcp.New(mcpServers([]config.MCPRunning{handle}), off)
+	prepared, err := tool.Prepare(json.RawMessage(`{"name":"fixture/echo","args":{"text":"hello"}}`), poo.PrepareEnv{})
+	if err != nil {
+		t.Fatalf("preparing the echo call: %v", err)
+	}
+	res, err := tool.Call(context.Background(), prepared, poo.ToolEnv{})
+	if err != nil {
+		t.Fatalf("calling the echo tool: %v", err)
+	}
+	if res.IsError || !strings.Contains(res.Text, `"text":"hello"`) {
+		t.Errorf("the echo call did not reach the server the handle lists, it answered %q (error: %v)", res.Text, res.IsError)
 	}
 }
 

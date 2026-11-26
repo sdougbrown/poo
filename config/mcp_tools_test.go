@@ -4,8 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/cli"
@@ -193,7 +197,7 @@ func TestADisabledMCPCallOffersTheServersToNobody(t *testing.T) {
 	if hasTool(runtime.Options.ToolOrder, cliregistry.FindToolName) {
 		t.Errorf("the session offers a search over servers it cannot call: %v", runtime.Options.ToolOrder)
 	}
-	if text := sessionPrompt(t, runtime, "picky", t.TempDir()); strings.Contains(text, "MCP tools:") {
+	if text := sessionPrompt(t, runtime, "picky", t.TempDir()); strings.Contains(text, "the servers of this session offer") || strings.Contains(text, "fixture/echo") {
 		t.Errorf("the prompt lists MCP tools the session cannot call: %q", text)
 	}
 }
@@ -349,10 +353,19 @@ func (s *listedServer) CallTool(context.Context, string, json.RawMessage) (mcp.C
 type listedSession struct {
 	// views are the per-server views, one per declared server.
 	views []callmcp.Server
+	// stop stops the servers the launch started, the way the client's own
+	// handle closes the group it keeps. The listed servers hold no
+	// process, so a launcher that started none leaves it unset.
+	stop func() error
 }
 
-// Close stops nothing: the listed servers hold no process.
-func (h *listedSession) Close() error { return nil }
+// Close stops the servers the launch started.
+func (h *listedSession) Close() error {
+	if h.stop == nil {
+		return nil
+	}
+	return h.stop()
+}
 
 // Offered returns every entry the servers hold: the package's own derivation
 // over the same per-server views the dispatch reads.
@@ -681,6 +694,58 @@ func TestACatalogBehindTheCallIsListedBesideTheSearchedServers(t *testing.T) {
 	}
 	if strings.Contains(text, "too many to list") {
 		t.Errorf("the prompt leaves a twenty-entry catalog to the search the servers brought:\n%s", text)
+	}
+}
+
+// TestTheSessionStopsTheServersItStarted covers the handle's other half: the
+// servers a session started stop when the session ends, so a session's own
+// fixture process is never left behind.
+func TestTheSessionStopsTheServersItStarted(t *testing.T) {
+	pidfile := filepath.Join(t.TempDir(), "pid")
+	binary := fixtureServer(t)
+	path := mcpManifest(t, map[string]any{"fixture": map[string]any{
+		"command": binary,
+		"env":     map[string]any{"POO_FIXTURE_PIDFILE": pidfile},
+	}}, nil)
+	settings, err := config.Parse([]byte(theModelSettings+theSessionDir(t)+theMCPPaths(path)+theMCPProfile("picky", "fixture")), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	var group *mcp.Group
+	runtime := buildWith(t, config.BuildOptions{
+		Settings:    settings,
+		MCPLauncher: clientLauncher(&group),
+		WorkingDir:  t.TempDir(),
+	})
+	defer runtime.Store.Close()
+
+	sess, err := runtime.CreateSession(context.Background(), runtime.Store, theCreatedRecord("picky", t.TempDir()))
+	if err != nil {
+		t.Fatalf("creating the session: %v", err)
+	}
+	if err := sess.Close(); err != nil {
+		t.Fatalf("closing the session: %v", err)
+	}
+
+	data, err := os.ReadFile(pidfile)
+	if err != nil {
+		t.Fatalf("the server left no pid file: %v", err)
+	}
+	var pid int
+	if _, err := fmt.Sscanf(string(data), "%d", &pid); err != nil {
+		t.Fatalf("the pid file holds %q, want a pid", data)
+	}
+	// Close stopped the process and waited for it, so the poll is the
+	// reaping's own bound.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if err := syscall.Kill(pid, syscall.Signal(0)); err != nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the closed session left the server %d behind", pid)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 

@@ -306,7 +306,7 @@ func clientLauncher(group **mcp.Group) config.MCPLauncher {
 		for _, server := range values.Servers {
 			servers = append(servers, &testMCPServer{group: g, name: server.Name})
 		}
-		return &listedSession{views: servers}, nil
+		return &listedSession{views: servers, stop: g.Close}, nil
 	}
 }
 
