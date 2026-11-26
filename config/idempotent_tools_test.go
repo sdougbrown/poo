@@ -1,7 +1,9 @@
 // A tool's own spec is the only place its idempotency is declared, and the
 // durable planner reads it from the session header. These tests pin the
-// flag through every conversion that builds a ToolInfo from a spec, and
-// through the header to a planned replay.
+// flag through the two conversions a session header is built from — the
+// runtime's session tools and the profile listing — and through the
+// header to a planned replay. The other spec-to-info copies keep the
+// remaining listings consistent with the header.
 package config_test
 
 import (

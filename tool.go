@@ -11,8 +11,9 @@ import (
 
 // ToolInfo describes one tool as a session's metadata records it.
 //
-// It is the tool's name, its side-effect class and its background mode:
-// what a restored session checks the tool against.
+// It is the tool's name, its side-effect class, its background mode and
+// whether repeating it is safe: what a restored session checks the tool
+// against.
 type ToolInfo struct {
 	// Name is the tool's identifier.
 	Name string `json:"name"`
