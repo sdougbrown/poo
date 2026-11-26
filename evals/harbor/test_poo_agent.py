@@ -155,6 +155,28 @@ class ProviderResolutionTests(unittest.TestCase):
             self.assertEqual(key, "HOME_KEY")
 
 
+    def test_an_unknown_provider_keeps_the_whole_slug_as_the_model_id(self) -> None:
+        # A router slug such as "customrouter/my-model" must reach the request
+        # whole. Splitting it the way a known provider splits would silently
+        # truncate the model name.
+        with patch.dict(os.environ, {}, clear=True):
+            ep, mid, _ = resolve_endpoint_and_model("customrouter/my-model", None, None, None)
+            self.assertIsNone(ep)
+            self.assertEqual(mid, "customrouter/my-model")
+
+    def test_the_endpoint_environment_variable_wins_over_a_known_provider(self) -> None:
+        # A caller who exports POO_ENDPOINT gets that endpoint, not the
+        # provider's default, and POO_API_KEY_ENV supplies the key variable.
+        with patch.dict(
+            os.environ,
+            {"POO_ENDPOINT": "http://custom:4000/v1", "POO_API_KEY_ENV": "HOME_KEY"},
+            clear=True,
+        ):
+            ep, _, key = resolve_endpoint_and_model("openai/gpt-4o", None, None, None)
+            self.assertEqual(ep, "http://custom:4000/v1")
+            self.assertEqual(key, "HOME_KEY")
+
+
 class PooAgentLifecycleTests(unittest.TestCase):
     def test_setup_and_run_with_mounted_logs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -366,9 +388,38 @@ class PooAgentFlagTests(unittest.TestCase):
             self.assertNotIn("Fix the bug", run_cmd)
             self.assertIn('-- "$(cat /logs/agent/instruction.txt)"', run_cmd)
 
-    def test_settings_mode_still_applies_an_explicit_flag(self) -> None:
-        # A settings file names the model, but an explicit flag must reach the
-        # run instead of being dropped silently.
+    def test_a_settings_run_sends_no_model_flags_of_its_own(self) -> None:
+        # poo rejects --context-limit, --api-key-env or --tools-mode without
+        # --endpoint and --model-id, so a settings run must send none of them:
+        # the file names its own model.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            settings = tmp_path / "settings.yaml"
+            settings.write_text("version: 1\n", encoding="utf-8")
+            agent = self._agent(tmp_path, settings=str(settings))
+
+            args = agent.build_run_args()
+            joined = " ".join(args)
+            self.assertIn("--settings /logs/agent/settings.yaml", joined)
+            for flag in ("--context-limit", "--endpoint", "--model-id", "--tools-mode", "--api-key-env"):
+                self.assertNotIn(flag, joined)
+
+    def test_a_settings_run_refuses_a_model_flag_given_alone(self) -> None:
+        # Sending it would exit with a usage error inside the container, and
+        # dropping it would silently ignore what the caller asked for.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            settings = tmp_path / "settings.yaml"
+            settings.write_text("version: 1\n", encoding="utf-8")
+            agent = self._agent(tmp_path, settings=str(settings), tools_mode="native")
+
+            with self.assertRaises(ValueError) as ctx:
+                agent.build_run_args()
+            self.assertIn("tools_mode", str(ctx.exception))
+
+    def test_a_settings_run_can_name_a_model_explicitly(self) -> None:
+        # Naming the model makes the whole group legal, so an explicit flag
+        # reaches the run instead of being dropped.
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             settings = tmp_path / "settings.yaml"
@@ -376,13 +427,16 @@ class PooAgentFlagTests(unittest.TestCase):
             agent = self._agent(
                 tmp_path,
                 settings=str(settings),
+                endpoint="http://localhost:4000/v1",
+                model_id="glm-5.3-flash",
                 context_limit=524288,
                 tools_mode="native",
             )
 
-            args = agent.build_run_args()
-            joined = " ".join(args)
+            joined = " ".join(agent.build_run_args())
             self.assertIn("--settings /logs/agent/settings.yaml", joined)
+            self.assertIn("--endpoint http://localhost:4000/v1", joined)
+            self.assertIn("--model-id glm-5.3-flash", joined)
             self.assertIn("--context-limit 524288", joined)
             self.assertIn("--tools-mode native", joined)
 
@@ -428,22 +482,29 @@ class PooAgentFlagTests(unittest.TestCase):
             with patch.object(poo_agent_module.subprocess, "run", side_effect=sp.TimeoutExpired("poo", 5)):
                 self.assertIsNone(agent.version())
 
-    def test_both_model_paths_forward_the_same_flags(self) -> None:
-        # One forwarding block serves both paths. A flag appended in only one
-        # branch works with --ak settings=... and is dropped without it.
+    def test_both_paths_forward_the_same_flags_when_a_model_is_named(self) -> None:
+        # One block decides the model flags, so the settings path and the plain
+        # path must agree once the caller names a model. Without one, the
+        # settings path sends none of them, because poo rejects the group alone.
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             settings = tmp_path / "settings.yaml"
             settings.write_text("version: 1\n", encoding="utf-8")
-            common = dict(context_limit=524288, tools_mode="native", api_key_env="OPENAI_API_KEY")
+            common = dict(
+                endpoint="http://localhost:4000/v1",
+                model_id="glm-5.3-flash",
+                context_limit=524288,
+                tools_mode="native",
+                api_key_env="OPENAI_API_KEY",
+            )
 
             with_settings = self._agent(tmp_path, settings=str(settings), **common)
-            without = self._agent(
-                tmp_path, model_name="openai/gpt-4o", endpoint="http://x/v1", model_id="m", **common
-            )
+            without = self._agent(tmp_path, model_name="openai/gpt-4o", **common)
 
             for agent in (with_settings, without):
                 joined = " ".join(agent.build_run_args())
+                self.assertIn("--endpoint http://localhost:4000/v1", joined)
+                self.assertIn("--model-id glm-5.3-flash", joined)
                 self.assertIn("--context-limit 524288", joined)
                 self.assertIn("--tools-mode native", joined)
                 self.assertIn("--api-key-env OPENAI_API_KEY", joined)
