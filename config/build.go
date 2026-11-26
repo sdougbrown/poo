@@ -1857,6 +1857,7 @@ func toolInfo(factory ToolFactory) poo.ToolInfo {
 		Name:       spec.Name,
 		Class:      spec.Class,
 		Background: spec.Background,
+		Idempotent: spec.Idempotent,
 	}
 }
 

@@ -93,7 +93,7 @@ func elevatedRegistryTools(opts BuildOptions, catalog *cli.Catalog, existing []p
 		if spec.Name == "" || slices.Contains(reserved, spec.Name) || offersToolName(existing, spec.Name) {
 			return nil
 		}
-		elevated = append(elevated, poo.ToolInfo{Name: spec.Name, Class: spec.Class, Background: spec.Background})
+		elevated = append(elevated, poo.ToolInfo{Name: spec.Name, Class: spec.Class, Background: spec.Background, Idempotent: spec.Idempotent})
 	}
 	return elevated
 }

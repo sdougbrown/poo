@@ -1082,7 +1082,7 @@ func (s *Session) toolInfos() []ToolInfo {
 		if !nestedCallable(spec.Name, spec) {
 			continue
 		}
-		infos = append(infos, ToolInfo{Name: spec.Name, Class: spec.Class, Background: spec.Background})
+		infos = append(infos, ToolInfo{Name: spec.Name, Class: spec.Class, Background: spec.Background, Idempotent: spec.Idempotent})
 	}
 	return infos
 }
