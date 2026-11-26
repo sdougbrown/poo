@@ -346,6 +346,49 @@ func TestTheDaemonDefaultsToDurableWhereARunDefaultsToLogged(t *testing.T) {
 	}
 }
 
+// TestTheDaemonHonorsASettingsModeOverItsOwnDefault covers the settings'
+// say: a settings file that names the logged mode opens a logged session,
+// and the daemon's durable default does not shadow it.
+func TestTheDaemonHonorsASettingsModeOverItsOwnDefault(t *testing.T) {
+	endpoint := newFakeEndpoint(t, doneAnswer())
+	dir := t.TempDir()
+	manifestDir := t.TempDir()
+	trigger := filepath.Join(dir, "trigger")
+	feedManifest(t, manifestDir, trigger)
+	settingsPath := filepath.Join(dir, "settings.json")
+	body := `{"version":1,
+		"endpoints":{"test":{"endpoint":"` + endpoint.URL + `/v1"}},
+		"models":{"test-model":{"endpoint":"test","model_id":"test-model","api":"chat_completions","tools_mode":"native","ops":["chat"],"context_limit":32768}},
+		"roles":{"chat":"test-model"},
+		"session":{"mode":"logged"},
+		"feeds":{"paths":["` + manifestDir + `"],"defaults":false}}`
+	if err := os.WriteFile(settingsPath, []byte(body), 0o600); err != nil {
+		t.Fatalf("writing the settings: %v", err)
+	}
+	sessionDir := filepath.Join(dir, "sessions")
+	sessionID := "logged-mode-session"
+
+	daemon := startDaemon(t,
+		"daemon",
+		"--settings", settingsPath,
+		"--working-dir", dir,
+		"--session-dir", sessionDir,
+		"--session", sessionID,
+	)
+	daemon.waitLine("poo daemon: started")
+	daemon.waitLine("poo daemon: session " + sessionID)
+	// The daemon opened the settings' logged session, not its own
+	// default.
+	path := sessionLog(dir, sessionID)
+	waitRecord(t, path, "session.created")
+	recs := readLog(t, path)
+	if recs[0]["mode"] != "logged" {
+		t.Errorf("the daemon's session mode is %v, want the settings' logged", recs[0]["mode"])
+	}
+	_ = daemon.cmd.Process.Kill()
+	daemon.waitExit()
+}
+
 // TestTheDaemonRefusesABadSessionID covers the refused argument: a
 // session id that names outside the session directory is refused with
 // the usage exit code.
