@@ -2014,7 +2014,7 @@ func (r *Runtime) resolvePolicy(opts BuildOptions, workingDir string) error {
 	}
 
 	// The tools that ask about calls outside the working directory name
-	// the argument that carries the path. The three file tools take
+	// the argument that carries the path. The file tools take
 	// theirs in "path"; a tool's primary argument is not it — grep's
 	// is "pattern", which the doom loop matches, not the policy's
 	// path boundary. A test pins "path" to each tool's schema.

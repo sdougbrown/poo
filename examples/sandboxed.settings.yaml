@@ -54,7 +54,7 @@ tools:
     - "~/.aws"
     - "/etc/shadow"
   # The file tools reach paths outside the working directory by default;
-  # the three settings below keep read, grep and edit inside it.
+  # the settings below keep read, grep, edit and write inside it.
   read: {restrict_to_working_dir: true}
   grep: {restrict_to_working_dir: true}
   edit: {restrict_to_working_dir: true}

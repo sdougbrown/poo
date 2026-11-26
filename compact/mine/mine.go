@@ -80,8 +80,8 @@ type Options struct {
 	// It defaults to the window-scaled default: the run output limit's
 	// own scale, 8192 under a 64k window, 16384 to 128k, 32768 above.
 	PointerMaxTokens int
-	// Files reports the file a tool call names. It defaults to the two
-	// file tools poo ships, read and edit, with the path in a "path"
+	// Files reports the file a tool call names. It defaults to the file
+	// tools poo ships, read, edit and write, with the path in a "path"
 	// argument. A consumer whose tools are named otherwise sets it, so
 	// the replacement states the files the work touched.
 	Files FileOp

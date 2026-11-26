@@ -10,14 +10,15 @@ import (
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/internal/fileio"
+	"github.com/sdougbrown/poo/protect"
 )
 
 // reserve holds a path the way a concurrent call does, from its Reserve
-// to its Release. This stands in for the race the guard exists for: a
-// second call for the same file while the first is still inside Call.
+// to its Release. The key goes through the same resolution the tool's
+// own Prepare applies, so the test cannot drift from the real key.
 func reserve(t *testing.T, dir, path string) {
 	t.Helper()
-	if !fileio.Reserve(fileio.Resolve(path, dir)) {
+	if !fileio.Reserve(protect.Resolve(fileio.Resolve(path, dir))) {
 		t.Fatalf("reserving %s: the path is already held", path)
 	}
 }
@@ -70,7 +71,7 @@ func TestAWriteWhileAnotherCallHoldsThePathConflicts(t *testing.T) {
 		t.Error("the write created the file while the path was held")
 	}
 
-	fileio.Release(fileio.Resolve(path, dir))
+	fileio.Release(protect.Resolve(fileio.Resolve(path, dir)))
 	res = runCall(t, map[string]any{"path": path, "content": "two\n"}, dir)
 	if res.IsError {
 		t.Fatalf("the retried write failed after the path was released: %s", res.Text)
