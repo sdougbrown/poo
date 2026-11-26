@@ -3386,7 +3386,7 @@ func (r *Runtime) OpenStore(mode, dir string) (session.Store, error) {
 				Message: "no store backend is registered for " + settings.Store,
 			}
 		}
-		return opener(dir, settings)
+		return opener(dir, settings, r.Build)
 	case string(session.ModeEphemeral):
 		return session.NewMemory(), nil
 	}
@@ -3434,17 +3434,20 @@ func (s *Settings) DurableSettings() DurableSettings {
 
 // StoreOpener opens the store a session's records go to.
 //
-// The opener receives the directory the session files live in and the
-// resolved durable settings: the resumption budget, the lease TTL, the
-// auto-resume and the store's name. It returns the store the session
-// writes to, or the failure that stopped the open.
+// The opener receives the directory the session files live in, the
+// resolved durable settings (the resumption budget, the lease TTL, the
+// auto-resume and the store's name), and the build the process runs as.
+// The build is the store's: a session written by another build is loaded
+// with a warning, so every backend records the identity it opens under.
+// It returns the store the session writes to, or the failure that stopped
+// the open.
 //
 // The opener is the backend's: a binary that links a store of its own
 // registers it by the settings' store name, and the open dispatches on
 // the name. The "file" backend is built in: it opens the file store
 // with the lease options and the planner's budget the settings resolve
 // to.
-type StoreOpener func(dir string, settings DurableSettings) (session.Store, error)
+type StoreOpener func(dir string, settings DurableSettings, build poo.BuildInfo) (session.Store, error)
 
 var (
 	// storeBackends are the store openers, by the settings' store
@@ -3497,10 +3500,10 @@ func storeBackend(name string) (StoreOpener, bool) {
 // the planner's budget the settings' resumption limit. A session's
 // owner is a lease instead of the flock: the owner is renewed by a
 // heartbeat, and a dead owner is taken over after the lease expires.
-func openFileStore(dir string, settings DurableSettings) (session.Store, error) {
+func openFileStore(dir string, settings DurableSettings, build poo.BuildInfo) (session.Store, error) {
 	lease := session.LeaseOptions{TTL: settings.LeaseTTL}
 	durable := session.DurableOptions{MaxResumptions: settings.MaxResumptions}
-	return session.NewStore(dir, session.WithLeaseOptions(lease), session.WithDurableOptions(durable))
+	return session.NewStore(dir, session.WithBuild(build), session.WithLeaseOptions(lease), session.WithDurableOptions(durable))
 }
 
 // ProjectInstructions returns the mutation that fills the prompt's

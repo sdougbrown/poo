@@ -919,8 +919,63 @@ func TestADurableSessionModeBuilds(t *testing.T) {
 	}
 }
 
+// TestTheDurableOpenersCarryTheBuild covers the durable path's build
+// identity: the openers record the build the runtime runs as, so a session
+// written by another build loads with the warning the logged path gives.
+func TestTheDurableOpenersCarryTheBuild(t *testing.T) {
+	settings, err := config.Parse([]byte(theModelSettings+"session:\n  mode: durable\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	dir := t.TempDir()
+	ctx := context.Background()
+	runtime := buildWith(t, config.BuildOptions{
+		Settings:   settings,
+		Overrides:  config.Overrides{},
+		WorkingDir: t.TempDir(),
+		Executors:  theExecutors(),
+		Build:      poo.BuildInfo{Name: "poo", Version: "0.2.0-test"},
+	})
+
+	// The session's header names another build, and the store records the
+	// build the runtime opens under.
+	store, err := runtime.OpenStore("durable", dir)
+	if err != nil {
+		t.Fatalf("opening the durable store: %v", err)
+	}
+	created := theDurableCreatedRecord("s1", "durable", dir)
+	created.Build = poo.BuildInfo{Name: "poo", Version: "0.1.0-test"}
+	if _, err := store.Create(ctx, created); err != nil {
+		store.Close()
+		t.Fatalf("creating the session: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("closing the store: %v", err)
+	}
+
+	reader, err := runtime.OpenStore("durable", dir)
+	if err != nil {
+		t.Fatalf("reopening the durable store: %v", err)
+	}
+	defer reader.Close()
+	loaded, err := reader.Load(ctx, "s1")
+	if err != nil {
+		t.Fatalf("loading the session: %v", err)
+	}
+	var warned bool
+	for _, warning := range loaded.Warnings {
+		if strings.Contains(warning, "made by poo 0.1.0-test") {
+			warned = true
+		}
+	}
+	if !warned {
+		t.Errorf("the load warns %v, want the other build's warning", loaded.Warnings)
+	}
+}
+
 // theDurableCreatedRecord is the header a test's store creates a session with.
 func theDurableCreatedRecord(id, mode, dir string) *poo.SessionCreatedRecord {
+>>>>>>> ceb00a3 (🐛 Give the durable stores the build they open under)
 	return &poo.SessionCreatedRecord{
 		RecordMeta: poo.NewRecordMeta("session.created"), SessionMetadata: poo.SessionMetadata{Format: poo.FormatVersion,
 			SessionID: id, Mode: mode, CreatedAt: "2026-10-22T12:00:00Z",
@@ -963,7 +1018,7 @@ func TestADurableStoreNameIsChecked(t *testing.T) {
 func TestARegisteredStoreBackendIsUsed(t *testing.T) {
 	const name = "test_backend"
 	fake := &fakeStore{name: name}
-	t.Cleanup(config.RegisterStoreBackendForTest(name, func(string, config.DurableSettings) (session.Store, error) {
+	t.Cleanup(config.RegisterStoreBackendForTest(name, func(string, config.DurableSettings, poo.BuildInfo) (session.Store, error) {
 		return fake, nil
 	}))
 	settings, err := config.Parse([]byte(theModelSettings+"session:\n  mode: durable\n  durable:\n    store: sqlite\n"), config.FormatYAML)

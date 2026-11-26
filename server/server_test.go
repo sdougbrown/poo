@@ -1156,10 +1156,10 @@ func TestAServedDurableSqliteSessionLoads(t *testing.T) {
 	// The server tests are the binary that registers the durable store,
 	// as poo does: the settings accept only "file" or "sqlite", and the
 	// open dispatches on the resolved name.
-	if err := config.RegisterStoreBackend(storeName, func(dir string, settings config.DurableSettings) (session.Store, error) {
+	if err := config.RegisterStoreBackend(storeName, func(dir string, settings config.DurableSettings, build poo.BuildInfo) (session.Store, error) {
 		lease := sqlite.LeaseOptions{TTL: settings.LeaseTTL}
 		durable := session.DurableOptions{MaxResumptions: settings.MaxResumptions}
-		return sqlite.New(filepath.Join(dir, "sessions.db"), sqlite.WithLeaseOptions(lease), sqlite.WithDurableOptions(durable))
+		return sqlite.New(filepath.Join(dir, "sessions.db"), sqlite.WithBuild(build), sqlite.WithLeaseOptions(lease), sqlite.WithDurableOptions(durable))
 	}); err != nil {
 		t.Fatalf("registering the sqlite backend: %v", err)
 	}

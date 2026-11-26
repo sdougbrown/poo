@@ -10,7 +10,7 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.9
 	github.com/chubin/vt10x v0.0.0-20231112153020-ef4f56837bf1
 	github.com/fastschema/qjs v0.0.6
-	github.com/modelcontextprotocol/go-sdk v1.6.0
+	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/muesli/termenv v0.16.0
 	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/reeflective/readline v1.3.0
@@ -19,9 +19,9 @@ require (
 	github.com/yuin/goldmark v1.8.2
 	go.starlark.net v0.0.0-20261021141710-4f4267fb140d
 	golang.org/x/net v0.55.0
-	golang.org/x/term v0.45.0
-	modernc.org/sqlite v1.62.0
-	mvdan.cc/sh/v3 v3.14.1
+	golang.org/x/term v0.43.0
+	modernc.org/sqlite v1.63.0
+	mvdan.cc/sh/v3 v3.13.1
 )
 
 require (
@@ -60,8 +60,10 @@ require (
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	github.com/yuin/goldmark-emoji v1.0.6 // indirect
 	golang.org/x/oauth2 v0.35.0 // indirect
+	golang.org/x/sync v0.24.0 // indirect
 	golang.org/x/sys v0.49.0 // indirect
 	golang.org/x/text v0.37.0 // indirect
+	golang.org/x/time v0.15.0 // indirect
 	modernc.org/libc v1.80.1 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect

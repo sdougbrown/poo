@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -1098,6 +1099,53 @@ func TestDurableModeLeavesALoggedCrashSettledInterrupted(t *testing.T) {
 	}
 	if answers != 1 {
 		t.Errorf("the session holds %d answers, want 1", answers)
+	}
+}
+
+// TestADurableLoadWarnsWhenTheBuildDiffers covers the durable path's build
+// identity: the store records the build it opens under, and a session
+// written by another build loads with the warning the logged path gives.
+func TestADurableLoadWarnsWhenTheBuildDiffers(t *testing.T) {
+	dir := t.TempDir()
+	writeSession(t, dir, "s1", durableHeader("s1"), runStarted("r1"))
+	ctx := context.Background()
+
+	store, err := NewStore(dir, WithBuild(poo.BuildInfo{Name: "poo", Version: "0.2.0"}))
+	if err != nil {
+		t.Fatalf("opening the store: %v", err)
+	}
+	loaded, err := store.Load(ctx, "s1")
+	if err != nil {
+		store.Close()
+		t.Fatalf("loading the durable session: %v", err)
+	}
+	var warned bool
+	for _, warning := range loaded.Warnings {
+		if strings.Contains(warning, "made by poo 0.1.0") {
+			warned = true
+		}
+	}
+	if !warned {
+		t.Errorf("the load warns %v, want the other build's warning", loaded.Warnings)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("closing the store: %v", err)
+	}
+
+	// A store that names no build compares nothing, so it warns nothing.
+	quiet, err := NewStore(dir)
+	if err != nil {
+		t.Fatalf("opening the quiet store: %v", err)
+	}
+	t.Cleanup(func() { quiet.Close() })
+	quietLoaded, err := quiet.Load(ctx, "s1")
+	if err != nil {
+		t.Fatalf("loading the durable session quietly: %v", err)
+	}
+	for _, warning := range quietLoaded.Warnings {
+		if strings.Contains(warning, "made by") {
+			t.Errorf("the quiet store warns %q, want nothing: a store that names no build compares nothing", warning)
+		}
 	}
 }
 
