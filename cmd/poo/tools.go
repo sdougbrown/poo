@@ -18,6 +18,7 @@ import (
 	"github.com/sdougbrown/poo/tool/grep"
 	"github.com/sdougbrown/poo/tool/history"
 	"github.com/sdougbrown/poo/tool/read"
+	"github.com/sdougbrown/poo/tool/write"
 )
 
 // addFinishTool gives the session the typed-result tool.
@@ -83,6 +84,7 @@ func linkedTools() map[string]config.ToolFactory {
 		"grep":    func(config.ToolOptions) poo.Tool { return grep.New() },
 		"history": func(config.ToolOptions) poo.Tool { return history.New() },
 		"edit":    func(opts config.ToolOptions) poo.Tool { return edit.New() },
+		"write":   func(opts config.ToolOptions) poo.Tool { return write.New() },
 		"codemode": func(opts config.ToolOptions) poo.Tool {
 			// An unset engine is the settings' default one, the same
 			// value the settings check judges limits by. Starlark is the

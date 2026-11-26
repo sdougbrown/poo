@@ -1,5 +1,5 @@
 // Package edit implements the edit tool: an exact-string replacement in
-// a file.
+// a file, or the creation of one with an empty old text.
 //
 // The tool replaces a string the model wrote out, and it fails loudly
 // when that string appears nowhere or more than once: a change that is
@@ -12,20 +12,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
-	"sync"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/internal/fileio"
 	"github.com/sdougbrown/poo/protect"
-)
-
-// Defaults for the edit tool.
-const (
-	// FileMode is the mode a created file gets.
-	FileMode = 0o644
-	// DirMode is the mode a created directory gets.
-	DirMode = 0o755
 )
 
 // Tool is the edit tool.
@@ -114,7 +105,7 @@ func (t *Tool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, e
 	if strings.TrimSpace(a.Path) == "" {
 		return nil, poo.InvalidArgsf("edit: path must not be empty")
 	}
-	abs := protect.Resolve(absolutePath(a.Path, env.WorkingDir))
+	abs := protect.Resolve(fileio.Resolve(a.Path, env.WorkingDir))
 	if env.RestrictEdit && env.WorkingDir != "" && !protect.Within(protect.Resolve(env.WorkingDir), abs) {
 		return nil, poo.InvalidArgsf("edit: path is outside the working directory: %s", a.Path)
 	}
@@ -136,10 +127,6 @@ func (t *Tool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, e
 	}, nil
 }
 
-// activeEdits reserves each path from read through rename. It covers
-// all edits in this process, not writes by other programs.
-var activeEdits sync.Map
-
 // Call makes the change.
 //
 // The context is honoured: a cancelled run stops paying for the edit.
@@ -152,14 +139,14 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 		return poo.ToolResult{}, errors.New("edit: prepared value is not an edit call")
 	}
 
-	if _, busy := activeEdits.LoadOrStore(p.abs, struct{}{}); busy {
+	if !fileio.Reserve(p.abs) {
 		return poo.ToolResult{
-			Text:       fmt.Sprintf("edit: another edit is in progress for %s; re-read the file before retrying", p.path),
+			Text:       fmt.Sprintf("edit: another write is in progress for %s; re-read the file before retrying", p.path),
 			Structured: json.RawMessage(`{"code":"edit_conflict"}`),
 			IsError:    true,
 		}, nil
 	}
-	defer activeEdits.Delete(p.abs)
+	defer fileio.Release(p.abs)
 
 	content, mode, exists, err := read(p.abs)
 	if err != nil {
@@ -172,7 +159,7 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 				IsError: true,
 			}, nil
 		}
-		if err := create(p.abs, p.new); err != nil {
+		if err := fileio.Write(p.abs, p.new); err != nil {
 			return poo.ToolResult{Text: fmt.Sprintf("edit: %v", err), IsError: true}, nil
 		}
 		return poo.ToolResult{Text: fmt.Sprintf("created %s", p.path)}, nil
@@ -203,7 +190,7 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 	if !p.replaceAll {
 		replaced = strings.Replace(content, p.old, p.new, 1)
 	}
-	if err := writeAtomic(p.abs, replaced, mode); err != nil {
+	if err := fileio.WriteAtomic(p.abs, replaced, mode); err != nil {
 		return poo.ToolResult{Text: fmt.Sprintf("edit: %v", err), IsError: true}, nil
 	}
 	if p.replaceAll {
@@ -232,56 +219,4 @@ func read(path string) (string, os.FileMode, bool, error) {
 		return "", 0, false, err
 	}
 	return string(content), info.Mode().Perm(), true, nil
-}
-
-// create writes a new file, making the directories it needs.
-func create(path, content string) error {
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, DirMode); err != nil {
-		return err
-	}
-	return writeAtomic(path, content, FileMode)
-}
-
-// writeAtomic writes a file through a temporary file and a rename in the
-// same directory, so a crash or a full disk leaves the old file in place
-// rather than a partial one. The mode is the file's own.
-func writeAtomic(path, content string, mode os.FileMode) error {
-	dir := filepath.Dir(path)
-	f, err := os.CreateTemp(dir, ".poo-edit-*")
-	if err != nil {
-		return err
-	}
-	temp := f.Name()
-	cleanup := func() {
-		f.Close()
-		os.Remove(temp)
-	}
-	if _, err := f.WriteString(content); err != nil {
-		cleanup()
-		return err
-	}
-	if err := f.Chmod(mode); err != nil {
-		cleanup()
-		return err
-	}
-	if err := f.Close(); err != nil {
-		os.Remove(temp)
-		return err
-	}
-	if err := os.Rename(temp, path); err != nil {
-		os.Remove(temp)
-		return err
-	}
-	return nil
-}
-
-// absolutePath returns the path a call works on.
-//
-// A relative path is taken from the working directory of the run.
-func absolutePath(path, workingDir string) string {
-	if filepath.IsAbs(path) {
-		return filepath.Clean(path)
-	}
-	return filepath.Join(workingDir, path)
 }

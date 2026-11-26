@@ -15,7 +15,7 @@ version: 1
 
 # The profile the session is built from: base, code or search.
 #
-# The code profile offers bash, read, grep and edit, and it allows
+# The code profile offers bash, read, grep, edit and write, and it allows
 # every side-effecting call no rule covers. That is the mini-swe-agent
 # stance: the isolation is the operator's job, and it is done with a
 # sandbox or a container.
@@ -159,7 +159,7 @@ tools:
   # The paths the tools must not touch, as globs on the resolved
   # paths. A glob is absolute, or starts with "~".
   #
-  # The file tools (read, grep and edit) refuse a protected path. The
+  # The file tools (read, grep, edit and write) refuse a protected path. The
   # bash tool cannot: with the local executor a command reaches
   # anything the process can, and with the bwrap executor the sandbox
   # masks the protected paths inside the directories it binds.

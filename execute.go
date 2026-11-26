@@ -800,6 +800,7 @@ func (s *Session) prepareEnv() PrepareEnv {
 		RestrictRead:   s.opts.RestrictRead,
 		RestrictGrep:   s.opts.RestrictGrep,
 		RestrictEdit:   s.opts.RestrictEdit,
+		RestrictWrite:  s.opts.RestrictWrite,
 	}
 }
 

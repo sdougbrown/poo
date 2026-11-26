@@ -86,8 +86,8 @@ type Options struct {
 	// keeps refilling its window keeps compacting selectively for as
 	// long as it runs.
 	EscalateAfter int
-	// Files reports the file a tool call names. It defaults to the two
-	// file tools poo ships, read and edit, with the path in a "path"
+	// Files reports the file a tool call names. It defaults to the file
+	// tools poo ships, read, edit and write, with the path in a "path"
 	// argument.
 	Files FileOp
 	// Fallback is the full-span strategy a selective pass that cannot

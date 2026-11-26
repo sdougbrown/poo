@@ -1,5 +1,5 @@
 Edit:
 - The edit replaces an exact string, so the old text must be in the file exactly as you wrote it, spacing included.
 - The old text must appear once, unless replace_all is set: the edit fails loudly when it appears nowhere or more than once.
-- An edit with an empty old text on a path that does not exist creates the file.
+- An edit with an empty old text on a path that does not exist creates the file; to create one, Write is the tool.
 - The result gives the path, the replacement count, or the failure reason; no read is needed to confirm.

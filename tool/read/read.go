@@ -12,12 +12,12 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/internal/caps"
+	"github.com/sdougbrown/poo/internal/fileio"
 	"github.com/sdougbrown/poo/protect"
 )
 
@@ -179,7 +179,7 @@ func (t *Tool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, e
 	}
 	// The path is resolved once, so the file that is read is the file
 	// the protection check named.
-	abs := protect.Resolve(absolutePath(a.Path, env.WorkingDir))
+	abs := protect.Resolve(fileio.Resolve(a.Path, env.WorkingDir))
 	if env.RestrictRead && !reachable(env, abs) {
 		return nil, poo.InvalidArgsf("read: path is outside the working directory: %s", a.Path)
 	}
@@ -203,8 +203,6 @@ func (t *Tool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, e
 	return &prepared{path: a.Path, abs: abs, offset: offset, limit: limit}, nil
 }
 
-// absolutePath returns the path a call works on.
-//
 // accepts reports whether the model this call runs for reads a modality.
 //
 // The run's model decides it, so a session that switched models answers for
@@ -286,14 +284,6 @@ func reachable(env poo.PrepareEnv, abs string) bool {
 		}
 	}
 	return false
-}
-
-// A relative path is taken from the working directory of the run.
-func absolutePath(path, workingDir string) string {
-	if filepath.IsAbs(path) {
-		return filepath.Clean(path)
-	}
-	return filepath.Join(workingDir, path)
 }
 
 // Call reads the file.

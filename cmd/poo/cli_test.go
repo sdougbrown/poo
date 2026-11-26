@@ -273,8 +273,8 @@ func TestTheNativeModeRunSendsTheToolsNatively(t *testing.T) {
 	// The code profile offers the bash and the file tools plus history,
 	// fetch and codemode, and the bash tool may run in the background,
 	// so the core registers the jobs tools beside it.
-	if len(tools) != 9 {
-		t.Errorf("the request held %d tools, want 9", len(tools))
+	if len(tools) != 10 {
+		t.Errorf("the request held %d tools, want 10", len(tools))
 	}
 	names := map[string]bool{}
 	for _, tool := range tools {
@@ -283,7 +283,7 @@ func TestTheNativeModeRunSendsTheToolsNatively(t *testing.T) {
 		name, _ := fn["name"].(string)
 		names[name] = true
 	}
-	for _, want := range []string{"bash", "read", "grep", "history", "edit", "fetch", "codemode", "jobs", "cancel_job"} {
+	for _, want := range []string{"bash", "read", "grep", "history", "edit", "write", "fetch", "codemode", "jobs", "cancel_job"} {
 		if !names[want] {
 			t.Errorf("the request does not offer the %q tool", want)
 		}

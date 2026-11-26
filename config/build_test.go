@@ -36,6 +36,7 @@ import (
 	"github.com/sdougbrown/poo/tool/grep"
 	"github.com/sdougbrown/poo/tool/history"
 	"github.com/sdougbrown/poo/tool/read"
+	"github.com/sdougbrown/poo/tool/write"
 )
 
 // stubEngine is an engine that never runs, for the wiring tests.
@@ -55,6 +56,7 @@ func theTools() map[string]config.ToolFactory {
 		"grep":     func(config.ToolOptions) poo.Tool { return grep.New() },
 		"history":  func(config.ToolOptions) poo.Tool { return history.New() },
 		"edit":     func(config.ToolOptions) poo.Tool { return edit.New() },
+		"write":    func(config.ToolOptions) poo.Tool { return write.New() },
 		"codemode": func(config.ToolOptions) poo.Tool { return toolcodemode.New(stubEngine{}) },
 		"fetch":    func(config.ToolOptions) poo.Tool { return fetchtool.New() },
 		"call_cli": func(opts config.ToolOptions) poo.Tool {
@@ -168,7 +170,7 @@ func TestTheBuildPicksTheProfileAndItsTools(t *testing.T) {
 	if runtime.Profile.Name != "code" {
 		t.Errorf("the profile is %q, want code", runtime.Profile.Name)
 	}
-	want := []string{"bash", "read", "grep", "history", "edit", "fetch", "codemode"}
+	want := []string{"bash", "read", "grep", "history", "edit", "write", "fetch", "codemode"}
 	if len(runtime.Options.ToolOrder) != len(want) {
 		t.Fatalf("the tools are %v, want %v", runtime.Options.ToolOrder, want)
 	}
@@ -184,7 +186,7 @@ func TestTheBuildPicksTheProfileAndItsTools(t *testing.T) {
 	for _, tool := range runtime.Profile.Tools {
 		names[tool.Name] = true
 	}
-	for _, name := range []string{"bash", "read", "grep", "edit", "jobs", "cancel_job"} {
+	for _, name := range []string{"bash", "read", "grep", "edit", "write", "jobs", "cancel_job"} {
 		if !names[name] {
 			t.Errorf("the profile does not offer the %q tool", name)
 		}
@@ -2001,7 +2003,7 @@ func TestADisablingABackgroundToolTakesTheJobToolsWithIt(t *testing.T) {
 	}
 	runtime := build(t, settings, config.Overrides{})
 
-	want := []string{"read", "grep", "history", "edit", "fetch"}
+	want := []string{"read", "grep", "history", "edit", "write", "fetch"}
 	if !slices.Equal(runtime.Options.ToolOrder, want) {
 		t.Errorf("the tools are %v, want %v", runtime.Options.ToolOrder, want)
 	}
@@ -2335,6 +2337,7 @@ func TestTheOutsideAskSettingReachesThePolicy(t *testing.T) {
 		{"read true", "tools:\n  read: {ask_outside_working_dir: true}\n", "read", map[string]string{"path": "outside.txt"}, 1},
 		{"grep true", "tools:\n  grep: {ask_outside_working_dir: true}\n", "grep", map[string]string{"path": "outside.txt", "pattern": "needle"}, 1},
 		{"edit true", "tools:\n  edit: {ask_outside_working_dir: true}\n", "edit", map[string]string{"path": "outside.txt", "old": "a", "new": "b"}, 1},
+		{"write true", "tools:\n  write: {ask_outside_working_dir: true}\n", "write", map[string]string{"path": "outside.txt", "content": "c"}, 1},
 		{"grep pattern is not the path", "tools:\n  grep: {ask_outside_working_dir: true}\n", "grep", map[string]string{"pattern": "../escape"}, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -2381,7 +2384,7 @@ func TestTheOutsideAskSettingReachesThePolicy(t *testing.T) {
 // "path" property, or a rename would leave the policy reading an
 // argument the call no longer sends and silently fail open.
 func TestTheFileToolsTakeTheirPathInThePathArgument(t *testing.T) {
-	for _, name := range []string{"read", "grep", "edit"} {
+	for _, name := range []string{"read", "grep", "edit", "write"} {
 		t.Run(name, func(t *testing.T) {
 			spec := theTools()[name](config.ToolOptions{}).Spec()
 			var schema struct {
@@ -2691,17 +2694,20 @@ roles:
 	}
 }
 
+// TestFileToolRestrictionsAreIndependent covers the confinement flags:
+// each tool's restrict_to_working_dir reaches only its own option.
 func TestFileToolRestrictionsAreIndependent(t *testing.T) {
 	for _, tc := range []struct {
-		name             string
-		yaml             string
-		read, grep, edit bool
+		name                    string
+		yaml                    string
+		read, grep, edit, write bool
 	}{
-		{"empty", "", false, false, false},
-		{"read-true", "tools:\n  read: {restrict_to_working_dir: true}\n", true, false, false},
-		{"grep-true", "tools:\n  grep: {restrict_to_working_dir: true}\n", false, true, false},
-		{"edit-true", "tools:\n  edit: {restrict_to_working_dir: true}\n", false, false, true},
-		{"read-false", "tools:\n  read: {restrict_to_working_dir: false}\n", false, false, false},
+		{"empty", "", false, false, false, false},
+		{"read-true", "tools:\n  read: {restrict_to_working_dir: true}\n", true, false, false, false},
+		{"grep-true", "tools:\n  grep: {restrict_to_working_dir: true}\n", false, true, false, false},
+		{"edit-true", "tools:\n  edit: {restrict_to_working_dir: true}\n", false, false, true, false},
+		{"write-true", "tools:\n  write: {restrict_to_working_dir: true}\n", false, false, false, true},
+		{"read-false", "tools:\n  read: {restrict_to_working_dir: false}\n", false, false, false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			settings, err := config.Parse([]byte(theModelSettings+tc.yaml), config.FormatYAML)
@@ -2709,8 +2715,8 @@ func TestFileToolRestrictionsAreIndependent(t *testing.T) {
 				t.Fatal(err)
 			}
 			opts := build(t, settings, config.Overrides{}).Options
-			if opts.RestrictRead != tc.read || opts.RestrictGrep != tc.grep || opts.RestrictEdit != tc.edit {
-				t.Fatalf("restrictions: read=%t grep=%t edit=%t", opts.RestrictRead, opts.RestrictGrep, opts.RestrictEdit)
+			if opts.RestrictRead != tc.read || opts.RestrictGrep != tc.grep || opts.RestrictEdit != tc.edit || opts.RestrictWrite != tc.write {
+				t.Fatalf("restrictions: read=%t grep=%t edit=%t write=%t", opts.RestrictRead, opts.RestrictGrep, opts.RestrictEdit, opts.RestrictWrite)
 			}
 		})
 	}

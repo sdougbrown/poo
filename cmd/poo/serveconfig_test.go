@@ -151,7 +151,7 @@ func TestTheHandshakeReportsTheSettingsProfiles(t *testing.T) {
 		name, _ := tool["name"].(string)
 		names = append(names, name)
 	}
-	for _, want := range []string{"bash", "read", "grep", "edit", "jobs", "cancel_job"} {
+	for _, want := range []string{"bash", "read", "grep", "edit", "write", "jobs", "cancel_job"} {
 		found := false
 		for _, name := range names {
 			if name == want {

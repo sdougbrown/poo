@@ -505,7 +505,7 @@ with `--profile`; the default is `code`.
 | Profile | Tools |
 |---|---|
 | `base` | none |
-| `code` | `bash`, `read`, `grep`, `edit`, `codemode` |
+| `code` | `bash`, `read`, `grep`, `edit`, `write`, `codemode` |
 | `search` | `read`, `grep` |
 
 A settings file that names `finish.schema_file` also gets the typed
@@ -647,6 +647,7 @@ tools:
   read: {restrict_to_working_dir: true}
   grep: {restrict_to_working_dir: true}
   edit: {restrict_to_working_dir: true}
+  write: {restrict_to_working_dir: true}
 ```
 
 Restricted `read` can also reach the session's skill directories. Protected
@@ -661,6 +662,7 @@ tools:
   read: {ask_outside_working_dir: true}
   grep: {ask_outside_working_dir: true}
   edit: {ask_outside_working_dir: true}
+  write: {ask_outside_working_dir: true}
 ```
 
 A call one of these tools makes to a path outside the working directory then
@@ -805,7 +807,7 @@ closure gate.
 | `poo/decide` | Decision-model types: questions, answers, the decider, the recording wrapper |
 | `poo/prompt` | The system prompt's vocabulary: named sections, the alternatives they offer, and the environment they read |
 | `poo/pootest` | Exported test helpers: a scripted transport, an in-memory sink, a stub decider, a scripted compactor |
-| `poo/tool/*` | Opt-in tools: `read`, `edit`, `grep`, `bash`, `cliregistry`, `codemode`, `fetch` |
+| `poo/tool/*` | Opt-in tools: `read`, `edit`, `write`, `grep`, `bash`, `cliregistry`, `codemode`, `fetch` |
 | `poo/cli` | The cli registry's catalog: the manifests a session may call |
 | `poo/feed` | The feed manifests a session runs: the loader, the environment, and the runner over a command's stdout |
 | `poo/exec` | The executor contract a binary fills: a command, its environment, and where it runs |

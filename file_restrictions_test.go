@@ -11,6 +11,7 @@ import (
 	"github.com/sdougbrown/poo/tool/edit"
 	"github.com/sdougbrown/poo/tool/grep"
 	"github.com/sdougbrown/poo/tool/read"
+	"github.com/sdougbrown/poo/tool/write"
 )
 
 func TestSessionAppliesFileToolRestrictions(t *testing.T) {
@@ -23,6 +24,7 @@ func TestSessionAppliesFileToolRestrictions(t *testing.T) {
 	if err := os.WriteFile(editPath, []byte("hello"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	writePath := filepath.Join(outside, "write.txt")
 	if err := os.WriteFile(filepath.Join(outside, "needle.txt"), []byte("x needle y\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -49,6 +51,11 @@ func TestSessionAppliesFileToolRestrictions(t *testing.T) {
 			tool: "edit", newTool: func() poo.Tool { return edit.New() },
 			restrict: func(o *poo.Options, v bool) { o.RestrictEdit = v },
 			args:     map[string]string{"path": editPath, "old": "hello", "new": "world"},
+		},
+		{
+			tool: "write", newTool: func() poo.Tool { return write.New() },
+			restrict: func(o *poo.Options, v bool) { o.RestrictWrite = v },
+			args:     map[string]string{"path": writePath, "content": "written"},
 		},
 	} {
 		t.Run(tc.tool, func(t *testing.T) {
@@ -86,6 +93,9 @@ func TestSessionAppliesFileToolRestrictions(t *testing.T) {
 	}
 	if string(mustRead(t, editPath)) != "world" {
 		t.Fatalf("unrestricted edit did not write the file: %q", mustRead(t, editPath))
+	}
+	if string(mustRead(t, writePath)) != "written" {
+		t.Fatalf("unrestricted write did not create the file: %q", mustRead(t, writePath))
 	}
 }
 
