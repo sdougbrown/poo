@@ -4,7 +4,7 @@ Use these manifests to delegate to child agents and receive their questions in t
 
 ## Set up
 
-1. Put `avenor` on `PATH`. Use a build that supports per-session supervisor startup in `avenor feed broker` and the bound `spawn`, `status`, `result`, and `message` commands.
+1. Put `avenor` on `PATH`. Use a build that supports per-session supervisor startup in `avenor feed broker`; the bound `spawn`, `status`, `result`, `await`, and `message` commands; and the bind-coordinate flags on `await` (avenor v0.52.0 or later).
 2. Add the manifests to your existing poo settings. Replace `~/Code/poo` with your checkout path:
 
    ```yaml
@@ -24,9 +24,9 @@ Use these manifests to delegate to child agents and receive their questions in t
    the defaults off does the same.
 3. Run `poo` with a profile that offers the registered tools: a profile with a side-effecting tool earns the catalog, and a catalog this short is offered entry by entry. Ask it to delegate a task and have the child ask a question before finishing.
 
-The [feed manifest](feeds.json) starts `avenor-inbox`. The [tool manifest](tools.json) registers `avenor_spawn`, `avenor_status`, `avenor_result`, and `avenor_message` (reply only). Poo resolves `session:id` to the same native session ID for the feed and every tool. Avenor starts a separate supervisor for each poo session and stops it when the feed exits. You do not need to start a service or export broker credentials.
+The [feed manifest](feeds.json) starts `avenor-inbox`. The [tool manifest](tools.json) registers `avenor_spawn`, `avenor_status`, `avenor_await`, `avenor_result`, and `avenor_message` (reply only). Poo resolves `session:id` to the same native session ID for the feed and every tool. Avenor starts a separate supervisor for each poo session and stops it when the feed exits. You do not need to start a service or export broker credentials.
 
-Use the `runtime_id` returned by `avenor_spawn` as the `runtime` argument to `avenor_status` and `avenor_result`. When the inbox delivers a child's ask, follow the included `avenor_message` call and use the supplied `reply_to` ID.
+Use the `runtime_id` returned by `avenor_spawn` as the target for `avenor_await`, and as the `runtime` argument to `avenor_status` and `avenor_result`. Waiting is `avenor_await`'s job: it blocks until the child reaches a terminal state and returns its final output — pass `background: true` when you would rather keep working while it waits. Call `avenor_status` between awaits to see where a run is, and call `avenor_result` when a run is already done. When the inbox delivers a child's ask, follow the included `avenor_message` call and use the supplied `reply_to` ID.
 
 To share an existing local supervisor, set `AVENOR_SOCKET` to its socket path in the feed and each tool entry. The feed will attach to that supervisor instead of starting one.
 
