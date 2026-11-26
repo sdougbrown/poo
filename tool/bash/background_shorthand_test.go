@@ -28,8 +28,7 @@ func TestBackgroundShorthand(t *testing.T) {
 		{command: "cat <<'END' &\ncontent\nEND", refuse: true},
 		// The reserved argument stays out of the shorthand: the
 		// shorthand translates the call, and the core decides the
-		// argument itself.
-		{command: `listen &`, background: "false", want: `listen`},
+		// argument itself.		{command: `listen &`, background: "false", want: `listen`},
 	} {
 		t.Run(tt.command+" background="+tt.background, func(t *testing.T) {
 			command, err := json.Marshal(tt.command)
@@ -70,8 +69,8 @@ func TestBackgroundShorthand(t *testing.T) {
 			if effective.Command != tt.want {
 				t.Fatalf("got %s; want command %q", got, tt.want)
 			}
-			if tt.background != "" && effective.Background != nil {
-				t.Fatalf("got %s; want the reserved argument out of the shorthand", got)
+			if tt.background != "" && string(effective.Background) != tt.background {
+				t.Fatalf("got %s; want the reserved argument passed through untouched", got)
 			}
 		})
 	}

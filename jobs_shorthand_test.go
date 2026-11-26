@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/sdougbrown/poo"
@@ -145,6 +146,96 @@ func TestTrailingAmpersandBesideBackgroundTrue(t *testing.T) {
 	waitForSink(t, sink, "job output", func() bool {
 		for _, rec := range sink.allRecords() {
 			if r, ok := rec.(*poo.JobEndedRecord); ok && r.Outcome == poo.OutcomeOK && strings.Contains(r.Text, "job output") {
+				return true
+			}
+		}
+		return false
+	})
+}
+
+// hookArgsRecorder is an after-tool hook that records the arguments it
+// was asked about.
+type hookArgsRecorder struct {
+	mu   sync.Mutex
+	args []json.RawMessage
+}
+
+func (h *hookArgsRecorder) AfterTool(_ poo.HookContext, info poo.ToolCallInfo, _ poo.ToolResult) (poo.ResultDecision, error) {
+	h.mu.Lock()
+	h.args = append(h.args, info.Arguments)
+	h.mu.Unlock()
+	return poo.ResultDecision{}, nil
+}
+
+func TestAnAfterToolHookSeesTheComposedShorthandArguments(t *testing.T) {
+	sink := &recordingSink{}
+	hook := &hookArgsRecorder{}
+	s := newTestSession(t, poo.Options{
+		Transport: scripted([]fakeResponse{
+			{calls: []poo.ToolCall{{CallID: "one", Name: "bash", Arguments: []byte(`{"command":"printf 'job output'&"}`)}}},
+			{text: "done"},
+		}),
+		AfterTool: []poo.AfterToolHook{hook},
+		Tools:     map[string]poo.Tool{"bash": bash.New()}, Sink: sink, WorkingDir: t.TempDir(),
+		Model: poo.ModelInfo{ModelID: "test-model", ContextLimit: 32768},
+	})
+	runSession(t, s, "run it")
+	waitForSink(t, sink, "job output", func() bool {
+		for _, rec := range sink.allRecords() {
+			if r, ok := rec.(*poo.JobEndedRecord); ok && r.Outcome == poo.OutcomeOK && strings.Contains(r.Text, "job output") {
+				return true
+			}
+		}
+		return false
+	})
+	hook.mu.Lock()
+	defer hook.mu.Unlock()
+	if len(hook.args) != 1 {
+		t.Fatalf("the completion hook saw %d calls, want 1", len(hook.args))
+	}
+	var effective struct {
+		Command    string `json:"command"`
+		Background bool   `json:"background"`
+	}
+	if err := json.Unmarshal(hook.args[0], &effective); err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(effective.Command) != "printf 'job output'" || !effective.Background {
+		t.Fatalf("the completion hook saw %s; want the composed effective shape the policy saw", hook.args[0])
+	}
+}
+
+func TestTheNearKeyMergesTheShorthandSpellings(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{
+			{CallID: "call_1", Name: "bash", Arguments: []byte(`{"command":"printf one&"}`)},
+			{CallID: "call_2", Name: "bash", Arguments: []byte(`{"command":"printf one","background":true}`)},
+			{CallID: "call_3", Name: "bash", Arguments: []byte(`{"command":"printf one&"}`)},
+		}},
+		{text: "the answer"},
+	})
+	sink := &recordingSink{}
+	s := newTestSession(t, poo.Options{
+		Transport: tr, Tools: map[string]poo.Tool{"bash": bash.New()}, Sink: sink, WorkingDir: t.TempDir(),
+		Model: poo.ModelInfo{ModelID: "test-model", ContextLimit: 32768},
+	})
+	runSession(t, s, "do the thing")
+	// The trailing & and the explicit background request are two
+	// spellings of one effective call, so the near streak holds across
+	// them: a model that alternates the spellings still accumulates
+	// the count a single spelling would.
+	if n := s.RepeatCountsFor("r1").Near; n != 1 {
+		t.Errorf("the first call's near count is %d, want 1", n)
+	}
+	if n := s.RepeatCountsFor("r2").Near; n != 2 {
+		t.Errorf("the second call's near count is %d, want 2", n)
+	}
+	if n := s.RepeatCountsFor("r3").Near; n != 3 {
+		t.Errorf("the third call's near count is %d, want 3", n)
+	}
+	waitForSink(t, sink, "one", func() bool {
+		for _, rec := range sink.allRecords() {
+			if r, ok := rec.(*poo.JobEndedRecord); ok && r.Outcome == poo.OutcomeOK && strings.Contains(r.Text, "one") {
 				return true
 			}
 		}

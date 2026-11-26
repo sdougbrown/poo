@@ -46,10 +46,6 @@ func (t *Tool) BackgroundShorthand(raw json.RawMessage) (json.RawMessage, error)
 	}
 	effective := command[:end] + trail
 	args["command"], _ = json.Marshal(effective)
-	// The reserved background argument stays out of the shorthand: a
-	// non-nil return asks for the job, and the core decides the
-	// argument itself.
-	delete(args, poo.BackgroundArgName)
 	return json.Marshal(args)
 }
 

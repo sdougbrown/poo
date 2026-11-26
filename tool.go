@@ -312,14 +312,14 @@ type PromptVariantContributor interface {
 //
 // The core consults the shorthand only for a tool that may run in the
 // background, and never for a nested call. It receives the raw arguments
-// the model wrote and returns the effective arguments without the
-// reserved background argument: a non-nil return asks for the job, and
-// the core owns the reserved argument itself. A list the tool cannot
-// safely translate is a recoverable argument error.
+// the model wrote and returns the effective arguments: the command
+// rewritten, the reserved background argument left as the model wrote
+// it. A non-nil return asks for the job, and the core owns the reserved
+// argument — it validates, strips and composes it. A list the tool
+// cannot safely translate is a recoverable argument error.
 type BackgroundShorthander interface {
-	// BackgroundShorthand returns the call's effective arguments
-	// without the reserved background argument, or nil when the call
-	// does not end with a shorthand request.
+	// BackgroundShorthand returns the call's effective arguments, or
+	// nil when the call does not end with a shorthand request.
 	BackgroundShorthand(raw json.RawMessage) (json.RawMessage, error)
 }
 
