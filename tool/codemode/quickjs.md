@@ -46,7 +46,7 @@ return files.map(r => r.is_error ? r.text : r.text.split("\n")[0]);
   Results follow the order of the returned array. If the callback throws
   or returns an invalid array, none of its captured calls run. A
   permission denial appears as a result in the array.
-- If two Poo edits overlap on the same resolved path in one process,
+- If two Poo writes overlap on the same resolved path in one process,
   one returns `is_error` with `structured` containing
   `{"code":"edit_conflict"}`. Re-read the file before retrying. Poo
   does not detect shell command conflicts or roll back a batch.

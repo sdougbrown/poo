@@ -58,8 +58,12 @@ History:
 Edit:
 - The edit replaces an exact string, so the old text must be in the file exactly as you wrote it, spacing included.
 - The old text must appear once, unless replace_all is set: the edit fails loudly when it appears nowhere or more than once.
-- An edit with an empty old text on a path that does not exist creates the file.
+- An edit with an empty old text on a path that does not exist creates the file; to create one, Write is the tool.
 - The result gives the path, the replacement count, or the failure reason; no read is needed to confirm.
+
+Write:
+- The write creates a file at the path, making the directories the path needs, and the path must not exist.
+- To change a file that is there, use Edit: replace the exact text, or replace the file's whole text after reading it.
 
 Fetch:
 - The result is one JSON object. Its fields are status, final_url after the redirects, content_type, size, and the body.
@@ -117,7 +121,7 @@ return files.map(r => r.is_error ? r.text : r.text.split("\n")[0]);
   Results follow the order of the returned array. If the callback throws
   or returns an invalid array, none of its captured calls run. A
   permission denial appears as a result in the array.
-- If two Poo edits overlap on the same resolved path in one process,
+- If two Poo writes overlap on the same resolved path in one process,
   one returns `is_error` with `structured` containing
   `{"code":"edit_conflict"}`. Re-read the file before retrying. Poo
   does not detect shell command conflicts or roll back a batch.

@@ -80,10 +80,12 @@ type PrepareEnv struct {
 	// They apply only when RestrictRead is set; an unrestricted read
 	// reaches any path.
 	ReadRoots []string
-	// RestrictRead, RestrictGrep and RestrictEdit confine the named tools to the working directory.
-	RestrictRead bool
-	RestrictGrep bool
-	RestrictEdit bool
+	// RestrictRead, RestrictGrep, RestrictEdit and RestrictWrite
+	// confine the named tools to the working directory.
+	RestrictRead  bool
+	RestrictGrep  bool
+	RestrictEdit  bool
+	RestrictWrite bool
 }
 
 // ToolEnv is the environment a tool sees while running.

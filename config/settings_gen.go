@@ -99,6 +99,8 @@ type SettingsFields struct {
 	ToolsProtectedPaths             []string "json:\"tools.protected_paths,omitempty\""
 	ToolsReadAskOutsideWorkingDir   *bool    "json:\"tools.read.ask_outside_working_dir,omitempty\""
 	ToolsReadRestrictToWorkingDir   *bool    "json:\"tools.read.restrict_to_working_dir,omitempty\""
+	ToolsWriteAskOutsideWorkingDir  *bool    "json:\"tools.write.ask_outside_working_dir,omitempty\""
+	ToolsWriteRestrictToWorkingDir  *bool    "json:\"tools.write.restrict_to_working_dir,omitempty\""
 	Ui                              *string  "json:\"ui,omitempty\""
 	Version                         *float64 "json:\"version,omitempty\""
 }
@@ -201,6 +203,8 @@ type SettingsAvailability struct {
 	ToolsProtectedPaths             FieldStatus
 	ToolsReadAskOutsideWorkingDir   FieldStatus
 	ToolsReadRestrictToWorkingDir   FieldStatus
+	ToolsWriteAskOutsideWorkingDir  FieldStatus
+	ToolsWriteRestrictToWorkingDir  FieldStatus
 	Ui                              FieldStatus
 	Version                         FieldStatus
 }
@@ -425,6 +429,10 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 	ToolsReadAskOutsideWorkingDirSatisfied := f.ToolsReadAskOutsideWorkingDir != nil
 	ToolsReadRestrictToWorkingDirEnabled := true
 	ToolsReadRestrictToWorkingDirSatisfied := f.ToolsReadRestrictToWorkingDir != nil
+	ToolsWriteAskOutsideWorkingDirEnabled := true
+	ToolsWriteAskOutsideWorkingDirSatisfied := f.ToolsWriteAskOutsideWorkingDir != nil
+	ToolsWriteRestrictToWorkingDirEnabled := true
+	ToolsWriteRestrictToWorkingDirSatisfied := f.ToolsWriteRestrictToWorkingDir != nil
 	UiEnabled := true
 	UiSatisfied := func() bool { v := f.Ui; return v != nil && *v != "" }()
 	VersionEnabled := true
@@ -2689,6 +2697,50 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 			Valid: nil,
 			Error: "",
 		},
+		ToolsWriteAskOutsideWorkingDir: FieldStatus{
+			Required:  ToolsWriteAskOutsideWorkingDirEnabled && false,
+			Enabled:   ToolsWriteAskOutsideWorkingDirEnabled,
+			Satisfied: ToolsWriteAskOutsideWorkingDirSatisfied,
+			Fair:      true,
+			Reason: func() *string {
+				var reasons []string
+				if len(reasons) == 0 {
+					return nil
+				}
+				return &reasons[0]
+			}(),
+			Reasons: func() []string {
+				var reasons []string
+				if reasons == nil {
+					reasons = []string{}
+				}
+				return reasons
+			}(),
+			Valid: nil,
+			Error: "",
+		},
+		ToolsWriteRestrictToWorkingDir: FieldStatus{
+			Required:  ToolsWriteRestrictToWorkingDirEnabled && false,
+			Enabled:   ToolsWriteRestrictToWorkingDirEnabled,
+			Satisfied: ToolsWriteRestrictToWorkingDirSatisfied,
+			Fair:      true,
+			Reason: func() *string {
+				var reasons []string
+				if len(reasons) == 0 {
+					return nil
+				}
+				return &reasons[0]
+			}(),
+			Reasons: func() []string {
+				var reasons []string
+				if reasons == nil {
+					reasons = []string{}
+				}
+				return reasons
+			}(),
+			Valid: nil,
+			Error: "",
+		},
 		Ui: FieldStatus{
 			Required:  UiEnabled && false,
 			Enabled:   UiEnabled,
@@ -2948,6 +3000,10 @@ func depSatisfied(f SettingsFields, name string) bool {
 		return f.ToolsReadAskOutsideWorkingDir != nil
 	case "ToolsReadRestrictToWorkingDir":
 		return f.ToolsReadRestrictToWorkingDir != nil
+	case "ToolsWriteAskOutsideWorkingDir":
+		return f.ToolsWriteAskOutsideWorkingDir != nil
+	case "ToolsWriteRestrictToWorkingDir":
+		return f.ToolsWriteRestrictToWorkingDir != nil
 	case "Ui":
 		v := f.Ui
 		return v != nil && *v != ""
@@ -3713,6 +3769,18 @@ func Challenge(fieldName string, f SettingsFields, c SettingsConditions, prev Se
 	case "ToolsReadRestrictToWorkingDir", "tools.read.restrict_to_working_dir":
 		found = true
 		status = avail.ToolsReadRestrictToWorkingDir
+		if status.Reason != nil {
+			explanations = append(explanations, "* "+*status.Reason)
+		}
+	case "ToolsWriteAskOutsideWorkingDir", "tools.write.ask_outside_working_dir":
+		found = true
+		status = avail.ToolsWriteAskOutsideWorkingDir
+		if status.Reason != nil {
+			explanations = append(explanations, "* "+*status.Reason)
+		}
+	case "ToolsWriteRestrictToWorkingDir", "tools.write.restrict_to_working_dir":
+		found = true
+		status = avail.ToolsWriteRestrictToWorkingDir
 		if status.Reason != nil {
 			explanations = append(explanations, "* "+*status.Reason)
 		}

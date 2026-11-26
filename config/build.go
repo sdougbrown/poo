@@ -2026,6 +2026,7 @@ func (r *Runtime) resolvePolicy(opts BuildOptions, workingDir string) error {
 		{"read", &settings.Tools.Read},
 		{"grep", &settings.Tools.Grep},
 		{"edit", &settings.Tools.Edit},
+		{"write", &settings.Tools.Write},
 	} {
 		if tool.target.AskOutsideWorkingDir != nil && *tool.target.AskOutsideWorkingDir {
 			askOutside[tool.name] = "path"
@@ -2312,6 +2313,7 @@ func (r *Runtime) resolveSession(opts BuildOptions, workingDir string) error {
 	r.Options.RestrictRead = settings.Tools.Read.RestrictToWorkingDir != nil && *settings.Tools.Read.RestrictToWorkingDir
 	r.Options.RestrictGrep = settings.Tools.Grep.RestrictToWorkingDir != nil && *settings.Tools.Grep.RestrictToWorkingDir
 	r.Options.RestrictEdit = settings.Tools.Edit.RestrictToWorkingDir != nil && *settings.Tools.Edit.RestrictToWorkingDir
+	r.Options.RestrictWrite = settings.Tools.Write.RestrictToWorkingDir != nil && *settings.Tools.Write.RestrictToWorkingDir
 	r.Options.MaxTurns = settings.Limits.MaxTurns
 	r.Options.MaxRunTokens = settings.Limits.MaxTokensPerRun
 	if settings.Limits.MaxDurationS > 0 {

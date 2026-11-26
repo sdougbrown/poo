@@ -505,7 +505,7 @@ with `--profile`; the default is `code`.
 | Profile | Tools |
 |---|---|
 | `base` | none |
-| `code` | `bash`, `read`, `grep`, `edit`, `codemode` |
+| `code` | `bash`, `read`, `grep`, `edit`, `write`, `codemode` |
 | `search` | `read`, `grep` |
 
 A settings file that names `finish.schema_file` also gets the typed
@@ -647,6 +647,7 @@ tools:
   read: {restrict_to_working_dir: true}
   grep: {restrict_to_working_dir: true}
   edit: {restrict_to_working_dir: true}
+  write: {restrict_to_working_dir: true}
 ```
 
 Restricted `read` can also reach the session's skill directories. Protected
@@ -661,6 +662,7 @@ tools:
   read: {ask_outside_working_dir: true}
   grep: {ask_outside_working_dir: true}
   edit: {ask_outside_working_dir: true}
+  write: {ask_outside_working_dir: true}
 ```
 
 A call one of these tools makes to a path outside the working directory then

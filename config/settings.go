@@ -425,10 +425,11 @@ type Pointer struct {
 
 // Tools are the tools' settings.
 type Tools struct {
-	// Read, Grep and Edit configure file-tool reach.
-	Read FileTool `json:"read,omitempty"`
-	Grep FileTool `json:"grep,omitempty"`
-	Edit FileTool `json:"edit,omitempty"`
+	// Read, Grep, Edit and Write configure file-tool reach.
+	Read  FileTool `json:"read,omitempty"`
+	Grep  FileTool `json:"grep,omitempty"`
+	Edit  FileTool `json:"edit,omitempty"`
+	Write FileTool `json:"write,omitempty"`
 	// Bash are the bash tool's settings.
 	Bash Bash `json:"bash,omitempty"`
 	// Codemode are the codemode tool's settings.

@@ -136,7 +136,7 @@ type callArgs struct {
 // one of these, so the refusal names the mistake rather than the catalog's
 // size. cmd/poo's test pins the list to the tools the binary builds.
 var builtinToolNames = []string{
-	"bash", "read", "grep", "history", "edit", "fetch", "codemode",
+	"bash", "read", "grep", "history", "edit", "write", "fetch", "codemode",
 	"jobs", "cancel_job", "find_tool", "subscribe_feed", "finish",
 }
 

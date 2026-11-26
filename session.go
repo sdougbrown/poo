@@ -652,10 +652,12 @@ type Options struct {
 	// When RestrictRead is off, the read tool may reach any path and
 	// the roots add nothing.
 	ReadRoots []string
-	// RestrictRead, RestrictGrep and RestrictEdit confine the named tools to the working directory.
-	RestrictRead bool
-	RestrictGrep bool
-	RestrictEdit bool
+	// RestrictRead, RestrictGrep, RestrictEdit and RestrictWrite
+	// confine the named tools to the working directory.
+	RestrictRead  bool
+	RestrictGrep  bool
+	RestrictEdit  bool
+	RestrictWrite bool
 
 	// MaxTurns is the turn limit. 0 means unlimited. A run that
 	// reaches it settles max_turns.

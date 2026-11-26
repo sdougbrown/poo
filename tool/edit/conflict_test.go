@@ -9,25 +9,27 @@ import (
 	"testing"
 
 	"github.com/sdougbrown/poo"
-	"github.com/sdougbrown/poo/protect"
+	"github.com/sdougbrown/poo/internal/fileio"
 )
 
-// reserveEdit marks a target as busy, the way a concurrent edit call
-// holds it from its LoadOrStore to its Delete. This stands in for the
-// race the guard exists for: a second call for the same file while the
-// first is still inside Call.
-func reserveEdit(t *testing.T, dir, path string) {
+// reserve marks a target as busy, the way a concurrent call holds it
+// from its Reserve to its Release. This stands in for the race the
+// guard exists for: a second call for the same file while the first is
+// still inside Call.
+func reserve(t *testing.T, dir, path string) {
 	t.Helper()
-	key := protect.Resolve(absolutePath(path, dir))
-	activeEdits.Store(key, struct{}{})
-	t.Cleanup(func() { activeEdits.Delete(key) })
+	key := fileio.Resolve(path, dir)
+	if !fileio.Reserve(key) {
+		t.Fatalf("reserving %s: the path is already held", path)
+	}
+	t.Cleanup(func() { fileio.Release(key) })
 }
 
-// releaseEdit frees a target reserved by reserveEdit, the way the other
-// edit finishing would.
-func releaseEdit(t *testing.T, dir, path string) {
+// release frees a target reserved by reserve, the way the other call
+// finishing would.
+func release(t *testing.T, dir, path string) {
 	t.Helper()
-	activeEdits.Delete(protect.Resolve(absolutePath(path, dir)))
+	fileio.Release(fileio.Resolve(path, dir))
 }
 
 // runCall prepares and runs an edit through the tool.
@@ -65,7 +67,7 @@ func TestAnEditUnderwayConflictsAndRetries(t *testing.T) {
 		}
 	}
 
-	reserveEdit(t, dir, "a.txt")
+	reserve(t, dir, "a.txt")
 
 	// A different instance and a different spelling of the held target.
 	res := runCall(t, New(), map[string]any{"path": a, "old": "one", "new": "ONE"}, dir)
@@ -81,7 +83,7 @@ func TestAnEditUnderwayConflictsAndRetries(t *testing.T) {
 	if payload.Code != "edit_conflict" {
 		t.Errorf("the conflict reports code %q, want edit_conflict", payload.Code)
 	}
-	if !strings.Contains(res.Text, "another edit is in progress") {
+	if !strings.Contains(res.Text, "another write is in progress") {
 		t.Errorf("the conflict says %q, want it to name the busy file", res.Text)
 	}
 	if got, err := os.ReadFile(a); err != nil || string(got) != "one\n" {
@@ -99,7 +101,7 @@ func TestAnEditUnderwayConflictsAndRetries(t *testing.T) {
 
 	// The other edit finishes and releases the file; the same call
 	// retries and lands.
-	releaseEdit(t, dir, "a.txt")
+	release(t, dir, "a.txt")
 	res = runCall(t, New(), map[string]any{"path": "a.txt", "old": "one", "new": "ONE"}, dir)
 	if res.IsError {
 		t.Fatalf("the retry failed after the other edit released the file: %s", res.Text)

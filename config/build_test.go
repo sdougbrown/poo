@@ -36,6 +36,7 @@ import (
 	"github.com/sdougbrown/poo/tool/grep"
 	"github.com/sdougbrown/poo/tool/history"
 	"github.com/sdougbrown/poo/tool/read"
+	"github.com/sdougbrown/poo/tool/write"
 )
 
 // stubEngine is an engine that never runs, for the wiring tests.
@@ -55,6 +56,7 @@ func theTools() map[string]config.ToolFactory {
 		"grep":     func(config.ToolOptions) poo.Tool { return grep.New() },
 		"history":  func(config.ToolOptions) poo.Tool { return history.New() },
 		"edit":     func(config.ToolOptions) poo.Tool { return edit.New() },
+		"write":    func(config.ToolOptions) poo.Tool { return write.New() },
 		"codemode": func(config.ToolOptions) poo.Tool { return toolcodemode.New(stubEngine{}) },
 		"fetch":    func(config.ToolOptions) poo.Tool { return fetchtool.New() },
 		"call_cli": func(opts config.ToolOptions) poo.Tool {
@@ -168,7 +170,7 @@ func TestTheBuildPicksTheProfileAndItsTools(t *testing.T) {
 	if runtime.Profile.Name != "code" {
 		t.Errorf("the profile is %q, want code", runtime.Profile.Name)
 	}
-	want := []string{"bash", "read", "grep", "history", "edit", "fetch", "codemode"}
+	want := []string{"bash", "read", "grep", "history", "edit", "write", "fetch", "codemode"}
 	if len(runtime.Options.ToolOrder) != len(want) {
 		t.Fatalf("the tools are %v, want %v", runtime.Options.ToolOrder, want)
 	}
@@ -184,7 +186,7 @@ func TestTheBuildPicksTheProfileAndItsTools(t *testing.T) {
 	for _, tool := range runtime.Profile.Tools {
 		names[tool.Name] = true
 	}
-	for _, name := range []string{"bash", "read", "grep", "edit", "jobs", "cancel_job"} {
+	for _, name := range []string{"bash", "read", "grep", "edit", "write", "jobs", "cancel_job"} {
 		if !names[name] {
 			t.Errorf("the profile does not offer the %q tool", name)
 		}
@@ -2001,7 +2003,7 @@ func TestADisablingABackgroundToolTakesTheJobToolsWithIt(t *testing.T) {
 	}
 	runtime := build(t, settings, config.Overrides{})
 
-	want := []string{"read", "grep", "history", "edit", "fetch"}
+	want := []string{"read", "grep", "history", "edit", "write", "fetch"}
 	if !slices.Equal(runtime.Options.ToolOrder, want) {
 		t.Errorf("the tools are %v, want %v", runtime.Options.ToolOrder, want)
 	}
