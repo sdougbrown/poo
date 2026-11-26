@@ -672,6 +672,40 @@ func TestEscapeStopsTheRunAndTheSessionGoesOn(t *testing.T) {
 	}
 }
 
+func TestEscapeStopsARunWokenByAJob(t *testing.T) {
+	server := &fakeServer{t: t}
+	server.script = func(s *fakeServer) {
+		s.event("tool.call", map[string]any{"run_id": "r1", "tool": "foreground", "summary": "Foreground call"})
+	}
+	term, code := startTerminalRepl(t, server)
+	waitFor(t, term, promptMark)
+	term.press("work\r")
+	waitFor(t, term, "Foreground call")
+	term.press("\x1b")
+	if got := server.waitCancels(t, 1)[0]; got != "r1" {
+		t.Fatalf("the first cancel named %q, want r1", got)
+	}
+	server.event("run.settled", map[string]any{"run_id": "r1", "reason": "cancelled"})
+	server.event("run.started", map[string]any{"run_id": "r2", "trigger": "job"})
+	server.event("tool.call", map[string]any{"run_id": "r2", "tool": "await", "summary": "Woken call"})
+	waitFor(t, term, "Woken call")
+	term.press("\x1b")
+	if got := server.waitCancels(t, 2)[1]; got != "r2" {
+		t.Fatalf("the second cancel named %q, want r2", got)
+	}
+	server.event("run.settled", map[string]any{"run_id": "r2", "reason": "cancelled"})
+	waitTimes(t, term, "✓ cancelled", 2)
+	term.press("/quit\r")
+	select {
+	case got := <-code:
+		if got != 0 {
+			t.Fatalf("the repl exited %d, want 0", got)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the repl did not quit")
+	}
+}
+
 // TestAnArrowKeyIsNotAnEscape covers the keys that begin with an escape
 // byte: an arrow must not stop the run, and the escape that stands
 // alone must.
