@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
+import poo_agent as poo_agent_module
 from poo_agent import (
     DEFAULT_BIN_TARGET,
     PooAgent,
@@ -413,6 +414,39 @@ class PooAgentFlagTests(unittest.TestCase):
             run_env = env.commands[-1][1]
             self.assertEqual(run_env.get("HARBOR_TEST"), "1")
             self.assertEqual(run_env.get("OPENAI_API_KEY"), "sk-test")
+
+
+    def test_a_flag_probe_that_times_out_does_not_fail_the_run(self) -> None:
+        # version() runs while the trial's metadata is written, after the
+        # expensive in-container run. A probe that hangs must degrade to None
+        # rather than lose the report.
+        import subprocess as sp
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            agent = self._agent(tmp_path, model_name="openai/gpt-4o", context_limit=65536)
+            with patch.object(poo_agent_module.subprocess, "run", side_effect=sp.TimeoutExpired("poo", 5)):
+                self.assertIsNone(agent.version())
+
+    def test_both_model_paths_forward_the_same_flags(self) -> None:
+        # One forwarding block serves both paths. A flag appended in only one
+        # branch works with --ak settings=... and is dropped without it.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            settings = tmp_path / "settings.yaml"
+            settings.write_text("version: 1\n", encoding="utf-8")
+            common = dict(context_limit=524288, tools_mode="native", api_key_env="OPENAI_API_KEY")
+
+            with_settings = self._agent(tmp_path, settings=str(settings), **common)
+            without = self._agent(
+                tmp_path, model_name="openai/gpt-4o", endpoint="http://x/v1", model_id="m", **common
+            )
+
+            for agent in (with_settings, without):
+                joined = " ".join(agent.build_run_args())
+                self.assertIn("--context-limit 524288", joined)
+                self.assertIn("--tools-mode native", joined)
+                self.assertIn("--api-key-env OPENAI_API_KEY", joined)
 
 
 def _harbor_installed() -> bool:

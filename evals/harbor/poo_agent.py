@@ -6,7 +6,7 @@ SWE-bench, etc.) and populates Harbor's AgentContext from poo's JSONL session lo
 Usage:
     PYTHONPATH=evals/harbor harbor run \
         --dataset terminal-bench/terminal-bench@4.1.0 \
-        --agent-import-path poo_agent:PooAgent \
+        --agent poo_agent:PooAgent \
         --model openai/gpt-4o \
         --ak context_limit=128000 \
         --n-concurrent 4
@@ -297,7 +297,10 @@ class PooAgent(BaseAgent):
             if proc.returncode == 0 and proc.stdout.strip():
                 self._cached_version = proc.stdout.strip().splitlines()[0]
                 return self._cached_version
-        except OSError:
+        except (OSError, subprocess.TimeoutExpired):
+            # A probe that times out is a SubprocessError, not an OSError. It is
+            # called while the trial's metadata is being written, so letting it
+            # escape would lose the report of a run that already happened.
             pass
         return None
 
@@ -333,15 +336,6 @@ class PooAgent(BaseAgent):
 
         if self.settings_path is not None:
             args.extend(["--settings", self._container_settings_path()])
-            # A settings file names the model, and an explicit flag still wins
-            # over it, so a caller who passes one of these gets it applied
-            # instead of silently dropped.
-            if self.context_limit is not None:
-                args.extend(["--context-limit", str(self.context_limit)])
-            if self.api_key_env:
-                args.extend(["--api-key-env", self.api_key_env])
-            if self.tools_mode:
-                args.extend(["--tools-mode", self.tools_mode])
         else:
             if not self.endpoint or not self.model_id:
                 raise ValueError(
@@ -349,20 +343,24 @@ class PooAgent(BaseAgent):
                     "both `endpoint` and `model_id` (via --model provider/model or "
                     "--ak endpoint=... --ak model_id=...)."
                 )
-            args.extend(
-                [
-                    "--endpoint",
-                    self.endpoint,
-                    "--model-id",
-                    self.model_id,
-                    "--context-limit",
-                    str(self.context_limit or DEFAULT_CONTEXT_LIMIT),
-                ]
-            )
-            if self.api_key_env:
-                args.extend(["--api-key-env", self.api_key_env])
-            if self.tools_mode:
-                args.extend(["--tools-mode", self.tools_mode])
+            args.extend(["--endpoint", self.endpoint, "--model-id", self.model_id])
+
+        # One forwarding block for both paths. A flag appended in only one
+        # branch works with --ak settings=... and is dropped without it, which
+        # is the bug this block exists to prevent.
+        #
+        # A settings file names the model and its window, and an explicit flag
+        # still wins over it, so an explicit value reaches the run either way.
+        args.extend(
+            [
+                "--context-limit",
+                str(self.context_limit or DEFAULT_CONTEXT_LIMIT),
+            ]
+        )
+        if self.api_key_env:
+            args.extend(["--api-key-env", self.api_key_env])
+        if self.tools_mode:
+            args.extend(["--tools-mode", self.tools_mode])
 
         if self.reasoning_effort:
             args.extend(["--reasoning-effort", self.reasoning_effort])
