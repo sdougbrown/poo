@@ -101,13 +101,7 @@ func Run(opts Options) int {
 	// draft hold still while output arrives. A pipe on either end keeps
 	// the plain stream, where a redirect or a test reads the words.
 	if termIsTerminal(in) && termIsTerminal(out) {
-		if l := newLayout(out); l != nil {
-			// The region is reserved once the session is open. A
-			// startup failure or an interrupt during the handshake
-			// must leave the terminal as it found it.
-			defer l.leave()
-			r.layout = l
-		}
+		r.layout = newLayout(out)
 	}
 	m := &machine{
 		opts:   opts,
@@ -233,6 +227,15 @@ func (m *machine) run() int {
 		return 1
 	}
 
+	quit := make(chan struct{})
+	interrupts := make(chan os.Signal, 1)
+	signal.Notify(interrupts, os.Interrupt)
+	defer signal.Stop(interrupts)
+	// Restore the terminal before another interrupt can kill the process
+	// during server shutdown. Close the editor before releasing its rows.
+	if m.r.layout != nil {
+		defer m.r.layout.leave()
+	}
 	input := m.newInput()
 	defer input.close()
 	m.gate = make(chan struct{})
@@ -240,10 +243,6 @@ func (m *machine) run() int {
 	m.esc = make(chan string, 1)
 	defer m.disarmFrame()
 
-	quit := make(chan struct{})
-	interrupts := make(chan os.Signal, 1)
-	signal.Notify(interrupts, os.Interrupt)
-	defer signal.Stop(interrupts)
 	resizes := make(chan os.Signal, 1)
 	var settle *time.Timer
 	var settled <-chan time.Time

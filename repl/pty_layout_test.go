@@ -711,6 +711,40 @@ func TestTheLayoutRestoresTheTerminalOnExit(t *testing.T) {
 	}
 }
 
+func TestCtrlCRestoresTheScrollRegionBeforeServerShutdown(t *testing.T) {
+	closing := make(chan struct{})
+	release := make(chan struct{})
+	released := false
+	server := &fakeServer{t: t, beforeClose: func() {
+		close(closing)
+		<-release
+	}}
+	term, code := startTerminalRepl(t, server)
+	defer func() {
+		if !released {
+			close(release)
+		}
+	}()
+	waitBottom(t, term)
+	term.press("\x03")
+	select {
+	case <-closing:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the server did not receive session/close")
+	}
+	waitFor(t, term, seqResetRegion)
+	close(release)
+	released = true
+	select {
+	case got := <-code:
+		if got != 130 {
+			t.Fatalf("Ctrl-C exited with %d, want 130", got)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the repl did not exit")
+	}
+}
+
 var _ = protocol.MethodRunCancel
 
 func TestAMultilineDraftStaysInTheFooter(t *testing.T) {

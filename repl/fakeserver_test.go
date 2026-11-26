@@ -32,6 +32,8 @@ type fakeServer struct {
 	levels []string
 	// closed says the client closed the session.
 	closed bool
+	// beforeClose runs before the server answers session/close.
+	beforeClose func()
 	// methods are the request methods the client sent, in order.
 	methods []string
 	// history is what session/history pages, oldest first.
@@ -354,6 +356,9 @@ func (s *fakeServer) line(line []byte) {
 		s.signal()
 		s.reply(req.ID, map[string]any{})
 	case protocol.MethodSessionClose:
+		if s.beforeClose != nil {
+			s.beforeClose()
+		}
 		s.mu.Lock()
 		s.closed = true
 		s.mu.Unlock()
