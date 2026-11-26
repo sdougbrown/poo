@@ -116,6 +116,8 @@ type FileStore struct {
 	// policy resolves the pending operations of a session that is
 	// loaded.
 	policy RecoveryPolicy
+	// durable is how a durable session's continuation is planned.
+	durable DurableOptions
 	// lease, when set, opens sessions with a lease instead of the
 	// flock: the session's owner is renewed by a heartbeat, and a dead
 	// owner is taken over after the lease expires.
@@ -196,12 +198,24 @@ func WithSettingsHash(hash string) Option {
 // pending operations.
 //
 // The default is the interrupt policy: v1 marks everything interrupted.
+// The policy resolves a logged or ephemeral session; a durable session's
+// pending operations are planned, and DurableOptions say how.
 func WithRecoveryPolicy(policy RecoveryPolicy) Option {
 	return func(s *FileStore) {
 		if policy != nil {
 			s.policy = policy
 		}
 	}
+}
+
+// WithDurableOptions sets how a durable session's continuation is planned.
+//
+// The load reads the planner's fallback lookup from the session's own
+// header, so a plan reads the class and the idempotency the session
+// recorded, whatever the store was opened with. A ToolLookup in the
+// options outranks it.
+func WithDurableOptions(opts DurableOptions) Option {
+	return func(s *FileStore) { s.durable = opts }
 }
 
 // WithLeaseOptions sets the lease options the store opens sessions
@@ -492,9 +506,12 @@ func (s *FileStore) loadLocked(ctx context.Context, id string, owner sessionOwne
 		return nil, &Error{Code: CodeStoreError, Message: "opening " + path, Err: err}
 	}
 	log.appendFault = s.appendFault
-	// The recovery appends to the log. A failure partway leaves the
-	// log with what it wrote, and the next load finishes the job.
-	if err := s.recover(ctx, log, pendingOf(id, recs)); err != nil {
+	// The recovery resolves the session's pending operations. A durable
+	// session's are planned instead, so its run continues. A failure
+	// partway leaves the log with what it wrote, and the next load
+	// finishes the job.
+	continuation, err := s.recover(ctx, log, pendingOf(id, recs), Mode(created.Mode), meta)
+	if err != nil {
 		log.Close()
 		return nil, err
 	}
@@ -524,26 +541,57 @@ func (s *FileStore) loadLocked(ctx context.Context, id string, owner sessionOwne
 		Records:       recs,
 		RecoveredTail: torn,
 		Jobs:          poo.PendingJobResults(recs),
+		Continuation:  continuation,
 		Warnings:      s.warnings(meta),
 	}, nil
 }
 
 // recover resolves a session's pending operations and puts them on disk.
 //
+// It returns the continuation a durable session has left to do, and nil
+// for every other session: those settle what is pending.
+//
 // The recovery appends only what is missing, so it is idempotent: a
 // recovery that failed partway is finished by the next load.
-func (s *FileStore) recover(ctx context.Context, log *Log, pending *Pending) error {
+func (s *FileStore) recover(ctx context.Context, log *Log, pending *Pending, mode Mode, meta Metadata) (*ContinuationPlan, error) {
+	continuation, err := s.resolve(ctx, log, pending, mode, meta)
+	if err != nil {
+		return nil, &Error{Code: CodeStoreError, Message: "recovering the session", Err: err}
+	}
+	if err := log.Sync(ctx); err != nil {
+		return nil, &Error{Code: CodeStoreError, Message: "syncing the session", Err: err}
+	}
+	return continuation, nil
+}
+
+// resolve picks the resolver a session's mode names.
+//
+// A durable session's run is planned for a continuation; every other
+// session's pending operations are settled, which is what this build does
+// for a logged session.
+func (s *FileStore) resolve(ctx context.Context, sink poo.RecordSink, pending *Pending, mode Mode, meta Metadata) (*ContinuationPlan, error) {
+	if mode == ModeDurable {
+		return s.durablePlanner(meta).Plan(ctx, sink, pending)
+	}
 	policy := s.policy
 	if policy == nil {
 		policy = InterruptPolicy{Now: s.now}
 	}
-	if err := policy.Resolve(ctx, log, pending); err != nil {
-		return &Error{Code: CodeStoreError, Message: "recovering the session", Err: err}
+	return nil, policy.Resolve(ctx, sink, pending)
+}
+
+// durablePlanner returns the planner a session is loaded with.
+//
+// The planner reads the session's own tools as its fallback lookup: the
+// header is what the session was created with, and a live tool set is the
+// caller's to supply.
+func (s *FileStore) durablePlanner(meta Metadata) DurablePlanner {
+	opts := s.durable
+	opts.Tools = meta.Tools
+	if opts.Now == nil {
+		opts.Now = s.now
 	}
-	if err := log.Sync(ctx); err != nil {
-		return &Error{Code: CodeStoreError, Message: "syncing the session", Err: err}
-	}
-	return nil
+	return DurablePlanner{Options: opts}
 }
 
 // warnings reports what changed since the session was written.

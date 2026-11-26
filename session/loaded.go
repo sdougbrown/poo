@@ -22,6 +22,13 @@ type Loaded struct {
 	// completion order. The restore queues them again: a job's outcome
 	// is a fact the model must see.
 	Jobs []poo.JobResult
+	// Continuation is what a durable session does next: the run's
+	// continuation plan, and the work the continuation resumes.
+	//
+	// It is nil for a logged or ephemeral session, which settles its
+	// pending operations instead of continuing them, and for a durable
+	// session with nothing to continue.
+	Continuation *ContinuationPlan
 	// Warnings report what changed since the session was written: a
 	// different build, or different settings. The records are still
 	// readable.
