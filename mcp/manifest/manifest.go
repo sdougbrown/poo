@@ -35,9 +35,9 @@ import (
 	"sort"
 	"strings"
 
-	// The cli-registry manifest scanner, which discovers the files. It is
-	// aliased: this package is a manifest too, and its own name would read
-	// as its own.
+	// The cli-registry manifest scanner, which discovers the files and
+	// decodes the `poo` block. It is aliased: this package is a manifest
+	// too, and its own name would read as its own.
 	climanifest "github.com/sdougbrown/cli-registry/manifest"
 
 	"github.com/sdougbrown/poo/feed"
@@ -303,11 +303,12 @@ func readFile(path string) (loaded, error) {
 
 // decodeEnvelope decodes the manifest's top level into env. It ignores a
 // top-level key the manifest does not name — a harness's own key, the way
-// a harness ignores poo's — but it still detects a duplicate key anywhere
-// in the document, and it decodes the `poo` block with unknown fields
-// rejected, so a field poo does not know fails the load wherever poo's own
-// key holds it. A file whose top level names no mcpServers is not a
-// manifest poo can use, and it fails the load naming the file.
+// a harness ignores poo's — and it detects a duplicate key anywhere in the
+// document: the strict decoder the `poo` block uses cannot decode the top
+// level, whose unknown keys are the tolerance's whole point, so the scan
+// covers the parts that decode loosely. A file whose top level names no
+// mcpServers is not a manifest poo can use, and it fails the load naming
+// the file.
 func decodeEnvelope(path string, data []byte, env *envelope) error {
 	// Duplicate-key detection runs on the raw bytes before any decode: a
 	// decode collapses duplicate keys (last wins), so the check must see
@@ -331,12 +332,12 @@ func decodeEnvelope(path string, data []byte, env *envelope) error {
 	}
 	env.MCPServers = servers
 	if rawPoo, ok := top["poo"]; ok {
-		// The `poo` block is poo's alone, so it decodes with unknown
-		// fields rejected: a field poo does not know fails the load.
-		dec := json.NewDecoder(bytes.NewReader(rawPoo))
-		dec.DisallowUnknownFields()
+		// The `poo` block is poo's alone, and it is a manifest of its own:
+		// the shared decoder holds its contract — unknown fields rejected,
+		// duplicate keys detected — so the JSON dialect rules live in one
+		// place the way a feed manifest's do.
 		var block pooBlock
-		if err := dec.Decode(&block); err != nil {
+		if err := climanifest.Decode(path, rawPoo, &block); err != nil {
 			return fmt.Errorf("mcp manifest %s: the poo key: %w", path, err)
 		}
 		env.Poo = &block
@@ -346,7 +347,9 @@ func decodeEnvelope(path string, data []byte, env *envelope) error {
 
 // detectDuplicateKeys rejects any JSON object with a repeated key. A decode
 // collapses duplicate keys (last wins), so the check runs on the raw bytes
-// before any decode — required to catch a duplicate key wherever it holds.
+// before any decode: the loose decodes — the top level, whose unknown keys
+// it must tolerate, and the mcpServers entries, whose unknown fields it
+// must too — cannot hold the contract themselves.
 func detectDuplicateKeys(b []byte) error {
 	type cont struct {
 		isObj   bool
