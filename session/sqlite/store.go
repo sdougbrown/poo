@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"sort"
 	"sync"
 	"time"
 
@@ -736,36 +735,11 @@ func (s *Store) Prune(ctx context.Context, policy session.Policy) (*session.Prun
 	if err != nil {
 		return nil, err
 	}
-	// The count rule keeps the newest sessions, and it counts the
-	// locked ones: a locked session is one of the sessions that are
-	// kept.
-	byActivity := make([]session.Listing, len(summaries))
-	copy(byActivity, summaries)
-	sort.Slice(byActivity, func(i, j int) bool {
-		if !byActivity[i].LastActivity.Equal(byActivity[j].LastActivity) {
-			return byActivity[i].LastActivity.After(byActivity[j].LastActivity)
-		}
-		// Ties are broken by id, so the same sessions are kept on every
-		// run.
-		return byActivity[i].ID < byActivity[j].ID
-	})
-	kept := map[string]bool{}
-	var boundary time.Time
-	if policy.Keep > 0 {
-		for i, sum := range byActivity {
-			if i >= policy.Keep {
-				break
-			}
-			kept[sum.ID] = true
-		}
-		if policy.Keep <= len(byActivity) {
-			boundary = byActivity[policy.Keep-1].LastActivity
-		}
-	}
+	byActivity, marked := session.MarkedBy(policy, summaries, now)
 
 	result := &session.PruneResult{}
 	for _, sum := range byActivity {
-		if !s.markedBy(sum, policy, now, kept, boundary) {
+		if !marked(sum) {
 			continue
 		}
 		// A live-leased session is never pruned: the lease holds it.
@@ -785,23 +759,6 @@ func (s *Store) Prune(ctx context.Context, policy session.Policy) (*session.Prun
 		result.Deleted = append(result.Deleted, sum)
 	}
 	return result, nil
-}
-
-// markedBy reports whether a policy marks a session.
-//
-// With both rules set, a session is marked when either rule marks it.
-func (s *Store) markedBy(sum session.Listing, policy session.Policy, now time.Time, kept map[string]bool, boundary time.Time) bool {
-	if policy.MaxAge > 0 && now.Sub(sum.LastActivity) > policy.MaxAge {
-		return true
-	}
-	if policy.Keep > 0 && !kept[sum.ID] {
-		// A session that became newer than the sessions that are kept
-		// is kept too: the count rule is about the newest sessions.
-		if boundary.IsZero() || !sum.LastActivity.After(boundary) {
-			return true
-		}
-	}
-	return false
 }
 
 // deleteSession deletes a session's rows: its records, its lease, and its
