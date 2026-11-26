@@ -10,7 +10,6 @@ import (
 	"github.com/sdougbrown/poo/config"
 	"github.com/sdougbrown/poo/exec"
 	"github.com/sdougbrown/poo/mcp"
-	"github.com/sdougbrown/poo/mcp/manifest"
 	"github.com/sdougbrown/poo/profile"
 	"github.com/sdougbrown/poo/profile/base"
 	"github.com/sdougbrown/poo/profile/code"
@@ -129,13 +128,13 @@ func linkedTools() map[string]config.ToolFactory {
 func linkedMCPLauncher() config.MCPLauncher {
 	version := buildVersion().String()
 	hostEnv := exec.Lookup(os.Environ())
-	return func(ctx context.Context, launch config.MCPLaunchValues) (config.MCPRunning, error) {
+	return func(ctx context.Context, launch config.MCPLaunchSelection) (config.MCPRunning, error) {
 		group, err := mcp.Launch(ctx, mcp.LaunchOptions{
 			SessionID:     launch.SessionID,
 			Dir:           launch.WorkingDir,
 			HostEnv:       hostEnv,
 			Scrub:         launch.Scrub,
-			Servers:       []manifest.Server{launch.Server},
+			Servers:       launch.Servers,
 			ClientVersion: version,
 		})
 		if err != nil {

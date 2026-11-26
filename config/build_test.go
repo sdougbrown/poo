@@ -1690,7 +1690,7 @@ func TestTheRuntimeCreatesAndResumesASession(t *testing.T) {
 // does not name its own: it starts nothing, and a session that asks it
 // to launch owns nothing to close.
 func theStubMCPLauncher() config.MCPLauncher {
-	return func(context.Context, config.MCPLaunchValues) (config.MCPRunning, error) {
+	return func(context.Context, config.MCPLaunchSelection) (config.MCPRunning, error) {
 		running := &stubRunning{}
 		return running, nil
 	}

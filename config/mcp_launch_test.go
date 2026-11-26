@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	osexec "os/exec"
 	"path/filepath"
@@ -17,13 +18,12 @@ import (
 	"github.com/sdougbrown/poo/config"
 	"github.com/sdougbrown/poo/exec"
 	"github.com/sdougbrown/poo/mcp"
-	"github.com/sdougbrown/poo/mcp/manifest"
 )
 
 // recordingLauncher is the launcher a test links when it wants to see
 // what a session asked it to start: every launch is recorded with the
-// session's own id and directory, and a named server may be made to
-// fail.
+// session's own id and directory, one entry per server, and a named
+// server may be made to fail.
 type recordingLauncher struct {
 	mu sync.Mutex
 	// starts are the recorded launches, in order: one
@@ -32,23 +32,48 @@ type recordingLauncher struct {
 	// fails names the servers that do not start, by the error they
 	// return.
 	fails map[string]error
+	// launches counts the launcher calls, one per session that asked.
+	launches int
 	// runnings are the handles the launcher handed out, in order.
 	runnings []*stubRunning
 }
 
-// launch is the launcher's function.
-func (l *recordingLauncher) launch(_ context.Context, values config.MCPLaunchValues) (config.MCPRunning, error) {
+// launch is the launcher's function. It runs the seam's own
+// transaction: the servers start in order, a failing server names
+// itself in the error it returns, and nothing the launch started
+// survives the failure.
+func (l *recordingLauncher) launch(_ context.Context, values config.MCPLaunchSelection) (config.MCPRunning, error) {
 	l.mu.Lock()
-	l.starts = append(l.starts, values.Server.Name+"@"+values.SessionID+"@"+values.WorkingDir)
-	err := l.fails[values.Server.Name]
-	if err == nil {
+	l.launches++
+	var group stubGroup
+	for _, server := range values.Servers {
+		l.starts = append(l.starts, server.Name+"@"+values.SessionID+"@"+values.WorkingDir)
+		if err := l.fails[server.Name]; err != nil {
+			_ = group.Close()
+			l.mu.Unlock()
+			return nil, fmt.Errorf("the mcp server %q did not start: %w", server.Name, err)
+		}
 		running := &stubRunning{}
 		l.runnings = append(l.runnings, running)
-		l.mu.Unlock()
-		return running, nil
+		group.runnings = append(group.runnings, running)
 	}
 	l.mu.Unlock()
-	return nil, err
+	return &group, nil
+}
+
+// stubGroup is the handle one launch hands back: it closes the servers
+// the launch started, the way the client's group does.
+type stubGroup struct {
+	runnings []*stubRunning
+}
+
+// Close closes every server the launch started.
+func (g *stubGroup) Close() error {
+	var errs []error
+	for _, running := range g.runnings {
+		errs = append(errs, running.Close())
+	}
+	return errors.Join(errs...)
 }
 
 // recorded returns the launches the launcher saw.
@@ -56,6 +81,13 @@ func (l *recordingLauncher) recorded() []string {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return append([]string(nil), l.starts...)
+}
+
+// launchCalls returns how many times the launcher was called.
+func (l *recordingLauncher) launchCalls() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.launches
 }
 
 // theSelectingSettings are the settings a session that selects a server
@@ -151,6 +183,11 @@ func TestMCPSelectionLaunchesWithTheSessionValues(t *testing.T) {
 	}
 	if closes := launcher.runnings[1].closes(); closes != 1 {
 		t.Errorf("the resumed session's server was closed %d times, want once", closes)
+	}
+	// One launch call per session, whatever the selection holds: the
+	// launcher receives the whole selection, not one server at a time.
+	if calls := launcher.launchCalls(); calls != 2 {
+		t.Errorf("the two sessions called the launcher %d times, want one per session", calls)
 	}
 }
 
@@ -248,13 +285,13 @@ func fixtureServer(t *testing.T) string {
 // from here; this is the same wiring over the same client.
 func clientLauncher(group **mcp.Group) config.MCPLauncher {
 	hostEnv := exec.Lookup(os.Environ())
-	return func(ctx context.Context, values config.MCPLaunchValues) (config.MCPRunning, error) {
+	return func(ctx context.Context, values config.MCPLaunchSelection) (config.MCPRunning, error) {
 		g, err := mcp.Launch(ctx, mcp.LaunchOptions{
 			SessionID: values.SessionID,
 			Dir:       values.WorkingDir,
 			HostEnv:   hostEnv,
 			Scrub:     values.Scrub,
-			Servers:   []manifest.Server{values.Server},
+			Servers:   values.Servers,
 		})
 		if err != nil {
 			return nil, err
@@ -356,6 +393,11 @@ func TestMCPFailedLaunchClosesWhatItStartedAndNamesTheServer(t *testing.T) {
 	if len(starts) != 2 {
 		t.Fatalf("the failed session launched %q, want both selected servers tried", starts)
 	}
+	// The whole selection went out as one launch: two servers, one
+	// launcher call.
+	if calls := launcher.launchCalls(); calls != 1 {
+		t.Errorf("the two-server selection called the launcher %d times, want one", calls)
+	}
 	// The server that started stopped with the failure: a session that
 	// was never built owns no process.
 	if closes := launcher.runnings[0].closes(); closes != 1 {
@@ -390,7 +432,7 @@ func TestMCPConstructionFailureLeavesNoChild(t *testing.T) {
 		t.Fatalf("decoding the settings: %v", err)
 	}
 	var pids []int
-	launcher := func(context.Context, config.MCPLaunchValues) (config.MCPRunning, error) {
+	launcher := func(context.Context, config.MCPLaunchSelection) (config.MCPRunning, error) {
 		// A real child, because the rollback's promise is about
 		// processes: a fake handle cannot prove one is gone.
 		child := osexec.Command("sleep", "60")
