@@ -933,7 +933,7 @@ func theDurableCreatedRecord(id, mode, dir string) *poo.SessionCreatedRecord {
 // accept fails the parse, and a name that is accepted but not
 // registered fails the open.
 func TestADurableStoreNameIsChecked(t *testing.T) {
-	settings, err := config.Parse([]byte(theModelSettings+"session:\n  mode: durable\n  durable:\n    store: bolt\n"), config.FormatYAML)
+	_, err := config.Parse([]byte(theModelSettings+"session:\n  mode: durable\n  durable:\n    store: bolt\n"), config.FormatYAML)
 	if err == nil {
 		t.Fatal("the settings accepted a store name they do not accept")
 	}
@@ -941,7 +941,7 @@ func TestADurableStoreNameIsChecked(t *testing.T) {
 		t.Errorf("the code is %q, want %q", code, config.CodeInvalid)
 	}
 
-	settings, err = config.Parse([]byte(theModelSettings+"session:\n  mode: durable\n  durable:\n    store: sqlite\n"), config.FormatYAML)
+	settings, err := config.Parse([]byte(theModelSettings+"session:\n  mode: durable\n  durable:\n    store: sqlite\n"), config.FormatYAML)
 	if err != nil {
 		t.Fatalf("decoding the settings: %v", err)
 	}
