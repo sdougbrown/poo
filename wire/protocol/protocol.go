@@ -47,6 +47,8 @@ const (
 	MethodRunInspect = "run/inspect"
 	// MethodRunCancel ends the active run.
 	MethodRunCancel = "run/cancel"
+	// MethodRunBackground moves a running call to a job.
+	MethodRunBackground = "run/background"
 	// MethodJobCancel stops one background job.
 	MethodJobCancel = "job/cancel"
 	// MethodSettingsGet returns the effective settings.
@@ -137,6 +139,8 @@ const (
 	// DataNotRunning means the session has no run that could take the
 	// request.
 	DataNotRunning = "not_running"
+	// DataCallNotBackgroundable means the call cannot move to a job.
+	DataCallNotBackgroundable = "call_not_backgroundable"
 	// DataRunNotFound means the session has no such run.
 	DataRunNotFound = "run_not_found"
 	// DataUnknownModel means the settings do not name that model.

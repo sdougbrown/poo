@@ -710,7 +710,17 @@ func (s *Session) executeOne(owner *callOwner, turn int, plan callPlan) {
 	if plan.callCtx != nil {
 		callCtx = plan.callCtx
 	}
-	result, err := tool.Call(callCtx, prepared, s.toolEnv(owner, turn, handle, plan))
+	env := s.toolEnv(owner, turn, handle, plan)
+	var result ToolResult
+	if eligible, ok := tool.(interface{ CanBackgroundRunningCall() bool }); ok && eligible.CanBackgroundRunningCall() && plan.parent == "" && owner.run != nil && s.backgroundModeOf(call.Name) == BackgroundAllowed {
+		var moved bool
+		result, err, moved = s.runLiveCall(owner, turn, plan, tool, env, callCtx)
+		if moved {
+			return
+		}
+	} else {
+		result, err = tool.Call(callCtx, prepared, env)
+	}
 	// The outcome is decided by the core, not by the tool.
 	outcome := OutcomeOK
 	var fatalCandidate *candidate
@@ -804,7 +814,7 @@ func (s *Session) executeOne(owner *callOwner, turn int, plan callPlan) {
 // starts. The call's own result is the "started" one, and the batch
 // carries on.
 func (s *Session) startJobCall(owner *callOwner, turn int, handle string, call ToolCall, plan callPlan) {
-	jobID, ok, winding, refusal := s.startJob(owner.run, turn, handle, call.Name, plan.prepared, plan.summary, call.Arguments, plan.stripped, plan.shorthand)
+	jobID, ok, winding, refusal := s.startJob(owner.run, turn, handle, call.Name, plan.prepared, plan.summary, call.Arguments, plan.stripped, plan.shorthand, nil)
 	if winding {
 		// The run settled while the job was being accepted; nothing
 		// else starts, and the finalization owns the run.
@@ -825,6 +835,10 @@ func (s *Session) startJobCall(owner *callOwner, turn int, handle string, call T
 		return
 	}
 
+	s.recordJobReceipt(owner, turn, handle, call, jobID)
+}
+
+func (s *Session) recordJobReceipt(owner *callOwner, turn int, handle string, call ToolCall, jobID string) {
 	text := fmt.Sprintf(StartedText, jobID, call.Name)
 	if plan.shorthand != nil {
 		text += " The trailing & requested this job."

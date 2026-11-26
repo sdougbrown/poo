@@ -624,6 +624,18 @@ type JobCancelParams struct {
 	JobID string `json:"job"`
 }
 
+// BackgroundParams names the live call to move into a job.
+type BackgroundParams struct {
+	SessionID string `json:"session_id"`
+	RunID     string `json:"run_id"`
+	Handle    string `json:"handle"`
+}
+
+// BackgroundResult names the job that owns the call now.
+type BackgroundResult struct {
+	JobID string `json:"job"`
+}
+
 // SettingsParams are the params of settings/get.
 type SettingsParams struct{}
 

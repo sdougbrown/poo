@@ -465,8 +465,11 @@ decorated blocks, and a statusline with the folder, git branch, model,
 reasoning level, and context fill. Input reads with vi keys at a terminal.
 Press Esc to stop a turn; Ctrl-C clears typed input or exits when the
 prompt is empty. Ctrl-J breaks the draft across lines; Enter submits
-the draft whole. The bash Ctrl chords edit the draft. Ctrl-A and Ctrl-E
-jump to its head and end. Ctrl-B and Ctrl-F move the cursor, and Ctrl-T
+the draft whole. Use `/bg` to move the running Bash call to a session job
+without restarting it. The job survives run cancellation, but the original
+Bash timeout still applies. Use `background: true` at launch for work
+that needs the full job timeout. The Bash Ctrl chords edit the draft.
+Ctrl-A and Ctrl-E jump to its head and end. Ctrl-B and Ctrl-F move the cursor, and Ctrl-T
 transposes the two characters before it. Ctrl-K kills to the end, Ctrl-U
 clears before the cursor, and Ctrl-W cuts the word behind it.
 `/less` shows the transcript through `less -R`, and

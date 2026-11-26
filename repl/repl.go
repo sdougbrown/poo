@@ -397,6 +397,9 @@ func (m *machine) line(res lineResult, input input) (int, bool) {
 		return 0, false
 	case text == "":
 		return 0, false
+	case text == "/bg":
+		m.backgroundCall()
+		return 0, false
 	case m.activeRun() != "":
 		// A run takes one prompt at a time, so a line submitted while
 		// it works is not the next one. A line that is not a command
@@ -829,7 +832,7 @@ func commandName(line string) (name, arg string) {
 		return "/thinking", strings.TrimSpace(strings.TrimPrefix(line, "/thinking "))
 	}
 	switch line {
-	case "/quit", "/q", "/exit", "/help", "/h", "?", "/less", "/model", "/models", "/cancel", "/thinking":
+	case "/quit", "/q", "/exit", "/help", "/h", "?", "/less", "/model", "/models", "/cancel", "/thinking", "/bg":
 		return line, ""
 	}
 	return "", ""
@@ -855,6 +858,7 @@ func (m *machine) command(line string, input input) (int, bool) {
 /thinking <lvl>  set the reasoning level: off, minimal, low, medium, high,
                  xhigh or a token budget
 Esc              stop the running turn
+/bg              move the running Bash call to a job
 /help            this list
 anything else    a prompt for the session`)
 		return 0, false
@@ -1216,6 +1220,28 @@ func (m *machine) cancelRun(runID string) {
 	}, nil)
 }
 
+func (m *machine) backgroundCall() {
+	if m.state == nil || len(m.state.bashCalls) == 0 {
+		m.r.notice("no running Bash call to background")
+		return
+	}
+	if len(m.state.bashCalls) != 1 {
+		m.r.notice("more than one Bash call is pending; none moved")
+		return
+	}
+	var handle string
+	for handle = range m.state.bashCalls {
+	}
+	var result protocol.BackgroundResult
+	if err := m.conn.call(protocol.MethodRunBackground, protocol.BackgroundParams{
+		SessionID: m.sessionID, RunID: m.activeRun(), Handle: handle,
+	}, &result); err != nil {
+		m.r.failure(err.Error())
+		return
+	}
+	delete(m.state.bashCalls, handle)
+}
+
 // event renders one event. The bool says the run settled.
 func (m *machine) event(evt protocol.Event, runID string, state *runState) bool {
 	switch evt.Type {
@@ -1232,9 +1258,21 @@ func (m *machine) event(evt protocol.Event, runID string, state *runState) bool 
 		// interrupted; the call's own write settles that message first.
 		tool, _ := evt.Payload["tool"].(string)
 		summary, _ := evt.Payload["summary"].(string)
+		if id, _ := evt.Payload["run_id"].(string); id == runID && tool == "bash" && evt.Payload["parent"] == nil {
+			if handle, _ := evt.Payload["handle"].(string); handle != "" {
+				if state.bashCalls == nil {
+					state.bashCalls = make(map[string]struct{})
+				}
+				state.bashCalls[handle] = struct{}{}
+			}
+		}
 		m.r.toolCall(tool, summary)
 		m.r.armSpinner(tool, summary)
 	case "tool.result":
+		if id, _ := evt.Payload["run_id"].(string); id == runID {
+			handle, _ := evt.Payload["handle"].(string)
+			delete(state.bashCalls, handle)
+		}
 		tool, _ := evt.Payload["tool"].(string)
 		outcome, _ := evt.Payload["outcome"].(string)
 		text, _ := evt.Payload["text"].(string)
@@ -1431,7 +1469,8 @@ func (m *machine) shutdown() {
 type runState struct {
 	// turns is how many turns the run took: the wire's settle event
 	// does not carry the count, the turn events do.
-	turns int
+	turns     int
+	bashCalls map[string]struct{}
 }
 
 // The errors the run loop reports to the caller.
