@@ -168,9 +168,10 @@ func ensurePrivate(path string) error {
 		f, err := os.OpenFile(p, os.O_CREATE|os.O_WRONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0o600)
 		if err != nil {
 			if errors.Is(err, syscall.ELOOP) {
-				// The open refused the link: the suffix names which
-				// refusal fired, so a test can tell it from the Lstat's.
-				return fmt.Errorf("session/sqlite: making %s private: it is not a regular file: the open refused a link", p)
+				// The open refused the link. The cause keeps its
+				// identity, so a caller can tell this refusal from
+				// the Lstat's by what the error is, not its wording.
+				return fmt.Errorf("session/sqlite: making %s private: the open refused a link: %w", p, syscall.ELOOP)
 			}
 			return fmt.Errorf("session/sqlite: making %s private: %w", p, err)
 		}

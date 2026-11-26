@@ -979,8 +979,8 @@ func TestALinkPlantedInTheOpenWindowIsRefused(t *testing.T) {
 	if err == nil {
 		t.Fatal("the store opened over a link planted in the open window, want an error")
 	}
-	if !strings.Contains(err.Error(), "it is not a regular file: the open refused a link") {
-		t.Errorf("the store returned %v, want the open's own refusal", err)
+	if !errors.Is(err, syscall.ELOOP) {
+		t.Errorf("the store returned %v, want the open's own refusal: %v", err, syscall.ELOOP)
 	}
 	data, err := os.ReadFile(victim)
 	if err != nil {
@@ -1029,6 +1029,9 @@ func TestAFIFOPlantedInTheOpenWindowIsRefused(t *testing.T) {
 		finished = true
 		if err == nil {
 			t.Fatal("the store opened over a FIFO planted in the open window, want an error")
+		}
+		if !errors.Is(err, syscall.ENXIO) {
+			t.Errorf("the store returned %v, want the FIFO's refusal: %v", err, syscall.ENXIO)
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("the store's open hung on the FIFO planted in the open window, want it refused at once: O_NONBLOCK is missing")
