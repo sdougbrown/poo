@@ -25,9 +25,6 @@ func TestSessionAppliesFileToolRestrictions(t *testing.T) {
 		t.Fatal(err)
 	}
 	writePath := filepath.Join(outside, "write.txt")
-	if err := os.WriteFile(writePath, []byte("old content"), 0600); err != nil {
-		t.Fatal(err)
-	}
 	if err := os.WriteFile(filepath.Join(outside, "needle.txt"), []byte("x needle y\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -96,6 +93,9 @@ func TestSessionAppliesFileToolRestrictions(t *testing.T) {
 	}
 	if string(mustRead(t, editPath)) != "world" {
 		t.Fatalf("unrestricted edit did not write the file: %q", mustRead(t, editPath))
+	}
+	if string(mustRead(t, writePath)) != "written" {
+		t.Fatalf("unrestricted write did not create the file: %q", mustRead(t, writePath))
 	}
 }
 
