@@ -125,8 +125,23 @@ func (r *permissionReporter) BeginPermission(ask PermissionAsk, opts PermissionR
 // the seal resolves as cancelled without writing anything.
 func (s *Session) beginPermission(owner *callOwner, ask PermissionAsk, opts PermissionRequestOptions) *PermissionRequest {
 	askedBy := ask.AskID
-	ask, opts = s.armResumedAsk(owner, ask, opts)
+	// The call the ask is about is fixed here, while the owner's current
+	// permission call is this one. The batch registers every call before
+	// the policy sees it, so the call's provider id is in the
+	// registration; both are read once, and the request carries them from
+	// then on.
+	s.mu.Lock()
+	handle := owner.permissionHandle
+	var callID string
+	if handle != "" {
+		if call := owner.pendingCalls[handle]; call != nil {
+			callID = call.id
+		}
+	}
+	s.mu.Unlock()
+	ask, opts = s.armResumedAsk(handle, ask, opts)
 	p := NewPermissionRequest(ask, opts)
+	p.handle, p.callID = handle, callID
 	p.logDrop = func(in PermissionTransition) {
 		s.logWarn("stale permission input dropped", slog.String("run_id", owner.id), slog.String("ask_id", ask.AskID), slog.Uint64("attempt", in.Attempt))
 	}
@@ -169,9 +184,12 @@ func (s *Session) beginPermission(owner *callOwner, ask PermissionAsk, opts Perm
 // match would give the replay the ask the client was shown. A plan whose ask
 // recorded no call falls back to the tool's name. The matched ask is taken
 // once, so the next ask of the same tool is a fresh one.
-func (s *Session) armResumedAsk(owner *callOwner, ask PermissionAsk, opts PermissionRequestOptions) (PermissionAsk, PermissionRequestOptions) {
+//
+// The handle is the call the request is about, read at the request's
+// creation: the owner's current permission call says the same thing then,
+// and the request keeps its own.
+func (s *Session) armResumedAsk(handle string, ask PermissionAsk, opts PermissionRequestOptions) (PermissionAsk, PermissionRequestOptions) {
 	s.mu.Lock()
-	handle := owner.permissionHandle
 	index := -1
 	if handle != "" {
 		for i, planned := range s.resumedAsks {
@@ -310,21 +328,9 @@ func (s *Session) persistPermission(owner *callOwner, p *PermissionRequest) {
 		rec := &PermissionAskedRecord{RecordMeta: NewRecordMeta("permission.asked"), RunID: owner.id, AskID: ask.AskID, Tool: ask.Tool, Summary: ask.Summary, Class: ask.Class, Reason: ask.Reason, RepeatCount: ask.RepeatCount}
 		// The ask names the call it is about, so a later load pairs a
 		// re-ask with that call rather than with the tool's last call.
-		// The batch registers every call before the policy sees it, so
-		// the call's provider id is here too. The handle and the call id
-		// are read in one critical section: a parallel read-only batch
-		// asks from several goroutines, and the handle can change
-		// between two reads.
-		s.mu.Lock()
-		handle := owner.permissionHandle
-		var callID string
-		if handle != "" {
-			if call := owner.pendingCalls[handle]; call != nil {
-				callID = call.id
-			}
-		}
-		s.mu.Unlock()
-		rec.Handle, rec.CallID = handle, callID
+		// The request carries that call from its creation; the owner's
+		// current permission call may already be the batch's next one.
+		rec.Handle, rec.CallID = p.handle, p.callID
 		// The ask's deadline and its fallback ride in the record, so a
 		// reader of the log knows when the ask expires and what it
 		// resolves to. The deadline is the request's own, which a policy

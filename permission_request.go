@@ -75,9 +75,15 @@ type PermissionRequestOptions struct {
 // resolution state. The finalization seals it, and its records have one
 // writer.
 type PermissionRequest struct {
-	mu              sync.Mutex
-	options         PermissionRequestOptions
-	ask             PermissionAsk
+	mu      sync.Mutex
+	options PermissionRequestOptions
+	ask     PermissionAsk
+	// handle and callID name the call the request is about. They are
+	// fixed when the request is created, so the record that persists the
+	// ask names the call the ask was made about even after the owner's
+	// current call has moved on.
+	handle          string
+	callID          string
 	attempt         uint64
 	attemptDeadline time.Time
 	active          bool

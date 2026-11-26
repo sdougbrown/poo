@@ -201,6 +201,17 @@ func (p DurablePlanner) Plan(ctx context.Context, sink poo.RecordSink, pend *Pen
 	var expired []expiredAsk
 	for _, ask := range run.Asks {
 		if live(now, ask) {
+			call, found := claimCall(run, ask, claimed)
+			if !found && ask.recordedHandle != "" {
+				// The ask's own record names a call the scan cannot
+				// find. A new log's ask names the call it is about, so
+				// the call cannot run, and no other call may take the
+				// ask: arming it would give the client's answer to the
+				// next call of the tool. The ask is answered the way an
+				// expired ask is, with its recorded fallback.
+				expired = append(expired, expiredAsk{ask: ask})
+				continue
+			}
 			// A live ask carries the call it is about, so the
 			// continuation asks about the same call and the restore
 			// knows the call the resumed run answers — when the plan
@@ -217,18 +228,18 @@ func (p DurablePlanner) Plan(ctx context.Context, sink poo.RecordSink, pend *Pen
 				Deadline: ask.Deadline,
 				Fallback: ask.Fallback,
 			}
-			if call, ok := claimCall(run, ask, claimed); ok {
+			if found {
 				planned.Arguments = call.Arguments
 				if planned.CallID == "" {
 					planned.CallID = call.CallID
 				}
 			} else {
-				// The scan found no call for the ask, and the only call
-				// the core writes that the scan cannot see is a nested
-				// one. The ask is not a call of its own: the tool that
-				// makes the call asks again, and this ask is armed there
-				// by the tool's name. Naming the missing handle here
-				// would plan an empty call beside that tool's.
+				// An old log's ask names no call, and the only call the
+				// core writes that the scan cannot see is a nested one.
+				// The ask is not a call of its own: the tool that makes
+				// the call asks again, and this ask is armed there by
+				// the tool's name. Naming the missing handle here would
+				// plan an empty call beside that tool's.
 				planned.Handle, planned.CallID = "", ""
 			}
 			plan.LiveAsks = append(plan.LiveAsks, planned)
@@ -390,9 +401,9 @@ func askDecision(ask PendingAsk) string {
 // The ask's own record names the call when it carries the handle; a log
 // written before it did pairs the two by position, the ask following the
 // record of the call it asks about. A log that holds no call for the ask
-// pairs it with nothing: a live ask is then armed by the tool's name when
-// the call it was about is made again, and an expired one is answered
-// without a call to answer.
+// pairs it with nothing: an old log's live ask is then armed by the tool's
+// name when the call it was about is made again, and an ask whose own record
+// named a call the scan cannot find is answered by its fallback.
 func claimCall(run *PendingRun, ask PendingAsk, claimed map[string]bool) (PendingCall, bool) {
 	for _, call := range run.Calls {
 		if !call.MissingResult || call.Handle != ask.Handle {

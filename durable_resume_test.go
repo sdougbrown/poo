@@ -618,9 +618,9 @@ func TestDurableResumePairsAReAskWithTheCallItNames(t *testing.T) {
 // TestDurableResumeDoesNotRunAnAskWhoseCallItCannotFind covers the live ask
 // whose call the log never recorded: the call was one a running tool made,
 // and the crash cut the run short between the ask and the nested call's own
-// tool.call record. The ask is not a call of its own, so the resumed run
-// replays its parent, re-asks by the tool's name, and runs nothing for the
-// ask.
+// tool.call record. The ask is not a call of its own, so the load answers it
+// by its fallback, the resumed run replays its parent, and the parent's
+// nested call asks afresh.
 func TestDurableResumeDoesNotRunAnAskWhoseCallItCannotFind(t *testing.T) {
 	parent := &resumeTool{
 		name:  "parent",
@@ -705,23 +705,205 @@ func TestDurableResumeDoesNotRunAnAskWhoseCallItCannotFind(t *testing.T) {
 			}
 		}
 	}
-	// The ask was not run as a call of its own: the batch holds the
-	// parent's ask again and nothing else.
+	// The ask was not run as a call of its own, and the load answered it:
+	// the parent's nested call asks a fresh question beside it.
+	answered := namedRecords(recs, "permission.answered")
+	// One answer resolves the log's ask, and one resolves the fresh ask.
+	if len(answered) != 2 {
+		t.Fatalf("the log holds %d answer(s), want the log's ask's and the fresh ask's", len(answered))
+	}
+	var answeredAsk bool
+	for _, rec := range answered {
+		answer := rec.(*poo.PermissionAnsweredRecord)
+		if answer.AskID != "ask_1" {
+			continue
+		}
+		answeredAsk = true
+		if answer.Decision != "deny" || answer.Provenance != poo.ProvenanceTimeout {
+			t.Errorf("the answer is %q from %q, want a deny from %q", answer.Decision, answer.Provenance, poo.ProvenanceTimeout)
+		}
+	}
+	if !answeredAsk {
+		t.Error("the log holds no answer for the unplaceable ask")
+	}
 	asks := namedRecords(recs, "permission.asked")
 	if len(asks) != 2 {
-		t.Fatalf("the log holds %d ask(s), want the log's and the parent's re-ask", len(asks))
+		t.Fatalf("the log holds %d ask(s), want the log's and the parent's nested call's", len(asks))
 	}
-	// The live ask kept the id the client was shown, and the parent's
-	// nested call asked it again by the tool's name.
+	// The parent's nested call asks afresh: the answered ask's id and
+	// deadline belong to the call the log named, not to this one.
 	reask := asks[1].(*poo.PermissionAskedRecord)
-	if reask.AskID != "ask_1" {
-		t.Errorf("the re-ask's id is %q, want the recorded %q", reask.AskID, "ask_1")
+	if reask.AskID == "ask_1" {
+		t.Errorf("the re-ask took the id %q, want a fresh one", "ask_1")
 	}
-	if reask.Deadline != deadline {
-		t.Errorf("the re-ask's deadline is %q, want the recorded %q", reask.Deadline, deadline)
+	if reask.Deadline == deadline {
+		t.Errorf("the re-ask took the recorded deadline %q, want a fresh one", deadline)
 	}
 	if reask.Tool != "child" {
 		t.Errorf("the re-ask is about the tool %q, want %q", reask.Tool, "child")
+	}
+}
+
+// TestDurableResumeDoesNotArmAnUnplaceableAskForTheTopLevelCall covers the
+// ask whose recorded call the log never saw: the model called the child
+// top-level before the parent that nests it, so the resumed batch asks about
+// the top-level child before the parent's nested child. The ask named the
+// nested handle, so it cannot be the top-level call's: it is answered by its
+// recorded fallback, and the top-level replay asks afresh.
+func TestDurableResumeDoesNotArmAnUnplaceableAskForTheTopLevelCall(t *testing.T) {
+	child := &resumeTool{name: "child", class: poo.ClassSideEffecting}
+	parent := &resumeTool{
+		name:  "parent",
+		class: poo.ClassReadOnly,
+		nest:  []poo.NestedCall{{Tool: "child", Arguments: json.RawMessage(`{"text":"nested"}`)}},
+	}
+	deadline := time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano)
+	dir := writeResumeLog(t,
+		resumeHeader(t, child, parent),
+		startedRun("r1"),
+		userMessage("r1", 0, "do both"),
+		assistantCall("r1", 1,
+			callBlock("call_1", "child", `{"text":"top"}`),
+			callBlock("call_2", "parent", `{"text":"parent"}`),
+		),
+		callRecord("r1", 1, "r1", "call_1", "child", `{"text":"top"}`),
+		callRecord("r1", 1, "r2", "call_2", "parent", `{"text":"parent"}`),
+		// The nested child asked under the handle it would have taken. The
+		// crash came before the nested call's own tool.call record, so the
+		// scan cannot find the call the ask names.
+		askedRecord("r1", "ask_1", "r3", "child", string(poo.ClassSideEffecting), deadline, "deny"),
+	)
+	store := resumeStore(t, dir)
+	asker := &allowAsker{asks: make(chan perm.Ask, 8)}
+	policy, err := perm.New(perm.Options{Askers: []perm.Asker{asker}})
+	if err != nil {
+		t.Fatalf("building the policy: %v", err)
+	}
+	opts := resumeOptions(t, scripted([]fakeResponse{{text: "done"}}), child, parent)
+	opts.Policy = policy
+
+	resumed := resumeDurable(t, store, opts)
+	// The load answers the ask the scan could not place, instead of arming
+	// it for whichever call asks first.
+	recs := readResumeLog(t, dir, "s1")
+	answered := namedRecords(recs, "permission.answered")
+	if len(answered) != 1 {
+		t.Fatalf("the log holds %d answer(s), want the unplaceable ask's", len(answered))
+	}
+	answer := answered[0].(*poo.PermissionAnsweredRecord)
+	if answer.AskID != "ask_1" {
+		t.Errorf("the answer resolves the ask %q, want %q", answer.AskID, "ask_1")
+	}
+	if answer.Decision != "deny" || answer.Provenance != poo.ProvenanceTimeout {
+		t.Errorf("the answer is %q from %q, want a deny from %q", answer.Decision, answer.Provenance, poo.ProvenanceTimeout)
+	}
+
+	if _, err := resumed.Session.ResumeRun(context.Background()); err != nil {
+		t.Fatalf("resuming the run: %v", err)
+	}
+	waitResumed(t, resumed.Session)
+
+	// Both child calls ran, each with its own ask: the top-level replay's
+	// and the parent's nested one.
+	if got := child.Calls(); len(got) != 2 || got[0] != "top" || got[1] != "nested" {
+		t.Errorf("the child tool ran %v, want the top-level call then the nested one", got)
+	}
+	if got := parent.Calls(); len(got) != 1 || got[0] != "parent" {
+		t.Errorf("the parent tool ran %v, want the one replayed call", got)
+	}
+	recs = readResumeLog(t, dir, "s1")
+	asks := namedRecords(recs, "permission.asked")
+	if len(asks) != 3 {
+		t.Fatalf("the log holds %d ask(s), want the log's and the resumed run's two", len(asks))
+	}
+	// The log's ask is answered; every ask after it is fresh, so none
+	// inherits the id or the deadline the client was shown for ask_1.
+	for _, rec := range asks[1:] {
+		fresh := rec.(*poo.PermissionAskedRecord)
+		if fresh.AskID == "ask_1" {
+			t.Errorf("the resumed ask about %q took the id %q", fresh.Summary, "ask_1")
+		}
+		if fresh.Deadline == deadline {
+			t.Errorf("the resumed ask about %q took the recorded deadline %q", fresh.Summary, deadline)
+		}
+	}
+	// The top-level replay asked afresh, under its own summary.
+	var top bool
+	for _, rec := range asks[1:] {
+		fresh := rec.(*poo.PermissionAskedRecord)
+		if fresh.Summary == "top" {
+			top = true
+		}
+	}
+	if !top {
+		t.Errorf("the log holds no fresh ask about the top-level call, want one")
+	}
+}
+
+// TestDurableResumeAnswersAnUnplaceableAskInsteadOfWaiting covers the ask
+// whose recorded call the log never saw, with no call left to ask it again:
+// the side-effecting parent may have run, so it is answered interrupted, and
+// the ask would have waited for ever on a run that never asks it.
+func TestDurableResumeAnswersAnUnplaceableAskInsteadOfWaiting(t *testing.T) {
+	parent := &resumeTool{
+		name:  "parent",
+		class: poo.ClassSideEffecting,
+		nest:  []poo.NestedCall{{Tool: "child", Arguments: json.RawMessage(`{"text":"nested"}`)}},
+	}
+	child := &resumeTool{name: "child", class: poo.ClassSideEffecting}
+	deadline := time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano)
+	dir := writeResumeLog(t,
+		resumeHeader(t, parent, child),
+		startedRun("r1"),
+		userMessage("r1", 0, "do the thing"),
+		assistantCall("r1", 1, callBlock("call_1", "parent", `{"text":"parent"}`)),
+		callRecord("r1", 1, "r1", "call_1", "parent", `{"text":"parent"}`),
+		startedCall("r1", 1, "r1", "call_1", "parent"),
+		// The nested child's ask names a call whose own record the crash
+		// never wrote, and the parent may already have run, so the
+		// resumed run never makes the call again.
+		askedRecord("r1", "ask_1", "r2", "child", string(poo.ClassSideEffecting), deadline, "deny"),
+	)
+	store := resumeStore(t, dir)
+	tr := scripted([]fakeResponse{{text: "done"}})
+	resumed := resumeDurable(t, store, resumeOptions(t, tr, parent, child))
+
+	// The load answers the ask: nothing will ask it again.
+	recs := readResumeLog(t, dir, "s1")
+	answered := namedRecords(recs, "permission.answered")
+	if len(answered) != 1 {
+		t.Fatalf("the log holds %d answer(s), want the unplaceable ask's", len(answered))
+	}
+	answer := answered[0].(*poo.PermissionAnsweredRecord)
+	if answer.AskID != "ask_1" {
+		t.Errorf("the answer resolves the ask %q, want %q", answer.AskID, "ask_1")
+	}
+	if answer.Decision != "deny" || answer.Provenance != poo.ProvenanceTimeout {
+		t.Errorf("the answer is %q from %q, want a deny from %q", answer.Decision, answer.Provenance, poo.ProvenanceTimeout)
+	}
+
+	if _, err := resumed.Session.ResumeRun(context.Background()); err != nil {
+		t.Fatalf("resuming the run: %v", err)
+	}
+	// The resumed run waits on nothing: the ask it could not place is
+	// answered, not published.
+	if awaiting, ok := resumed.Session.Awaiting(); ok {
+		t.Errorf("the resumed run waits on %+v, want nothing", awaiting)
+	}
+	waitResumed(t, resumed.Session)
+
+	if got := parent.Calls(); len(got) != 0 {
+		t.Errorf("the parent tool ran %v, want no repeat of an effect that may have happened", got)
+	}
+	recs = readResumeLog(t, dir, "s1")
+	// The ask is answered once, and no second ask replaces it.
+	asks := namedRecords(recs, "permission.asked")
+	if len(asks) != 1 {
+		t.Errorf("the log holds %d ask(s), want only the one the crash left", len(asks))
+	}
+	answered = namedRecords(recs, "permission.answered")
+	if len(answered) != 1 {
+		t.Errorf("the log holds %d answer(s), want the ask answered once", len(answered))
 	}
 }
 

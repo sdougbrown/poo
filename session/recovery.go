@@ -196,7 +196,9 @@ type PendingAsk struct {
 	CallID string
 	// recordedHandle is the handle the ask's own record names, and is
 	// empty on a log written before the record carried one. The plan
-	// matches a re-ask by it; an ask without one is matched by tool name.
+	// matches a re-ask by it, and an ask whose handle names a call the
+	// scan cannot find is answered by its fallback instead: an ask without
+	// one is matched by tool name.
 	recordedHandle string
 }
 
