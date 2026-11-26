@@ -440,6 +440,16 @@ func recoveredInputID(sessionID, job string) string {
 // records landed in. A call the model saw but whose record was never
 // written is recovered from the message alone.
 func pendingOf(id string, recs []poo.Record) *Pending {
+	return PendingOf(id, recs)
+}
+
+// PendingOf computes the operations a session has not resolved, from its
+// records.
+//
+// It is the exported form of the pending computation: a store of its
+// own, in another package, computes a session's pending operations
+// through it, the way the file store does.
+func PendingOf(id string, recs []poo.Record) *Pending {
 	state := &pendingState{
 		runs:       map[string]*PendingRun{},
 		settled:    map[string]bool{},
