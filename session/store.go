@@ -678,7 +678,7 @@ func (s *FileStore) Append(ctx context.Context, rec poo.Record) error {
 	if err := s.open.log.Append(ctx, rec); err != nil {
 		return &Error{Code: CodeStoreError, Message: "writing " + rec.Meta().Record, Err: err}
 	}
-	if s.needsSync(rec) {
+	if NeedsSync(rec, s.open.tools) {
 		if err := s.open.log.Sync(ctx); err != nil {
 			return &Error{Code: CodeStoreError, Message: "syncing " + rec.Meta().Record, Err: err}
 		}
@@ -720,14 +720,14 @@ func (s *FileStore) Flush(ctx context.Context) error {
 	return nil
 }
 
-// needsSync reports whether a record must be on disk before the session
+// NeedsSync reports whether a record must be on disk before the session
 // carries on.
 //
 // A run's boundaries, a run's resumption, a side-effecting tool's start
 // and its result are the records a crash must not lose: the run's
 // outcome, where a resumed run picked up, and the effect that may have
 // happened.
-func (s *FileStore) needsSync(rec poo.Record) bool {
+func NeedsSync(rec poo.Record, tools map[string]poo.ToolKind) bool {
 	switch r := rec.(type) {
 	case *poo.RunStartedRecord, *poo.RunSettledRecord:
 		return true
@@ -738,7 +738,7 @@ func (s *FileStore) needsSync(rec poo.Record) bool {
 		// it either.
 		return true
 	case *poo.ToolResultRecord:
-		return s.open.tools[r.Tool] == poo.ClassSideEffecting
+		return tools[r.Tool] == poo.ClassSideEffecting
 	}
 	return false
 }

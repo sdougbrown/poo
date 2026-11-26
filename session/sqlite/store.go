@@ -527,7 +527,7 @@ func (s *Store) Append(ctx context.Context, rec poo.Record) error {
 	}
 	// The sync is the commit: with the WAL's full synchronous mode, the
 	// commit puts the record on disk, so a crash cannot lose it.
-	if s.needsSync(rec) {
+	if session.NeedsSync(rec, s.open.tools) {
 		s.open.syncs++
 	}
 	return nil
@@ -560,25 +560,6 @@ func (s *Store) Flush(ctx context.Context) error {
 		return err
 	}
 	return ctx.Err()
-}
-
-// needsSync reports whether a record must be on disk before the session
-// carries on.
-//
-// A run's boundaries, a run's resumption, a side-effecting tool's start
-// and its result are the records a crash must not lose: the run's
-// outcome, where a resumed run picked up, and the effect that may have
-// happened.
-func (s *Store) needsSync(rec poo.Record) bool {
-	switch r := rec.(type) {
-	case *poo.RunStartedRecord, *poo.RunSettledRecord:
-		return true
-	case *poo.ToolStartedRecord, *poo.RunResumedRecord:
-		return true
-	case *poo.ToolResultRecord:
-		return s.open.tools[r.Tool] == poo.ClassSideEffecting
-	}
-	return false
 }
 
 // Close releases the store's resources: the open session's lease and the
