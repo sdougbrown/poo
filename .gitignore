@@ -54,3 +54,4 @@ evals/harbor/bin/
 /dist/
 
 /poo-eval
+/livecompaction
