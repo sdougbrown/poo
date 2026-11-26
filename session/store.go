@@ -441,7 +441,7 @@ func (s *FileStore) writeSessionFile(ctx context.Context, path string, created *
 // The read takes no authority, and the file format's knowledge — the
 // format check, the migration and the codec — stays in one read, whose
 // failures are the ones a caller already maps. The read uses the store's
-// codec, as every other read does.
+// codec, the way Load and ReadRecords decode with it.
 func (s *FileStore) Metadata(ctx context.Context, id string) (Metadata, error) {
 	return metadataWith(s.codec, s.dir, id)
 }

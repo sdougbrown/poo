@@ -513,7 +513,11 @@ func (f *Server) Create(ctx context.Context, params protocol.CreateParams, env w
 	// names an unsupported mode cannot get a session that pretends to
 	// run in it.
 	if !contains(f.Capabilities().Persistence, mode) {
-		return nil, nil, fmt.Errorf("server: this process does not serve the %q mode", mode)
+		return nil, nil, &config.Error{
+			Code:    config.CodeUnsupported,
+			Field:   "session.mode",
+			Message: fmt.Sprintf("this process does not serve the %q mode", mode),
+		}
 	}
 	store, err := runtime.OpenStore(mode, params.SessionDir)
 	if err != nil {
@@ -606,7 +610,7 @@ func (f *Server) Load(ctx context.Context, params protocol.LoadParams, env wire.
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil, nil, session.ErrSessionNotFound
 		}
-		return nil, nil, err
+		return nil, nil, &session.Error{Code: session.CodeStoreError, Message: "stating " + dir, Err: err}
 	}
 	// The session's own profile decides the tools it runs with, and its
 	// own model decides the endpoint it talks to. The header says both,

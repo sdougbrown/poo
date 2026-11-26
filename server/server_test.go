@@ -271,9 +271,13 @@ func TestALoadOfAMissingDirectoryCreatesNothing(t *testing.T) {
 // store is opened.
 func TestALoadRefusesAnInvalidSessionID(t *testing.T) {
 	srv := newServer(t, servedSettings(t, search.Name, `{"chat": "chat-model"}`))
-	_, _, err := srv.Load(context.Background(), protocol.LoadParams{SessionID: "../x", SessionDir: t.TempDir()}, wire.FactoryEnv{})
+	dir := filepath.Join(t.TempDir(), "not-there")
+	_, _, err := srv.Load(context.Background(), protocol.LoadParams{SessionID: "../x", SessionDir: dir}, wire.FactoryEnv{})
 	if !errors.Is(err, session.ErrInvalidSessionID) {
 		t.Errorf("the load of an invalid id is %v, want %v", err, session.ErrInvalidSessionID)
+	}
+	if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the load opened a store for an invalid id: %v", err)
 	}
 }
 
