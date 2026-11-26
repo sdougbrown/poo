@@ -238,6 +238,21 @@ func TestAMCPPathThatDoesNotLoadNamesTheField(t *testing.T) {
 	}
 }
 
+// theDefaultMCPFeed writes one server with a resource feed into the
+// default mcp directory and returns the directory.
+func theDefaultMCPFeed(t *testing.T, pooDir string) string {
+	t.Helper()
+	dir := filepath.Join(pooDir, "mcp")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("making the default mcp directory: %v", err)
+	}
+	body := `{"mcpServers": {"avenor": {"command": "true"}}, "poo": {"servers": {"avenor": {"feeds": {"inbox": {"resource": "avenor://inbox"}}}}}}`
+	if err := os.WriteFile(filepath.Join(dir, "mcp.json"), []byte(body), 0o600); err != nil {
+		t.Fatalf("writing the manifest: %v", err)
+	}
+	return dir
+}
+
 // TestASelectedResourceFeedShapesTheProfileTools covers the tool side of
 // the counting: a selected server's resource feed is a feed the session
 // runs, so a profile that offers no background tool of its own still offers
@@ -266,6 +281,65 @@ func TestASelectedResourceFeedShapesTheProfileTools(t *testing.T) {
 	}
 	if offered["subscribe_feed"] {
 		t.Errorf("the profile offers the subscribe tool, and the resource feed is one the session starts beside itself, not one the model subscribes to")
+	}
+}
+
+// TestAListingCountsASelectedServersResourceFeed covers the listing side of
+// the counting: a profile whose only feed is a resource feed a selected
+// server declares is advertised with the job tools, the way a session under
+// it runs — and a profile that selects nothing, or turns the mcp defaults
+// off, is advertised without them.
+func TestAListingCountsASelectedServersResourceFeed(t *testing.T) {
+	pooDir := theDefaultsPooDir(t)
+	theDefaultMCPFeed(t, pooDir)
+	document := theMCPSettings() + `profiles:
+  watcher:
+    base: base
+    mcp_servers: [avenor]
+  plain:
+    base: base
+  quiet:
+    base: base
+    mcp_defaults: false
+    mcp_servers: [avenor]
+profile: watcher
+`
+	settings, err := config.Parse([]byte(document), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+	offered := map[string]map[string]bool{}
+	for _, listed := range runtime.Profiles {
+		offered[listed.Name] = map[string]bool{}
+		for _, tool := range listed.Tools {
+			offered[listed.Name][tool.Name] = true
+		}
+	}
+	for _, name := range []string{"jobs", "cancel_job"} {
+		if !offered["watcher"][name] {
+			t.Errorf("the listing does not offer the %q tool for the watcher profile, and its selected server declares a feed the session runs", name)
+		}
+	}
+	if offered["watcher"]["subscribe_feed"] {
+		t.Errorf("the listing offers the subscribe tool for the watcher profile, and the resource feed is one the session starts beside itself")
+	}
+	if offered["plain"]["jobs"] {
+		t.Errorf("the listing offers the job tools for a profile that runs no feed and selects no server")
+	}
+	if offered["quiet"]["jobs"] {
+		t.Errorf("the listing offers the job tools for a profile whose mcp defaults are off: it runs no feed")
+	}
+	// The session and its listing entry agree for the profile the session
+	// runs.
+	session := map[string]bool{}
+	for _, tool := range runtime.Profile.Tools {
+		session[tool.Name] = true
+	}
+	for _, name := range []string{"jobs", "cancel_job"} {
+		if !session[name] {
+			t.Errorf("the session does not offer the %q tool, and the selected server declares a feed the session runs", name)
+		}
 	}
 }
 

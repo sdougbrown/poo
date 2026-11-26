@@ -1486,17 +1486,21 @@ func withoutDisabled(tools []poo.ToolInfo, disabled []string) []poo.ToolInfo {
 // profile the settings empty is not offered, and a profile earns the
 // registry tools its own entries leave for it.
 func (r *Runtime) resolveProfiles(opts BuildOptions, definitions []profile.Profile, workingDir string) ([]poo.Profile, error) {
-	type manifestKey struct{ feeds, registry bool }
+	type manifestKey struct{ feeds, registry, mcp bool }
 	type manifestPair struct {
 		feeds    *feed.Set
 		registry *cli.Catalog
+		mcp      *manifest.Set
 	}
-	// The listing judges a profile's tools by the feeds and the registry it
-	// resolves, not by the servers it selects: the server selection names
-	// what a session starts, and no listed tool stands for one.
+	// The listing judges a profile's tools by the feeds it resolves — the
+	// feed manifests', and the resource feeds the selected servers
+	// declare — and by the registry it resolves: a feed the session will
+	// run is one the listing offers the job tools for, whatever manifest
+	// holds it. The selection itself still names what a session starts,
+	// and no listed tool stands for a server.
 	words := r.chosenWords(opts)
-	chosenKey := manifestKey{feeds: words.feeds, registry: words.registry}
-	sets := map[manifestKey]manifestPair{chosenKey: {feeds: r.Feeds, registry: r.loaded}}
+	chosenKey := manifestKey{feeds: words.feeds, registry: words.registry, mcp: words.mcp}
+	sets := map[manifestKey]manifestPair{chosenKey: {feeds: r.Feeds, registry: r.loaded, mcp: r.mcpSet}}
 	pairFor := func(key manifestKey) (manifestPair, error) {
 		if pair, ok := sets[key]; ok {
 			return pair, nil
@@ -1509,7 +1513,11 @@ func (r *Runtime) resolveProfiles(opts BuildOptions, definitions []profile.Profi
 		if err != nil {
 			return manifestPair{}, err
 		}
-		pair := manifestPair{feeds: feeds, registry: registry}
+		mcp, _, err := r.loadMCP(opts, workingDir, key.mcp)
+		if err != nil {
+			return manifestPair{}, err
+		}
+		pair := manifestPair{feeds: feeds, registry: registry, mcp: mcp}
 		sets[key] = pair
 		return pair, nil
 	}
@@ -1521,6 +1529,7 @@ func (r *Runtime) resolveProfiles(opts BuildOptions, definitions []profile.Profi
 		pair, err := pairFor(manifestKey{
 			feeds:    defaultsOn(r.Settings.Feeds.Defaults, variant.FeedsDefaults),
 			registry: defaultsOn(r.Settings.CLIRegistry.Defaults, variant.RegistryDefaults),
+			mcp:      defaultsOn(r.Settings.MCP.Defaults, variant.mcpDefaults),
 		})
 		if err != nil {
 			// A variant whose manifests fail the load is offered
@@ -1536,6 +1545,15 @@ func (r *Runtime) resolveProfiles(opts BuildOptions, definitions []profile.Profi
 		for _, spec := range pair.feeds.Specs() {
 			if spec.Optional {
 				optionalFeed = true
+				break
+			}
+		}
+		// A selected server's resource feed is a feed the session runs, so
+		// it earns the job tools the way a manifest's feed does; it is
+		// never optional, so it earns no subscribe tool.
+		for _, server := range variant.mcpServers {
+			if len(pair.mcp.Feeds(server)) > 0 {
+				feeds = true
 				break
 			}
 		}
