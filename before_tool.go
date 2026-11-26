@@ -111,6 +111,10 @@ func (s *Session) callPolicy(ctx context.Context, owner *callOwner, h PolicyHook
 // it is asked about a call.
 func (s *Session) toolCallInfo(turn int, handle, tool string, prepared Prepared, plan callPlan) ToolCallInfo {
 	counts := s.repeatCountFor(handle)
+	args := plan.call.Arguments
+	if plan.shorthand != nil {
+		args = plan.shorthand
+	}
 	return ToolCallInfo{
 		// The spec is the one the model was offered: a background-capable
 		// tool's schema carries the background argument in it, so a hook
@@ -118,7 +122,7 @@ func (s *Session) toolCallInfo(turn int, handle, tool string, prepared Prepared,
 		// the same shape the call has.
 		Spec:            s.toolSpecFor(tool),
 		Prepared:        prepared,
-		Arguments:       cloneArguments(plan.call.Arguments),
+		Arguments:       cloneArguments(args),
 		Handle:          handle,
 		WorkingDir:      s.opts.WorkingDir,
 		RepeatCount:     counts.exact,

@@ -52,6 +52,9 @@ type callPlan struct {
 	// background reports that the model asked for the call to run in
 	// the background.
 	background bool
+	// shorthand holds the effective arguments when the tool rewrites a
+	// background shorthand. The call keeps the original for the record.
+	shorthand json.RawMessage
 	// stripped is the call's arguments without the reserved background
 	// argument, so a job's duplicate key keys the same data prepare
 	// saw.
@@ -80,7 +83,7 @@ type callPlan struct {
 // It reports whether any call was processed: a call that got a result
 // other than skipped: truncated.
 func (s *Session) executeBatch(run *runState, turn int, calls []ToolCall, truncated bool) bool {
-	plans := s.planCalls(&run.callOwner, turn, calls, truncated)
+	plans := s.planCalls(&run.callOwner, turn, calls, truncated, false)
 	if len(plans) == 0 {
 		return false
 	}
@@ -271,7 +274,7 @@ func (s *Session) nextHandle() string {
 // The plan validates every call, so a call that failed its validation
 // is known before its repeat counts are taken, and is counted toward
 // the near key.
-func (s *Session) planCalls(owner *callOwner, turn int, calls []ToolCall, truncated bool) []callPlan {
+func (s *Session) planCalls(owner *callOwner, turn int, calls []ToolCall, truncated, nested bool) []callPlan {
 	var plans []callPlan
 	for i, call := range calls {
 		handle := s.nextHandle()
@@ -323,7 +326,28 @@ func (s *Session) planCalls(owner *callOwner, turn int, calls []ToolCall, trunca
 			plans = append(plans, plan)
 			continue
 		}
-		prepared, err := tool.Prepare(stripped, s.prepareEnv())
+		if !nested && s.backgroundModeOf(call.Name) == BackgroundAllowed {
+			if sh, ok := tool.(interface {
+				BackgroundShorthand(json.RawMessage) (json.RawMessage, error)
+			}); ok {
+				effective, err := sh.BackgroundShorthand(call.Arguments)
+				if err != nil {
+					plan.invalid, plan.prepareErr, plan.complete = true, err, !truncated
+					plans = append(plans, plan)
+					continue
+				}
+				if effective != nil {
+					plan.background, plan.stripped, err = backgroundArg(effective)
+					if err != nil {
+						plan.invalid, plan.prepareErr, plan.complete = true, err, !truncated
+						plans = append(plans, plan)
+						continue
+					}
+					plan.shorthand = effective
+				}
+			}
+		}
+		prepared, err := tool.Prepare(plan.stripped, s.prepareEnv())
 		if err != nil {
 			plan.invalid = true
 			plan.prepareErr = err
@@ -782,6 +806,9 @@ func (s *Session) startJobCall(owner *callOwner, turn int, handle string, call T
 	}
 
 	text := fmt.Sprintf(StartedText, jobID, call.Name)
+	if plan.shorthand != nil {
+		text += " The trailing & requested this job."
+	}
 	s.recordResult(owner, turn, handle, call.Name, call.CallID, ToolResult{Text: text}, OutcomeStarted)
 	s.events.emit(EventJobStarted, map[string]any{
 		"job":    jobID,
