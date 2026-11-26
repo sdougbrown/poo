@@ -504,6 +504,89 @@ func TestDurableResumeReAsksALiveAskWithItsDeadline(t *testing.T) {
 	}
 }
 
+// TestDurableResumePairsAReAskWithTheCallItNames covers the resumed batch that
+// holds a replayed call and a live ask for one tool: the log's ask belongs to
+// the call it names, so the live ask keeps the id and deadline the client was
+// shown, and the replay asks afresh.
+func TestDurableResumePairsAReAskWithTheCallItNames(t *testing.T) {
+	tool := &resumeTool{name: "echo", class: poo.ClassSideEffecting}
+	deadline := time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano)
+	// The ask follows the record of the call it asks about, so it names the
+	// live call; the call after it was never started and replays.
+	dir := writeResumeLog(t,
+		resumeHeader(t, tool),
+		startedRun("r1"),
+		userMessage("r1", 0, "delete both builds"),
+		assistantCall("r1", 1,
+			callBlock("call_1", "echo", `{"text":"live"}`),
+			callBlock("call_2", "echo", `{"text":"replay"}`),
+		),
+		callRecord("r1", 1, "r1", "call_1", "echo", `{"text":"live"}`),
+		askedRecord("r1", "ask_1", "echo", string(poo.ClassSideEffecting), deadline, "deny"),
+		callRecord("r1", 1, "r2", "call_2", "echo", `{"text":"replay"}`),
+	)
+	store := resumeStore(t, dir)
+	asker := &allowAsker{asks: make(chan perm.Ask, 4)}
+	policy, err := perm.New(perm.Options{Askers: []perm.Asker{asker}})
+	if err != nil {
+		t.Fatalf("building the policy: %v", err)
+	}
+	opts := resumeOptions(t, scripted([]fakeResponse{{text: "done"}}), tool)
+	opts.Policy = policy
+
+	resumed := resumeDurable(t, store, opts)
+	if _, err := resumed.Session.ResumeRun(context.Background()); err != nil {
+		t.Fatalf("resuming the run: %v", err)
+	}
+	waitResumed(t, resumed.Session)
+
+	// The replay runs first, then the call the log's ask held open. Both
+	// passed the policy, so the tool ran both.
+	if calls := tool.Calls(); len(calls) != 2 {
+		t.Fatalf("the tool ran %v, want the replayed call and the live ask's", calls)
+	}
+
+	recs := readResumeLog(t, dir, "s1")
+	asks := namedRecords(recs, "permission.asked")
+	if len(asks) != 3 {
+		t.Fatalf("the log holds %d ask(s), want the log's and the resumed run's two", len(asks))
+	}
+	var live, replay *poo.PermissionAskedRecord
+	for _, rec := range asks {
+		ask := rec.(*poo.PermissionAskedRecord)
+		switch ask.Summary {
+		case "live":
+			live = ask
+		case "replay":
+			replay = ask
+		}
+	}
+	if live == nil {
+		t.Fatalf("the log holds no resumed ask about the live call, want one")
+	}
+	if replay == nil {
+		t.Fatalf("the log holds no resumed ask about the replayed call, want one")
+	}
+	// The live ask is the one the client was shown: it keeps the log's id
+	// and the deadline the ask had left.
+	if live.AskID != "ask_1" {
+		t.Errorf("the live ask's id is %q, want the recorded %q", live.AskID, "ask_1")
+	}
+	if live.Deadline != deadline {
+		t.Errorf("the live ask's deadline is %q, want the recorded %q", live.Deadline, deadline)
+	}
+	// The replay is a fresh ask: it takes neither the id nor the deadline.
+	if replay.AskID == "ask_1" {
+		t.Errorf("the replay's ask took the id %q, want a fresh one", replay.AskID)
+	}
+	if replay.AskID == "" {
+		t.Error("the replay's ask has no id, want a fresh one")
+	}
+	if replay.Deadline == deadline {
+		t.Errorf("the replay's ask took the recorded deadline %q, want a fresh one", replay.Deadline)
+	}
+}
+
 // TestDurableResumeResolvesAnExpiredAskAtLoad covers the ask whose deadline
 // passed while the process was dead: the load answers it the way it was
 // going to be answered, and the resumed run reads the refusal.

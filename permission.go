@@ -125,7 +125,7 @@ func (r *permissionReporter) BeginPermission(ask PermissionAsk, opts PermissionR
 // the seal resolves as cancelled without writing anything.
 func (s *Session) beginPermission(owner *callOwner, ask PermissionAsk, opts PermissionRequestOptions) *PermissionRequest {
 	askedBy := ask.AskID
-	ask, opts = s.armResumedAsk(ask, opts)
+	ask, opts = s.armResumedAsk(owner, ask, opts)
 	p := NewPermissionRequest(ask, opts)
 	p.logDrop = func(in PermissionTransition) {
 		s.logWarn("stale permission input dropped", slog.String("run_id", owner.id), slog.String("ask_id", ask.AskID), slog.Uint64("attempt", in.Attempt))
@@ -162,15 +162,34 @@ func (s *Session) beginPermission(owner *callOwner, ask PermissionAsk, opts Perm
 // the question is the one the crashed run asked: the ask keeps the log's id
 // and the wall-clock deadline it was given, so an answer that arrives after
 // the restart answers the ask the client was already shown, and a deadline
-// that has not passed still has the time it had left. The plan's ask is
-// taken once, so the next ask of the same tool is a fresh one.
-func (s *Session) armResumedAsk(ask PermissionAsk, opts PermissionRequestOptions) (PermissionAsk, PermissionRequestOptions) {
+// that has not passed still has the time it had left.
+//
+// The plan's ask is taken by the call it names, not by the tool: a resumed
+// batch can hold a replayed call and a live ask for one tool, and a name
+// match would give the replay the ask the client was shown. A plan whose ask
+// recorded no call falls back to the tool's name. The matched ask is taken
+// once, so the next ask of the same tool is a fresh one.
+func (s *Session) armResumedAsk(owner *callOwner, ask PermissionAsk, opts PermissionRequestOptions) (PermissionAsk, PermissionRequestOptions) {
 	s.mu.Lock()
+	handle := ""
+	if owner != nil {
+		handle = owner.permissionHandle
+	}
 	index := -1
-	for i, planned := range s.resumedAsks {
-		if planned.Tool == ask.Tool {
-			index = i
-			break
+	if handle != "" {
+		for i, planned := range s.resumedAsks {
+			if planned.Handle == handle {
+				index = i
+				break
+			}
+		}
+	}
+	if index < 0 {
+		for i, planned := range s.resumedAsks {
+			if planned.Handle == "" && planned.Tool == ask.Tool {
+				index = i
+				break
+			}
 		}
 	}
 	if index < 0 {
