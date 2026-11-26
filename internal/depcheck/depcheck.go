@@ -32,6 +32,10 @@
 //     the core's
 //   - the scopeschema package may import the standard library only, for it
 //     holds the rules a feed's scope schema answers to
+//   - the mcp/manifest package may import the standard library, the exec
+//     package and the feed package, plus the packages outside the module
+//     that hold a cli registry: an mcp manifest's resource feed carries a
+//     feed's filter, and its templates carry a session reference
 //   - the server package may import the packages it composes: the core,
 //     the settings, the profiles, the executors, the permission policy,
 //     the sessions, the catalogs, the feeds and the wire
@@ -139,6 +143,9 @@ func (c Checker) rules() []rule {
 		{path: m + "/internal/schematext", allowed: []string{"github.com/sdougbrown/cli-registry/schema"}},
 		{path: m + "/cli", allowed: []string{m + "/prompt", m + "/internal/schematext"}, external: true},
 		{path: m + "/feed", allowed: []string{m + "/exec", m + "/scopeschema"}, external: true},
+		// An mcp manifest's resource feed carries a feed's filter, and its
+		// templates carry the session reference the exec package validates.
+		{path: m + "/mcp/manifest", allowed: []string{m + "/exec", m + "/feed"}, external: true},
 		{path: m + "/scopeschema"},
 		{
 			path: m + "/server",

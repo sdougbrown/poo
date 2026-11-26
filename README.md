@@ -828,6 +828,7 @@ closure gate.
 | `poo/tool/*` | Opt-in tools: `read`, `edit`, `write`, `grep`, `bash`, `cliregistry`, `codemode`, `fetch` |
 | `poo/cli` | The cli registry's catalog: the manifests a session may call |
 | `poo/feed` | The feed manifests a session runs: the loader, the environment, and the runner over a command's stdout |
+| `poo/mcp/manifest` | The mcp.json manifests a session may start: the servers, the templates their launch resolves, and the resource feeds they declare |
 | `poo/exec` | The executor contract a binary fills: a command, its environment, and where it runs |
 | `poo/protect` | The protected-path matcher: the paths a tool must not touch |
 | `poo/server` | The `wire.Factory` a `serve` command is built from |
