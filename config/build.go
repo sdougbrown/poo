@@ -1602,7 +1602,8 @@ func (r *Runtime) addMCPTools(opts BuildOptions) error {
 	if len(r.MCPServers) == 0 {
 		return nil
 	}
-	names := r.mcpToolNames()
+	disabled := r.disabledTools(r.Profile.Name)
+	names := r.mcpToolNames(disabled)
 	// A selected server is a process the session starts, and the model
 	// reaches its tools through this call alone: a binary that links no call
 	// would start servers nothing could use.
@@ -1617,7 +1618,6 @@ func (r *Runtime) addMCPTools(opts BuildOptions) error {
 				r.profileName(opts), strings.Join(r.MCPServers, ", "), name),
 		}
 	}
-	disabled := r.disabledTools(r.Profile.Name)
 	for _, name := range names {
 		if slices.Contains(disabled, name) || slices.Contains(r.toolNames, name) {
 			continue
@@ -1633,9 +1633,15 @@ func (r *Runtime) addMCPTools(opts BuildOptions) error {
 // The call is the one a selection needs. The search comes with it when the
 // session has a decision model to ask, because a server may list more tools
 // than the prompt holds; a session without one lists the tools the servers
-// offer instead.
-func (r *Runtime) mcpToolNames() []string {
+// offer instead. The search is bound with the call, so the operator's disabled
+// call leaves it out too: a session with no way to call an MCP tool needs no way
+// to search for one, and a search that named a tool the model cannot call would
+// be worse than no hit.
+func (r *Runtime) mcpToolNames(disabled []string) []string {
 	names := []string{ToolCallMCP}
+	if slices.Contains(disabled, ToolCallMCP) {
+		return names
+	}
 	if r.deciderErr == nil && r.decider != nil {
 		names = append(names, cli.FindToolName)
 	}
@@ -1920,10 +1926,10 @@ func (r *Runtime) resolveProfiles(opts BuildOptions, definitions []profile.Profi
 				}
 			}
 		}
-		if selected > 0 {
+		if selected > 0 && linksTool(opts, ToolCallMCP) {
 			// A session of this profile reaches its servers through these
 			// tools, so the listing names them the way that session does.
-			for _, name := range r.mcpToolNames() {
+			for _, name := range r.mcpToolNames(disabled) {
 				if !linksTool(opts, name) || slices.Contains(disabled, name) {
 					continue
 				}

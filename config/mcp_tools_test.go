@@ -188,8 +188,67 @@ func TestADisabledMCPCallOffersTheServersToNobody(t *testing.T) {
 	if hasTool(runtime.Options.ToolOrder, config.ToolCallMCP) {
 		t.Errorf("the session offers a call the settings disable: %v", runtime.Options.ToolOrder)
 	}
+	// The search is bound with the call: a session with no way to call an MCP
+	// tool has no MCP entry for a search to return.
+	if hasTool(runtime.Options.ToolOrder, cliregistry.FindToolName) {
+		t.Errorf("the session offers a search over servers it cannot call: %v", runtime.Options.ToolOrder)
+	}
 	if text := sessionPrompt(t, runtime, "picky", t.TempDir()); strings.Contains(text, "MCP tools:") {
 		t.Errorf("the prompt lists MCP tools the session cannot call: %q", text)
+	}
+}
+
+// TestADisabledMCPCallLeavesNoMCPEntryInTheSearch covers the search a session
+// keeps for its catalog: the MCP servers it selected are reachable through no
+// tool, so a search over the catalog returns the catalog's entries and nothing
+// of theirs.
+func TestADisabledMCPCallLeavesNoMCPEntryInTheSearch(t *testing.T) {
+	path := mcpManifest(t, map[string]any{"fixture": stdioServer()}, nil)
+	settings, err := config.Parse([]byte(withDecider+theSessionDir(t)+"tools:\n  disabled: ["+config.ToolCallMCP+"]\n"+
+		"cli_registry:\n  paths: [\""+thresholdRegistry(t, 40, 0)+"\"]\n"+
+		theMCPPaths(path)+theMCPProfile("picky", "fixture")), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := buildWith(t, config.BuildOptions{
+		Settings:    settings,
+		MCPLauncher: listedLauncher(map[string][]mcp.Tool{"fixture": {mcpTool("echo", "answers with what it is given", false)}}),
+		WorkingDir:  t.TempDir(),
+	})
+	defer runtime.Store.Close()
+	if !hasTool(runtime.Options.ToolOrder, cliregistry.FindToolName) {
+		t.Fatalf("the session offers %v, and no search over its 40 entries", runtime.Options.ToolOrder)
+	}
+	runtime.Options.Decider = yesDecider{}
+	transport := pootest.NewTransport(
+		pootest.Turn{Calls: []pootest.Call{{
+			Name:      cliregistry.FindToolName,
+			ID:        "c1",
+			Arguments: json.RawMessage(`{"intent":"echo what I give it"}`),
+		}}},
+		pootest.Turn{Text: "done"},
+	)
+	runtime.Options.Transport = transport
+
+	sess, err := runtime.CreateSession(context.Background(), runtime.Store, theCreatedRecord("picky", t.TempDir()))
+	if err != nil {
+		t.Fatalf("creating the session: %v", err)
+	}
+	defer sess.Close()
+	if _, err := sess.Prompt(context.Background(), "find a tool"); err != nil {
+		t.Fatalf("prompting: %v", err)
+	}
+	if _, err := sess.Wait(context.Background()); err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	text := requestText(transport)
+	// The search answered from the catalog, and the server's tool is not in
+	// its reach.
+	if !strings.Contains(text, "entry-") {
+		t.Errorf("the search did not return the catalog's entries:\n%s", text)
+	}
+	if strings.Contains(text, "fixture/") {
+		t.Errorf("the search returned a tool the session cannot call:\n%s", text)
 	}
 }
 
