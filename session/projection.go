@@ -54,11 +54,16 @@ func metadataOf(line []byte) (Metadata, error) {
 	if err := json.Unmarshal(line, &created); err != nil {
 		return Metadata{}, &Error{Code: CodeCorruptLog, Message: "the log does not start with a session", Err: err}
 	}
-	return metadataOfRecord(&created), nil
+	return MetadataOfRecord(&created), nil
 }
 
-// metadataOfRecord returns the header a session's header record holds.
-func metadataOfRecord(created *poo.SessionCreatedRecord) Metadata {
+// MetadataOfRecord returns the header a session's created record holds.
+//
+// The projection reads an existing log's header with it, and a store that
+// keeps the header beside its records writes the same conversion, so the
+// metadata a session is created with and the metadata a load reads are one
+// header.
+func MetadataOfRecord(created *poo.SessionCreatedRecord) Metadata {
 	return Metadata{
 		Format:       created.Format,
 		SessionID:    created.SessionID,

@@ -1131,7 +1131,7 @@ func TestDurableLoadPlansAContinuation(t *testing.T) {
 			t.Errorf("the load settled the run %s, want it continued", settled.RunID)
 		}
 	}
-	meta := metadataOfRecord(header)
+	meta := MetadataOfRecord(header)
 
 	// The same records under the logged mode are settled interrupted, and
 	// the interrupt policy is what the resolver picks for them.

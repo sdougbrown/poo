@@ -68,6 +68,10 @@ type openSession struct {
 	// name. A tool that is not named here has no class, and its
 	// results are not synced.
 	tools map[string]poo.ToolKind
+	// seq is the number the session's next record is stamped with. The
+	// store keeps it so a write does not count the session's records
+	// first.
+	seq int64
 	// syncs counts the syncs the open session made.
 	syncs int
 }
@@ -224,7 +228,7 @@ func (s *Store) Create(ctx context.Context, created *poo.SessionCreatedRecord) (
 		owner.Release()
 		return "", &session.Error{Code: session.CodeSessionExists, Message: "the session already exists: " + id}
 	}
-	meta := metadataOfRecord(created)
+	meta := session.MetadataOfRecord(created)
 	metadataJSON, err := json.Marshal(meta)
 	if err != nil {
 		owner.Release()
@@ -255,6 +259,14 @@ func (s *Store) Create(ctx context.Context, created *poo.SessionCreatedRecord) (
 		owner.Release()
 		return "", err
 	}
+	// The header is the session's first record, so the count the session's
+	// numbering continues from is the one this transaction wrote.
+	var count int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM records WHERE session_id = ?`, id).Scan(&count); err != nil {
+		tx.Rollback()
+		owner.Release()
+		return "", err
+	}
 	if err := tx.Commit(); err != nil {
 		owner.Release()
 		return "", err
@@ -263,6 +275,7 @@ func (s *Store) Create(ctx context.Context, created *poo.SessionCreatedRecord) (
 		id:    id,
 		owner: owner,
 		tools: toolClasses(created.Tools),
+		seq:   int64(count) + 1,
 	}
 	return id, nil
 }
@@ -382,10 +395,17 @@ func (s *Store) loadLocked(ctx context.Context, id string, owner *LeaseAuthority
 	if err != nil {
 		return nil, err
 	}
+	// The count is the number the session's records continue from: the
+	// recovery records the load wrote are included.
+	var count int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM records WHERE session_id = ?`, id).Scan(&count); err != nil {
+		return nil, err
+	}
 	s.open = &openSession{
 		id:    id,
 		owner: owner,
 		tools: toolClasses(meta.Tools),
+		seq:   int64(count) + 1,
 	}
 	return &session.Loaded{
 		ID:           id,
@@ -521,11 +541,7 @@ func (s *Store) Append(ctx context.Context, rec poo.Record) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	var count int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM records WHERE session_id = ?`, s.open.id).Scan(&count); err != nil {
-		return err
-	}
-	nextSeq := int64(count) + 1
+	nextSeq := s.open.seq
 	at := s.now()
 	poo.Stamp(rec, nextSeq, at)
 	line, err := s.codec.Encode(rec)
@@ -549,6 +565,7 @@ func (s *Store) Append(ctx context.Context, rec poo.Record) error {
 	if err := tx.Commit(); err != nil {
 		return err
 	}
+	s.open.seq = nextSeq + 1
 	// The sync is the commit: with the WAL's full synchronous mode, the
 	// commit puts the record on disk, so a crash cannot lose it.
 	if session.NeedsSync(rec, s.open.tools) {
@@ -846,40 +863,6 @@ func toolClasses(tools []poo.ToolInfo) map[string]poo.ToolKind {
 		out[tool.Name] = tool.Class
 	}
 	return out
-}
-
-// metadataOfRecord returns the header a session's header record holds.
-func metadataOfRecord(created *poo.SessionCreatedRecord) session.Metadata {
-	return session.Metadata{
-		Format:       created.Format,
-		SessionID:    created.SessionID,
-		Mode:         session.Mode(created.Mode),
-		CreatedAt:    parseTime(created.CreatedAt),
-		WorkingDir:   created.WorkingDir,
-		Profile:      created.Profile,
-		Roles:        created.Roles,
-		SettingsHash: created.SettingsHash,
-		Tools:        created.Tools,
-		Model:        created.Model,
-		ContextLimit: created.ContextLimit,
-		ToolsMode:    string(created.ToolsMode),
-		Build:        created.Build,
-	}
-}
-
-// parseTime reads a record's timestamp.
-//
-// A record with no timestamp is at the start of time: a summary says
-// what it knows, and it does not invent a time.
-func parseTime(value string) time.Time {
-	if value == "" {
-		return time.Time{}
-	}
-	t, err := time.Parse(time.RFC3339Nano, value)
-	if err != nil {
-		return time.Time{}
-	}
-	return t
 }
 
 // runIDOf returns the run id a record names, and the empty string for a

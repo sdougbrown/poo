@@ -123,7 +123,7 @@ func (m *Memory) List(ctx context.Context) ([]Listing, error) {
 	if !ok {
 		return nil, &Error{Code: CodeCorruptLog, Message: "the session does not start with a session"}
 	}
-	meta := metadataOfRecord(created)
+	meta := MetadataOfRecord(created)
 	return []Listing{Projection{}.Summarize(meta, recs)}, nil
 }
 
