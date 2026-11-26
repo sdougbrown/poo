@@ -112,6 +112,9 @@ func waitGone(t *testing.T, what string, pid int) {
 // close leaves no process behind.
 func TestLaunchStartsTheSelectedServersWithTheSessionValues(t *testing.T) {
 	t.Setenv("SECRET", "s3cret")
+	// The sentinel is the test's own, so the assertion does not depend
+	// on the runner's environment carrying a name like HOME.
+	t.Setenv("POO_ENV_SENTINEL", "present")
 	binary := buildFixture(t, "server")
 	dir := t.TempDir()
 	pidfile := filepath.Join(dir, "fixture.pid")
@@ -148,7 +151,7 @@ func TestLaunchStartsTheSelectedServersWithTheSessionValues(t *testing.T) {
 		}
 	}
 
-	res, err := g.CallTool(context.Background(), "fixture/echo", json.RawMessage(`{"text":"hi","env":["POO_FIXTURE_VALUE","SECRET","LEAK","HOME"]}`))
+	res, err := g.CallTool(context.Background(), "fixture/echo", json.RawMessage(`{"text":"hi","env":["POO_FIXTURE_VALUE","SECRET","LEAK","POO_ENV_SENTINEL"]}`))
 	if err != nil {
 		t.Fatalf("calling the echo tool: %v", err)
 	}
@@ -182,8 +185,8 @@ func TestLaunchStartsTheSelectedServersWithTheSessionValues(t *testing.T) {
 	if got := answer.Env["LEAK"]; got != "s3cret" {
 		t.Errorf("the manifest's explicit ${SECRET} resolved to %q, want the scrubbed value back", got)
 	}
-	if got := answer.Env["HOME"]; got == "<unset>" {
-		t.Error("the scrubbed environment kept no HOME")
+	if got := answer.Env["POO_ENV_SENTINEL"]; got != "present" {
+		t.Errorf("the scrubbed base environment reached the server with the sentinel as %q, want present", got)
 	}
 
 	if err := g.Close(); err != nil {
