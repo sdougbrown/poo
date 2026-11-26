@@ -256,7 +256,6 @@ func applyV1(tx *sql.Tx) error {
 			seq INTEGER PRIMARY KEY AUTOINCREMENT,
 			session_id TEXT,
 			type TEXT,
-			run_id TEXT,
 			payload TEXT,
 			created_at TEXT
 		)`,

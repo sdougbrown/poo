@@ -260,8 +260,8 @@ func (s *Store) Create(ctx context.Context, created *poo.SessionCreatedRecord) (
 		owner.Release()
 		return "", err
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO records (session_id, type, run_id, payload, created_at) VALUES (?, ?, ?, ?, ?)`,
-		id, created.Meta().Record, "", string(line), nowT.Format(time.RFC3339Nano)); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO records (session_id, type, payload, created_at) VALUES (?, ?, ?, ?)`,
+		id, created.Meta().Record, string(line), nowT.Format(time.RFC3339Nano)); err != nil {
 		tx.Rollback()
 		owner.Release()
 		return "", err
@@ -471,8 +471,8 @@ func (r *recordSink) Append(ctx context.Context, rec poo.Record) error {
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO records (session_id, type, run_id, payload, created_at) VALUES (?, ?, ?, ?, ?)`,
-		r.id, rec.Meta().Record, runIDOf(rec), string(line), at.Format(time.RFC3339Nano)); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO records (session_id, type, payload, created_at) VALUES (?, ?, ?, ?)`,
+		r.id, rec.Meta().Record, string(line), at.Format(time.RFC3339Nano)); err != nil {
 		tx.Rollback()
 		return err
 	}
@@ -519,8 +519,8 @@ func (s *Store) Append(ctx context.Context, rec poo.Record) error {
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO records (session_id, type, run_id, payload, created_at) VALUES (?, ?, ?, ?, ?)`,
-		s.open.id, rec.Meta().Record, runIDOf(rec), string(line), at.Format(time.RFC3339Nano)); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO records (session_id, type, payload, created_at) VALUES (?, ?, ?, ?)`,
+		s.open.id, rec.Meta().Record, string(line), at.Format(time.RFC3339Nano)); err != nil {
 		tx.Rollback()
 		return err
 	}
@@ -788,36 +788,4 @@ func toolClasses(tools []poo.ToolInfo) map[string]poo.ToolKind {
 		out[tool.Name] = tool.Class
 	}
 	return out
-}
-
-// runIDOf returns the run id a record names, and the empty string for a
-// record that names no run.
-func runIDOf(rec poo.Record) string {
-	switch r := rec.(type) {
-	case *poo.RunStartedRecord:
-		return r.RunID
-	case *poo.RunSettledRecord:
-		return r.RunID
-	case *poo.ToolCallRecord:
-		return r.RunID
-	case *poo.ToolResultRecord:
-		return r.RunID
-	case *poo.MessageRecord:
-		return r.RunID
-	case *poo.ToolStartedRecord:
-		return r.RunID
-	case *poo.RunResumedRecord:
-		return r.RunID
-	case *poo.PermissionAskedRecord:
-		return r.RunID
-	case *poo.PermissionAnsweredRecord:
-		return r.RunID
-	case *poo.JobStartedRecord:
-		return r.RunID
-	case *poo.JobEndedRecord:
-		return r.RunID
-	case *poo.TurnHookRecord:
-		return r.RunID
-	}
-	return ""
 }
