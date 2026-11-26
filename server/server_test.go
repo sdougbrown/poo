@@ -212,6 +212,71 @@ func TestALoadedSessionTellsAClientThatCannotAnswerWhyItsAsksFallBack(t *testing
 	}
 }
 
+// TestALoadInTheEphemeralModeRefusesARecordedSession covers the process
+// that serves no recorded session: a load in the ephemeral mode answers
+// the unsupported-mode refusal, not the store's not-found failure.
+func TestALoadInTheEphemeralModeRefusesARecordedSession(t *testing.T) {
+	ctx := context.Background()
+	settings := servedSettings(t, search.Name, `{"chat": "chat-model"}`)
+	srv := newServer(t, settings)
+	dir := t.TempDir()
+	sess, info, err := srv.Create(ctx, protocol.CreateParams{
+		Mode:       "logged",
+		SessionDir: dir,
+	}, wire.FactoryEnv{})
+	if err != nil {
+		t.Fatalf("creating the session: %v", err)
+	}
+	id := sess.ID()
+	if err := sess.Close(); err != nil {
+		t.Fatalf("closing the session: %v", err)
+	}
+	if err := info.Release(); err != nil {
+		t.Fatalf("releasing the store: %v", err)
+	}
+
+	mode := "ephemeral"
+	settings.Session.Mode = &mode
+	ephemeral := newServer(t, settings)
+	_, _, err = ephemeral.Load(ctx, protocol.LoadParams{SessionID: id, SessionDir: dir}, wire.FactoryEnv{})
+	if errors.Is(err, session.ErrSessionNotFound) {
+		t.Fatalf("the ephemeral load of a recorded session is %v, want the unsupported-mode refusal", err)
+	}
+	var failure *config.Error
+	if !errors.As(err, &failure) || failure.Code != config.CodeUnsupported {
+		t.Fatalf("the ephemeral load of a recorded session is %v, want the unsupported-mode refusal", err)
+	}
+	if failure.Field != "session.mode" {
+		t.Errorf("the refusal's field is %q, want session.mode", failure.Field)
+	}
+}
+
+// TestALoadOfAMissingDirectoryCreatesNothing covers the load's read-only
+// failure: a directory that holds no session is the store's not-found
+// failure, and the load does not create the directory.
+func TestALoadOfAMissingDirectoryCreatesNothing(t *testing.T) {
+	srv := newServer(t, servedSettings(t, search.Name, `{"chat": "chat-model"}`))
+	dir := filepath.Join(t.TempDir(), "not-there")
+	_, _, err := srv.Load(context.Background(), protocol.LoadParams{SessionID: "s1", SessionDir: dir}, wire.FactoryEnv{})
+	if !errors.Is(err, session.ErrSessionNotFound) {
+		t.Fatalf("the load of a missing directory is %v, want %v", err, session.ErrSessionNotFound)
+	}
+	if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the load created the missing directory: %v", err)
+	}
+}
+
+// TestALoadRefusesAnInvalidSessionID covers the load's validation: an id
+// that would name outside the session's directory is refused before any
+// store is opened.
+func TestALoadRefusesAnInvalidSessionID(t *testing.T) {
+	srv := newServer(t, servedSettings(t, search.Name, `{"chat": "chat-model"}`))
+	_, _, err := srv.Load(context.Background(), protocol.LoadParams{SessionID: "../x", SessionDir: t.TempDir()}, wire.FactoryEnv{})
+	if !errors.Is(err, session.ErrInvalidSessionID) {
+		t.Errorf("the load of an invalid id is %v, want %v", err, session.ErrInvalidSessionID)
+	}
+}
+
 // The handshake names the default profile, and it is the profile a
 // session whose params name none runs under.
 func TestTheHandshakeNamesTheDefaultProfile(t *testing.T) {

@@ -212,20 +212,30 @@ func TestASessionRoundTripsThroughTheStore(t *testing.T) {
 }
 
 // TestASessionsMetadataIsReadWithoutOpeningIt covers the header read: a
-// store returns the header a session was created with, and reports a
-// session it does not hold as not found. The read takes no authority, so
-// a fresh store over the database answers it without opening the session.
+// store returns the header a session was created with while the session's
+// owner holds its lease. The read takes no authority, so a second store
+// over the same database answers it without taking, releasing, or fencing
+// the owner's lease.
 func TestASessionsMetadataIsReadWithoutOpeningIt(t *testing.T) {
-	path, store := newTestStore(t)
+	path := filepath.Join(t.TempDir(), "test.db")
+	clk := &testClock{t: time.Now()}
+	// The owner's lease outlives the test, so only the probe can end it.
+	store, err := New(path, WithLeaseOptions(LeaseOptions{TTL: 3 * time.Hour, OwnerID: "owner", Now: clk.Now}))
+	if err != nil {
+		t.Fatalf("opening the store: %v", err)
+	}
+	t.Cleanup(func() { store.Close() })
 	ctx := context.Background()
 	if _, err := store.Create(ctx, createdRecord("s1")); err != nil {
 		t.Fatalf("creating the session: %v", err)
 	}
-	if err := store.Close(); err != nil {
-		t.Fatalf("closing the store: %v", err)
-	}
 
-	reader := newTestStoreAt(t, path)
+	reader, err := New(path, WithLeaseOptions(LeaseOptions{TTL: 3 * time.Hour, OwnerID: "probe", Now: clk.Now}))
+	if err != nil {
+		t.Fatalf("opening the reading store: %v", err)
+	}
+	t.Cleanup(func() { reader.Close() })
+
 	meta, err := reader.Metadata(ctx, "s1")
 	if err != nil {
 		t.Fatalf("reading the session's metadata: %v", err)
@@ -241,6 +251,18 @@ func TestASessionsMetadataIsReadWithoutOpeningIt(t *testing.T) {
 	}
 	if len(meta.Tools) != 2 || meta.Tools[0].Name != "bash" || meta.Tools[1].Name != "read" {
 		t.Errorf("the session's tools are %v, want bash and read", meta.Tools)
+	}
+
+	// The probe took no authority: the live lease still refuses a second
+	// load, and the owner can still write.
+	if _, err := reader.Load(ctx, "s1"); !errors.Is(err, session.ErrSessionLocked) {
+		t.Errorf("the load after the probe returned %v, want the session locked", err)
+	}
+	if err := store.open.owner.CheckHeld(); err != nil {
+		t.Errorf("the owner's lease after the probe is %v, want it held", err)
+	}
+	if err := store.Append(ctx, runStarted("r1")); err != nil {
+		t.Errorf("the owner's append after the probe returned %v, want it to hold", err)
 	}
 }
 

@@ -11,7 +11,9 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io/fs"
+	"os"
 	"sort"
 	"sync"
 	"time"
@@ -581,9 +583,30 @@ func (f *Server) Create(ctx context.Context, params protocol.CreateParams, env w
 // Load opens a recorded session.
 func (f *Server) Load(ctx context.Context, params protocol.LoadParams, env wire.FactoryEnv) (*poo.Session, *wire.Info, error) {
 	f.client.set(env.Client)
+	// A process in the ephemeral mode serves no recorded session: its
+	// store is the memory, which holds nothing to read back, so it refuses
+	// the load before any store is opened.
+	if f.runtime.SessionMode == string(session.ModeEphemeral) {
+		return nil, nil, &config.Error{
+			Code:    config.CodeUnsupported,
+			Field:   "session.mode",
+			Message: fmt.Sprintf("this process is in the %q mode: it serves no recorded session", f.runtime.SessionMode),
+		}
+	}
+	if err := session.ValidateID(params.SessionID); err != nil {
+		return nil, nil, err
+	}
 	dir := params.SessionDir
 	if dir == "" {
 		dir = f.runtime.SessionDir
+	}
+	// A load names an existing session's directory. One that is not there
+	// holds no session, and opening a store would create it.
+	if _, err := os.Stat(dir); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil, session.ErrSessionNotFound
+		}
+		return nil, nil, err
 	}
 	// The session's own profile decides the tools it runs with, and its
 	// own model decides the endpoint it talks to. The header says both,
@@ -605,9 +628,9 @@ func (f *Server) Load(ctx context.Context, params protocol.LoadParams, env wire.
 		return nil, nil, err
 	}
 	// The header's mode is the session's own. The open by that mode is the
-	// refusal's one owner, so a process in another mode refuses the
-	// session with CodeUnsupported, the way it always has. A session of
-	// the process's own mode keeps the store already opened.
+	// refusal's one owner, so a process that does not serve the session's
+	// mode answers CodeUnsupported. A session of the process's own mode
+	// keeps the store already opened.
 	if string(meta.Mode) != f.runtime.SessionMode {
 		_ = store.Close()
 		// The store is the session's own mode: a durable session's records

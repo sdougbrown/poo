@@ -71,8 +71,10 @@ type Store interface {
 	// Metadata returns the header of a session the store has not opened.
 	//
 	// The read takes no authority: a caller may learn what a session was
-	// before it takes the lock on it. A session the store does not hold is
-	// its not-found failure.
+	// before it takes the lock on it. The read honors ctx when the store's
+	// medium can: a query is canceled with it, a header-sized file read has
+	// nothing to wait on. A session the store does not hold is its
+	// not-found failure.
 	Metadata(ctx context.Context, id string) (Metadata, error)
 
 	// Load reads a session's records, recovers the session, and makes
@@ -437,10 +439,11 @@ func (s *FileStore) writeSessionFile(ctx context.Context, path string, created *
 // Metadata returns the header of a session the store has not opened.
 //
 // The read takes no authority, and the file format's knowledge — the
-// format check, the migration and the codec — stays in MetadataOf, whose
-// failures are the ones a caller already maps.
+// format check, the migration and the codec — stays in one read, whose
+// failures are the ones a caller already maps. The read uses the store's
+// codec, as every other read does.
 func (s *FileStore) Metadata(ctx context.Context, id string) (Metadata, error) {
-	return MetadataOf(s.dir, id)
+	return metadataWith(s.codec, s.dir, id)
 }
 
 // Load reads a session's records, recovers the session, and opens it.
@@ -739,10 +742,13 @@ func (s *FileStore) Flush(ctx context.Context) error {
 // NeedsSync reports whether a record must be on disk before the session
 // carries on.
 //
-// A run's boundaries, a run's resumption, a side-effecting tool's start
-// and its result are the records a crash must not lose: the run's
-// outcome, where a resumed run picked up, and the effect that may have
-// happened.
+// A run's boundaries, a run's resumption, a tool's start and a
+// side-effecting tool's result are the records a crash must not lose: the
+// run's outcome, where a resumed run picked up, and the effect that may
+// have happened.
+//
+// tools classifies the open session's tools. A tool the map does not name
+// has no class, so its result does not sync.
 func NeedsSync(rec poo.Record, tools map[string]poo.ToolKind) bool {
 	switch r := rec.(type) {
 	case *poo.RunStartedRecord, *poo.RunSettledRecord:
