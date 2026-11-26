@@ -540,6 +540,9 @@ func Build(opts BuildOptions) (*Runtime, error) {
 	if err := runtime.resolveTools(opts, workingDir); err != nil {
 		return nil, err
 	}
+	if err := runtime.resolveMCPLauncher(opts); err != nil {
+		return nil, err
+	}
 	if err := runtime.resolveFeedRuns(opts); err != nil {
 		return nil, err
 	}
@@ -1177,27 +1180,38 @@ func (r *Runtime) resolveMCP(opts BuildOptions, workingDir string) error {
 	if err := r.checkMCPFeedNames(); err != nil {
 		return err
 	}
-	// A selection names servers a live session starts, and starting
-	// them is the launcher's job. The requirement is the build's, not
-	// the session's: every entry point of the poo binary links the
-	// launcher, so a profile that selects a server builds everywhere
-	// the binary runs, and an inspection command that never builds a
-	// session still passes because it builds the same runtime.
-	if len(r.MCPServers) > 0 {
-		if opts.MCPLauncher == nil {
-			return &Error{
-				Code:  CodeUnsupported,
-				Field: "mcp.paths",
-				Message: fmt.Sprintf("the profile %q selects the mcp servers [%s], and this binary links no launcher to start them",
-					profile, strings.Join(r.MCPServers, ", ")),
-			}
-		}
-		// The attach is set on the runtime's own options, not added per
-		// call: every path that builds a session — a created one, a
-		// resumed one, a headless run — goes through the same options,
-		// and each of them attaches exactly once.
-		r.Options.SessionAttach = r.mcpAttach
+	return nil
+}
+
+// resolveMCPLauncher holds the launcher requirement a selection
+// carries: starting the servers a live session starts is the
+// launcher's job, and the requirement is the build's, not the
+// session's — every entry point of the poo binary links the launcher,
+// so a profile that selects a server builds everywhere the binary
+// runs, and an inspection command that never builds a session still
+// passes because it builds the same runtime.
+//
+// It runs after the tools resolve, so a binary that fails on both
+// counts names the executor it lacks before the launcher: the
+// executor is what the session's own commands need, and the feed a
+// selected server declares reaches it first.
+func (r *Runtime) resolveMCPLauncher(opts BuildOptions) error {
+	if len(r.MCPServers) == 0 {
+		return nil
 	}
+	if opts.MCPLauncher == nil {
+		return &Error{
+			Code:  CodeUnsupported,
+			Field: "mcp.paths",
+			Message: fmt.Sprintf("the profile %q selects the mcp servers [%s], and this binary links no launcher to start them",
+				r.profileName(opts), strings.Join(r.MCPServers, ", ")),
+		}
+	}
+	// The attach is set on the runtime's own options, not added per
+	// call: every path that builds a session — a created one, a
+	// resumed one, a headless run — goes through the same options,
+	// and each of them attaches exactly once.
+	r.Options.SessionAttach = r.mcpAttach
 	return nil
 }
 
