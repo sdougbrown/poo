@@ -11,10 +11,12 @@
 // unchanged: a harness ignores a top-level key it does not know, which
 // Claude Code 2.1.332 does for a file that carries `poo` beside
 // `mcpServers` and still lists the servers (2026-11-26). That is the
-// format contract this package keeps. An entry's fields poo does not read
-// are ignored for the same reason — other harnesses add their own there —
-// while the `poo` block is poo's alone, so an unknown field in it, or a
-// top-level key that is neither, fails the load.
+// format contract this package keeps: poo ignores a top-level key it does
+// not know, the way a harness ignores poo's. An entry's fields poo does
+// not read are ignored for the same reason — other harnesses add their own
+// there — while the `poo` block is poo's alone, so an unknown field in it
+// fails the load. A file whose top level names no `mcpServers` is not a
+// manifest poo can use, and it fails the load naming the file.
 //
 // The package is JSON only, and it knows nothing of a transport or a
 // process. It hands the config layer the servers a session may start,
@@ -23,17 +25,19 @@
 package manifest
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 
-	// The cli-registry manifest scanner, which discovers the files and
-	// checks a document for duplicate keys. It is aliased: this package is
-	// a manifest too, and its own name would read as its own.
+	// The cli-registry manifest scanner, which discovers the files. It is
+	// aliased: this package is a manifest too, and its own name would read
+	// as its own.
 	climanifest "github.com/sdougbrown/cli-registry/manifest"
 
 	"github.com/sdougbrown/poo/feed"
@@ -227,10 +231,11 @@ type loaded struct {
 	warnings []string
 }
 
-// envelope is the manifest's top-level shape, decoded with unknown fields
-// rejected and duplicate keys detected: the file's only top-level keys are
-// the servers every harness reads and poo's own block, so a key that is
-// neither is a misspelling the load has to name.
+// envelope is the manifest's top-level shape. The top level decodes with
+// unknown fields ignored and duplicate keys detected: a key the manifest
+// does not name is a harness's own, and it is left alone the way a harness
+// leaves poo's. The `poo` block decodes with unknown fields rejected, so a
+// field poo does not know fails the load wherever poo's own key holds it.
 type envelope struct {
 	MCPServers map[string]json.RawMessage `json:"mcpServers"`
 	Poo        *pooBlock                  `json:"poo"`
@@ -272,11 +277,8 @@ func readFile(path string) (loaded, error) {
 		return loaded{}, fmt.Errorf("mcp manifest %s: %w", path, err)
 	}
 	var env envelope
-	// Decode rejects unknown fields and duplicate keys, and names the file
-	// in its failures. The `poo` block is decoded with it, so a field poo
-	// does not know fails the load wherever poo's own key holds it.
-	if err := climanifest.Decode(path, data, &env); err != nil {
-		return loaded{}, fmt.Errorf("mcp manifest: %w", err)
+	if err := decodeEnvelope(path, data, &env); err != nil {
+		return loaded{}, err
 	}
 	var content loaded
 	skipped := map[string]string{}
@@ -297,6 +299,104 @@ func readFile(path string) (loaded, error) {
 		return loaded{}, err
 	}
 	return content, nil
+}
+
+// decodeEnvelope decodes the manifest's top level into env. It ignores a
+// top-level key the manifest does not name — a harness's own key, the way
+// a harness ignores poo's — but it still detects a duplicate key anywhere
+// in the document, and it decodes the `poo` block with unknown fields
+// rejected, so a field poo does not know fails the load wherever poo's own
+// key holds it. A file whose top level names no mcpServers is not a
+// manifest poo can use, and it fails the load naming the file.
+func decodeEnvelope(path string, data []byte, env *envelope) error {
+	// Duplicate-key detection runs on the raw bytes before any decode: a
+	// decode collapses duplicate keys (last wins), so the check must see
+	// them first.
+	if err := detectDuplicateKeys(data); err != nil {
+		return fmt.Errorf("mcp manifest %s: %w", path, err)
+	}
+	// The top level decodes into a map of raw values: a key the manifest
+	// does not name is held and ignored, the way a harness ignores poo's.
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(data, &top); err != nil {
+		return fmt.Errorf("mcp manifest %s: %w", path, err)
+	}
+	raw, ok := top["mcpServers"]
+	if !ok {
+		return fmt.Errorf("mcp manifest %s: the file names no mcpServers, and a manifest's servers live there", path)
+	}
+	var servers map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &servers); err != nil {
+		return fmt.Errorf("mcp manifest %s: the mcpServers key: %w", path, err)
+	}
+	env.MCPServers = servers
+	if rawPoo, ok := top["poo"]; ok {
+		// The `poo` block is poo's alone, so it decodes with unknown
+		// fields rejected: a field poo does not know fails the load.
+		dec := json.NewDecoder(bytes.NewReader(rawPoo))
+		dec.DisallowUnknownFields()
+		var block pooBlock
+		if err := dec.Decode(&block); err != nil {
+			return fmt.Errorf("mcp manifest %s: the poo key: %w", path, err)
+		}
+		env.Poo = &block
+	}
+	return nil
+}
+
+// detectDuplicateKeys rejects any JSON object with a repeated key. A decode
+// collapses duplicate keys (last wins), so the check runs on the raw bytes
+// before any decode — required to catch a duplicate key wherever it holds.
+func detectDuplicateKeys(b []byte) error {
+	type cont struct {
+		isObj   bool
+		keys    map[string]bool
+		needKey bool
+	}
+	dec := json.NewDecoder(bytes.NewReader(b))
+	stack := []cont{{isObj: true, keys: map[string]bool{}, needKey: true}} // implicit root
+	for {
+		tok, err := dec.Token()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
+		switch v := tok.(type) {
+		case json.Delim:
+			switch v {
+			case '{':
+				if n := len(stack); n > 0 {
+					stack[n-1].needKey = true
+				}
+				stack = append(stack, cont{isObj: true, keys: map[string]bool{}, needKey: true})
+			case '[':
+				if n := len(stack); n > 0 {
+					stack[n-1].needKey = true
+				}
+				stack = append(stack, cont{isObj: false})
+			case '}', ']':
+				stack = stack[:len(stack)-1]
+			}
+		case string:
+			top := &stack[len(stack)-1]
+			if top.isObj && top.needKey {
+				if top.keys[v] {
+					return fmt.Errorf("duplicate object key %q", v)
+				}
+				top.keys[v] = true
+				top.needKey = false
+			} else if top.isObj {
+				top.needKey = true
+			}
+		default:
+			if top := &stack[len(stack)-1]; top.isObj {
+				top.needKey = true
+			}
+		}
+	}
+	return nil
 }
 
 // readServer validates one `mcpServers` entry.

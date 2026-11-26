@@ -87,6 +87,37 @@ func TestAClaudeCodeFileLoadsUnchanged(t *testing.T) {
 	}
 }
 
+// TestAnUnknownTopLevelKeyIsIgnored covers the format contract: a top-level
+// key the manifest does not name is a harness's own, and it is ignored the
+// way a harness ignores poo's.
+func TestAnUnknownTopLevelKeyIsIgnored(t *testing.T) {
+	dir := writeManifest(t, map[string]any{
+		"mcpServers": map[string]any{"avenor": aServer("true")},
+		"harnessKey": map[string]any{"some": "harness value"},
+	})
+	set, err := manifest.Load(dir)
+	if err != nil {
+		t.Fatalf("loading the manifest with an unknown top-level key: %v", err)
+	}
+	if names := set.Names(); !slices.Equal(names, []string{"avenor"}) {
+		t.Fatalf("the load holds the servers %q, want avenor alone", names)
+	}
+}
+
+// TestAFileWithNoMCPServersFails covers the shape that is not a manifest:
+// a file whose top level names no mcpServers is not one poo can use, and it
+// fails the load naming the file.
+func TestAFileWithNoMCPServersFails(t *testing.T) {
+	path := writeManifest(t, map[string]any{"harnessKey": map[string]any{"some": "value"}})
+	_, err := manifest.Load(path)
+	if err == nil {
+		t.Fatal("the load took a file with no mcpServers")
+	}
+	if !strings.Contains(err.Error(), path) {
+		t.Errorf("the failure does not name the file: %v", err)
+	}
+}
+
 // resolve resolves a template over a host environment holding one variable.
 func resolve(t *testing.T, template manifest.Template, name, value, sessionID string) string {
 	t.Helper()
@@ -294,6 +325,21 @@ func TestThePooBlockIsPooOnly(t *testing.T) {
 			t.Errorf("the load took a field poo does not know in its own block: %v", err)
 		}
 	})
+}
+
+// TestAnUnknownFieldInThePooBlockStillFails covers the regression guard: the
+// top level tolerates an unknown key, but the `poo` block is poo's alone, so
+// a field poo does not know in it still fails the load.
+func TestAnUnknownFieldInThePooBlockStillFails(t *testing.T) {
+	body := map[string]any{
+		"mcpServers": map[string]any{"avenor": aServer("true")},
+		"harnessKey": map[string]any{"some": "value"},
+		"poo":        map[string]any{"servers": map[string]any{"avenor": map[string]any{"feeds": map[string]any{"inbox": map[string]any{"resource": "avenor://inbox", "poll": "1s"}}}}},
+	}
+	_, err := manifest.Load(writeManifest(t, body))
+	if err == nil || !strings.Contains(err.Error(), "poll") {
+		t.Errorf("the load took a field poo does not know in its own block: %v", err)
+	}
 }
 
 // TestTwoFeedsMayNotShareAName covers the name: a resource feed is a feed, and
