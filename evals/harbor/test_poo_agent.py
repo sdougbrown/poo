@@ -181,7 +181,9 @@ class PooAgentLifecycleTests(unittest.TestCase):
             env = FakeEnvironment(log_lines=log_lines, mount_logs_dir=logs_dir)
             ctx = FakeContext()
 
-            with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}, clear=False):
+            # clear=True: a host POO_ENDPOINT or POO_API_KEY_ENV would change the
+            # resolution this test is pinning.
+            with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}, clear=True):
                 asyncio.run(agent.setup(env))
                 asyncio.run(agent.run("Fix the bug in `foo.py`\nwith 'quotes' & $vars.", env, ctx))
 
@@ -238,6 +240,186 @@ class PooAgentLifecycleTests(unittest.TestCase):
             self.assertEqual(ctx.n_input_tokens, 123)
             self.assertEqual(ctx.n_output_tokens, 45)
             self.assertIn("--settings /logs/agent/settings.yaml", env.commands[-1][0])
+
+
+class PooAgentMetadataTests(unittest.TestCase):
+    """The metadata a trial reports when the run did not go cleanly."""
+
+    def _agent(self, tmp_path: Path, **kwargs: Any) -> PooAgent:
+        fake_bin = tmp_path / "poo-linux-amd64"
+        fake_bin.write_bytes(b"#!/bin/sh\necho dev\n")
+        return PooAgent(
+            logs_dir=tmp_path / "logs",
+            model_name="openai/gpt-4o",
+            poo_bin=str(fake_bin),
+            context_limit=65536,
+            **kwargs,
+        )
+
+    def test_a_log_with_no_records_still_reports_the_return_code(self) -> None:
+        # A run that died before writing its first record must not look like a
+        # trial that did nothing: the return code and a no-log marker are the
+        # only evidence the harness gets.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            agent = self._agent(tmp_path)
+            ctx = FakeContext()
+
+            agent.populate_context_post_run(ctx, return_code=2)
+
+            self.assertIsNotNone(ctx.metadata)
+            self.assertEqual(ctx.metadata["return_code"], 2)
+            self.assertEqual(ctx.metadata["settle_reason"], "no-log")
+            self.assertEqual(ctx.metadata["log_records"], 0)
+            self.assertIsNone(ctx.n_input_tokens)
+
+    def test_turns_fall_back_to_the_usage_records_when_no_settle_exists(self) -> None:
+        # A killed run writes no settle record. poo's own Turns() counts the
+        # requests the run made in that case, skipping the ones a compaction
+        # made (numbered 0), and the adapter must report the same number.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            agent = self._agent(tmp_path)
+            ctx = FakeContext()
+            agent.logs_dir.mkdir(parents=True, exist_ok=True)
+            lines = [
+                json.dumps({"record": "usage", "request": 1, "input_tokens": 10, "output_tokens": 1}),
+                json.dumps({"record": "usage", "request": 2, "input_tokens": 10, "output_tokens": 1}),
+                # A compaction's own request is numbered 0 and is not a turn.
+                json.dumps({"record": "usage", "request": 0, "input_tokens": 10, "output_tokens": 1}),
+                json.dumps({"record": "usage", "request": 3, "input_tokens": 10, "output_tokens": 1}),
+            ]
+            (agent.logs_dir / "session.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+            agent.populate_context_post_run(ctx, return_code=None)
+
+            self.assertIsNone(ctx.metadata["return_code"])
+            self.assertEqual(ctx.metadata["turns"], 3)
+
+    def test_the_settle_record_still_wins_over_the_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            agent = self._agent(tmp_path)
+            ctx = FakeContext()
+            agent.logs_dir.mkdir(parents=True, exist_ok=True)
+            lines = [
+                json.dumps({"record": "usage", "request": i, "input_tokens": 1, "output_tokens": 1})
+                for i in range(1, 6)
+            ]
+            lines.append(json.dumps({"record": "run.settled", "reason": "finished", "turns": 9}))
+            (agent.logs_dir / "session.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+            agent.populate_context_post_run(ctx)
+
+            self.assertEqual(ctx.metadata["turns"], 9)
+            self.assertEqual(ctx.metadata["settle_reason"], "finished")
+
+
+class PooAgentFlagTests(unittest.TestCase):
+    """The flags the run is given, and the ones it must never be given."""
+
+    def _agent(self, tmp_path: Path, **kwargs: Any) -> PooAgent:
+        fake_bin = tmp_path / "poo-linux-amd64"
+        fake_bin.write_bytes(b"#!/bin/sh\necho dev\n")
+        return PooAgent(logs_dir=tmp_path / "logs", poo_bin=str(fake_bin), **kwargs)
+
+    def test_the_instruction_is_not_inlined_into_the_command(self) -> None:
+        # A task's own pkill -f can match a command line that carries the
+        # instruction, so the instruction travels through a file.
+        instruction = "Fix the bug in `foo.py` with 'quotes' & $vars."
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            agent = self._agent(tmp_path, model_name="openai/gpt-4o", context_limit=65536)
+            env = FakeEnvironment()
+            ctx = FakeContext()
+
+            with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}, clear=True):
+                asyncio.run(agent.setup(env))
+                asyncio.run(agent.run(instruction, env, ctx))
+
+            run_cmd = env.commands[-1][0]
+            self.assertNotIn("Fix the bug", run_cmd)
+            self.assertIn('-- "$(cat /logs/agent/instruction.txt)"', run_cmd)
+
+    def test_settings_mode_still_applies_an_explicit_flag(self) -> None:
+        # A settings file names the model, but an explicit flag must reach the
+        # run instead of being dropped silently.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            settings = tmp_path / "settings.yaml"
+            settings.write_text("version: 1\n", encoding="utf-8")
+            agent = self._agent(
+                tmp_path,
+                settings=str(settings),
+                context_limit=524288,
+                tools_mode="native",
+            )
+
+            args = agent.build_run_args()
+            joined = " ".join(args)
+            self.assertIn("--settings /logs/agent/settings.yaml", joined)
+            self.assertIn("--context-limit 524288", joined)
+            self.assertIn("--tools-mode native", joined)
+
+    def test_a_run_with_no_model_and_no_settings_refuses_to_start(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            agent = self._agent(Path(tmp))
+            with self.assertRaises(ValueError):
+                agent.build_run_args()
+
+    def test_extra_env_reaches_the_run(self) -> None:
+        # The stub base class in this module mirrors Harbor's read-only
+        # extra_env property, so this also pins the shadowing bug that shipped
+        # once: an adapter that assigns self.extra_env fails here, not at run time.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            agent = self._agent(
+                tmp_path,
+                model_name="openai/gpt-4o",
+                context_limit=65536,
+                extra_env={"HARBOR_TEST": "1"},
+            )
+            env = FakeEnvironment()
+            ctx = FakeContext()
+
+            with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}, clear=True):
+                asyncio.run(agent.setup(env))
+                asyncio.run(agent.run("Do the thing", env, ctx))
+
+            run_env = env.commands[-1][1]
+            self.assertEqual(run_env.get("HARBOR_TEST"), "1")
+            self.assertEqual(run_env.get("OPENAI_API_KEY"), "sk-test")
+
+
+def _harbor_installed() -> bool:
+    try:
+        import harbor.agents.base  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+@unittest.skipUnless(_harbor_installed(), "harbor is not installed")
+class RealHarborBaseAgentTests(unittest.TestCase):
+    """The adapter against Harbor's own BaseAgent, not this module's stub.
+
+    Everything else here runs against the stub, which is how the extra_env
+    shadowing bug shipped: the stub lacked the read-only property Harbor's base
+    class exposes, so the collision only appeared at run time.
+    """
+
+    def test_the_adapter_constructs_and_keeps_its_env(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            agent = PooAgent(
+                logs_dir=Path(tmp) / "logs",
+                model_name="openai/gpt-4o",
+                endpoint="http://localhost:4000/v1",
+                model_id="gpt-4o",
+                context_limit=65536,
+                extra_env={"HARBOR_TEST": "1"},
+            )
+            self.assertEqual(agent.extra_env.get("HARBOR_TEST"), "1")
+            self.assertIn("--endpoint http://localhost:4000/v1", " ".join(agent.build_run_args()))
 
 
 if __name__ == "__main__":
