@@ -1,0 +1,8 @@
+#!/bin/sh
+# A fixture filter: it answers with a record, then one past the bytes a
+# record may be.
+cat >/dev/null
+printf '{"text": "the first message"}\n'
+printf '{"text": "'
+head -c 1200000 /dev/zero | tr '\0' 'x'
+printf '"}\n'

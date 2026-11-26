@@ -112,21 +112,21 @@ func TestTheFilterOutputRefusesWhatIsNotARecord(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			_, delivered, err := filterOutput([]byte(c.out))
+			messages, fault := filterOutput([]byte(c.out))
 			if c.wantErr {
-				if err == nil {
+				if fault == nil {
 					t.Fatalf("the output %q was not refused", c.out)
 				}
-				if !strings.Contains(err.Error(), c.wantErrText) {
-					t.Errorf("the error is %q, want it to say %q", err.Error(), c.wantErrText)
+				if !strings.Contains(fault.Message, c.wantErrText) {
+					t.Errorf("the error is %q, want it to say %q", fault.Message, c.wantErrText)
 				}
 				return
 			}
-			if err != nil {
-				t.Fatalf("the output %q was refused: %v", c.out, err)
+			if fault != nil {
+				t.Fatalf("the output %q was refused: %v", c.out, fault)
 			}
-			if !delivered {
-				t.Errorf("the output %q was not delivered", c.out)
+			if len(messages) != 1 {
+				t.Errorf("the output %q is %d records, want the one", c.out, len(messages))
 			}
 		})
 	}
@@ -136,15 +136,15 @@ func TestTheFilterOutputRefusesWhatIsNotARecord(t *testing.T) {
 // with no data: `{text, from, data}` emits a null data, and the record is
 // delivered without data rather than faulting the feed.
 func TestAFilterNullDataIsAbsentData(t *testing.T) {
-	message, delivered, err := filterOutput([]byte(`{"text":"the message","from":"alice","data":null}`))
-	if err != nil {
-		t.Fatalf("the output was refused: %v", err)
+	messages, fault := filterOutput([]byte(`{"text":"the message","from":"alice","data":null}`))
+	if fault != nil {
+		t.Fatalf("the output was refused: %v", fault)
 	}
-	if !delivered {
-		t.Fatal("the output was dropped")
+	if len(messages) != 1 {
+		t.Fatalf("the output is %d records, want the one", len(messages))
 	}
-	if message.Data != nil {
-		t.Errorf("the record's data is %q, and a null data is no data", message.Data)
+	if messages[0].Data != nil {
+		t.Errorf("the record's data is %q, and a null data is no data", messages[0].Data)
 	}
 }
 

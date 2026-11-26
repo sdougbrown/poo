@@ -1,0 +1,10 @@
+#!/bin/sh
+# A fixture filter: it answers with five records that fit, whose sizes add
+# up to more than one run's output may be.
+cat >/dev/null
+text=$(head -c 900000 /dev/zero | tr '\0' 'x')
+i=0
+while [ "$i" -lt 5 ]; do
+	printf '{"text": "%s"}\n' "$text"
+	i=$((i + 1))
+done

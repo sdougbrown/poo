@@ -112,11 +112,14 @@ type Spec struct {
 // dropped or let through. A manifest names one of its two kinds.
 //
 // A command filter is one process per record. The record arrives on the
-// filter's standard input; the record it writes to its standard output is
-// the one delivered, and it may add a `data` object beside its text; an
-// empty standard output drops the record; and a nonzero exit, or output
-// that is not a record, fails the attempt. It fails closed: the feed
-// suspends rather than delivering what the filter did not pass.
+// filter's standard input; the records it writes to its standard output
+// are the ones delivered, in the order it wrote them, and each may add a
+// `data` object beside its text. An empty standard output drops the
+// record. One record may become several, so a filter adapts a source whose
+// shape poo does not know. The output is all or nothing: a value that is
+// not a record, or output past the caps one run may write, fails the
+// attempt. It fails closed: the feed suspends rather than delivering what
+// the filter did not pass.
 //
 // A question filter asks the session's decision model the question about
 // a message's text, and drops the message when the answer is no with at

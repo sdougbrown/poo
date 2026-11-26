@@ -1,0 +1,7 @@
+#!/bin/sh
+# A fixture filter: it answers with a record, one that is not, and a record
+# again. One value that is not a record leaves the whole output undelivered.
+cat >/dev/null
+printf '{"text": "the first message"}\n'
+printf '{"from": "alice"}\n'
+printf '{"text": "the third message"}\n'

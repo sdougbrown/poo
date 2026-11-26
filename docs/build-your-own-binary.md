@@ -449,8 +449,9 @@ refused.
 
 **Filters before delivery.** An optional `filter` names one of two kinds:
 a `question`, put to the session's decision model, or a `command`, run as
-one process per record. A manifest that names both fails the load. A feed
-with no filter delivers what its command writes.
+one process per record and free to answer with no record or with several.
+A manifest that names both fails the load. A feed with no filter delivers
+what its command writes.
 
 **Question filter.** The question applies to the text of every message,
 including messages emitted while a run is active. A message whose text is
@@ -513,8 +514,10 @@ A manifest question, by contrast, still delivers unfiltered and warns,
 because the operator chose it.
 
 **Command filter.** The filter's argv runs once per record. The record
-the feed wrote arrives on the filter's standard input, and the record the
-filter writes to its standard output is the one delivered. For example:
+the feed wrote arrives on the filter's standard input, and the records the
+filter writes to its standard output are the ones delivered, in the order
+it wrote them. One source record may become any number of inputs, which is
+how a filter adapts a source whose shape poo does not know. For example:
 
 ```json
 "filter": {
@@ -546,6 +549,12 @@ printf '%s\n' "$record" | jq '
   }'
 ```
 
+The standard output is a stream of JSON values, one record each: `jq -c`'s
+one-value-per-line output and jq's default pretty-printed output both
+parse, and a stream may mix them. The output is all or nothing. If any
+value is not a record, none of the run's records is delivered and the
+attempt fails closed.
+
 The empty standard output is the drop: a record the filter withholds is
 one the session never queues. The `text` it forwards is bounded at 2000
 characters, and the `from` it writes drops the author, so the model reads
@@ -559,19 +568,22 @@ no filter has no `data`, and the field is ignored there.
 The filter runs the way the feed's own command runs: the same executor,
 the same directory, and the same environment, the manifest's `env`
 entries and the library's benign names. A record is at most 1 MiB on both
-sides of the filter.
+sides of the filter, and one run's whole output is at most 4 MiB and 256
+records. Past either of the run's caps the attempt fails closed, the way
+it does for a record past 1 MiB.
 
 The command filter fails closed. An empty standard output drops the
-record, which is how a filter withholds one. A nonzero exit, or output
-that is not a record, fails the attempt, and the feed is suspended: it
-does not restart, whatever `restart` says. The session wakes with a
-report of its own, delivered as a feed input whose text is a `<feed>`
-element with `fault` and `log` attributes: the fault's code, and the path
-of a file beside the session's own that holds the filter's diagnostics
-for the attempt. Those diagnostics never ride the input. The report ends
-with how the feed starts again: `subscribe_feed` with the feed's name and
-scope, for a feed a subscription started. One suspension is one wake, and
-a further fault that lands before the report is delivered joins it.
+record, which is how a filter withholds one. A nonzero exit, output that
+is not a record, or output past a cap fails the attempt, and the feed is
+suspended: it does not restart, whatever `restart` says. The session wakes
+with a report of its own, delivered as a feed input whose text is a
+`<feed>` element with `fault` and `log` attributes: the fault's code, and
+the path of a file beside the session's own that holds the filter's
+diagnostics for the attempt. Those diagnostics never ride the input. The
+report ends with how the feed starts again: `subscribe_feed` with the
+feed's name and scope, for a feed a subscription started. One suspension
+is one wake, and a further fault that lands before the report is
+delivered joins it.
 
 **The model reads a feed's input as outside input.** The message is one
 XML element: `<feed name="<name>" from="<from>">` around the text, with

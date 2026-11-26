@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"time"
 
 	"github.com/sdougbrown/poo"
@@ -146,15 +148,33 @@ func questionOf(io poo.FeedIO, manifest *feed.Filter) (poo.FeedFilterPrompt, boo
 // is the filter's, not the feed's output.
 const maxFilterStderrBytes = 64 << 10
 
+// maxFilterOutputBytes is the most one filter run's stdout may be.
+//
+// A filter fans a record out, so its output is a stream of records rather
+// than one, and the cap is the run's rather than a record's: a run that
+// writes past it is one whose output the session will not hold in memory.
+const maxFilterOutputBytes = 4 << 20
+
+// maxFilterRecords is the most records one filter run may write. The cap
+// bounds what one source record becomes, so a filter cannot flood the
+// feed's backlog from a single record.
+const maxFilterRecords = 256
+
 // commandFilterEmit wraps delivery for a feed with a validated manifest
-// command: one process per record, and a record out for the record in.
+// command: one process per record, and any number of records out for the
+// record in.
 //
 // The filter runs the way the feed's own command runs — the same executor,
 // the same directory and the same environment — so it reaches what the
-// feed reaches and nothing more. Its record's text, sender, image and
-// `data` object are what the session queues; empty output drops the record;
-// and a nonzero exit or output that is not a record is the fault that
-// suspends the feed.
+// feed reaches and nothing more. Its records' text, sender, image and
+// `data` object are what the session queues, in the order the filter wrote
+// them; empty output drops the record; and a nonzero exit or output that is
+// not a record is the fault that suspends the feed.
+//
+// One run's output is all or nothing: if any value in it is not a record,
+// none of the run's records is delivered. What was emitted stands, though:
+// a session that refuses one record partway through the run keeps the ones
+// before it, and the attempt ends with that refusal.
 func commandFilterEmit(ctx context.Context, io poo.FeedIO, spec feed.Spec, ex exec.Executor, env func(string) (string, bool), session func(scope, name string) (string, error)) func(string, string, *poo.FeedImage, json.RawMessage) error {
 	filter := *spec.Filter
 	// The environment resolves once per attempt, the way the feed's own
@@ -202,22 +222,21 @@ func commandFilterEmit(ctx context.Context, io poo.FeedIO, spec feed.Spec, ex ex
 				Stderr:  stderr.bytes(),
 			}
 		}
-		message, delivered, err := filterOutput(out)
-		if err != nil {
-			return &poo.FeedFault{
-				Code:    poo.FeedFaultOutput,
-				Message: err.Error(),
-				Stderr:  stderr.bytes(),
+		messages, fault := filterOutput(out)
+		if fault != nil {
+			fault.Stderr = stderr.bytes()
+			return fault
+		}
+		for _, message := range messages {
+			var deliveredImage *poo.FeedImage
+			if message.Image != nil {
+				deliveredImage = &poo.FeedImage{Path: message.Image.Path, MediaType: message.Image.MediaType}
+			}
+			if err := io.Emit(message.From, message.Text, deliveredImage, message.Data); err != nil {
+				return err
 			}
 		}
-		if !delivered {
-			return nil
-		}
-		var deliveredImage *poo.FeedImage
-		if message.Image != nil {
-			deliveredImage = &poo.FeedImage{Path: message.Image.Path, MediaType: message.Image.MediaType}
-		}
-		return io.Emit(message.From, message.Text, deliveredImage, message.Data)
+		return nil
 	}
 }
 
@@ -258,37 +277,75 @@ type filterMessage struct {
 	Data json.RawMessage `json:"data,omitempty"`
 }
 
-// filterOutput reads what a filter wrote.
+// filterOutput reads what a filter wrote: a stream of JSON values, one
+// record each.
 //
-// An empty output drops the record, which is how a filter says the feed's
-// record is not one to deliver. Anything else is one record: a lone JSON
-// object naming the message, with a `data` object beside its text when the
-// record is structured.
-func filterOutput(out []byte) (filterMessage, bool, error) {
-	trimmed := bytes.TrimSpace(out)
-	if len(trimmed) == 0 {
-		return filterMessage{}, false, nil
+// The stream is the fan-out: a filter answers the one record it read with
+// as many records as its source holds, and `jq`'s one-value-per-line output
+// and its pretty-printed output are the same stream to the decoder. Empty
+// output drops the record, which is how a filter says the feed's record is
+// not one to deliver.
+//
+// The output is all or nothing. A value that is not a record, a record past
+// the bytes one may be, or a run past the records it may write leaves the
+// whole output undelivered, and the fault is the one that suspends the
+// feed. The fault carries no diagnostics: the caller that holds them
+// attaches them.
+func filterOutput(out []byte) ([]filterMessage, *poo.FeedFault) {
+	var messages []filterMessage
+	decoder := json.NewDecoder(bytes.NewReader(out))
+	for {
+		start := decoder.InputOffset()
+		var message filterMessage
+		if err := decoder.Decode(&message); err != nil {
+			if errors.Is(err, io.EOF) {
+				return messages, nil
+			}
+			return nil, &poo.FeedFault{
+				Code:    poo.FeedFaultOutput,
+				Message: fmt.Sprintf("the filter's output is not a record: %v", err),
+			}
+		}
+		// The record's own bytes are what the cap measures: the decoder's
+		// position advances over the value it read, whitespace included.
+		if size := decoder.InputOffset() - start; size > feed.MaxLineBytes {
+			return nil, &poo.FeedFault{
+				Code:    poo.FeedFaultRecord,
+				Message: fmt.Sprintf("the filter wrote more than the %d bytes a record is", feed.MaxLineBytes),
+			}
+		}
+		if message.Text == "" && message.Image == nil {
+			return nil, &poo.FeedFault{
+				Code:    poo.FeedFaultOutput,
+				Message: "the filter's record has no text",
+			}
+		}
+		if message.Image != nil && message.Image.Path == "" {
+			return nil, &poo.FeedFault{
+				Code:    poo.FeedFaultOutput,
+				Message: "the filter's record names an image with no path",
+			}
+		}
+		// A filter that forwards jq's `{text, from, data}` writes a null
+		// data for a record with none. Null is the absence of data, not a
+		// record the session refuses: the record is delivered without it.
+		if bytes.Equal(bytes.TrimSpace(message.Data), []byte("null")) {
+			message.Data = nil
+		}
+		if len(message.Data) > 0 && !isJSONObject(message.Data) {
+			return nil, &poo.FeedFault{
+				Code:    poo.FeedFaultOutput,
+				Message: "the filter's record has a data that is not an object",
+			}
+		}
+		if len(messages) == maxFilterRecords {
+			return nil, &poo.FeedFault{
+				Code:    poo.FeedFaultOutput,
+				Message: fmt.Sprintf("the filter wrote more than the %d records one filter run may", maxFilterRecords),
+			}
+		}
+		messages = append(messages, message)
 	}
-	var message filterMessage
-	if err := json.Unmarshal(trimmed, &message); err != nil {
-		return filterMessage{}, false, fmt.Errorf("the filter's output is not a record: %v", err)
-	}
-	if message.Text == "" && message.Image == nil {
-		return filterMessage{}, false, fmt.Errorf("the filter's record has no text")
-	}
-	if message.Image != nil && message.Image.Path == "" {
-		return filterMessage{}, false, fmt.Errorf("the filter's record names an image with no path")
-	}
-	// A filter that forwards jq's `{text, from, data}` writes a null data
-	// for a record with none. Null is the absence of data, not a record
-	// the session refuses: the record is delivered without it.
-	if bytes.Equal(bytes.TrimSpace(message.Data), []byte("null")) {
-		message.Data = nil
-	}
-	if len(message.Data) > 0 && !isJSONObject(message.Data) {
-		return filterMessage{}, false, fmt.Errorf("the filter's record has a data that is not an object")
-	}
-	return message, true, nil
 }
 
 // isJSONObject reports whether raw is one JSON object and nothing else.
@@ -300,13 +357,14 @@ func isJSONObject(raw []byte) bool {
 // runFilter runs one filter for one record and returns what it wrote and
 // its exit status.
 //
-// The output is held to the record cap: a filter that writes more than a
-// record may be is a filter whose output the session cannot read, and the
-// bytes past the cap are dropped rather than held. The diagnostics are
-// kept for the fault log. A filter that does not start at all is a plain
-// failure, not a fault: nothing was asked of it and nothing was refused.
+// The output is held to the run's cap: a filter that writes past it is a
+// filter whose records the session cannot read, and the bytes past the cap
+// are dropped rather than held. A record's own cap is the decoder's to
+// enforce, over the value it read. The diagnostics are kept for the fault
+// log. A filter that does not start at all is a plain failure, not a fault:
+// nothing was asked of it and nothing was refused.
 func runFilter(ctx context.Context, ex exec.Executor, command exec.Command, stderr *limitedBuffer) ([]byte, int, error) {
-	out := &limitedBuffer{limit: feed.MaxLineBytes}
+	out := &limitedBuffer{limit: maxFilterOutputBytes}
 	command.Stderr = stderr
 	proc, err := ex.Start(ctx, command, out)
 	if err != nil {
@@ -318,8 +376,8 @@ func runFilter(ctx context.Context, ex exec.Executor, command exec.Command, stde
 	}
 	if out.overflowed() {
 		return nil, code, &poo.FeedFault{
-			Code:    poo.FeedFaultRecord,
-			Message: fmt.Sprintf("the filter wrote more than the %d bytes a record is", feed.MaxLineBytes),
+			Code:    poo.FeedFaultOutput,
+			Message: fmt.Sprintf("the filter wrote more than the %d bytes one filter run may", maxFilterOutputBytes),
 			Stderr:  stderr.bytes(),
 		}
 	}

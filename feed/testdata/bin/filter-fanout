@@ -1,0 +1,7 @@
+#!/bin/sh
+# A fixture filter: it answers the one record it reads with three, which is
+# the fan-out every command feed may use.
+cat >/dev/null
+printf '{"text": "the first message", "from": "alice"}\n'
+printf '{"text": "the second message", "from": "alice"}\n'
+printf '{"text": "the third message", "from": "alice"}\n'

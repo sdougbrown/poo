@@ -1,5 +1,7 @@
 #!/bin/sh
-# A fixture filter: it writes more than a record may be to its output, so
-# the attempt's output cap is the fault that suspends the feed.
+# A fixture filter: it writes one record that is more than a record may be,
+# so the attempt's record cap is the fault that suspends the feed.
 cat >/dev/null
+printf '{"text": "'
 head -c 1200000 /dev/zero | tr '\0' 'x'
+printf '"}\n'

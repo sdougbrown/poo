@@ -1,0 +1,8 @@
+#!/bin/sh
+# A fixture filter: it answers with more records than one run may write.
+cat >/dev/null
+i=0
+while [ "$i" -lt 257 ]; do
+	printf '{"text": "record %d"}\n' "$i"
+	i=$((i + 1))
+done
