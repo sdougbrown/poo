@@ -2,8 +2,11 @@
   "version": 1,
   "tools": {
     "avenor_spawn": {
-      "description": "Start an Avenor child whose messages return to this conversation. Use the returned runtime_id with avenor_status or avenor_result.",
-      "command": ["avenor", "spawn"],
+      "description": "Start an Avenor child and wait for its spawn result: runtime_id, session_id, sentinel_file. The runtime_id is the handle for avenor_status, avenor_await and avenor_result; the label is what you pass if you named one. Returns when the child is registered, not when its work is done.",
+      "command": [
+        "avenor",
+        "spawn"
+      ],
       "env": {
         "AVENOR_BIND_HOST": "poo",
         "AVENOR_BIND_SESSION": "session:id"
@@ -11,48 +14,139 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "prompt": {"type": "string", "description": "The task for the child."},
-          "dir": {"type": "string", "description": "The child's working directory."},
-          "label": {"type": "string", "description": "A short display label."},
-          "agent": {"type": "string", "description": "An optional named agent role."}
+          "prompt": {
+            "type": "string",
+            "description": "The task for the child."
+          },
+          "dir": {
+            "type": "string",
+            "description": "The child's working directory."
+          },
+          "label": {
+            "type": "string",
+            "description": "A short display label, unique per conversation."
+          },
+          "agent": {
+            "type": "string",
+            "description": "An optional named agent role."
+          }
         },
-        "required": ["prompt", "dir"],
+        "required": [
+          "prompt",
+          "dir"
+        ],
         "additionalProperties": false
       },
       "bindings": [
-        {"property": "prompt", "style": "stdin", "flag": "--prompt-stdin"},
-        {"property": "dir", "style": "equals", "flag": "--dir"},
-        {"property": "label", "style": "equals", "flag": "--label"},
-        {"property": "agent", "style": "equals", "flag": "--agent"}
+        {
+          "property": "prompt",
+          "style": "stdin",
+          "flag": "--prompt-stdin"
+        },
+        {
+          "property": "dir",
+          "style": "equals",
+          "flag": "--dir"
+        },
+        {
+          "property": "label",
+          "style": "equals",
+          "flag": "--label"
+        },
+        {
+          "property": "agent",
+          "style": "equals",
+          "flag": "--agent"
+        }
       ],
-      "output": {"mode": "raw"}
+      "output": {
+        "mode": "raw"
+      }
     },
     "avenor_status": {
-      "description": "Read an Avenor child's status or wait for it to complete a turn. If the child is waiting for your answer, handle the inbox message before waiting again.",
-      "command": ["avenor", "status", "--timeout-ms=30000"],
+      "description": "Read one child's status once: state, phase, pending permission. It does not wait. Call it between avenor_await calls to see where a run is, and answer an inbox message before waiting again if the status shows the child is waiting on you.",
+      "command": [
+        "avenor",
+        "status"
+      ],
       "env": {
         "AVENOR_BIND_HOST": "poo",
         "AVENOR_BIND_SESSION": "session:id"
       },
-      "timeout": "35s",
       "inputSchema": {
         "type": "object",
         "properties": {
-          "runtime": {"type": "string", "description": "The runtime_id from avenor_spawn."},
-          "wait": {"type": "string", "enum": ["turn_complete"], "description": "Wait up to 30 seconds for the turn to complete."}
+          "runtime": {
+            "type": "string",
+            "description": "The runtime_id from avenor_spawn."
+          }
         },
-        "required": ["runtime"],
+        "required": [
+          "runtime"
+        ],
         "additionalProperties": false
       },
       "bindings": [
-        {"property": "runtime", "style": "equals", "flag": "--runtime"},
-        {"property": "wait", "style": "equals", "flag": "--wait"}
+        {
+          "property": "runtime",
+          "style": "equals",
+          "flag": "--runtime"
+        }
       ],
-      "output": {"mode": "raw"}
+      "output": {
+        "mode": "raw"
+      }
+    },
+    "avenor_await": {
+      "description": "Wait until one child reaches a terminal state, then return its complete final output. This is how you wait; avenor_result is the read you use when a run is already done. Give the wall-clock timeout a margin over the work you expect. Exit 0 means the run reached done; 10, 11 or 12 mean it failed, hit its phase timeout or was killed; 124 means your wait timed out before the run finished. A pending permission exits 20 with no output: handle the inbox message, then await again.",
+      "command": [
+        "avenor",
+        "await",
+        "--until=done",
+        "--print-output",
+        "--format=json",
+        "--timeout=35m"
+      ],
+      "env": {
+        "AVENOR_BIND_HOST": "poo",
+        "AVENOR_BIND_SESSION": "session:id"
+      },
+      "timeout": "36m",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "type": "string",
+            "description": "The runtime_id from avenor_spawn, the child's run id, or its label."
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "additionalProperties": false
+      },
+      "bindings": [
+        {
+          "property": "target",
+          "style": "positional"
+        }
+      ],
+      "output": {
+        "mode": "json",
+        "success_exit_codes": [
+          0,
+          10,
+          11,
+          12
+        ]
+      }
     },
     "avenor_result": {
-      "description": "Read an Avenor child's final output after its turn completes.",
-      "command": ["avenor", "result"],
+      "description": "Read one child's complete final reply from a run that already finished. It reads once and returns; for a run still going, call avenor_await instead.",
+      "command": [
+        "avenor",
+        "result"
+      ],
       "env": {
         "AVENOR_BIND_HOST": "poo",
         "AVENOR_BIND_SESSION": "session:id"
@@ -60,19 +154,33 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "runtime": {"type": "string", "description": "The runtime_id from avenor_spawn."}
+          "runtime": {
+            "type": "string",
+            "description": "The runtime_id from avenor_spawn."
+          }
         },
-        "required": ["runtime"],
+        "required": [
+          "runtime"
+        ],
         "additionalProperties": false
       },
       "bindings": [
-        {"property": "runtime", "style": "equals", "flag": "--runtime"}
+        {
+          "property": "runtime",
+          "style": "equals",
+          "flag": "--runtime"
+        }
       ],
-      "output": {"mode": "raw"}
+      "output": {
+        "mode": "raw"
+      }
     },
     "avenor_message": {
-      "description": "Reply to an Avenor message received in this conversation's inbox.",
-      "command": ["avenor", "message"],
+      "description": "Message another agent run on this conversation's supervisor: tell sends without waiting, ask sends and waits up to the timeout for one reply, withdraw retracts your open ask. Reply to an inbound message through the inbox feed's avenor_reply instead.",
+      "command": [
+        "avenor",
+        "message"
+      ],
       "env": {
         "AVENOR_BIND_HOST": "poo",
         "AVENOR_BIND_SESSION": "session:id"
@@ -80,19 +188,69 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "action": {"type": "string", "enum": ["reply"]},
-          "reply_to": {"type": "string", "description": "The message ID provided by the inbox."},
-          "message": {"type": "string", "description": "Your answer to the child."}
+          "action": {
+            "type": "string",
+            "enum": [
+              "tell",
+              "ask",
+              "withdraw"
+            ],
+            "description": "tell: deliver without a reply edge. ask: deliver and wait for one reply. withdraw: retract an ask you sent."
+          },
+          "target": {
+            "type": "string",
+            "description": "Recipient run id or peer label. A tell or ask needs a live target."
+          },
+          "message": {
+            "type": "string",
+            "description": "Text the recipient reads; an ask's text is the question it answers."
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 600000,
+            "description": "How long an ask waits for its reply, 0 to 600000 ms; absent uses the 600000 ms cap."
+          },
+          "message_id": {
+            "type": "string",
+            "description": "For withdraw: the message id of the ask to retract."
+          }
         },
-        "required": ["action", "reply_to", "message"],
+        "required": [
+          "action"
+        ],
         "additionalProperties": false
       },
       "bindings": [
-        {"property": "action", "style": "equals", "flag": "--action"},
-        {"property": "reply_to", "style": "equals", "flag": "--reply-to"},
-        {"property": "message", "style": "stdin", "flag": "--message-stdin"}
+        {
+          "property": "action",
+          "style": "equals",
+          "flag": "--action"
+        },
+        {
+          "property": "target",
+          "style": "equals",
+          "flag": "--target"
+        },
+        {
+          "property": "message",
+          "style": "stdin",
+          "flag": "--message-stdin"
+        },
+        {
+          "property": "timeout_ms",
+          "style": "equals",
+          "flag": "--timeout-ms"
+        },
+        {
+          "property": "message_id",
+          "style": "equals",
+          "flag": "--message-id"
+        }
       ],
-      "output": {"mode": "raw"}
+      "output": {
+        "mode": "raw"
+      }
     }
   }
 }
