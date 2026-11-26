@@ -25,6 +25,10 @@ type daemonHandle struct {
 	stdin *os.File
 	mu    sync.Mutex
 	lines []string
+	// stderrDone closes when the daemon's stderr ends: the pipe the
+	// scanner reads ends with the process, so its closing is the
+	// process's exit.
+	stderrDone chan struct{}
 }
 
 // startDaemon starts the daemon with the given arguments and returns
@@ -33,7 +37,7 @@ type daemonHandle struct {
 func startDaemon(t *testing.T, args ...string) *daemonHandle {
 	t.Helper()
 	binary := buildTheBinary(t, nil)
-	h := &daemonHandle{t: t}
+	h := &daemonHandle{t: t, stderrDone: make(chan struct{})}
 	h.cmd = exec.Command(binary, args...)
 	null, err := os.Open(os.DevNull)
 	if err != nil {
@@ -54,6 +58,7 @@ func startDaemon(t *testing.T, args ...string) *daemonHandle {
 			h.lines = append(h.lines, scanner.Text())
 			h.mu.Unlock()
 		}
+		close(h.stderrDone)
 	}()
 	if err := h.cmd.Start(); err != nil {
 		t.Fatalf("starting the daemon: %v", err)
@@ -94,6 +99,19 @@ func (h *daemonHandle) allLines() []string {
 	out := make([]string, len(h.lines))
 	copy(out, h.lines)
 	return out
+}
+
+// alive reports whether the daemon is still running. Its stderr ends
+// with the process — the pipe the scanner reads closes when the only
+// writer exits — so this sees an exit that a Signal(0) check cannot:
+// the signal succeeds on a process that exited but was not reaped.
+func (h *daemonHandle) alive() bool {
+	select {
+	case <-h.stderrDone:
+		return false
+	default:
+		return true
+	}
 }
 
 // waitExit waits for the daemon to exit and returns its exit code.
@@ -223,10 +241,15 @@ func TestTheDaemonStaysAliveOnAFeed(t *testing.T) {
 	}
 	waitRecord(t, sessionLog(dir, sessionID), "run.settled")
 
-	// The daemon is still alive: it has not exited.
-	time.Sleep(500 * time.Millisecond)
-	if err := daemon.cmd.Process.Signal(syscall.Signal(0)); err != nil {
-		t.Fatalf("the daemon exited before the check: %v", err)
+	// The daemon is still alive over a window, not at one moment: an
+	// idle shutdown or a late-exit bug fires after a single check
+	// would have passed.
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if !daemon.alive() {
+			t.Fatalf("the daemon exited after its wake: %v", daemon.allLines())
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 	if err := daemon.cmd.Process.Signal(syscall.SIGTERM); err != nil {
 		t.Fatalf("signalling the daemon: %v", err)
