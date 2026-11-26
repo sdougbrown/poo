@@ -267,6 +267,30 @@ func (s *Store) Create(ctx context.Context, created *poo.SessionCreatedRecord) (
 	return id, nil
 }
 
+// Metadata returns the header of a session the store has not opened.
+//
+// The read takes no authority: it reads the row the session's create
+// wrote and does not open the session. A session the store does not hold
+// is its not-found failure.
+func (s *Store) Metadata(ctx context.Context, id string) (session.Metadata, error) {
+	if err := session.ValidateID(id); err != nil {
+		return session.Metadata{}, err
+	}
+	var metadataJSON string
+	err := s.db.QueryRowContext(ctx, `SELECT metadata_json FROM sessions WHERE id = ?`, id).Scan(&metadataJSON)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return session.Metadata{}, session.ErrSessionNotFound
+		}
+		return session.Metadata{}, &session.Error{Code: session.CodeStoreError, Message: "reading the session's header: " + id, Err: err}
+	}
+	var meta session.Metadata
+	if err := json.Unmarshal([]byte(metadataJSON), &meta); err != nil {
+		return session.Metadata{}, &session.Error{Code: session.CodeStoreError, Message: "reading the session's header: " + id, Err: err}
+	}
+	return meta, nil
+}
+
 // takeOwner takes the owner on a session: the lease, when the store
 // opens sessions with a lease. The authority is held for the store's own
 // life — a lease's heartbeat ends only at its release — so it takes no

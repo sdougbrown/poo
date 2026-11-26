@@ -23,6 +23,7 @@ import (
 	"github.com/sdougbrown/poo/profile/search"
 	"github.com/sdougbrown/poo/server"
 	"github.com/sdougbrown/poo/session"
+	"github.com/sdougbrown/poo/session/sqlite"
 	"github.com/sdougbrown/poo/tool/grep"
 	"github.com/sdougbrown/poo/tool/read"
 	"github.com/sdougbrown/poo/wire"
@@ -1041,6 +1042,62 @@ func durableServedSettings(t *testing.T, profile, store string) *config.Settings
 		t.Fatalf("decoding the settings: %v", err)
 	}
 	return settings
+}
+
+// TestAServedDurableSqliteSessionLoads covers the load path over a store
+// that keeps no log: a durable session lives in the sqlite store, so its
+// header is read through that store and the session resumes.
+func TestAServedDurableSqliteSessionLoads(t *testing.T) {
+	const storeName = "server_test_sqlite"
+	// The server tests are the binary that registers the durable store,
+	// as poo does: the settings accept only "file" or "sqlite", and the
+	// open dispatches on the resolved name.
+	if err := config.RegisterStoreBackend(storeName, func(dir string, settings config.DurableSettings) (session.Store, error) {
+		lease := sqlite.LeaseOptions{TTL: settings.LeaseTTL}
+		durable := session.DurableOptions{MaxResumptions: settings.MaxResumptions}
+		return sqlite.New(filepath.Join(dir, "sessions.db"), sqlite.WithLeaseOptions(lease), sqlite.WithDurableOptions(durable))
+	}); err != nil {
+		t.Fatalf("registering the sqlite backend: %v", err)
+	}
+	settings := durableServedSettings(t, search.Name, "sqlite")
+	*settings.Session.Durable.Store = storeName
+	srv := newServer(t, settings)
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	sess, info, err := srv.Create(ctx, protocol.CreateParams{Mode: "durable", SessionDir: dir}, wire.FactoryEnv{})
+	if err != nil {
+		t.Fatalf("creating the session: %v", err)
+	}
+	id := sess.ID()
+	if _, err := os.Stat(filepath.Join(dir, id+".jsonl")); !os.IsNotExist(err) {
+		t.Fatalf("the sqlite session wrote a log: %v", err)
+	}
+	if err := sess.Close(); err != nil {
+		t.Fatalf("closing the session: %v", err)
+	}
+	if err := info.Release(); err != nil {
+		t.Fatalf("releasing the store: %v", err)
+	}
+
+	loaded, info, err := srv.Load(ctx, protocol.LoadParams{SessionID: id, SessionDir: dir}, wire.FactoryEnv{})
+	if err != nil {
+		t.Fatalf("loading the session: %v", err)
+	}
+	defer func() {
+		if err := loaded.Close(); err != nil {
+			t.Errorf("closing the loaded session: %v", err)
+		}
+		if err := info.Release(); err != nil {
+			t.Errorf("releasing the store: %v", err)
+		}
+	}()
+	if loaded.ID() != id {
+		t.Errorf("the loaded session is %q, want %q", loaded.ID(), id)
+	}
+	if info.Mode != "durable" {
+		t.Errorf("the loaded session's mode is %q, want durable", info.Mode)
+	}
 }
 
 // The handshake announces the durable mode only when the settings'

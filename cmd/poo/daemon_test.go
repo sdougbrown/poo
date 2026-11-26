@@ -458,3 +458,67 @@ func TestTheDaemonReleasesTheLeaseOnShutdown(t *testing.T) {
 		t.Errorf("the lease is still held after the shutdown: %v", err)
 	}
 }
+
+// daemonSqliteSettings writes the settings a daemon test runs under with
+// the durable store's sqlite backend: the endpoint, the session's
+// directory, the feed manifest, and a tiny lease TTL, so a dead owner is
+// taken over in about a second.
+func daemonSqliteSettings(t *testing.T, dir, endpointURL, manifestDir string) string {
+	t.Helper()
+	path := filepath.Join(dir, "settings.json")
+	body := `{"version":1,
+		"endpoints":{"test":{"endpoint":"` + endpointURL + `/v1"}},
+		"models":{"test-model":{"endpoint":"test","model_id":"test-model","api":"chat_completions","tools_mode":"native","ops":["chat"],"context_limit":32768}},
+		"roles":{"chat":"test-model"},
+		"session":{"durable":{"lease_ttl_s":1,"store":"sqlite"}},
+		"feeds":{"paths":["` + manifestDir + `"],"defaults":false}}`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("writing the settings: %v", err)
+	}
+	return path
+}
+
+// TestTheDaemonResumesADurableSqliteSession covers the existence probe: a
+// sqlite session keeps no log, so the daemon finds the session it created
+// through the store on the next start and resumes it, instead of taking
+// the create path and failing that the session already exists.
+func TestTheDaemonResumesADurableSqliteSession(t *testing.T) {
+	endpoint := newFakeEndpoint(t, doneAnswer())
+	dir := t.TempDir()
+	manifestDir := t.TempDir()
+	settings := daemonSqliteSettings(t, dir, endpoint.URL, manifestDir)
+	sessionDir := filepath.Join(dir, "sessions")
+	sessionID := "durable-session"
+
+	first := startDaemon(t,
+		"daemon",
+		"--settings", settings,
+		"--working-dir", dir,
+		"--session-dir", sessionDir,
+		"--session", sessionID,
+	)
+	first.waitLine("poo daemon: started")
+	first.waitLine("poo daemon: session " + sessionID)
+	// The session lives in the sqlite database, and no log holds it.
+	if _, err := os.Stat(filepath.Join(sessionDir, sessionID+".jsonl")); !os.IsNotExist(err) {
+		t.Fatalf("the sqlite session wrote a log: %v", err)
+	}
+	// The daemon dies without releasing its lease; the restart takes the
+	// session over once the lease expires.
+	_ = first.cmd.Process.Kill()
+	first.waitExit()
+	time.Sleep(2 * time.Second)
+
+	restart := startDaemon(t,
+		"daemon",
+		"--settings", settings,
+		"--working-dir", dir,
+		"--session-dir", sessionDir,
+		"--session", sessionID,
+	)
+	defer func() { _ = restart.cmd.Process.Kill() }()
+	restart.waitLine("poo daemon: started")
+	restart.waitLine("poo daemon: session " + sessionID)
+	_ = restart.cmd.Process.Kill()
+	restart.waitExit()
+}

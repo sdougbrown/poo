@@ -96,6 +96,18 @@ func (m *Memory) Load(ctx context.Context, id string) (*Loaded, error) {
 	return nil, ErrSessionNotFound
 }
 
+// Metadata fails: an ephemeral session is not on disk.
+//
+// The memory holds the session that is running, and the core keeps its
+// records. A session that was never written cannot be read back, which is
+// what Load says too.
+func (m *Memory) Metadata(ctx context.Context, id string) (Metadata, error) {
+	if err := ValidateID(id); err != nil {
+		return Metadata{}, err
+	}
+	return Metadata{}, ErrSessionNotFound
+}
+
 // Pending returns the operations the memory's session has not resolved.
 func (m *Memory) Pending(ctx context.Context, id string) (*Pending, error) {
 	return pendingOf(id, m.Records()), nil

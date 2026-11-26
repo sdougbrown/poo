@@ -587,21 +587,36 @@ func (f *Server) Load(ctx context.Context, params protocol.LoadParams, env wire.
 	}
 	// The session's own profile decides the tools it runs with, and its
 	// own model decides the endpoint it talks to. The header says both,
-	// and it is read before the session is loaded.
-	meta, err := session.MetadataOf(dir, params.SessionID)
+	// and the store that holds the session is what reads it: the process's
+	// own store is opened first, and a session of another mode is reopened
+	// by the store that mode names.
+	store, err := f.runtime.OpenStore(f.runtime.SessionMode, dir)
 	if err != nil {
+		return nil, nil, err
+	}
+	meta, err := store.Metadata(ctx, params.SessionID)
+	if err != nil {
+		_ = store.Close()
 		return nil, nil, err
 	}
 	runtime, err := f.runtimeForLoad(meta)
 	if err != nil {
+		_ = store.Close()
 		return nil, nil, err
 	}
-	// The store is the session's own mode: a durable session's records
-	// go to the store the settings open, and its unsettled run is
-	// planned for a continuation by the store's recovery.
-	store, err := runtime.OpenStore(string(meta.Mode), dir)
-	if err != nil {
-		return nil, nil, err
+	// The header's mode is the session's own. The open by that mode is the
+	// refusal's one owner, so a process in another mode refuses the
+	// session with CodeUnsupported, the way it always has. A session of
+	// the process's own mode keeps the store already opened.
+	if string(meta.Mode) != f.runtime.SessionMode {
+		_ = store.Close()
+		// The store is the session's own mode: a durable session's records
+		// go to the store the settings open, and its unsettled run is
+		// planned for a continuation by the store's recovery.
+		store, err = runtime.OpenStore(string(meta.Mode), dir)
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 	recorder := &session.Recording{Store: store}
 	resumed, err := runtime.ResumeSession(ctx, recorder, params.SessionID, poo.WithObserver(env.Observer))

@@ -53,9 +53,9 @@ func CheckMode(mode Mode) error {
 
 // Store holds sessions' records.
 //
-// A store creates sessions, loads them, lists them and prunes them. It
-// implements poo.RecordSink, so a caller hands it to a core session as
-// the session's sink.
+// A store creates sessions, reads a session's header, loads them, lists
+// them and prunes them. It implements poo.RecordSink, so a caller hands
+// it to a core session as the session's sink.
 type Store interface {
 	poo.RecordSink
 
@@ -67,6 +67,13 @@ type Store interface {
 	// Create starts a session in the store and makes it the store's
 	// current session. It returns the session's id.
 	Create(ctx context.Context, created *poo.SessionCreatedRecord) (string, error)
+
+	// Metadata returns the header of a session the store has not opened.
+	//
+	// The read takes no authority: a caller may learn what a session was
+	// before it takes the lock on it. A session the store does not hold is
+	// its not-found failure.
+	Metadata(ctx context.Context, id string) (Metadata, error)
 
 	// Load reads a session's records, recovers the session, and makes
 	// it the store's current session.
@@ -425,6 +432,15 @@ func (s *FileStore) writeSessionFile(ctx context.Context, path string, created *
 		return &Error{Code: CodeStoreError, Message: "syncing " + s.dir, Err: err}
 	}
 	return nil
+}
+
+// Metadata returns the header of a session the store has not opened.
+//
+// The read takes no authority, and the file format's knowledge — the
+// format check, the migration and the codec — stays in MetadataOf, whose
+// failures are the ones a caller already maps.
+func (s *FileStore) Metadata(ctx context.Context, id string) (Metadata, error) {
+	return MetadataOf(s.dir, id)
 }
 
 // Load reads a session's records, recovers the session, and opens it.

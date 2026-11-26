@@ -211,6 +211,53 @@ func TestASessionRoundTripsThroughTheStore(t *testing.T) {
 	}
 }
 
+// TestASessionsMetadataIsReadWithoutOpeningIt covers the header read: a
+// store returns the header a session was created with, and reports a
+// session it does not hold as not found. The read takes no authority, so
+// a fresh store over the database answers it without opening the session.
+func TestASessionsMetadataIsReadWithoutOpeningIt(t *testing.T) {
+	path, store := newTestStore(t)
+	ctx := context.Background()
+	if _, err := store.Create(ctx, createdRecord("s1")); err != nil {
+		t.Fatalf("creating the session: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("closing the store: %v", err)
+	}
+
+	reader := newTestStoreAt(t, path)
+	meta, err := reader.Metadata(ctx, "s1")
+	if err != nil {
+		t.Fatalf("reading the session's metadata: %v", err)
+	}
+	if meta.SessionID != "s1" {
+		t.Errorf("the session's id is %q, want s1", meta.SessionID)
+	}
+	if meta.Mode != session.ModeLogged {
+		t.Errorf("the session's mode is %q, want logged", meta.Mode)
+	}
+	if meta.ContextLimit != 32768 {
+		t.Errorf("the context limit is %d, want 32768", meta.ContextLimit)
+	}
+	if len(meta.Tools) != 2 || meta.Tools[0].Name != "bash" || meta.Tools[1].Name != "read" {
+		t.Errorf("the session's tools are %v, want bash and read", meta.Tools)
+	}
+}
+
+// TestMetadataReportsAMissingOrInvalidSession covers the header read's
+// failures: a session the store does not hold is the store's not-found
+// failure, and an id that would name outside the store is refused.
+func TestMetadataReportsAMissingOrInvalidSession(t *testing.T) {
+	_, store := newTestStore(t)
+	ctx := context.Background()
+	if _, err := store.Metadata(ctx, "missing"); !errors.Is(err, session.ErrSessionNotFound) {
+		t.Errorf("the missing session's metadata read is %v, want %v", err, session.ErrSessionNotFound)
+	}
+	if _, err := store.Metadata(ctx, "../outside"); !errors.Is(err, session.ErrInvalidSessionID) {
+		t.Errorf("the invalid session's metadata read is %v, want %v", err, session.ErrInvalidSessionID)
+	}
+}
+
 // TestARunBoundaryAndASideEffectingResultAreSynced covers the
 // durability rule: a run's boundaries and a side-effecting tool's
 // result are on disk before the write returns.

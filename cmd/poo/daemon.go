@@ -166,7 +166,7 @@ func handleDaemon(parent context.Context, inv clicontract.Invocation, stdout, st
 	var sess *poo.Session
 	var hadPending bool
 	var pendingRunID string
-	if _, err := session.MetadataOf(session.StoreDir(store), sessionID); err == nil {
+	if _, err := store.Metadata(ctx, sessionID); err == nil {
 		// The session is there: load it, and take over its lease when
 		// the owner is dead.
 		resumed, err := runtime.ResumeSession(ctx, store, sessionID)
