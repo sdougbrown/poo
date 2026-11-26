@@ -1128,6 +1128,15 @@ func (s *Session) Close() error {
 	// The jobs are stopped before the fence, so a job's own record is
 	// written while the store still takes it.
 	s.closeJobs()
+	// The attached subsystems stop after the jobs, outside the
+	// session's lock: their processes are the session's own, and a
+	// closer that fails says so without holding anything up — the
+	// fence, the writes and the flush below still run.
+	if s.attachClose != nil {
+		if err := s.attachClose(); err != nil {
+			errs = append(errs, err)
+		}
+	}
 	// The fence refuses every write that has not registered yet, and the
 	// wait covers the ones that have, so no record follows the flush.
 	s.mu.Lock()

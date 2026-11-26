@@ -169,6 +169,11 @@ type Session struct {
 	jobCtx context.Context
 	// jobCancel stops the session's jobs.
 	jobCancel context.CancelCauseFunc
+	// attachClose stops the subsystems the session's attach started:
+	// the MCP servers its profile selected, say. It runs when the
+	// session ends, after the feeds and the jobs, and a construction
+	// that fails after the attach runs it on the way out.
+	attachClose func() error
 	// unattendedWakes counts the woken runs that followed one another
 	// with no client input in between.
 	unattendedWakes int
@@ -606,6 +611,14 @@ type Options struct {
 	// tools' sections are in it. A mutation that is nil is skipped.
 	Prompt     []func(*prompt.Builder)
 	loadPrompt func(dir string) ([]func(*prompt.Builder), error)
+	// SessionAttach starts the subsystems a live session owns beyond
+	// its tools and feeds: the MCP servers its profile selected, say.
+	//
+	// It runs once, when the session is built, after the id and the
+	// working directory are final and before anything else starts, and
+	// the close it returns runs when the session ends. Nil means the
+	// session attaches nothing.
+	SessionAttach AttachFunc
 	// PromptVariant names the prompt variant the prompt renders in.
 	//
 	// The variant picks the alternative text of the sections that
@@ -806,9 +819,6 @@ func New(opts Options, fns ...Option) (*Session, error) {
 			return nil, &ErrSessionInit{Cause: err}
 		}
 	}
-	if err := checkFeeds(opts.Feeds); err != nil {
-		return nil, &ErrSessionInit{Cause: err}
-	}
 	if opts.MaxContinuations <= 0 {
 		opts.MaxContinuations = DefaultMaxContinuations
 	}
@@ -841,7 +851,9 @@ func New(opts Options, fns ...Option) (*Session, error) {
 	}
 	// A construction that fails rolls back everything it started. The
 	// event bus's reporter is a goroutine, and no session is returned
-	// for the caller to close.
+	// for the caller to close, so the rollback is the only close the
+	// failed construction gets: the session's own context ends here,
+	// and the subsystems the attach started stop with it.
 	complete := false
 	defer func() {
 		if complete {
@@ -853,7 +865,33 @@ func New(opts Options, fns ...Option) (*Session, error) {
 		if s.jobCancel != nil {
 			s.jobCancel(nil)
 		}
+		if s.attachClose != nil {
+			_ = s.attachClose()
+		}
 	}()
+	// The session's job context is created here, under the rollback's
+	// watch, because the attach needs a context the session owns: a
+	// construction that fails after this point cancels it on the way
+	// out, so no cancellation leaks.
+	s.jobCtx, s.jobCancel = context.WithCancelCause(context.Background())
+	// The attach runs once per live session, after the id and the
+	// working directory are final and before anything else starts: the
+	// feeds, the tools' sections and the first run all see what it
+	// attached. A restore reaches this call too — it fills the id and
+	// the directory before the session is built — and the attach is not
+	// the prompt loader, so a recorded prompt skips nothing here.
+	if fn := s.opts.SessionAttach; fn != nil {
+		attach, err := fn(s.jobCtx, &Attach{SessionID: s.opts.SessionID, WorkingDir: s.opts.WorkingDir, Options: &s.opts})
+		if err != nil {
+			return nil, &ErrSessionInit{Cause: err}
+		}
+		s.attachClose = attach
+	}
+	// The feeds are checked after the attach, so the ones it appended
+	// are held to the same rule the declared ones are.
+	if err := checkFeeds(s.opts.Feeds); err != nil {
+		return nil, &ErrSessionInit{Cause: err}
+	}
 	s.est.charsPerToken = CharsPerToken
 	if opts.Logger != nil {
 		s.logs = newLogDispatcher(opts.Logger.Handler())
@@ -911,11 +949,9 @@ func New(opts Options, fns ...Option) (*Session, error) {
 			return nil, &ErrSessionInit{Cause: err}
 		}
 	}
-	// The jobs' context is created after every fallible step, so a
-	// construction that fails has no cancellation to leak. The feeds'
-	// contexts come from it, and the feeds start once the session takes
-	// runs.
-	s.jobCtx, s.jobCancel = context.WithCancelCause(context.Background())
+	// The feeds' contexts come from the session's job context, which
+	// the attach already ran under, and the feeds start once the
+	// session takes runs.
 	s.buildFeeds()
 	if !opts.feedsDeferred {
 		s.startFeeds()
