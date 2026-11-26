@@ -10,6 +10,7 @@ import (
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/internal/fileio"
+	"github.com/sdougbrown/poo/protect"
 )
 
 // reserve marks a target as busy, the way a concurrent call holds it
@@ -18,7 +19,7 @@ import (
 // still inside Call.
 func reserve(t *testing.T, dir, path string) {
 	t.Helper()
-	key := fileio.Resolve(path, dir)
+	key := protect.Resolve(fileio.Resolve(path, dir))
 	if !fileio.Reserve(key) {
 		t.Fatalf("reserving %s: the path is already held", path)
 	}
@@ -29,7 +30,7 @@ func reserve(t *testing.T, dir, path string) {
 // finishing would.
 func release(t *testing.T, dir, path string) {
 	t.Helper()
-	fileio.Release(fileio.Resolve(path, dir))
+	fileio.Release(protect.Resolve(fileio.Resolve(path, dir)))
 }
 
 // runCall prepares and runs an edit through the tool.

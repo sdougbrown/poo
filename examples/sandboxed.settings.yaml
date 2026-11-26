@@ -58,6 +58,7 @@ tools:
   read: {restrict_to_working_dir: true}
   grep: {restrict_to_working_dir: true}
   edit: {restrict_to_working_dir: true}
+  write: {restrict_to_working_dir: true}
   # A model that must not reach the network at all names fetch here.
   # The sandboxed bash above is already off it.
   disabled: [fetch]
