@@ -65,6 +65,10 @@ type SettingsFields struct {
 	RolesCompaction                 *string  "json:\"roles.compaction,omitempty\""
 	RolesDecider                    *string  "json:\"roles.decider,omitempty\""
 	SessionDir                      *string  "json:\"session.dir,omitempty\""
+	SessionDurableAutoResume        *bool    "json:\"session.durable.auto_resume,omitempty\""
+	SessionDurableLeaseTtlS         *float64 "json:\"session.durable.lease_ttl_s,omitempty\""
+	SessionDurableMaxResumptions    *float64 "json:\"session.durable.max_resumptions,omitempty\""
+	SessionDurableStore             *string  "json:\"session.durable.store,omitempty\""
 	SessionMode                     *string  "json:\"session.mode,omitempty\""
 	SessionProjectPrompt            *bool    "json:\"session.project_prompt,omitempty\""
 	SessionRetentionMaxAgeDays      *float64 "json:\"session.retention.max_age_days,omitempty\""
@@ -172,6 +176,10 @@ type SettingsAvailability struct {
 	RolesCompaction                 FieldStatus
 	RolesDecider                    FieldStatus
 	SessionDir                      FieldStatus
+	SessionDurableAutoResume        FieldStatus
+	SessionDurableLeaseTtlS         FieldStatus
+	SessionDurableMaxResumptions    FieldStatus
+	SessionDurableStore             FieldStatus
 	SessionMode                     FieldStatus
 	SessionProjectPrompt            FieldStatus
 	SessionRetentionMaxAgeDays      FieldStatus
@@ -367,6 +375,14 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 	RolesDeciderSatisfied := func() bool { v := f.RolesDecider; return v != nil && *v != "" }()
 	SessionDirEnabled := true
 	SessionDirSatisfied := func() bool { v := f.SessionDir; return v != nil && *v != "" }()
+	SessionDurableAutoResumeEnabled := true
+	SessionDurableAutoResumeSatisfied := f.SessionDurableAutoResume != nil
+	SessionDurableLeaseTtlSEnabled := true
+	SessionDurableLeaseTtlSSatisfied := f.SessionDurableLeaseTtlS != nil
+	SessionDurableMaxResumptionsEnabled := true
+	SessionDurableMaxResumptionsSatisfied := f.SessionDurableMaxResumptions != nil
+	SessionDurableStoreEnabled := true
+	SessionDurableStoreSatisfied := func() bool { v := f.SessionDurableStore; return v != nil && *v != "" }()
 	SessionModeEnabled := true
 	SessionModeSatisfied := func() bool { v := f.SessionMode; return v != nil && *v != "" }()
 	SessionProjectPromptEnabled := true
@@ -1907,15 +1923,37 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 			Valid: nil,
 			Error: "",
 		},
-		SessionMode: FieldStatus{
-			Required:  SessionModeEnabled && false,
-			Enabled:   SessionModeEnabled,
-			Satisfied: SessionModeSatisfied,
-			Fair:      f.SessionMode != nil && isValidRegexMatch(*f.SessionMode, "^(logged|ephemeral)$"),
+		SessionDurableAutoResume: FieldStatus{
+			Required:  SessionDurableAutoResumeEnabled && false,
+			Enabled:   SessionDurableAutoResumeEnabled,
+			Satisfied: SessionDurableAutoResumeSatisfied,
+			Fair:      true,
 			Reason: func() *string {
 				var reasons []string
-				if !(f.SessionMode != nil && isValidRegexMatch(*f.SessionMode, "^(logged|ephemeral)$")) && "session.mode must be logged or ephemeral" != "" {
-					reasons = append(reasons, "session.mode must be logged or ephemeral")
+				if len(reasons) == 0 {
+					return nil
+				}
+				return &reasons[0]
+			}(),
+			Reasons: func() []string {
+				var reasons []string
+				if reasons == nil {
+					reasons = []string{}
+				}
+				return reasons
+			}(),
+			Valid: nil,
+			Error: "",
+		},
+		SessionDurableLeaseTtlS: FieldStatus{
+			Required:  SessionDurableLeaseTtlSEnabled && false,
+			Enabled:   SessionDurableLeaseTtlSEnabled,
+			Satisfied: SessionDurableLeaseTtlSSatisfied,
+			Fair:      f.SessionDurableLeaseTtlS != nil && *f.SessionDurableLeaseTtlS >= 1,
+			Reason: func() *string {
+				var reasons []string
+				if !(f.SessionDurableLeaseTtlS != nil && *f.SessionDurableLeaseTtlS >= 1) && "session.durable.lease_ttl_s must be at least a second" != "" {
+					reasons = append(reasons, "session.durable.lease_ttl_s must be at least a second")
 				}
 				if len(reasons) == 0 {
 					return nil
@@ -1924,8 +1962,92 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 			}(),
 			Reasons: func() []string {
 				var reasons []string
-				if !(f.SessionMode != nil && isValidRegexMatch(*f.SessionMode, "^(logged|ephemeral)$")) && "session.mode must be logged or ephemeral" != "" {
-					reasons = append(reasons, "session.mode must be logged or ephemeral")
+				if !(f.SessionDurableLeaseTtlS != nil && *f.SessionDurableLeaseTtlS >= 1) && "session.durable.lease_ttl_s must be at least a second" != "" {
+					reasons = append(reasons, "session.durable.lease_ttl_s must be at least a second")
+				}
+				if reasons == nil {
+					reasons = []string{}
+				}
+				return reasons
+			}(),
+			Valid: nil,
+			Error: "",
+		},
+		SessionDurableMaxResumptions: FieldStatus{
+			Required:  SessionDurableMaxResumptionsEnabled && false,
+			Enabled:   SessionDurableMaxResumptionsEnabled,
+			Satisfied: SessionDurableMaxResumptionsSatisfied,
+			Fair:      f.SessionDurableMaxResumptions != nil && *f.SessionDurableMaxResumptions >= 1,
+			Reason: func() *string {
+				var reasons []string
+				if !(f.SessionDurableMaxResumptions != nil && *f.SessionDurableMaxResumptions >= 1) && "session.durable.max_resumptions must be at least one" != "" {
+					reasons = append(reasons, "session.durable.max_resumptions must be at least one")
+				}
+				if len(reasons) == 0 {
+					return nil
+				}
+				return &reasons[0]
+			}(),
+			Reasons: func() []string {
+				var reasons []string
+				if !(f.SessionDurableMaxResumptions != nil && *f.SessionDurableMaxResumptions >= 1) && "session.durable.max_resumptions must be at least one" != "" {
+					reasons = append(reasons, "session.durable.max_resumptions must be at least one")
+				}
+				if reasons == nil {
+					reasons = []string{}
+				}
+				return reasons
+			}(),
+			Valid: nil,
+			Error: "",
+		},
+		SessionDurableStore: FieldStatus{
+			Required:  SessionDurableStoreEnabled && false,
+			Enabled:   SessionDurableStoreEnabled,
+			Satisfied: SessionDurableStoreSatisfied,
+			Fair:      f.SessionDurableStore != nil && isValidRegexMatch(*f.SessionDurableStore, "^(file|sqlite)$"),
+			Reason: func() *string {
+				var reasons []string
+				if !(f.SessionDurableStore != nil && isValidRegexMatch(*f.SessionDurableStore, "^(file|sqlite)$")) && "session.durable.store must be file or sqlite" != "" {
+					reasons = append(reasons, "session.durable.store must be file or sqlite")
+				}
+				if len(reasons) == 0 {
+					return nil
+				}
+				return &reasons[0]
+			}(),
+			Reasons: func() []string {
+				var reasons []string
+				if !(f.SessionDurableStore != nil && isValidRegexMatch(*f.SessionDurableStore, "^(file|sqlite)$")) && "session.durable.store must be file or sqlite" != "" {
+					reasons = append(reasons, "session.durable.store must be file or sqlite")
+				}
+				if reasons == nil {
+					reasons = []string{}
+				}
+				return reasons
+			}(),
+			Valid: nil,
+			Error: "",
+		},
+		SessionMode: FieldStatus{
+			Required:  SessionModeEnabled && false,
+			Enabled:   SessionModeEnabled,
+			Satisfied: SessionModeSatisfied,
+			Fair:      f.SessionMode != nil && isValidRegexMatch(*f.SessionMode, "^(logged|ephemeral|durable)$"),
+			Reason: func() *string {
+				var reasons []string
+				if !(f.SessionMode != nil && isValidRegexMatch(*f.SessionMode, "^(logged|ephemeral|durable)$")) && "session.mode must be logged, ephemeral or durable" != "" {
+					reasons = append(reasons, "session.mode must be logged, ephemeral or durable")
+				}
+				if len(reasons) == 0 {
+					return nil
+				}
+				return &reasons[0]
+			}(),
+			Reasons: func() []string {
+				var reasons []string
+				if !(f.SessionMode != nil && isValidRegexMatch(*f.SessionMode, "^(logged|ephemeral|durable)$")) && "session.mode must be logged, ephemeral or durable" != "" {
+					reasons = append(reasons, "session.mode must be logged, ephemeral or durable")
 				}
 				if reasons == nil {
 					reasons = []string{}
@@ -3001,6 +3123,15 @@ func depSatisfied(f SettingsFields, name string) bool {
 	case "SessionDir":
 		v := f.SessionDir
 		return v != nil && *v != ""
+	case "SessionDurableAutoResume":
+		return f.SessionDurableAutoResume != nil
+	case "SessionDurableLeaseTtlS":
+		return f.SessionDurableLeaseTtlS != nil
+	case "SessionDurableMaxResumptions":
+		return f.SessionDurableMaxResumptions != nil
+	case "SessionDurableStore":
+		v := f.SessionDurableStore
+		return v != nil && *v != ""
 	case "SessionMode":
 		v := f.SessionMode
 		return v != nil && *v != ""
@@ -3247,7 +3378,10 @@ var ruleMeta = []RuleMetaEntry{
 	{Field: "PermissionFallback", RuleType: "check", Expr: "f.PermissionFallback != nil && isValidRegexMatch(*f.PermissionFallback, \"^(allow|deny)$\")", Reason: "permission.fallback must be allow or deny"},
 	{Field: "PermissionUnmatched", RuleType: "check", Expr: "f.PermissionUnmatched != nil && isValidRegexMatch(*f.PermissionUnmatched, \"^(allow|ask|deny)$\")", Reason: "permission.unmatched must be allow, ask or deny"},
 	{Field: "ReasoningChat", RuleType: "check", Expr: "f.ReasoningChat != nil && isValidRegexMatch(*f.ReasoningChat, \"^(default|off|minimal|low|medium|high|xhigh|([1-9][0-9]*))$\")", Reason: "reasoning.chat must be default, off, minimal, low, medium, high, xhigh or a budget in tokens"},
-	{Field: "SessionMode", RuleType: "check", Expr: "f.SessionMode != nil && isValidRegexMatch(*f.SessionMode, \"^(logged|ephemeral)$\")", Reason: "session.mode must be logged or ephemeral"},
+	{Field: "SessionDurableLeaseTtlS", RuleType: "check", Expr: "f.SessionDurableLeaseTtlS != nil && *f.SessionDurableLeaseTtlS >= 1", Reason: "session.durable.lease_ttl_s must be at least a second"},
+	{Field: "SessionDurableMaxResumptions", RuleType: "check", Expr: "f.SessionDurableMaxResumptions != nil && *f.SessionDurableMaxResumptions >= 1", Reason: "session.durable.max_resumptions must be at least one"},
+	{Field: "SessionDurableStore", RuleType: "check", Expr: "f.SessionDurableStore != nil && isValidRegexMatch(*f.SessionDurableStore, \"^(file|sqlite)$\")", Reason: "session.durable.store must be file or sqlite"},
+	{Field: "SessionMode", RuleType: "check", Expr: "f.SessionMode != nil && isValidRegexMatch(*f.SessionMode, \"^(logged|ephemeral|durable)$\")", Reason: "session.mode must be logged, ephemeral or durable"},
 	{Field: "SessionRetentionMaxAgeDays", RuleType: "check", Expr: "f.SessionRetentionMaxAgeDays != nil && *f.SessionRetentionMaxAgeDays >= 0", Reason: "session.retention.max_age_days must not be negative"},
 	{Field: "SessionRetentionMaxSessions", RuleType: "check", Expr: "f.SessionRetentionMaxSessions != nil && *f.SessionRetentionMaxSessions >= 0", Reason: "session.retention.max_sessions must not be negative"},
 	{Field: "SkillsDefault", RuleType: "disables", Expr: "f.SkillsUserPath != nil", Reason: "skills.default and skills.user_path are mutually exclusive: one names the default directory, the other the person's own"},
@@ -3643,13 +3777,40 @@ func Challenge(fieldName string, f SettingsFields, c SettingsConditions, prev Se
 		if status.Reason != nil {
 			explanations = append(explanations, "* "+*status.Reason)
 		}
+	case "SessionDurableAutoResume", "session.durable.auto_resume":
+		found = true
+		status = avail.SessionDurableAutoResume
+		if status.Reason != nil {
+			explanations = append(explanations, "* "+*status.Reason)
+		}
+	case "SessionDurableLeaseTtlS", "session.durable.lease_ttl_s":
+		found = true
+		status = avail.SessionDurableLeaseTtlS
+		if status.Reason != nil {
+			explanations = append(explanations, "* "+*status.Reason)
+		}
+		explanations = append(explanations, "* check: session.durable.lease_ttl_s must be at least a second")
+	case "SessionDurableMaxResumptions", "session.durable.max_resumptions":
+		found = true
+		status = avail.SessionDurableMaxResumptions
+		if status.Reason != nil {
+			explanations = append(explanations, "* "+*status.Reason)
+		}
+		explanations = append(explanations, "* check: session.durable.max_resumptions must be at least one")
+	case "SessionDurableStore", "session.durable.store":
+		found = true
+		status = avail.SessionDurableStore
+		if status.Reason != nil {
+			explanations = append(explanations, "* "+*status.Reason)
+		}
+		explanations = append(explanations, "* check: session.durable.store must be file or sqlite")
 	case "SessionMode", "session.mode":
 		found = true
 		status = avail.SessionMode
 		if status.Reason != nil {
 			explanations = append(explanations, "* "+*status.Reason)
 		}
-		explanations = append(explanations, "* check: session.mode must be logged or ephemeral")
+		explanations = append(explanations, "* check: session.mode must be logged, ephemeral or durable")
 	case "SessionProjectPrompt", "session.project_prompt":
 		found = true
 		status = avail.SessionProjectPrompt

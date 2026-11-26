@@ -376,8 +376,17 @@ func (f *Server) Capabilities() protocol.Capabilities {
 		return protocol.Capabilities{}
 	}
 	modes := []string{"ephemeral"}
-	if runtime.SessionMode == string(session.ModeLogged) {
+	switch runtime.SessionMode {
+	case string(session.ModeLogged):
 		modes = []string{"ephemeral", "logged"}
+	case string(session.ModeDurable):
+		// The durable mode is offered only when the settings' store
+		// name has a registered backend: a binary that links no
+		// backend for the name cannot open the sessions it would
+		// announce.
+		if config.StoreBackendRegistered(runtime.Settings.DurableSettings().Store) {
+			modes = []string{"ephemeral", "durable"}
+		}
 	}
 	decider := false
 	if _, err := runtime.DeciderModel(); err == nil {
@@ -563,7 +572,7 @@ func (f *Server) Create(ctx context.Context, params protocol.CreateParams, env w
 	// guidance a profile opted into rides the variant the session
 	// renders in, and the session knows whether it does.
 	info.Warnings = append(info.Warnings, sess.StartWarnings()...)
-	if mode == string(session.ModeLogged) {
+	if mode == string(session.ModeLogged) || mode == string(session.ModeDurable) {
 		info.SessionDir = session.StoreDir(store)
 	}
 	return sess, info, nil
@@ -587,7 +596,10 @@ func (f *Server) Load(ctx context.Context, params protocol.LoadParams, env wire.
 	if err != nil {
 		return nil, nil, err
 	}
-	store, err := runtime.OpenStore(string(session.ModeLogged), dir)
+	// The store is the session's own mode: a durable session's records
+	// go to the store the settings open, and its unsettled run is
+	// planned for a continuation by the store's recovery.
+	store, err := runtime.OpenStore(string(meta.Mode), dir)
 	if err != nil {
 		return nil, nil, err
 	}

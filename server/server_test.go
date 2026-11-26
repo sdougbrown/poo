@@ -1019,3 +1019,44 @@ func TestARefreshedCatalogIsWhatASessionSwitchesTo(t *testing.T) {
 		t.Errorf("the session runs %q, want the model the refresh reported", configured.Models.Chat)
 	}
 }
+
+// durableServedSettings returns the settings a durable served session is
+// built from: the named profile, the durable mode, and the named store.
+func durableServedSettings(t *testing.T, profile, store string) *config.Settings {
+	t.Helper()
+	document := `{
+  "version": 1,
+  "profile": "` + profile + `",
+  "session": {"mode": "durable", "durable": {"store": "` + store + `"}},
+  "endpoints": {
+    "grace": {"endpoint": "http://user:secret@grace:4000/v1", "api_key_env": "POO_TEST_KEY"}
+  },
+  "models": {
+    "chat-model": {"endpoint": "grace", "model_id": "chat-model", "api": "chat_completions", "tools_mode": "native", "ops": ["chat"], "inputs": ["text"], "context_limit": 32768}
+  },
+  "roles": {"chat": "chat-model"}
+}`
+	settings, err := config.Parse([]byte(document), config.FormatJSON)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	return settings
+}
+
+// The handshake announces the durable mode only when the settings'
+// store name has a registered backend: a binary that links no backend
+// for the name does not offer the sessions it cannot open.
+func TestTheHandshakeAnnouncesDurableOnlyForARegisteredBackend(t *testing.T) {
+	// "file" is built in, so a durable process over it offers the mode.
+	srv := newServer(t, durableServedSettings(t, search.Name, "file"))
+	if !slices.Contains(srv.Capabilities().Persistence, "durable") {
+		t.Error("the capabilities do not announce durable for the built-in store")
+	}
+
+	// "sqlite" has no backend registered in this binary, so a durable
+	// process over it offers no durable mode.
+	srv = newServer(t, durableServedSettings(t, search.Name, "sqlite"))
+	if slices.Contains(srv.Capabilities().Persistence, "durable") {
+		t.Error("the capabilities announce durable for a store with no registered backend")
+	}
+}

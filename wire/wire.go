@@ -598,6 +598,7 @@ func knownMethod(method string) bool {
 	switch method {
 	case protocol.MethodSessionCreate,
 		protocol.MethodSessionLoad,
+		protocol.MethodSessionResumeRun,
 		protocol.MethodSessionGet,
 		protocol.MethodSessionConfigure,
 		protocol.MethodSessionClose,

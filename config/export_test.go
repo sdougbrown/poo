@@ -22,3 +22,23 @@ func (r *Runtime) ModelAPIKey(name string) string {
 	}
 	return r.EndpointKey(model)
 }
+
+// RegisterStoreBackendForTest registers a store opener for a test and
+// returns the cleanup that restores the previous entry, so a test that
+// registers a backend of its own leaves the registry the way it found
+// it.
+func RegisterStoreBackendForTest(name string, fn StoreOpener) func() {
+	storeBackendsMu.Lock()
+	prev, hadPrev := storeBackends[name]
+	storeBackends[name] = fn
+	storeBackendsMu.Unlock()
+	return func() {
+		storeBackendsMu.Lock()
+		defer storeBackendsMu.Unlock()
+		if hadPrev {
+			storeBackends[name] = prev
+		} else {
+			delete(storeBackends, name)
+		}
+	}
+}

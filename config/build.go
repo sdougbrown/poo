@@ -13,6 +13,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/sdougbrown/poo"
@@ -3343,13 +3344,16 @@ func promptSources(opts BuildOptions, r *Runtime) prompt.Sources {
 //
 // The store holds one session open at a time, so a caller that serves
 // several sessions at once opens one store for each of them. The mode
-// is the session's persistence mode: the logged mode writes a file and
-// the ephemeral mode keeps the records in memory.
+// is the session's persistence mode: the logged mode writes a file,
+// the durable mode writes a file and continues a run a crash left
+// unsettled, and the ephemeral mode keeps the records in memory.
 //
-// A process in the ephemeral mode serves no logged session: the mode it
-// announced is the only one it has.
+// A process in the ephemeral mode serves no logged or durable session:
+// the mode it announced is the only one it has. A mode the build does
+// not support is refused.
 func (r *Runtime) OpenStore(mode, dir string) (session.Store, error) {
-	if mode == string(session.ModeLogged) {
+	switch mode {
+	case string(session.ModeLogged):
 		if r.SessionMode != string(session.ModeLogged) {
 			return nil, &Error{
 				Code:    CodeUnsupported,
@@ -3361,8 +3365,141 @@ func (r *Runtime) OpenStore(mode, dir string) (session.Store, error) {
 			dir = r.SessionDir
 		}
 		return session.NewStore(dir, session.WithBuild(r.Build))
+	case string(session.ModeDurable):
+		if r.SessionMode != string(session.ModeDurable) {
+			return nil, &Error{
+				Code:    CodeUnsupported,
+				Field:   "session.mode",
+				Message: fmt.Sprintf("this process is in the %q mode: it serves no durable session", r.SessionMode),
+			}
+		}
+		if dir == "" {
+			dir = r.SessionDir
+		}
+		settings := r.Settings.DurableSettings()
+		opener, ok := storeBackend(settings.Store)
+		if !ok {
+			return nil, &Error{
+				Code:    CodeUnsupported,
+				Field:   "session.durable.store",
+				Message: "no store backend is registered for " + settings.Store,
+			}
+		}
+		return opener(dir, settings)
+	case string(session.ModeEphemeral):
+		return session.NewMemory(), nil
 	}
-	return session.NewMemory(), nil
+	return nil, session.CheckMode(session.Mode(mode))
+}
+
+// DurableSettings are the durable mode's settings, with the defaults
+// filled in.
+type DurableSettings struct {
+	// MaxResumptions is how many times a run may be resumed before
+	// the planner gives up on it.
+	MaxResumptions int
+	// LeaseTTL is how long a session's lease lasts before it
+	// expires.
+	LeaseTTL time.Duration
+	// AutoResume says a loaded session resumes its run itself.
+	AutoResume bool
+	// Store is the store's name: "file" or "sqlite".
+	Store string
+}
+
+// DurableSettings returns the durable mode's settings with the
+// defaults filled in.
+func (s *Settings) DurableSettings() DurableSettings {
+	out := DurableSettings{
+		MaxResumptions: session.DefaultMaxResumptions,
+		LeaseTTL:       30 * time.Second,
+		Store:          "file",
+	}
+	durable := s.Session.Durable
+	if durable.MaxResumptions != nil {
+		out.MaxResumptions = *durable.MaxResumptions
+	}
+	if durable.LeaseTTLS != nil {
+		out.LeaseTTL = time.Duration(*durable.LeaseTTLS) * time.Second
+	}
+	if durable.AutoResume != nil {
+		out.AutoResume = *durable.AutoResume
+	}
+	if durable.Store != nil && *durable.Store != "" {
+		out.Store = *durable.Store
+	}
+	return out
+}
+
+// StoreOpener opens the store a session's records go to.
+//
+// The opener receives the directory the session files live in and the
+// resolved durable settings: the resumption budget, the lease TTL, the
+// auto-resume and the store's name. It returns the store the session
+// writes to, or the failure that stopped the open.
+//
+// The opener is the backend's: a binary that links a store of its own
+// registers it by the settings' store name, and the open dispatches on
+// the name. The "file" backend is built in: it opens the file store
+// with the lease options and the planner's budget the settings resolve
+// to.
+type StoreOpener func(dir string, settings DurableSettings) (session.Store, error)
+
+var (
+	// storeBackends are the store openers, by the settings' store
+	// name. "file" is built in; a binary registers the rest.
+	storeBackendsMu sync.Mutex
+	storeBackends   = map[string]StoreOpener{
+		"file": openFileStore,
+	}
+)
+
+// RegisterStoreBackend registers the opener of a store backend by the
+// settings' store name.
+//
+// The name is the settings' session.durable.store value: a binary that
+// links the sqlite backend registers it here, and the open dispatches
+// on the name. A name that is registered twice takes the later
+// registration. A nil opener is refused: the open would panic on the
+// call.
+func RegisterStoreBackend(name string, fn StoreOpener) error {
+	if fn == nil {
+		return &Error{Code: CodeInvalid, Message: "the store backend's opener is nil"}
+	}
+	storeBackendsMu.Lock()
+	defer storeBackendsMu.Unlock()
+	storeBackends[name] = fn
+	return nil
+}
+
+// StoreBackendRegistered says the settings' store name has a
+// registered backend, for the capabilities that announce the durable
+// mode: a binary that links no backend for the name does not offer
+// the sessions it cannot open.
+func StoreBackendRegistered(name string) bool {
+	_, ok := storeBackend(name)
+	return ok
+}
+
+// storeBackend returns the opener the settings' store name names.
+func storeBackend(name string) (StoreOpener, bool) {
+	storeBackendsMu.Lock()
+	defer storeBackendsMu.Unlock()
+	fn, ok := storeBackends[name]
+	return fn, ok
+}
+
+// openFileStore opens the file store a durable session's records go
+// to.
+//
+// The lease options are the settings': the TTL the settings name, and
+// the planner's budget the settings' resumption limit. A session's
+// owner is a lease instead of the flock: the owner is renewed by a
+// heartbeat, and a dead owner is taken over after the lease expires.
+func openFileStore(dir string, settings DurableSettings) (session.Store, error) {
+	lease := session.LeaseOptions{TTL: settings.LeaseTTL}
+	durable := session.DurableOptions{MaxResumptions: settings.MaxResumptions}
+	return session.NewStore(dir, session.WithLeaseOptions(lease), session.WithDurableOptions(durable))
 }
 
 // ProjectInstructions returns the mutation that fills the prompt's
@@ -3520,7 +3657,10 @@ func (r *Runtime) CreateSession(ctx context.Context, store session.Store, create
 // store holds the session's authority until it is closed. The load
 // recovers the session: a torn tail is truncated, an unsettled run is
 // marked interrupted, and the job results that were never delivered are
-// queued again.
+// queued again. A durable session's unsettled run is planned for a
+// continuation instead, and the continuation is threaded into the
+// restore, which holds it on the session: the session resumes it when
+// it is asked, or the restore resumes it when the settings say so.
 //
 // The options are the ones the session is built with: the hooks and the
 // observers a new session would carry.
@@ -3541,6 +3681,7 @@ func (r *Runtime) ResumeSession(ctx context.Context, store session.Store, id str
 	// in: the core takes the recorded directory when the options name
 	// none.
 	opts.WorkingDir = ""
+	fns = append(append([]poo.Option(nil), fns...), poo.WithAutoResume(r.Settings.DurableSettings().AutoResume))
 	return session.Resume(ctx, store, id, opts, append(fns, poo.WithPolicy(r.Policy), r.MCPAttachOption(), poo.WithPromptLoader(r.SessionPrompt))...)
 }
 

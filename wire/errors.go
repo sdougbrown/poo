@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/config"
 	storesession "github.com/sdougbrown/poo/session"
 	"github.com/sdougbrown/poo/wire/protocol"
 )
@@ -50,6 +51,12 @@ func codeOf(err error) string {
 	// corrupt_log and store_error.
 	if code, ok := storesession.CodeOf(err); ok {
 		return code
+	}
+	// A settings failure that names a mode this build does not have:
+	// the store the settings name has no registered backend, or the
+	// process is not in the mode the session asks for.
+	if code, ok := config.CodeOf(err); ok && code == config.CodeUnsupported {
+		return protocol.DataUnsupportedMode
 	}
 	// An input the session refused: an unknown message id, or a
 	// delivery note that does not describe a number of characters.

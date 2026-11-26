@@ -43,8 +43,8 @@ func TestInitializeReportsTheBinary(t *testing.T) {
 	if result.Models.Chat != "test-model" {
 		t.Errorf("the chat model = %q, want test-model", result.Models.Chat)
 	}
-	if len(result.Capabilities.Persistence) != 2 {
-		t.Errorf("the persistence modes = %v, want two", result.Capabilities.Persistence)
+	if len(result.Capabilities.Persistence) != 3 {
+		t.Errorf("the persistence modes = %v, want three", result.Capabilities.Persistence)
 	}
 	if !result.Capabilities.Compaction {
 		t.Error("the binary compacts, so the capability should say so")
@@ -1530,13 +1530,156 @@ func TestCreateInAnUnsupportedMode(t *testing.T) {
 
 	_, rerr := h.call(protocol.MethodSessionCreate, protocol.CreateParams{
 		WorkingDir: factory.dir,
-		Mode:       "durable",
+		Mode:       "quantum",
 	})
 	if rerr == nil {
 		t.Fatal("the create in an unsupported mode was answered")
 	}
 	if rerr.Data == nil || rerr.Data.Code != protocol.DataUnsupportedMode {
 		t.Errorf("the data code = %+v, want %q", rerr.Data, protocol.DataUnsupportedMode)
+	}
+}
+
+// A durable session is created, the process dies with its run unsettled,
+// the session is loaded, and the run is resumed: the load reports the
+// pending run, the resume re-asks the ask the run was waiting on, a
+// second resume is refused while the run is active, and the resume is
+// refused again once the run has settled.
+func TestADurableSessionSurvivesACrash(t *testing.T) {
+	// The first session is asked to call the tool, and the loaded
+	// session finishes the run: the transport the loaded session gets
+	// is the turn the run ends on.
+	var built int
+	factory := newTestFactory(t, func() poo.ChatTransport {
+		built++
+		if built == 1 {
+			return pootest.NewTransport(pootest.Turn{Calls: []pootest.Call{{Name: "test"}}, Finish: "tool_calls"})
+		}
+		return pootest.NewTransport(pootest.Turn{Text: "done", Finish: "stop"})
+	})
+	factory.unmatched = perm.ActionAsk
+	h := newHarness(t, factory, wire.Bounds{})
+	h.initialize()
+
+	// The session is created in the durable mode.
+	create, rerr := h.call(protocol.MethodSessionCreate, protocol.CreateParams{
+		WorkingDir: factory.dir,
+		Mode:       "durable",
+	})
+	if rerr != nil {
+		t.Fatalf("the create: %v", rerr)
+	}
+	var created protocol.SessionInfo
+	if err := json.Unmarshal(create, &created); err != nil {
+		t.Fatalf("decoding the create: %v", err)
+	}
+	id := created.SessionID
+
+	// The run is started, and it is waiting on the ask the policy
+	// made before the process dies.
+	if _, rerr := h.call(protocol.MethodRunPrompt, protocol.PromptParams{SessionID: id, Text: "call the tool"}); rerr != nil {
+		t.Fatalf("the prompt: %v", rerr)
+	}
+	ask := h.ask()
+
+	// The process dies: the store is closed, and the run is
+	// unsettled in the records.
+	factory.crash()
+
+	// The session is loaded, and the load reports the pending run.
+	load, rerr := h.call(protocol.MethodSessionLoad, protocol.LoadParams{SessionID: id})
+	if rerr != nil {
+		t.Fatalf("the load: %v", rerr)
+	}
+	var loaded protocol.SessionInfo
+	if err := json.Unmarshal(load, &loaded); err != nil {
+		t.Fatalf("decoding the load: %v", err)
+	}
+	if loaded.Mode != "durable" {
+		t.Errorf("the loaded session's mode = %q, want durable", loaded.Mode)
+	}
+	if loaded.PendingRun == nil {
+		t.Fatal("the load reports no pending run, want the run the crash left unsettled")
+	}
+	if loaded.PendingRun.Phase != "executing" {
+		t.Errorf("the pending run's phase = %q, want executing", loaded.PendingRun.Phase)
+	}
+
+	// The get reports the pending run, and no wait: the run is held
+	// idle until it is asked to continue.
+	get, rerr := h.call(protocol.MethodSessionGet, protocol.GetParams{SessionID: id})
+	if rerr != nil {
+		t.Fatalf("the get: %v", rerr)
+	}
+	var got protocol.GetResult
+	if err := json.Unmarshal(get, &got); err != nil {
+		t.Fatalf("decoding the get: %v", err)
+	}
+	if got.PendingRun == nil {
+		t.Error("the get reports no pending run, want the run the crash left unsettled")
+	}
+	if got.Awaiting != nil {
+		t.Errorf("the get reports a wait of %+v, want none before the resumption", got.Awaiting)
+	}
+
+	// The run is resumed, and it re-asks the ask it was waiting on.
+	resumed, rerr := h.call(protocol.MethodSessionResumeRun, protocol.ResumeRunParams{SessionID: id})
+	if rerr != nil {
+		t.Fatalf("the resume: %v", rerr)
+	}
+	var resume protocol.ResumeRunResult
+	if err := json.Unmarshal(resumed, &resume); err != nil {
+		t.Fatalf("decoding the resume: %v", err)
+	}
+	if resume.RunID != loaded.PendingRun.RunID {
+		t.Errorf("the resumed run is %q, want %q", resume.RunID, loaded.PendingRun.RunID)
+	}
+	reAsk := h.ask()
+	if string(reAsk.ID) != string(ask.ID) {
+		t.Errorf("the re-ask is %s, want the ask the run was waiting on", reAsk.ID)
+	}
+
+	// A resume while the run is active is refused.
+	_, rerr = h.call(protocol.MethodSessionResumeRun, protocol.ResumeRunParams{SessionID: id})
+	if rerr == nil {
+		t.Fatal("the resume while the run is active was answered")
+	}
+	if rerr.Data == nil || rerr.Data.Code != protocol.DataBusy {
+		t.Errorf("the data code = %+v, want %q", rerr.Data, protocol.DataBusy)
+	}
+
+	// The get reports the wait, and no pending run: the run is
+	// active, and it is waiting on the ask.
+	get, rerr = h.call(protocol.MethodSessionGet, protocol.GetParams{SessionID: id})
+	if rerr != nil {
+		t.Fatalf("the get: %v", rerr)
+	}
+	got = protocol.GetResult{}
+	if err := json.Unmarshal(get, &got); err != nil {
+		t.Fatalf("decoding the get: %v", err)
+	}
+	if got.PendingRun != nil {
+		t.Errorf("the get reports a pending run of %+v, want none while the run is active", got.PendingRun)
+	}
+	if got.Awaiting == nil {
+		t.Fatal("the get reports no wait, want the ask the run is waiting on")
+	}
+	if got.Awaiting.Kind != "permission" {
+		t.Errorf("the wait's kind = %q, want permission", got.Awaiting.Kind)
+	}
+
+	// The ask is answered, and the run settles.
+	h.answer(reAsk, "allow")
+	h.event("run.settled")
+	h.awaitState(t, id, "settled")
+
+	// A resume once the run has settled is refused.
+	_, rerr = h.call(protocol.MethodSessionResumeRun, protocol.ResumeRunParams{SessionID: id})
+	if rerr == nil {
+		t.Fatal("the resume after the run settled was answered")
+	}
+	if rerr.Data == nil || rerr.Data.Code != protocol.DataNoPendingRun {
+		t.Errorf("the data code = %+v, want %q", rerr.Data, protocol.DataNoPendingRun)
 	}
 }
 
