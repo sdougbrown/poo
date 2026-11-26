@@ -116,6 +116,10 @@ type FileStore struct {
 	// policy resolves the pending operations of a session that is
 	// loaded.
 	policy RecoveryPolicy
+	// lease, when set, opens sessions with a lease instead of the
+	// flock: the session's owner is renewed by a heartbeat, and a dead
+	// owner is taken over after the lease expires.
+	lease *LeaseOptions
 	// mu guards the store's state.
 	mu sync.Mutex
 	// open is the session the store has open, if any.
@@ -135,8 +139,9 @@ type openSession struct {
 	id string
 	// path is the session's file.
 	path string
-	// lock is the session's authority.
-	lock *Authority
+	// owner is the session's authority: the flock authority, or the
+	// lease authority when the store opens sessions with a lease.
+	owner sessionOwner
 	// log writes the session's records.
 	log *Log
 	// tools are the tool classes the session was created with, by
@@ -196,6 +201,19 @@ func WithRecoveryPolicy(policy RecoveryPolicy) Option {
 		if policy != nil {
 			s.policy = policy
 		}
+	}
+}
+
+// WithLeaseOptions sets the lease options the store opens sessions
+// with.
+//
+// When set, a session's owner is a lease instead of the flock: the
+// owner is renewed by a heartbeat, and a dead owner is taken over after
+// the lease expires. A session that is fenced is refused: its writes
+// fail with ErrLeaseLost.
+func WithLeaseOptions(opts LeaseOptions) Option {
+	return func(s *FileStore) {
+		s.lease = &opts
 	}
 }
 
@@ -282,7 +300,7 @@ func (s *FileStore) Create(ctx context.Context, created *poo.SessionCreatedRecor
 		return "", err
 	}
 
-	lock, err := Acquire(LockPath(s.dir, id))
+	owner, err := s.takeOwner(id)
 	if err != nil {
 		return "", err
 	}
@@ -290,31 +308,42 @@ func (s *FileStore) Create(ctx context.Context, created *poo.SessionCreatedRecor
 	if _, err := os.Stat(path); err == nil {
 		// The session is already there: a log holds one session, and
 		// a second one would take the first one's records with it.
-		lock.Release()
+		owner.Release()
 		return "", &Error{Code: CodeSessionExists, Message: "the session already exists: " + id}
 	} else if !errors.Is(err, fs.ErrNotExist) {
-		lock.Release()
+		owner.Release()
 		return "", &Error{Code: CodeStoreError, Message: "stating " + path, Err: err}
 	}
 	if err := s.writeSessionFile(ctx, path, created); err != nil {
-		lock.Release()
+		owner.Release()
 		return "", err
 	}
 	log, err := openLog(path, 1, s.now)
 	if err != nil {
 		os.Remove(path)
-		lock.Release()
+		owner.Release()
 		return "", &Error{Code: CodeStoreError, Message: "opening " + path, Err: err}
 	}
 	log.appendFault = s.appendFault
 	s.open = &openSession{
 		id:    id,
 		path:  path,
-		lock:  lock,
+		owner: owner,
 		log:   log,
 		tools: toolClasses(created.Tools),
 	}
 	return id, nil
+}
+
+// takeOwner takes the owner on a session: the flock authority, or the
+// lease authority when the store opens sessions with a lease. The
+// authority is held for the store's own life — a lease's heartbeat ends
+// only at its release — so it takes no context from the open call.
+func (s *FileStore) takeOwner(id string) (sessionOwner, error) {
+	if s.lease != nil {
+		return AcquireLease(s.dir, id, *s.lease)
+	}
+	return Acquire(LockPath(s.dir, id))
 }
 
 // writeSessionFile writes a new session's file.
@@ -405,22 +434,22 @@ func (s *FileStore) Load(ctx context.Context, id string) (*Loaded, error) {
 	if err := s.closeOpen(); err != nil {
 		return nil, err
 	}
-	lock, err := Acquire(LockPath(s.dir, id))
+	owner, err := s.takeOwner(id)
 	if err != nil {
 		return nil, err
 	}
-	loaded, err := s.loadLocked(ctx, id, lock)
+	loaded, err := s.loadLocked(ctx, id, owner)
 	if err != nil {
-		lock.Release()
+		owner.Release()
 		return nil, err
 	}
 	return loaded, nil
 }
 
-// loadLocked loads a session with the authority already taken.
+// loadLocked loads a session with the owner already taken.
 //
-// The authority is the caller's: a failure gives it up.
-func (s *FileStore) loadLocked(ctx context.Context, id string, lock *Authority) (*Loaded, error) {
+// The owner is the caller's: a failure gives it up.
+func (s *FileStore) loadLocked(ctx context.Context, id string, owner sessionOwner) (*Loaded, error) {
 	path := s.path(id)
 	lines, torn, err := s.readLog(path, true)
 	if err != nil {
@@ -485,7 +514,7 @@ func (s *FileStore) loadLocked(ctx context.Context, id string, lock *Authority) 
 	s.open = &openSession{
 		id:    id,
 		path:  path,
-		lock:  lock,
+		owner: owner,
 		log:   log,
 		tools: toolClasses(meta.Tools),
 	}
@@ -592,6 +621,9 @@ func (s *FileStore) Append(ctx context.Context, rec poo.Record) error {
 	if s.open == nil {
 		return &Error{Code: CodeStoreError, Message: "the store has no open session"}
 	}
+	if err := s.open.owner.CheckHeld(); err != nil {
+		return err
+	}
 	if err := s.open.log.Append(ctx, rec); err != nil {
 		return &Error{Code: CodeStoreError, Message: "writing " + rec.Meta().Record, Err: err}
 	}
@@ -611,6 +643,9 @@ func (s *FileStore) Flush(ctx context.Context) error {
 	defer s.mu.Unlock()
 	if s.open == nil {
 		return nil
+	}
+	if err := s.open.owner.CheckHeld(); err != nil {
+		return err
 	}
 	if err := s.open.log.Flush(ctx); err != nil {
 		return &Error{Code: CodeStoreError, Message: "flushing the session", Err: err}
@@ -659,11 +694,11 @@ func (s *FileStore) closeOpen() error {
 	open := s.open
 	s.open = nil
 	logErr := open.log.Close()
-	lockErr := open.lock.Release()
+	ownerErr := open.owner.Release()
 	if logErr != nil {
 		return logErr
 	}
-	return lockErr
+	return ownerErr
 }
 
 // Pending returns the operations a session has not resolved.
@@ -781,6 +816,15 @@ func (s *FileStore) summarize(id string) (Listing, error) {
 		return Listing{}, err
 	}
 	sum.Locked = locked
+	if !sum.Locked {
+		// A live lease locks the session too: a leased session is
+		// held, the way a locked one is.
+		leased, err := LeaseLocked(LeasePath(s.dir, id), s.now())
+		if err != nil {
+			return Listing{}, err
+		}
+		sum.Locked = leased
+	}
 	return sum, nil
 }
 
@@ -849,6 +893,18 @@ func (s *FileStore) Prune(ctx context.Context, policy Policy) (*PruneResult, err
 				continue
 			}
 			return nil, err
+		}
+		// A live-leased session is never pruned: the lease holds it,
+		// the way a lock does.
+		leased, err := LeaseLocked(LeasePath(s.dir, sum.ID), now)
+		if err != nil {
+			lock.Release()
+			return nil, err
+		}
+		if leased {
+			lock.Release()
+			result.Skipped = append(result.Skipped, sum)
+			continue
 		}
 		// The session's activity may have moved since the listing, so
 		// the rules are checked again under the lock.
@@ -942,6 +998,17 @@ func (s *FileStore) removeStaleTmp(now time.Time) ([]string, error) {
 				continue
 			}
 			return nil, err
+		}
+		// A live-leased session is never touched: the lease holds it,
+		// the way a lock does.
+		leased, err := LeaseLocked(LeasePath(s.dir, id), now)
+		if err != nil {
+			lock.Release()
+			return nil, err
+		}
+		if leased {
+			lock.Release()
+			continue
 		}
 		if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			lock.Release()

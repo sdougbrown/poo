@@ -27,6 +27,14 @@ const (
 	acquireProbeRetry = 200 * time.Microsecond
 )
 
+// sessionOwner is the exclusive right to write a session, held by
+// either the flock authority or the lease authority.
+type sessionOwner interface {
+	Release() error
+	LeaseLost() <-chan struct{}
+	CheckHeld() error
+}
+
 // Authority is the exclusive right to write a session.
 //
 // The authority is an exclusive flock on the session's lock file. It is
@@ -83,6 +91,18 @@ func Acquire(path string) (*Authority, error) {
 
 // Path returns the path of the lock file the authority is held on.
 func (a *Authority) Path() string { return a.path }
+
+// CheckHeld reports whether the authority is still held.
+//
+// The kernel holds the lock for the process's life, so the authority is
+// always held: the check never fails.
+func (a *Authority) CheckHeld() error { return nil }
+
+// LeaseLost is the channel that closes when the authority is lost.
+//
+// The flock authority is never lost: the kernel holds the lock for the
+// process's life, so the channel never closes. A nil channel is right.
+func (a *Authority) LeaseLost() <-chan struct{} { return nil }
 
 // Release gives the authority up.
 //
