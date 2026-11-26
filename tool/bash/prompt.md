@@ -5,4 +5,5 @@ Bash:
 - Background processes are killed when the command returns.
 - A foreground call can pass "timeout" in milliseconds, capped at the configured bash timeout or 10 minutes. A background call runs under the job timeout instead, so long work belongs there.
 - Work that has to keep running belongs in a background call. Pass "background": true and the call runs asynchronously, returning at once; the result arrives later as a message.
+- A single command ending in a trailing & ("make build &") starts a managed background job instead of running in the foreground; the result arrives later as a message.
 - Long output is truncated with the middle elided. Use grep/sed/head/tail to inspect narrower ranges.

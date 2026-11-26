@@ -271,11 +271,13 @@ type jobState struct {
 	// prepared is the validated call the job runs, so a completion the
 	// close owns can still name the call to its hooks.
 	prepared Prepared
-	// hookArgs are the arguments the admission hooks saw — the call's
-	// raw arguments, or the composed effective shape of a shorthand
-	// request — so the completion hook sees the same shape for the
-	// same job.
-	hookArgs json.RawMessage
+	// arguments are the call's raw arguments, so the completion hook
+	// sees the call the admission hooks saw.
+	arguments json.RawMessage
+	// shorthand holds the effective arguments of a shorthand request,
+	// so the completion hook composes the shape the admission hooks
+	// saw.
+	shorthand json.RawMessage
 	// dupKey is the key the duplicate rule matches on: the tool plus
 	// the canonical form of the call's data, without the reserved
 	// background argument.
@@ -460,10 +462,11 @@ func WithJobs(o JobOptions) Option {
 // or broken; the caller renders its own text for that.
 //
 // The raw and stripped arguments both ride in: the job keeps the raw
-// call for its records, and the duplicate key keys the stripped form,
-// the same data prepare saw. The hook arguments ride in too, so the
-// completion hook sees what the admission hooks saw.
-func (s *Session) startJob(run *runState, turn int, handle, tool string, prepared Prepared, summary string, raw, stripped, hookArgs json.RawMessage) (jobID string, ok bool, winding bool, refusal string) {
+// call for its records and its completion hooks, the duplicate key
+// keys the stripped form — the same data prepare saw — and the
+// shorthand rides in so the completion hook composes the shape the
+// admission hooks saw.
+func (s *Session) startJob(run *runState, turn int, handle, tool string, prepared Prepared, summary string, raw, stripped, shorthand json.RawMessage) (jobID string, ok bool, winding bool, refusal string) {
 	// The slot is reserved under the lock, and the job is registered
 	// there too, so a job that is admitted is a job the session knows
 	// about. A run that is winding down admits nothing: no new effect
@@ -519,7 +522,8 @@ func (s *Session) startJob(run *runState, turn int, handle, tool string, prepare
 		cancel:    cancel,
 		done:      make(chan struct{}),
 		prepared:  prepared,
-		hookArgs: cloneArguments(hookArgs),
+		arguments: cloneArguments(raw),
+		shorthand: shorthand,
 		dupKey:    dupKey,
 	}
 	s.jobs[jobID] = job
@@ -783,7 +787,7 @@ func (s *Session) completeJob(job *jobState, result ToolResult, outcome Outcome,
 		result.Text = closedJobText(result.Text)
 	}
 
-	info := s.toolCallInfo(0, job.handle, job.tool, prepared, callPlan{call: ToolCall{Name: job.tool, Arguments: job.hookArgs}})
+	info := s.toolCallInfo(0, job.handle, job.tool, prepared, callPlan{call: ToolCall{Name: job.tool, Arguments: job.arguments}, shorthand: job.shorthand})
 	info.JobID = job.id
 	chain, hookErr := s.runAfterTool(completionCtx, job.runID, job.id, 0, info, result)
 
