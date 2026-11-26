@@ -1288,6 +1288,156 @@ func TestDurableResumeTakesAnInterruptedTurnToTheGate(t *testing.T) {
 	}
 }
 
+// settleHook is a BeforeSettle hook for the resume tests.
+type settleHook struct {
+	// idempotent reports that running it twice is safe.
+	idempotent bool
+	// decision is what the hook answers.
+	decision poo.SettleDecision
+	// err is what the hook fails with.
+	err error
+	// once, when set, answers decision on the first call and accepts
+	// every call after it: a hook that always continues would run the
+	// chain to its continuation limit.
+	once bool
+
+	mu    sync.Mutex
+	turns []int
+	calls int
+}
+
+// Idempotent reports whether the hook may be run again.
+func (h *settleHook) Idempotent() bool { return h.idempotent }
+
+// BeforeSettle records the turn and answers with the hook's decision.
+func (h *settleHook) BeforeSettle(ctx poo.HookContext, natural poo.Reason) (poo.SettleDecision, error) {
+	h.mu.Lock()
+	h.turns = append(h.turns, ctx.Turn)
+	h.calls++
+	first := h.calls == 1
+	h.mu.Unlock()
+	if h.once && !first {
+		return poo.Accept(), nil
+	}
+	return h.decision, h.err
+}
+
+// ranIn reports whether the hook ran in a turn.
+func (h *settleHook) ranIn(turn int) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, got := range h.turns {
+		if got == turn {
+			return true
+		}
+	}
+	return false
+}
+
+// TestDurableResumeCarriesOnFromASettleHook covers the BeforeSettle chain's
+// resumption: the model had stopped on its own, the chain began, and the
+// crash left its first hook in flight. The resumed run continues the chain
+// from the recorded hook, and the hook's decision is the run's.
+func TestDurableResumeCarriesOnFromASettleHook(t *testing.T) {
+	tool := &resumeTool{name: "echo"}
+	hook := &settleHook{
+		idempotent: true,
+		once:       true,
+		decision: poo.SettleDecision{Continue: &poo.Message{
+			Role:    poo.RoleUser,
+			Content: []poo.ContentBlock{{Kind: poo.ContentText, Text: "carry on"}},
+		}},
+	}
+	dir := writeResumeLog(t,
+		resumeHeader(t, tool),
+		startedRun("r1"),
+		userMessage("r1", 0, "answer"),
+		assistantCall("r1", 1, poo.ContentBlock{Kind: poo.ContentText, Text: "here"}),
+		hookRecord("r1", 1, "before_settle", "started", 0, false),
+	)
+	store := resumeStore(t, dir)
+	tr := scripted([]fakeResponse{{text: "done"}})
+	opts := resumeOptions(t, tr, tool)
+	opts.BeforeSettle = []poo.BeforeSettleHook{hook}
+	resumed := resumeDurable(t, store, opts)
+	if _, err := resumed.Session.ResumeRun(context.Background()); err != nil {
+		t.Fatalf("resuming the run: %v", err)
+	}
+	waitResumed(t, resumed.Session)
+
+	// The chain resumed at the recorded hook, and the hook's Continue sent
+	// the run back to the model: the continuation carries the hook's
+	// message, and the run settles naturally after the model's answer.
+	if !hook.ranIn(1) {
+		t.Error("the settle hook did not run in the resumed turn, want it run from the recorded index")
+	}
+	recs := readResumeLog(t, dir, "s1")
+	var ended bool
+	for _, rec := range namedRecords(recs, "turn.hook") {
+		hookRec := rec.(*poo.TurnHookRecord)
+		if hookRec.Phase == "before_settle" && hookRec.Status == "ended" && hookRec.HookIndex == 0 {
+			ended = true
+		}
+	}
+	if !ended {
+		t.Error("the log holds no ended record for the resumed settle hook, want one at index 0")
+	}
+	settles := namedRecords(recs, "run.settled")
+	if len(settles) != 1 {
+		t.Fatalf("the log holds %d settle(s), want 1", len(settles))
+	}
+	if reason := settles[0].(*poo.RunSettledRecord).Reason; reason != poo.ReasonEndTurn {
+		t.Errorf("the run settled as %q, want %q", reason, poo.ReasonEndTurn)
+	}
+	requests := tr.Requests()
+	if len(requests) != 1 {
+		t.Fatalf("the resumed run made %d request(s), want 1", len(requests))
+	}
+	if !requestHolds(requests[0], "carry on") {
+		t.Error("the model's request does not carry the settle hook's continuation")
+	}
+}
+
+// TestDurableResumeSettlesOnASettleHooksError covers the settle chain's
+// failure: the resumed hook fails, and the run settles as a hook error,
+// naming the chain it failed in.
+func TestDurableResumeSettlesOnASettleHooksError(t *testing.T) {
+	tool := &resumeTool{name: "echo"}
+	hook := &settleHook{
+		idempotent: true,
+		err:        errors.New("the settle hook refused"),
+	}
+	dir := writeResumeLog(t,
+		resumeHeader(t, tool),
+		startedRun("r1"),
+		userMessage("r1", 0, "answer"),
+		assistantCall("r1", 1, poo.ContentBlock{Kind: poo.ContentText, Text: "here"}),
+		hookRecord("r1", 1, "before_settle", "started", 0, false),
+	)
+	store := resumeStore(t, dir)
+	tr := scripted([]fakeResponse{{text: "done"}})
+	opts := resumeOptions(t, tr, tool)
+	opts.BeforeSettle = []poo.BeforeSettleHook{hook}
+	resumed := resumeDurable(t, store, opts)
+	if _, err := resumed.Session.ResumeRun(context.Background()); err != nil {
+		t.Fatalf("resuming the run: %v", err)
+	}
+	waitResumed(t, resumed.Session)
+
+	recs := readResumeLog(t, dir, "s1")
+	settles := namedRecords(recs, "run.settled")
+	if len(settles) != 1 {
+		t.Fatalf("the log holds %d settle(s), want 1", len(settles))
+	}
+	settled := settles[0].(*poo.RunSettledRecord)
+	if settled.Reason != poo.ReasonHookError {
+		t.Errorf("the run settled as %q, want %q", settled.Reason, poo.ReasonHookError)
+	}
+	if !strings.HasPrefix(settled.Detail.Source, "before_settle") {
+		t.Errorf("the settle does not name the before_settle chain: %+v", settled.Detail)
+	}
+}
+
 // TestDurableResumeDeliversQueuedInputs covers the input a crash left
 // queued: it is the user's message, so it is delivered and recorded as
 // delivered, not dropped.
