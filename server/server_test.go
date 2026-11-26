@@ -266,6 +266,26 @@ func TestALoadOfAMissingDirectoryCreatesNothing(t *testing.T) {
 	}
 }
 
+// TestALoadOfADirectoryItCannotStatCarriesTheStoreFailure covers the
+// load's probe failure: a directory path that runs through a regular
+// file is the store's own failure, not the internal one, so the wire
+// carries the store's code for it.
+func TestALoadOfADirectoryItCannotStatCarriesTheStoreFailure(t *testing.T) {
+	srv := newServer(t, servedSettings(t, search.Name, `{"chat": "chat-model"}`))
+	file := filepath.Join(t.TempDir(), "a-file")
+	if err := os.WriteFile(file, []byte("not a directory"), 0o600); err != nil {
+		t.Fatalf("writing the file: %v", err)
+	}
+	_, _, err := srv.Load(context.Background(), protocol.LoadParams{
+		SessionID:  "s1",
+		SessionDir: filepath.Join(file, "sub"),
+	}, wire.FactoryEnv{})
+	code, _ := session.CodeOf(err)
+	if code != session.CodeStoreError {
+		t.Fatalf("the load of an unstattable directory is %v, want the store failure", err)
+	}
+}
+
 // TestALoadRefusesAnInvalidSessionID covers the load's validation: an id
 // that would name outside the session's directory is refused before any
 // store is opened.
@@ -278,6 +298,21 @@ func TestALoadRefusesAnInvalidSessionID(t *testing.T) {
 	}
 	if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("the load opened a store for an invalid id: %v", err)
+	}
+}
+
+// TestACreateInAModeTheProcessDoesNotServe covers the create's refusal:
+// a mode the process does not serve carries the unsupported-mode
+// failure, the same refusal the load gives, not the internal one.
+func TestACreateInAModeTheProcessDoesNotServe(t *testing.T) {
+	srv := newServer(t, servedSettings(t, search.Name, `{"chat": "chat-model"}`))
+	_, _, err := srv.Create(context.Background(), protocol.CreateParams{Mode: "quantum"}, wire.FactoryEnv{})
+	var failure *config.Error
+	if !errors.As(err, &failure) || failure.Code != config.CodeUnsupported {
+		t.Fatalf("the create in an unserved mode is %v, want the unsupported-mode refusal", err)
+	}
+	if failure.Field != "session.mode" {
+		t.Errorf("the refusal's field is %q, want session.mode", failure.Field)
 	}
 }
 
