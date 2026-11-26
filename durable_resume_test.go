@@ -262,12 +262,13 @@ func startedCall(runID string, turn int, handle, callID, tool string) *poo.ToolS
 	}
 }
 
-// askedRecord returns the record of a permission ask.
-func askedRecord(runID, askID, tool, class, deadline, fallback string) *poo.PermissionAskedRecord {
+// askedRecord returns the record of a permission ask about a call.
+func askedRecord(runID, askID, handle, tool, class, deadline, fallback string) *poo.PermissionAskedRecord {
 	return &poo.PermissionAskedRecord{
 		RecordMeta: poo.NewRecordMeta("permission.asked"),
 		RunID:      runID,
 		AskID:      askID,
+		Handle:     handle,
 		Tool:       tool,
 		Summary:    "a call the policy asks about",
 		Class:      poo.ToolKind(class),
@@ -409,8 +410,9 @@ func TestDurableResumeReAsksALiveAskWithItsDeadline(t *testing.T) {
 		startedRun("r1"),
 		userMessage("r1", 0, "delete the build"),
 		assistantCall("r1", 1, callBlock("call_1", "echo", `{"text":"build"}`)),
-		callRecord("r1", 1, "r1", "call_1", "echo", `{"text":"build"}`),
-		askedRecord("r1", "ask_1", "echo", string(poo.ClassSideEffecting), deadline, "deny"),
+		// The ask is written before its call's record, and the crash left
+		// the call unrecorded: the ask names the call it waits on.
+		askedRecord("r1", "ask_1", "r1", "echo", string(poo.ClassSideEffecting), deadline, "deny"),
 	)
 	store := resumeStore(t, dir)
 	asker := &allowAsker{asks: make(chan perm.Ask, 4)}
@@ -492,6 +494,10 @@ func TestDurableResumeReAsksALiveAskWithItsDeadline(t *testing.T) {
 	if second.AskID != "ask_1" {
 		t.Errorf("the re-ask's id is %q, want the recorded %q", second.AskID, "ask_1")
 	}
+	// The re-ask names its own call, so a later load pairs it exactly.
+	if second.Handle != "r1" || second.CallID != "call_1" {
+		t.Errorf("the re-ask names the call %q/%q, want r1/call_1", second.Handle, second.CallID)
+	}
 	answered := namedRecords(recs, "permission.answered")
 	if len(answered) != 1 {
 		t.Fatalf("the log holds %d answer(s), want 1", len(answered))
@@ -511,19 +517,19 @@ func TestDurableResumeReAsksALiveAskWithItsDeadline(t *testing.T) {
 func TestDurableResumePairsAReAskWithTheCallItNames(t *testing.T) {
 	tool := &resumeTool{name: "echo", class: poo.ClassSideEffecting}
 	deadline := time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano)
-	// The ask follows the record of the call it asks about, so it names the
-	// live call; the call after it was never started and replays.
+	// The ask is written before its call's record, the way the core writes
+	// it, so the log holds a record for the earlier call only: that one
+	// replays, and the ask waits on the call it names.
 	dir := writeResumeLog(t,
 		resumeHeader(t, tool),
 		startedRun("r1"),
 		userMessage("r1", 0, "delete both builds"),
 		assistantCall("r1", 1,
-			callBlock("call_1", "echo", `{"text":"live"}`),
-			callBlock("call_2", "echo", `{"text":"replay"}`),
+			callBlock("call_1", "echo", `{"text":"replay"}`),
+			callBlock("call_2", "echo", `{"text":"live"}`),
 		),
-		callRecord("r1", 1, "r1", "call_1", "echo", `{"text":"live"}`),
-		askedRecord("r1", "ask_1", "echo", string(poo.ClassSideEffecting), deadline, "deny"),
-		callRecord("r1", 1, "r2", "call_2", "echo", `{"text":"replay"}`),
+		callRecord("r1", 1, "r1", "call_1", "echo", `{"text":"replay"}`),
+		askedRecord("r1", "ask_1", "r2", "echo", string(poo.ClassSideEffecting), deadline, "deny"),
 	)
 	store := resumeStore(t, dir)
 	asker := &allowAsker{asks: make(chan perm.Ask, 4)}
@@ -541,9 +547,11 @@ func TestDurableResumePairsAReAskWithTheCallItNames(t *testing.T) {
 	waitResumed(t, resumed.Session)
 
 	// The replay runs first, then the call the log's ask held open. Both
-	// passed the policy, so the tool ran both.
+	// passed the policy, so the tool ran both, in the batch's order.
 	if calls := tool.Calls(); len(calls) != 2 {
-		t.Fatalf("the tool ran %v, want the replayed call and the live ask's", calls)
+		t.Fatalf("the tool ran %v, want the replay then the live ask's call", calls)
+	} else if calls[0] != "replay" || calls[1] != "live" {
+		t.Errorf("the tool ran %v, want the replay then the live ask's call", calls)
 	}
 
 	recs := readResumeLog(t, dir, "s1")
@@ -575,6 +583,14 @@ func TestDurableResumePairsAReAskWithTheCallItNames(t *testing.T) {
 	if live.Deadline != deadline {
 		t.Errorf("the live ask's deadline is %q, want the recorded %q", live.Deadline, deadline)
 	}
+	// The re-asks name their own calls: the live one waits on the second
+	// call, and the replay's ask on the first.
+	if live.Handle != "r2" || live.CallID != "call_2" {
+		t.Errorf("the live ask names the call %q/%q, want r2/call_2", live.Handle, live.CallID)
+	}
+	if replay.Handle != "r1" || replay.CallID != "call_1" {
+		t.Errorf("the replay's ask names the call %q/%q, want r1/call_1", replay.Handle, replay.CallID)
+	}
 	// The replay is a fresh ask: it takes neither the id nor the deadline.
 	if replay.AskID == "ask_1" {
 		t.Errorf("the replay's ask took the id %q, want a fresh one", replay.AskID)
@@ -584,6 +600,60 @@ func TestDurableResumePairsAReAskWithTheCallItNames(t *testing.T) {
 	}
 	if replay.Deadline == deadline {
 		t.Errorf("the replay's ask took the recorded deadline %q, want a fresh one", replay.Deadline)
+	}
+}
+
+// TestDurableResumeReAsksAnOldLogByToolName covers a log written before an
+// ask carried its call: the ask names none, and the log holds no record for
+// its call, so the resumed run matches the ask by tool name and keeps the id
+// and deadline the client was shown.
+func TestDurableResumeReAsksAnOldLogByToolName(t *testing.T) {
+	tool := &resumeTool{name: "echo", class: poo.ClassSideEffecting}
+	deadline := time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano)
+	dir := writeResumeLog(t,
+		resumeHeader(t, tool),
+		startedRun("r1"),
+		userMessage("r1", 0, "delete the build"),
+		assistantCall("r1", 1, callBlock("call_1", "echo", `{"text":"build"}`)),
+		// The old ask names no call, and the crash left the call
+		// unrecorded: nothing pairs the two by position, so only the
+		// tool's name can.
+		askedRecord("r1", "ask_1", "", "echo", string(poo.ClassSideEffecting), deadline, "deny"),
+	)
+	store := resumeStore(t, dir)
+	asker := &allowAsker{asks: make(chan perm.Ask, 4)}
+	policy, err := perm.New(perm.Options{Askers: []perm.Asker{asker}})
+	if err != nil {
+		t.Fatalf("building the policy: %v", err)
+	}
+	opts := resumeOptions(t, scripted([]fakeResponse{{text: "done"}}), tool)
+	opts.Policy = policy
+
+	resumed := resumeDurable(t, store, opts)
+	if _, err := resumed.Session.ResumeRun(context.Background()); err != nil {
+		t.Fatalf("resuming the run: %v", err)
+	}
+	waitResumed(t, resumed.Session)
+
+	if calls := tool.Calls(); len(calls) != 1 || calls[0] != "build" {
+		t.Fatalf("the tool ran %v, want the ask's call once", calls)
+	}
+	recs := readResumeLog(t, dir, "s1")
+	asks := namedRecords(recs, "permission.asked")
+	if len(asks) != 2 {
+		t.Fatalf("the log holds %d ask(s), want the old log's and the re-ask", len(asks))
+	}
+	reask := asks[1].(*poo.PermissionAskedRecord)
+	if reask.AskID != "ask_1" {
+		t.Errorf("the re-ask's id is %q, want the recorded %q", reask.AskID, "ask_1")
+	}
+	if reask.Deadline != deadline {
+		t.Errorf("the re-ask's deadline is %q, want the recorded %q", reask.Deadline, deadline)
+	}
+	// The re-ask is a new record, so it carries the call it is about even
+	// though the old one could not.
+	if reask.Handle != "r1" {
+		t.Errorf("the re-ask's handle is %q, want %q", reask.Handle, "r1")
 	}
 }
 
@@ -598,8 +668,9 @@ func TestDurableResumeResolvesAnExpiredAskAtLoad(t *testing.T) {
 		startedRun("r1"),
 		userMessage("r1", 0, "delete the build"),
 		assistantCall("r1", 1, callBlock("call_1", "echo", `{"text":"build"}`)),
-		callRecord("r1", 1, "r1", "call_1", "echo", `{"text":"build"}`),
-		askedRecord("r1", "ask_1", "echo", string(poo.ClassSideEffecting), expired, "deny"),
+		// The ask is written before its call's record, and the crash left
+		// the call unrecorded: the ask names the call the fallback denies.
+		askedRecord("r1", "ask_1", "r1", "echo", string(poo.ClassSideEffecting), expired, "deny"),
 	)
 	store := resumeStore(t, dir)
 	tr := scripted([]fakeResponse{{text: "done"}})

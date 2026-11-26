@@ -171,10 +171,7 @@ func (s *Session) beginPermission(owner *callOwner, ask PermissionAsk, opts Perm
 // once, so the next ask of the same tool is a fresh one.
 func (s *Session) armResumedAsk(owner *callOwner, ask PermissionAsk, opts PermissionRequestOptions) (PermissionAsk, PermissionRequestOptions) {
 	s.mu.Lock()
-	handle := ""
-	if owner != nil {
-		handle = owner.permissionHandle
-	}
+	handle := owner.permissionHandle
 	index := -1
 	if handle != "" {
 		for i, planned := range s.resumedAsks {
@@ -311,6 +308,18 @@ func (s *Session) persistPermission(owner *callOwner, p *PermissionRequest) {
 		p.askedWritten = true
 		ask := p.ask
 		rec := &PermissionAskedRecord{RecordMeta: NewRecordMeta("permission.asked"), RunID: owner.id, AskID: ask.AskID, Tool: ask.Tool, Summary: ask.Summary, Class: ask.Class, Reason: ask.Reason, RepeatCount: ask.RepeatCount}
+		// The ask names the call it is about, so a later load pairs a
+		// re-ask with that call rather than with the tool's last call.
+		// The batch registers every call before the policy sees it, so
+		// the call's provider id is here too.
+		rec.Handle = owner.permissionHandle
+		if rec.Handle != "" {
+			s.mu.Lock()
+			if call := owner.pendingCalls[rec.Handle]; call != nil {
+				rec.CallID = call.id
+			}
+			s.mu.Unlock()
+		}
 		// The ask's deadline and its fallback ride in the record, so a
 		// reader of the log knows when the ask expires and what it
 		// resolves to. The deadline is the request's own, which a policy

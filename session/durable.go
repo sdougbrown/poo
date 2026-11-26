@@ -208,7 +208,7 @@ func (p DurablePlanner) Plan(ctx context.Context, sink poo.RecordSink, pend *Pen
 			planned := PlannedAsk{
 				RunID:    ask.RunID,
 				AskID:    ask.AskID,
-				Handle:   ask.Handle,
+				Handle:   ask.recordedHandle,
 				CallID:   ask.CallID,
 				Tool:     ask.Tool,
 				Summary:  ask.Summary,
@@ -219,6 +219,9 @@ func (p DurablePlanner) Plan(ctx context.Context, sink poo.RecordSink, pend *Pen
 			}
 			if call, ok := claimCall(run, ask, claimed); ok {
 				planned.Arguments = call.Arguments
+				if planned.CallID == "" {
+					planned.CallID = call.CallID
+				}
 			}
 			plan.LiveAsks = append(plan.LiveAsks, planned)
 			continue
@@ -376,13 +379,19 @@ func askDecision(ask PendingAsk) string {
 // claimCall returns the call an ask is about, and claims it so no other
 // rule answers it.
 //
-// The log pairs the two by position: the ask follows the record of the call
-// it asks about, so the scan names that call on the ask. A log that holds no
-// call for the ask pairs it with nothing, and the answer is then all the
-// plan writes.
+// The ask's own record names the call when it carries the handle; a log
+// written before it did pairs the two by position, the ask following the
+// record of the call it asks about. A log that holds no call for the ask
+// pairs it with nothing, and the answer is then all the plan writes.
 func claimCall(run *PendingRun, ask PendingAsk, claimed map[string]bool) (PendingCall, bool) {
 	for _, call := range run.Calls {
-		if !call.MissingResult || call.Handle != ask.Handle || call.CallID != ask.CallID {
+		if !call.MissingResult || call.Handle != ask.Handle {
+			continue
+		}
+		// A handle names one call of the run. The id narrows the match
+		// when the ask recorded one; a log that pairs the ask by
+		// position may hold call id only, and still names the call.
+		if ask.CallID != "" && call.CallID != ask.CallID {
 			continue
 		}
 		key := callIdentity(call.CallID, call.RunID, call.Handle)

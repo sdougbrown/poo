@@ -188,11 +188,16 @@ type PendingAsk struct {
 	// existed says nothing and resolves to "deny" too.
 	Fallback string
 	// Handle is the handle of the call the ask is about, and CallID is the
-	// provider's id of that call. The log pairs them by position: an ask
-	// follows the record of the call it asks about. Both are empty when
-	// the log holds no call for the ask.
+	// provider's id of that call. The ask's own record names them when it
+	// carries them; a log written before it did pairs the ask with the
+	// last call of its tool before it, and both fields then hold that
+	// call's.
 	Handle string
 	CallID string
+	// recordedHandle is the handle the ask's own record names, and is
+	// empty on a log written before the record carried one. The plan
+	// matches a re-ask by it; an ask without one is matched by tool name.
+	recordedHandle string
 }
 
 // PendingJob is a job that started and never ended.
@@ -641,19 +646,29 @@ func PendingOf(id string, recs []poo.Record) *Pending {
 		case *poo.PermissionAskedRecord:
 			key := askIdentity(r.RunID, r.AskID)
 			if _, ok := state.asks[key]; !ok {
-				about := state.lastCalls[callToolKey(r.RunID, r.Tool)]
-				state.asks[key] = &PendingAsk{
-					RunID:    r.RunID,
-					AskID:    r.AskID,
-					Tool:     r.Tool,
-					Summary:  r.Summary,
-					Class:    r.Class,
-					Reason:   r.Reason,
-					Deadline: askDeadline(r.Deadline),
-					Fallback: r.Fallback,
-					Handle:   about.handle,
-					CallID:   about.callID,
+				ask := &PendingAsk{
+					RunID:          r.RunID,
+					AskID:          r.AskID,
+					Handle:         r.Handle,
+					CallID:         r.CallID,
+					Tool:           r.Tool,
+					Summary:        r.Summary,
+					Class:          r.Class,
+					Reason:         r.Reason,
+					Deadline:       askDeadline(r.Deadline),
+					Fallback:       r.Fallback,
+					recordedHandle: r.Handle,
 				}
+				if ask.Handle == "" {
+					// A log written before the ask carried its call
+					// pairs it the way it always did: with the last
+					// call of its tool before it.
+					about := state.lastCalls[callToolKey(r.RunID, r.Tool)]
+					ask.Handle, ask.CallID = about.handle, about.callID
+				} else if ask.CallID == "" {
+					ask.CallID = state.callIDs[ask.Handle]
+				}
+				state.asks[key] = ask
 				state.askOrder = append(state.askOrder, key)
 			}
 		case *poo.PermissionAnsweredRecord:
@@ -932,7 +947,9 @@ type pendingState struct {
 	// and asks, by run id.
 	facts map[string]*runFacts
 	// lastCalls are the calls seen so far, by run and tool: an ask
-	// follows the record of the call it asks about.
+	// written before its call's record is paired with the last call of
+	// its tool that precedes it. An ask whose own record carries its
+	// call does not use this.
 	lastCalls map[string]callRef
 	// hooks are the turn hooks that started, by identity, and hookOrder
 	// is the order they started in.

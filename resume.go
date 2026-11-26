@@ -87,11 +87,13 @@ type PlannedAsk struct {
 	RunID string `json:"run_id"`
 	// AskID names the ask.
 	AskID string `json:"ask_id"`
-	// Handle is the call's identifier within the turn, when the log pairs
-	// the ask with a call.
+	// Handle is the call's identifier within the turn, when the ask's own
+	// record names it. It is empty for a log written before the record
+	// carried its call, and the resumed run then matches the ask by tool
+	// name.
 	Handle string `json:"handle,omitempty"`
 	// CallID is the provider's id of the call the ask is about, when the
-	// log pairs the ask with one.
+	// ask names one.
 	CallID string `json:"call_id,omitempty"`
 	// Tool is the name of the tool the model called.
 	Tool string `json:"tool"`

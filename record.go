@@ -333,6 +333,12 @@ type PermissionAskedRecord struct {
 	RunID string `json:"run_id"`
 	// AskID names the ask.
 	AskID string `json:"ask_id"`
+	// Handle is the handle of the call the ask is about, and CallID is
+	// the provider's id of that call. They are absent on a log written
+	// before the ask carried its call; such a log pairs the ask with the
+	// call that precedes it.
+	Handle string `json:"handle,omitempty"`
+	CallID string `json:"call_id,omitempty"`
 	// Tool is the name of the tool the model called.
 	Tool string `json:"tool"`
 	// Summary describes the call.
