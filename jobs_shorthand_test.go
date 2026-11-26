@@ -116,3 +116,38 @@ func TestTrailingAmpersandConflictsWithBackgroundFalse(t *testing.T) {
 		t.Error("the model did not see the background conflict error")
 	}
 }
+
+func TestTrailingAmpersandBesideBackgroundTrue(t *testing.T) {
+	sink := &recordingSink{}
+	s := newTestSession(t, poo.Options{
+		Transport: scripted([]fakeResponse{
+			{calls: []poo.ToolCall{{CallID: "one", Name: "bash", Arguments: []byte(`{"command":"printf 'job output'&","background":true}`)}}},
+			{text: "done"},
+		}),
+		Tools: map[string]poo.Tool{"bash": bash.New()}, Sink: sink, WorkingDir: t.TempDir(),
+		Model: poo.ModelInfo{ModelID: "test-model", ContextLimit: 32768},
+	})
+	runSession(t, s, "run it")
+	var started bool
+	for _, rec := range sink.allRecords() {
+		r, ok := rec.(*poo.ToolResultRecord)
+		if !ok {
+			continue
+		}
+		if r.Outcome == poo.OutcomeError {
+			t.Fatalf("an explicit true beside the trailing & was refused: %s", r.Text)
+		}
+		started = started || (r.Outcome == poo.OutcomeStarted && strings.Contains(r.Text, "job j1"))
+	}
+	if !started {
+		t.Fatal("the trailing & beside an explicit true did not start a job")
+	}
+	waitForSink(t, sink, "job output", func() bool {
+		for _, rec := range sink.allRecords() {
+			if r, ok := rec.(*poo.JobEndedRecord); ok && r.Outcome == poo.OutcomeOK && strings.Contains(r.Text, "job output") {
+				return true
+			}
+		}
+		return false
+	})
+}
