@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	clicontract "github.com/sdougbrown/cli-contract"
 
@@ -190,12 +189,7 @@ func handleDaemon(parent context.Context, inv clicontract.Invocation, stdout, st
 		}
 		return exit{operationalExitCode}
 	} else {
-		created, err := daemonCreated(runtime, mode, workDir, sessionID)
-		if err != nil {
-			_ = store.Close()
-			fmt.Fprintf(stderr, "poo daemon: %v\n", err)
-			return exit{usageExitCode}
-		}
+		created := runtime.CreatedRecord(mode, workDir, sessionID)
 		sess, err = runtime.CreateSession(ctx, store, created)
 		if err != nil {
 			_ = store.Close()
@@ -285,38 +279,6 @@ func handleDaemon(parent context.Context, inv clicontract.Invocation, stdout, st
 		fmt.Fprintf(stderr, "poo daemon: the lease was lost: a takeover owner now holds the session\n")
 		return exit{operationalExitCode}
 	}
-}
-
-// daemonCreated builds the header of a session the daemon creates.
-func daemonCreated(runtime *config.Runtime, mode, workDir, sessionID string) (*poo.SessionCreatedRecord, error) {
-	model := runtime.Options.Model
-	chat := session.LoggedModel(model)
-	roles := poo.ModelRoles{Chat: &chat}
-	if deciderModel, _, err := runtime.Decider(); err == nil {
-		logged := session.LoggedModel(deciderModel)
-		roles.Decider = &logged
-	}
-	if runtime.Options.SideModel.ModelID != "" {
-		logged := session.LoggedModel(runtime.Options.SideModel)
-		roles.Compaction = &logged
-	}
-	return &poo.SessionCreatedRecord{
-		RecordMeta: poo.NewRecordMeta("session.created"),
-		SessionMetadata: poo.SessionMetadata{
-			Format:       poo.FormatVersion,
-			SessionID:    sessionID,
-			Mode:         mode,
-			CreatedAt:    time.Now().UTC().Format(time.RFC3339Nano),
-			WorkingDir:   workDir,
-			Tools:        runtime.SessionTools(),
-			Profile:      runtime.Profile.Name,
-			Roles:        roles,
-			Build:        poo.BuildInfo{Name: "poo", Version: buildVersion().String()},
-			Model:        poo.SessionModel{ModelID: model.ModelID, Endpoint: session.LoggedEndpoint(model.Endpoint), MaxOutput: model.MaxOutput},
-			ContextLimit: model.ContextLimit,
-			ToolsMode:    poo.ToolsMode(model.Tools.Mode),
-		},
-	}, nil
 }
 
 // runningFeeds counts the feeds a session starts: the ones that are not

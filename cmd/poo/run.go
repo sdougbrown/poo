@@ -198,39 +198,13 @@ func handleRun(parent context.Context, inv clicontract.Invocation, stdout, stder
 		defer cancel()
 	}
 
-	// The log records the models without their credentials: a URL may
-	// carry a key, and the log is a file a consumer reads.
-	chatModel := session.LoggedModel(model)
-
+	// The header is the runtime's, with the models it names recorded
+	// without their credentials: a URL may carry a key, and the log is a
+	// file a consumer reads. The reasoning effort is this invocation's
+	// own, so the run adds it.
 	sessionID := session.NewID()
-	created := &poo.SessionCreatedRecord{
-		RecordMeta: poo.NewRecordMeta("session.created"),
-		SessionMetadata: poo.SessionMetadata{
-			Format:     poo.FormatVersion,
-			SessionID:  sessionID,
-			Mode:       runtime.SessionMode,
-			CreatedAt:  time.Now().UTC().Format(time.RFC3339Nano),
-			WorkingDir: workDir,
-			Tools:      runtime.SessionTools(),
-			// The metadata says what the session ran with: the profile
-			// it was built from, and the models it talked to.
-			Profile:         runtime.Profile.Name,
-			Roles:           poo.ModelRoles{Chat: &chatModel},
-			Build:           poo.BuildInfo{Name: "poo", Version: buildVersion().String()},
-			Model:           poo.SessionModel{ModelID: model.ModelID, Endpoint: session.LoggedEndpoint(model.Endpoint), MaxOutput: model.MaxOutput},
-			ContextLimit:    model.ContextLimit,
-			ToolsMode:       poo.ToolsMode(model.Tools.Mode),
-			ReasoningEffort: o.reasoningEffort,
-		},
-	}
-	if deciderModel, _, err := runtime.Decider(); err == nil {
-		deciderModel = session.LoggedModel(deciderModel)
-		created.Roles.Decider = &deciderModel
-	}
-	if runtime.Options.SideModel.ModelID != "" {
-		sideModel := session.LoggedModel(runtime.Options.SideModel)
-		created.Roles.Compaction = &sideModel
-	}
+	created := runtime.CreatedRecord(runtime.SessionMode, workDir, sessionID)
+	created.ReasoningEffort = o.reasoningEffort
 
 	sink, err := openSink(ctx, runtime, created, o.logPath, workDir)
 	if err != nil {

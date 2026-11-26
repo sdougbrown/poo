@@ -16,7 +16,6 @@ import (
 	"os"
 	"sort"
 	"sync"
-	"time"
 
 	"fmt"
 	"github.com/sdougbrown/poo"
@@ -488,9 +487,9 @@ func (f *Server) Create(ctx context.Context, params protocol.CreateParams, env w
 	}
 	// The decision model must be one the settings name, and it is built
 	// before the session is so a bad name leaves nothing behind. The
-	// header says which model decides: the one the request names, and
-	// otherwise the one the runtime resolved from the settings.
-	headerDecider := runtime.Options.DeciderModel
+	// header says which model decides: the one the runtime holds, and
+	// the one the request names, which the runtime does not know.
+	var requestDecider *poo.ModelInfo
 	var deciderModel poo.ModelInfo
 	var decider decide.Decider
 	if deciderName != "" {
@@ -502,7 +501,7 @@ func (f *Server) Create(ctx context.Context, params protocol.CreateParams, env w
 		if err != nil {
 			return nil, nil, err
 		}
-		headerDecider = deciderModel
+		requestDecider = &deciderModel
 	}
 	mode := params.Mode
 	if mode == "" {
@@ -530,10 +529,13 @@ func (f *Server) Create(ctx context.Context, params protocol.CreateParams, env w
 	if workDir == "" {
 		workDir = f.workDir
 	}
-	created, err := f.created(runtime, mode, workDir, headerDecider)
-	if err != nil {
-		_ = store.Close()
-		return nil, nil, err
+	// The header is the runtime's, and the request's decider is the one
+	// fact the runtime does not hold: the session runs with it, so the
+	// header names it.
+	created := runtime.CreatedRecord(mode, workDir, session.NewID())
+	if requestDecider != nil {
+		logged := session.LoggedModel(*requestDecider)
+		created.Roles.Decider = &logged
 	}
 	sess, err := runtime.CreateSession(ctx, recorder, created, poo.WithObserver(env.Observer))
 	if err != nil {
@@ -884,43 +886,6 @@ func (f *Server) Settings(ctx context.Context) (map[string]any, error) {
 		return nil, err
 	}
 	return out, nil
-}
-
-// created returns the header record a session starts with.
-//
-// The roles are the models the session runs with: the chat model the
-// runtime was built for, the decision model the caller resolved, and
-// the compaction model the strategies reconstruct with. A model with no
-// name is no model, so the header records no such role.
-func (f *Server) created(runtime *config.Runtime, mode, workDir string, decider poo.ModelInfo) (*poo.SessionCreatedRecord, error) {
-	model := runtime.Options.Model
-	chat := session.LoggedModel(model)
-	roles := poo.ModelRoles{Chat: &chat}
-	if decider.Name != "" {
-		logged := session.LoggedModel(decider)
-		roles.Decider = &logged
-	}
-	if runtime.Options.SideModel.ModelID != "" {
-		side := session.LoggedModel(runtime.Options.SideModel)
-		roles.Compaction = &side
-	}
-	return &poo.SessionCreatedRecord{
-		RecordMeta: poo.NewRecordMeta("session.created"),
-		SessionMetadata: poo.SessionMetadata{
-			Format:       poo.FormatVersion,
-			SessionID:    session.NewID(),
-			Mode:         mode,
-			CreatedAt:    time.Now().UTC().Format(time.RFC3339Nano),
-			WorkingDir:   workDir,
-			Tools:        runtime.SessionTools(),
-			Profile:      runtime.Profile.Name,
-			Roles:        roles,
-			Build:        f.build.Build,
-			Model:        poo.SessionModel{ModelID: model.ModelID, Endpoint: session.LoggedEndpoint(model.Endpoint), MaxOutput: model.MaxOutput},
-			ContextLimit: model.ContextLimit,
-			ToolsMode:    poo.ToolsMode(model.Tools.Mode),
-		},
-	}, nil
 }
 
 // promptOverrides converts the wire's prompt overrides into the

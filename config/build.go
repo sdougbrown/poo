@@ -3599,6 +3599,49 @@ func (r *Runtime) resolveUserPrompt(opts BuildOptions) error {
 	return nil
 }
 
+// CreatedRecord returns the header a session started under the runtime
+// carries.
+//
+// The header is the runtime's own facts: the mode the session runs in,
+// the directory it works in, and the build, settings, tools and models
+// the runtime was built with. A role names a model only when the
+// runtime has it: a decider the build could not construct is no model
+// the session talks to, and a session whose header recorded one would
+// be refused by the load that cannot build it.
+//
+// What belongs to one invocation rather than to the runtime — a run's
+// reasoning effort — the caller sets on the record this returns.
+func (r *Runtime) CreatedRecord(mode, workDir, sessionID string) *poo.SessionCreatedRecord {
+	model := r.Options.Model
+	chat := session.LoggedModel(model)
+	roles := poo.ModelRoles{Chat: &chat}
+	if r.Options.Decider != nil {
+		logged := session.LoggedModel(r.Options.DeciderModel)
+		roles.Decider = &logged
+	}
+	if r.Options.SideModel.ModelID != "" {
+		logged := session.LoggedModel(r.Options.SideModel)
+		roles.Compaction = &logged
+	}
+	return &poo.SessionCreatedRecord{
+		RecordMeta: poo.NewRecordMeta("session.created"),
+		SessionMetadata: poo.SessionMetadata{
+			Format:       poo.FormatVersion,
+			SessionID:    sessionID,
+			Mode:         mode,
+			CreatedAt:    time.Now().UTC().Format(time.RFC3339Nano),
+			WorkingDir:   workDir,
+			Tools:        r.SessionTools(),
+			Profile:      r.Profile.Name,
+			Roles:        roles,
+			Build:        r.Build,
+			Model:        poo.SessionModel{ModelID: model.ModelID, Endpoint: session.LoggedEndpoint(model.Endpoint), MaxOutput: model.MaxOutput},
+			ContextLimit: model.ContextLimit,
+			ToolsMode:    poo.ToolsMode(model.Tools.Mode),
+		},
+	}
+}
+
 // CreateSession creates a session in the store and returns it.
 //
 // The session's records go to the store, and the store holds the
