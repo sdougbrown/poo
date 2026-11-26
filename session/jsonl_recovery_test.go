@@ -1351,6 +1351,40 @@ func TestARecoveredCallIsAnsweredInTheNextRequest(t *testing.T) {
 	}
 }
 
+// TestAResumeTheStoreRefusesBreaksTheSessionWithoutAnError covers the
+// contract a supervisor's own-resume relies on: a store that refuses the
+// resumption's own record returns no error from ResumeRun, and the session
+// is broken — the failure is the session's state, and a supervisor must
+// read it as a dead resident rather than a resumed one.
+func TestAResumeTheStoreRefusesBreaksTheSessionWithoutAnError(t *testing.T) {
+	dir, store := newTestStore(t)
+	ctx := context.Background()
+	writeSession(t, dir, "s1",
+		durableHeader("s1", poo.ToolInfo{Name: "bash", Class: poo.ClassSideEffecting}),
+		runStarted("r1"),
+	)
+	transport := pootest.NewTransport(pootest.Turn{Text: "ok", Finish: "stop"})
+	// The store refuses the resumption's own record: the fault reaches the
+	// log the load opens, and the durable load itself writes nothing.
+	store.appendFault = 1
+	resumed, err := Resume(ctx, store, "s1", recoveryOptions("s1", bashTool{}, transport))
+	if err != nil {
+		t.Fatalf("resuming the session: %v", err)
+	}
+	t.Cleanup(func() { resumed.Session.Close() })
+
+	runID, err := resumed.Session.ResumeRun(ctx)
+	if err != nil {
+		t.Fatalf("the resume returned %v, want no error: the refusal is the session's state", err)
+	}
+	if runID != "r1" {
+		t.Errorf("the resume returned %q, want the pending run %q", runID, "r1")
+	}
+	if !resumed.Session.Broken() {
+		t.Fatal("the session is not broken, want the refused record to fence it")
+	}
+}
+
 // Review scratch tests: crash windows that leave a tool call the model
 // saw without a result, which the recovery never repairs.
 

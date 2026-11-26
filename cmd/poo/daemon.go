@@ -226,6 +226,16 @@ func handleDaemon(parent context.Context, inv clicontract.Invocation, stdout, st
 				_ = store.Close()
 				return exit{operationalExitCode}
 			}
+			// A store that refused the resumption's record returns no
+			// error: the session is broken, and a supervisor must not
+			// read it as a healthy resident, the same as the restore's
+			// own resume below.
+			if sess.Broken() {
+				fmt.Fprintf(stderr, "poo daemon: resuming the pending run: the session is broken\n")
+				_ = sess.Close()
+				_ = store.Close()
+				return exit{operationalExitCode}
+			}
 			fmt.Fprintf(stderr, "poo daemon: resumed %s\n", pending.RunID)
 		} else if hadPending {
 			// The restore carried it on: the settings' auto-resume did.

@@ -975,7 +975,6 @@ func TestTheDurableOpenersCarryTheBuild(t *testing.T) {
 
 // theDurableCreatedRecord is the header a test's store creates a session with.
 func theDurableCreatedRecord(id, mode, dir string) *poo.SessionCreatedRecord {
->>>>>>> ceb00a3 (🐛 Give the durable stores the build they open under)
 	return &poo.SessionCreatedRecord{
 		RecordMeta: poo.NewRecordMeta("session.created"), SessionMetadata: poo.SessionMetadata{Format: poo.FormatVersion,
 			SessionID: id, Mode: mode, CreatedAt: "2026-10-22T12:00:00Z",
