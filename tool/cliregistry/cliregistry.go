@@ -72,6 +72,9 @@ const (
 	// SectionName is the name of the prompt section that lists the
 	// catalog.
 	SectionName = cli.SectionName
+	// CommandArgument is the call tool's argument that names a registered
+	// command.
+	CommandArgument = cli.CommandArgument
 	// FindThreshold is the number of entries above which a session with
 	// a decision model searches the catalog instead of reading it.
 	FindThreshold = cli.FindThreshold

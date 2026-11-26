@@ -99,13 +99,13 @@ func (t *CallTool) Spec() poo.ToolSpec {
 		Schema: json.RawMessage(`{
   "type": "object",
   "properties": {
-    "command": {"type": "string", "description": "One line of the catalog: the registered command's name."},
+    "` + CommandArgument + `": {"type": "string", "description": "One line of the catalog: the registered command's name."},
     "args": {"type": "object", "additionalProperties": true, "description": "The command's arguments, as the catalog line describes them."}
   },
-  "required": ["command"]
+  "required": ["` + CommandArgument + `"]
 ,"additionalProperties":false}`),
 		Class:      poo.ClassSideEffecting,
-		PrimaryArg: "command",
+		PrimaryArg: CommandArgument,
 		// A registered tool runs where bash runs, so it leaves the turn
 		// the same way. Background true turns the call into a job, and
 		// the result arrives as a message.

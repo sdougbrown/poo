@@ -332,9 +332,6 @@ func (t *Tool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, e
 			return nil, poo.InvalidArgsf("%s: %s: args must be an object: %v", CallToolName, name, err)
 		}
 	}
-	if args == nil {
-		return nil, poo.InvalidArgsf("%s: %s: args must be an object", CallToolName, name)
-	}
 	return &preparedCall{
 		server: strings.TrimSpace(server),
 		tool:   strings.TrimSpace(tool),
