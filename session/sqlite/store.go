@@ -583,13 +583,16 @@ func (s *Store) needsSync(rec poo.Record) bool {
 
 // Close releases the store's resources: the open session's lease and the
 // database.
+//
+// The database closes whatever the open session's release said: a lease
+// that could not be released is reported, but it is not the database's
+// to hold hostage. Both failures are reported, the lease's first.
 func (s *Store) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.closeOpen(); err != nil {
-		return err
-	}
-	return s.db.Close()
+	releaseErr := s.closeOpen()
+	dbErr := s.db.Close()
+	return errors.Join(releaseErr, dbErr)
 }
 
 // closeOpen closes the open session, if there is one.

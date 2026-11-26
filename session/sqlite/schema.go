@@ -39,7 +39,10 @@ var ErrSchema = errors.New("session/sqlite: the schema could not be migrated")
 // writer and a writer never blocks a reader. The busy timeout lets a
 // writer wait out a brief reader instead of failing at once. Every
 // transaction the caller begins is an immediate one: it takes the write
-// lock at the start, so a read-then-write is atomic.
+// lock at the start, so a read-then-write is atomic. Commits are fully
+// synced: the store promises a needs-sync record is on the disk before
+// the append returns, and WAL's own default would leave that to the
+// next checkpoint.
 func Open(path string) (*sql.DB, error) {
 	dsn := path
 	if strings.Contains(path, "?") {
@@ -47,7 +50,7 @@ func Open(path string) (*sql.DB, error) {
 	} else {
 		dsn += "?"
 	}
-	dsn += fmt.Sprintf("_journal_mode=WAL&_busy_timeout=%d&_txlock=immediate", busyTimeoutMS)
+	dsn += fmt.Sprintf("_journal_mode=WAL&_busy_timeout=%d&_txlock=immediate&_pragma=synchronous(FULL)", busyTimeoutMS)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
