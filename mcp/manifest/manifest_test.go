@@ -33,6 +33,18 @@ func writeManifestNamed(t *testing.T, dir, name string, body map[string]any) str
 	return path
 }
 
+// writeRawManifest writes the raw JSON bytes under a directory and returns
+// the file's path. A map literal cannot hold a repeated key, so a case that
+// needs one writes the bytes as they stand.
+func writeRawManifest(t *testing.T, raw string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "mcp.json")
+	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+		t.Fatalf("writing the manifest: %v", err)
+	}
+	return path
+}
+
 // aServer is a stdio entry the manifest shape reads.
 func aServer(command string) map[string]any {
 	return map[string]any{"command": command}
@@ -116,6 +128,33 @@ func TestAFileWithNoMCPServersFails(t *testing.T) {
 	if !strings.Contains(err.Error(), path) {
 		t.Errorf("the failure does not name the file: %v", err)
 	}
+}
+
+// TestADuplicateKeyFailsTheLoad covers the duplicate: a decode collapses
+// duplicate keys (last wins), so the load detects a repeated key on the raw
+// bytes before any decode, naming the file. A map literal cannot hold a
+// repeated key, so the bytes are written as they stand.
+func TestADuplicateKeyFailsTheLoad(t *testing.T) {
+	t.Run("top-level key", func(t *testing.T) {
+		path := writeRawManifest(t, `{"mcpServers": {"avenor": {"command": "true"}}, "mcpServers": {"avenor": {"command": "false"}}}`)
+		_, err := manifest.Load(path)
+		if err == nil {
+			t.Fatal("the load took a file with a duplicate top-level key")
+		}
+		if !strings.Contains(err.Error(), "mcpServers") || !strings.Contains(err.Error(), path) {
+			t.Errorf("the failure does not name the key and the file: %v", err)
+		}
+	})
+	t.Run("key in the poo block", func(t *testing.T) {
+		path := writeRawManifest(t, `{"mcpServers": {"avenor": {"command": "true"}}, "poo": {"servers": {"avenor": {"feeds": {"inbox": {"resource": "avenor://inbox"}, "inbox": {"resource": "avenor://other"}}}}}`)
+		_, err := manifest.Load(path)
+		if err == nil {
+			t.Fatal("the load took a file with a duplicate key in the poo block")
+		}
+		if !strings.Contains(err.Error(), "inbox") || !strings.Contains(err.Error(), path) {
+			t.Errorf("the failure does not name the key and the file: %v", err)
+		}
+	})
 }
 
 // resolve resolves a template over a host environment holding one variable.
@@ -244,6 +283,11 @@ func TestMalformedReferencesFailTheLoad(t *testing.T) {
 			server: map[string]any{"command": "serve", "env": map[string]any{"URL": "${}"}},
 			want:   "names no variable",
 		},
+		{
+			name:   "reference name with a brace",
+			server: map[string]any{"command": "${A${B}"},
+			want:   "not a variable name",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -277,6 +321,43 @@ func TestAnEntryWithoutWhatPooStartsFails(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), tt.want) {
 				t.Errorf("the failure does not say what is wrong: %v", err)
+			}
+		})
+	}
+}
+
+// TestAServerNameOutsideThePatternFails covers the name: a server name
+// outside the pattern the entry's key takes fails the load, naming the
+// server, and a name inside it loads.
+func TestAServerNameOutsideThePatternFails(t *testing.T) {
+	tests := []struct {
+		name   string
+		server string
+		valid  bool
+	}{
+		{name: "valid", server: "my-server_1", valid: true},
+		{name: "with a space", server: "my server", valid: false},
+		{name: "with a dot", server: "my.server", valid: false},
+		{name: "with a slash", server: "my/server", valid: false},
+		{name: "with a unicode letter", server: "mý", valid: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			set, err := manifest.Load(writeManifest(t, map[string]any{"mcpServers": map[string]any{tt.server: aServer("true")}}))
+			if tt.valid {
+				if err != nil {
+					t.Fatalf("loading a server name inside the pattern: %v", err)
+				}
+				if names := set.Names(); !slices.Equal(names, []string{tt.server}) {
+					t.Errorf("the load holds the servers %q, want %q", names, tt.server)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("the load took a server name outside the pattern")
+			}
+			if !strings.Contains(err.Error(), tt.server) {
+				t.Errorf("the failure does not name the server: %v", err)
 			}
 		})
 	}

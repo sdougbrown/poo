@@ -605,34 +605,42 @@ func (r *Runtime) resolveProfile(opts BuildOptions, workingDir string) error {
 	return nil
 }
 
+// sessionFeeds returns the feeds the session runs: the feed manifests'
+// feeds, and the resource feeds the selected MCP servers declare, for a
+// resource feed is a feed the session runs. Each entry is the feed's
+// name and whether the model may start it: a manifest's feed by its own
+// word, and a resource feed always, for it is one the model subscribes
+// to.
+func (r *Runtime) sessionFeeds() map[string]bool {
+	feeds := map[string]bool{}
+	for _, spec := range r.Feeds.Specs() {
+		feeds[spec.Name] = spec.Optional
+	}
+	for _, server := range r.MCPServers {
+		for _, decl := range r.mcpSet.Feeds(server) {
+			feeds[decl.Name] = true
+		}
+	}
+	return feeds
+}
+
+// hasFeed reports whether the session runs a feed by the name.
+func (r *Runtime) hasFeed(name string) bool {
+	_, ok := r.sessionFeeds()[name]
+	return ok
+}
+
 // hasFeeds reports whether the session runs feeds.
 func (r *Runtime) hasFeeds() bool {
-	return r.Feeds.Len() > 0
+	return len(r.sessionFeeds()) > 0
 }
 
 // hasOptionalFeeds reports whether the session loads a feed the model may
 // start.
 func (r *Runtime) hasOptionalFeeds() bool {
-	for _, spec := range r.Feeds.Specs() {
-		if spec.Optional {
+	for _, optional := range r.sessionFeeds() {
+		if optional {
 			return true
-		}
-	}
-	return false
-}
-
-// hasFeed reports whether the session runs a feed by the name: one the feed
-// manifests declare, or a resource feed one of the selected MCP servers
-// declares, for a resource feed is a feed the session runs.
-func (r *Runtime) hasFeed(name string) bool {
-	if r.Feeds.Has(name) {
-		return true
-	}
-	for _, server := range r.MCPServers {
-		for _, decl := range r.mcpSet.Feeds(server) {
-			if decl.Name == name {
-				return true
-			}
 		}
 	}
 	return false

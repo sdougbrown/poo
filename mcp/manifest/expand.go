@@ -55,11 +55,12 @@ const (
 
 // ParseTemplate parses one manifest value into the pieces it resolves.
 //
-// An unterminated `${`, a reference with no name, a `session:` reference
-// to a value the session scope does not carry, and a reference that
-// takes a default all fail here, when the manifest loads: a value the
-// session could never resolve is a manifest that does not load, rather
-// than a server that fails at every launch.
+// An unterminated `${`, a reference with no name, a reference whose name
+// holds a dollar or a brace, a `session:` reference to a value the session
+// scope does not carry, and a reference that takes a default all fail here,
+// when the manifest loads: a value the session could never resolve is a
+// manifest that does not load, rather than a server that fails at every
+// launch.
 func ParseTemplate(source string) (Template, error) {
 	var parts []templatePart
 	var text strings.Builder
@@ -109,6 +110,13 @@ func referencePart(body string) (templatePart, error) {
 	name, value, hasDefault := strings.Cut(body, ":-")
 	if name == "" {
 		return templatePart{}, fmt.Errorf("the reference %q names no variable", "${"+"}")
+	}
+	// A name that holds a dollar or a brace is a reference that reached
+	// into another reference, and it would only fail at resolve time:
+	// the load refuses it, naming the reference, the way it refuses the
+	// other shapes a launch could never resolve.
+	if strings.ContainsAny(name, "${}") {
+		return templatePart{}, fmt.Errorf("the reference %q is not a variable name, and a variable name is letters, digits, an underscore and a dash only", "${"+name+"}")
 	}
 	if scope, field, reference := strings.Cut(name, ":"); reference {
 		if hasDefault {

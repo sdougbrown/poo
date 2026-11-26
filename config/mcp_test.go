@@ -176,6 +176,32 @@ func TestMCPSelectedMissingWarns(t *testing.T) {
 	}
 }
 
+// TestAProfileRefusesAnEmptySelectedServer covers the validation:
+// a selected server name cannot be empty, so a profile that names one
+// never reads as a server the settings could not find.
+func TestAProfileRefusesAnEmptySelectedServer(t *testing.T) {
+	document := theMCPSettings() + "profiles:\n  greedy:\n    base: code\n    mcp_servers: [\"\"]\nprofile: greedy\n"
+	settings, err := config.Parse([]byte(document), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	opts := config.BuildOptions{
+		Settings:       settings,
+		WorkingDir:     t.TempDir(),
+		Executors:      theExecutors(),
+		DefaultProfile: "code",
+		Tools:          theTools(),
+		Profiles:       theProfiles(),
+	}
+	_, err = config.Build(opts)
+	if err == nil {
+		t.Fatal("the build accepted an empty selected server name")
+	}
+	if !strings.Contains(err.Error(), "mcp_servers") {
+		t.Errorf("the failure does not name the field: %v", err)
+	}
+}
+
 // TestMCPFeedNameCollision covers the shared namespace: a resource feed a
 // selected server declares may not carry the name of a feed the settings load,
 // and the failure names the name and the server.
