@@ -95,15 +95,6 @@ func handleDaemon(parent context.Context, inv clicontract.Invocation, stdout, st
 	}
 	o.endpointFlags.apply(settings)
 
-	// The mode is resolved once: the flag over the settings over the
-	// default, and the one value goes to the build and the store.
-	mode := "durable"
-	if settings.Session.Mode != nil && *settings.Session.Mode != "" {
-		mode = *settings.Session.Mode
-	}
-	if o.ephemeral {
-		mode = "ephemeral"
-	}
 	autoResume := true
 	if settings.Session.Durable.AutoResume != nil {
 		autoResume = *settings.Session.Durable.AutoResume
@@ -118,7 +109,13 @@ func handleDaemon(parent context.Context, inv clicontract.Invocation, stdout, st
 		fmt.Fprintf(stderr, "poo daemon: %v\n", err)
 		return exit{usageExitCode}
 	}
-	overrides.SessionMode = mode
+	// The daemon is the resident host, so its default is the durable
+	// mode, where a run's is logged: the default lands in the override
+	// only when neither the flag nor the settings name a mode, so the
+	// build's own resolver keeps the flag over the settings.
+	if overrides.SessionMode == "" && (settings.Session.Mode == nil || *settings.Session.Mode == "") {
+		overrides.SessionMode = "durable"
+	}
 
 	runtime, err := config.Build(config.BuildOptions{
 		Settings:       settings,
@@ -146,6 +143,10 @@ func handleDaemon(parent context.Context, inv clicontract.Invocation, stdout, st
 	// The model the daemon talks to, and the command's own sections.
 	model := runtime.Options.Model
 	runtime.Options.Prompt = append(runtime.Options.Prompt, promptMutation(runtime, model))
+
+	// The mode the build resolved: the flag over the settings over the
+	// daemon's default. The store and the created record both carry it.
+	mode := runtime.SessionMode
 
 	// The store holds the session's records and its lease.
 	store, err := runtime.OpenStore(mode, "")

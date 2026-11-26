@@ -280,6 +280,72 @@ func TestTheDaemonEphemeralFlagOpensAnEphemeralSession(t *testing.T) {
 	daemon.waitExit()
 }
 
+// TestTheDaemonDefaultsToDurableWhereARunDefaultsToLogged covers the
+// daemon's own default: a settings file that names no session mode runs
+// the daemon's session durably, the resident host's default, where the
+// same settings run a one-shot logged.
+func TestTheDaemonDefaultsToDurableWhereARunDefaultsToLogged(t *testing.T) {
+	endpoint := newFakeEndpoint(t, doneAnswer())
+	dir := t.TempDir()
+	manifestDir := t.TempDir()
+	trigger := filepath.Join(dir, "trigger")
+	feedManifest(t, manifestDir, trigger)
+	// The settings name no session.mode, so the default decides.
+	settings := daemonSettings(t, dir, endpoint.URL, manifestDir)
+	sessionDir := filepath.Join(dir, "sessions")
+	sessionID := "default-mode-session"
+
+	daemon := startDaemon(t,
+		"daemon",
+		"--settings", settings,
+		"--working-dir", dir,
+		"--session-dir", sessionDir,
+		"--session", sessionID,
+	)
+	daemon.waitLine("poo daemon: started")
+	daemon.waitLine("poo daemon: session " + sessionID)
+	// The daemon opened a durable session, and its header says so,
+	// where the run's default would say logged.
+	path := sessionLog(dir, sessionID)
+	waitRecord(t, path, "session.created")
+	recs := readLog(t, path)
+	if recs[0]["mode"] != "durable" {
+		t.Errorf("the daemon's session mode is %v, want durable", recs[0]["mode"])
+	}
+	_ = daemon.cmd.Process.Kill()
+	daemon.waitExit()
+
+	// The same settings run a one-shot logged.
+	runDir := filepath.Join(dir, "run-sessions")
+	code, stderr := runCLI(t,
+		"run",
+		"--settings", settings,
+		"--working-dir", dir,
+		"--session-dir", runDir,
+		"say hello",
+	)
+	if code != 0 {
+		t.Fatalf("the run exited %d, want 0; stderr: %s", code, stderr)
+	}
+	entries, err := os.ReadDir(runDir)
+	if err != nil {
+		t.Fatalf("reading the run's session dir: %v", err)
+	}
+	runLog := ""
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), ".jsonl") {
+			runLog = filepath.Join(runDir, entry.Name())
+		}
+	}
+	if runLog == "" {
+		t.Fatalf("the run wrote no session log in %s", runDir)
+	}
+	runRecs := readLog(t, runLog)
+	if runRecs[0]["mode"] != "logged" {
+		t.Errorf("the run's session mode is %v, want logged", runRecs[0]["mode"])
+	}
+}
+
 // TestTheDaemonRefusesABadSessionID covers the refused argument: a
 // session id that names outside the session directory is refused with
 // the usage exit code.
