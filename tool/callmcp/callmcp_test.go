@@ -422,6 +422,31 @@ func TestAnImageTypeProvidersRefuseIsLeftOut(t *testing.T) {
 	}
 }
 
+// TestAnImageTooLargeForAProviderIsLeftOut covers the size: an image larger
+// than the bytes a provider takes is left out with a line, the way a feed
+// image over the same cap is refused.
+func TestAnImageTooLargeForAProviderIsLeftOut(t *testing.T) {
+	server := &fakeServer{
+		name:   "fixture",
+		tools:  []mcp.Tool{tool("shot", "takes a screenshot", true)},
+		result: mcp.CallResult{Images: []mcp.CallImage{{MediaType: "image/png", Data: make([]byte, poo.MaxImageBytes+1)}}},
+	}
+	res, err := call(t, newTool(server), `{"name":"fixture/shot"}`, poo.ToolEnv{
+		Model: poo.ModelInfo{Inputs: []poo.Modality{poo.ModalityText, poo.ModalityImage}},
+	})
+	if err != nil {
+		t.Fatalf("calling: %v", err)
+	}
+	if len(res.Attachments) != 0 {
+		t.Errorf("an image larger than a provider takes was attached")
+	}
+	for _, want := range []string{"image/png", "larger than", "left out"} {
+		if !strings.Contains(res.Text, want) {
+			t.Errorf("the note %q does not name %q", res.Text, want)
+		}
+	}
+}
+
 // TestTheCatalogListsWhatTheSessionCanCall covers the prompt: the section
 // names each tool by its qualified name with its arguments and the server's own
 // hint, and a session with no server carries no catalog.

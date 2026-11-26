@@ -409,8 +409,9 @@ func (t *Tool) namesHint() string {
 // has its middle elided, and the count says how much. The structured content
 // rides beside the text when it is valid JSON and fits under the same cap; a
 // larger one is left out whole, because a structured value cut in half is not
-// the value the server returned. An image becomes an attachment only when the
-// run's model reads one. Whatever is left out is said in one line.
+// the value the server returned. An image becomes an attachment only when
+// the run's model reads one and it fits under the size a request may carry.
+// Whatever is left out is said in one line.
 func (t *Tool) result(res mcp.CallResult, env poo.ToolEnv) poo.ToolResult {
 	cap := env.Settings.ObservationCapChars
 	if cap <= 0 {
@@ -440,6 +441,11 @@ func (t *Tool) result(res mcp.CallResult, env poo.ToolEnv) poo.ToolResult {
 		if !t.accepts(poo.ModalityImage, env) {
 			notes = append(notes, fmt.Sprintf("the tool returned an image (%s, %d bytes), and this run's model does not accept image input, so it was left out",
 				image.MediaType, len(image.Data)))
+			continue
+		}
+		if len(image.Data) > poo.MaxImageBytes {
+			notes = append(notes, fmt.Sprintf("the tool returned an image (%s, %d bytes), and it is larger than the %d bytes a model takes, so it was left out",
+				image.MediaType, len(image.Data), poo.MaxImageBytes))
 			continue
 		}
 		attachments = append(attachments, poo.Attachment{
