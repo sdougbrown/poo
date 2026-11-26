@@ -295,8 +295,9 @@ func TestLeaseFencedWritesFailWithLeaseLost(t *testing.T) {
 }
 
 // TestLeaseAFileStoresLeaseRunsOnTheStoresClock covers the file
-// store's lease clock: a store given a clock leases on that clock, so
-// the lease's expiry is the store's now plus the TTL, not wall time.
+// store's lease clock: a store given a clock leases and renews on that
+// clock, so the lease's expiry is the store's now plus the TTL, not wall
+// time.
 //
 // The store's own listing reads leases on its clock, so a lease stamped
 // from wall time is one the store disagrees with: this store's clock in
@@ -330,6 +331,22 @@ func TestLeaseAFileStoresLeaseRunsOnTheStoresClock(t *testing.T) {
 	}
 	if live, err := LeaseLocked(path, injected.Add(ttl)); err != nil || live {
 		t.Errorf("the lease is live = %v, %v at its expiry, want it expired", live, err)
+	}
+	// The renewal is the heartbeat's tick, and it stamps the same clock:
+	// a renewal on wall time would put the expiry decades past the
+	// store's now, which the listing would then read as live forever.
+	clk.Advance(ttl + time.Second)
+	owner, ok := store.open.owner.(*LeaseAuthority)
+	if !ok {
+		t.Fatalf("the store's owner is %T, want a lease authority", store.open.owner)
+	}
+	owner.heartbeatTick()
+	renewed, err := readLease(path)
+	if err != nil {
+		t.Fatalf("reading the renewed lease: %v", err)
+	}
+	if want := clk.Now().Add(ttl); !renewed.ExpiresAt.Equal(want) {
+		t.Errorf("the renewed lease expires at %s, want %s: the renewal runs on the store's clock", renewed.ExpiresAt, want)
 	}
 }
 

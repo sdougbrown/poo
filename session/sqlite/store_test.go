@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -642,6 +643,20 @@ func TestADefaultStoresLeaseRenewsAndReleases(t *testing.T) {
 	if live, err := LeaseLocked(store.db, "s1", clk.Now()); err != nil || !live {
 		t.Fatalf("the renewed lease is live = %v, %v, want it live", live, err)
 	}
+	// The renewal stamps the expiry from the store's clock too: one
+	// stamped from wall time would be far past the clock the store reads
+	// leases on.
+	var expiresAt string
+	if err := store.db.QueryRow(`SELECT expires_at FROM leases WHERE session_id = ?`, "s1").Scan(&expiresAt); err != nil {
+		t.Fatalf("reading the renewed lease's expiry: %v", err)
+	}
+	renewedExpires, err := time.Parse(time.RFC3339Nano, expiresAt)
+	if err != nil {
+		t.Fatalf("parsing the renewed lease's expiry: %v", err)
+	}
+	if want := clk.Now().Add(session.DefaultLeaseTTL); !renewedExpires.Equal(want) {
+		t.Errorf("the renewed lease expires at %s, want %s: the renewal runs on the store's clock", renewedExpires, want)
+	}
 	// The close releases the lease and ends the heartbeat.
 	if err := store.Close(); err != nil {
 		t.Fatalf("closing the store returned %v, want nil", err)
@@ -936,7 +951,8 @@ func TestTheDatabaseFilesArePrivate(t *testing.T) {
 //
 // Without the hook the Lstat refuses the link first, so the test cannot
 // tell the two refusals apart, and deleting O_NOFOLLOW would leave it
-// green.
+// green. The assertion names the open's own refusal, so a hook moved
+// above the Lstat reports the Lstat's refusal and still fails.
 func TestALinkPlantedInTheOpenWindowIsRefused(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.db")
@@ -944,9 +960,11 @@ func TestALinkPlantedInTheOpenWindowIsRefused(t *testing.T) {
 	if err := os.WriteFile(victim, []byte("not the store's"), 0o644); err != nil {
 		t.Fatalf("writing the victim file: %v", err)
 	}
+	var fired bool
 	var once sync.Once
 	beforePrivateOpen = func(p string) {
 		once.Do(func() {
+			fired = true
 			if err := os.Symlink(victim, p); err != nil {
 				t.Fatalf("planting the symlink in the open window: %v", err)
 			}
@@ -955,11 +973,14 @@ func TestALinkPlantedInTheOpenWindowIsRefused(t *testing.T) {
 	t.Cleanup(func() { beforePrivateOpen = nil })
 
 	_, err := New(path)
+	if !fired {
+		t.Fatal("the hook did not fire: the open window is not instrumented")
+	}
 	if err == nil {
 		t.Fatal("the store opened over a link planted in the open window, want an error")
 	}
-	if !strings.Contains(err.Error(), "not a regular file") {
-		t.Errorf("the store returned %v, want the not-a-regular-file error", err)
+	if !strings.Contains(err.Error(), "it is not a regular file: the open refused a link") {
+		t.Errorf("the store returned %v, want the open's own refusal", err)
 	}
 	data, err := os.ReadFile(victim)
 	if err != nil {
@@ -967,6 +988,50 @@ func TestALinkPlantedInTheOpenWindowIsRefused(t *testing.T) {
 	}
 	if string(data) != "not the store's" {
 		t.Errorf("the victim holds %q, want it untouched", data)
+	}
+}
+
+// TestAFIFOPlantedInTheOpenWindowIsRefused covers the open's O_NONBLOCK:
+// a FIFO planted after the Lstat and before the open would block the
+// open forever, since nothing holds the other end. O_NONBLOCK makes the
+// open return at once with ENXIO, which the function's own error wrap
+// reports.
+func TestAFIFOPlantedInTheOpenWindowIsRefused(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.db")
+	var once sync.Once
+	beforePrivateOpen = func(p string) {
+		once.Do(func() {
+			if err := syscall.Mkfifo(p, 0o600); err != nil {
+				t.Errorf("planting the FIFO in the open window: %v", err)
+			}
+		})
+	}
+	// An open still stuck in the hook's window is the mutant: the hook is
+	// left in place rather than raced against the leaked goroutine.
+	var finished bool
+	t.Cleanup(func() {
+		if finished {
+			beforePrivateOpen = nil
+		}
+	})
+
+	// New runs on its own goroutine, so a missing O_NONBLOCK fails the
+	// test on a timer instead of hanging it. The goroutine stuck in the
+	// open leaks on that failure: the hang is what the test names.
+	opened := make(chan error, 1)
+	go func() {
+		_, err := New(path)
+		opened <- err
+	}()
+	select {
+	case err := <-opened:
+		finished = true
+		if err == nil {
+			t.Fatal("the store opened over a FIFO planted in the open window, want an error")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("the store's open hung on the FIFO planted in the open window, want it refused at once: O_NONBLOCK is missing")
 	}
 }
 
