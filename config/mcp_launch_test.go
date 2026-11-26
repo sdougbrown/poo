@@ -197,6 +197,33 @@ func TestMCPSelectedMissingServerWarnsAndStartsTheRest(t *testing.T) {
 	}
 }
 
+// TestMCPInvalidDeclaredFeedFailsBeforeAnyLaunch covers the order the
+// construction validates in: a session whose declared feeds do not
+// pass the check fails before the attach runs, so no selected server
+// starts for a session the feeds reject.
+func TestMCPInvalidDeclaredFeedFailsBeforeAnyLaunch(t *testing.T) {
+	path := mcpManifest(t, map[string]any{"one": stdioServer()}, nil)
+	settings, err := config.Parse([]byte(theSelectingSettings(t, path, "picky", "one")), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	launcher := &recordingLauncher{}
+	runtime := buildWith(t, config.BuildOptions{Settings: settings, MCPLauncher: launcher.launch, WorkingDir: t.TempDir()})
+	defer runtime.Store.Close()
+
+	_, err = runtime.CreateSession(context.Background(), runtime.Store, theCreatedRecord("picky", t.TempDir()),
+		poo.WithFeeds(poo.FeedSpec{Name: "bad name!", Run: func(context.Context, poo.FeedIO) error { return nil }}))
+	if err == nil {
+		t.Fatal("the session was built with an invalid declared feed")
+	}
+	if !strings.Contains(err.Error(), `"bad name!"`) {
+		t.Errorf("the failure says %q, want the feed named", err)
+	}
+	if starts := launcher.recorded(); len(starts) != 0 {
+		t.Errorf("the rejected session launched %q, want nothing", starts)
+	}
+}
+
 // fixtureServer builds the mcp package's fixture server and returns its
 // path. The test asks a real server what environment it runs with, so
 // the server is a process the client can start.

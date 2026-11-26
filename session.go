@@ -819,6 +819,13 @@ func New(opts Options, fns ...Option) (*Session, error) {
 			return nil, &ErrSessionInit{Cause: err}
 		}
 	}
+	// The declared feeds are validated before the attach runs, so a
+	// session with invalid declared feeds fails before it starts any
+	// server: the attach is the check the appended feeds go through,
+	// not the one the declared ones wait for.
+	if err := checkFeeds(opts.Feeds); err != nil {
+		return nil, &ErrSessionInit{Cause: err}
+	}
 	if opts.MaxContinuations <= 0 {
 		opts.MaxContinuations = DefaultMaxContinuations
 	}
@@ -887,8 +894,8 @@ func New(opts Options, fns ...Option) (*Session, error) {
 		}
 		s.attachClose = attach
 	}
-	// The feeds are checked after the attach, so the ones it appended
-	// are held to the same rule the declared ones are.
+	// The feeds the attach appended are held to the same rule the
+	// declared ones were validated by before the attach ran.
 	if err := checkFeeds(s.opts.Feeds); err != nil {
 		return nil, &ErrSessionInit{Cause: err}
 	}
