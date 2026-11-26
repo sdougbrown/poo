@@ -85,7 +85,7 @@ type SessionMetadata struct {
 	Format string `json:"format"`
 	// SessionID identifies the session.
 	SessionID string `json:"session_id"`
-	// Mode is the persistence mode: "logged" or "ephemeral".
+	// Mode is the persistence mode: "logged", "ephemeral" or "durable".
 	Mode string `json:"mode"`
 	// CreatedAt is the RFC 3339 creation time in UTC.
 	CreatedAt string `json:"created_at"`
