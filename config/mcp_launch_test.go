@@ -18,6 +18,7 @@ import (
 	"github.com/sdougbrown/poo/config"
 	"github.com/sdougbrown/poo/exec"
 	"github.com/sdougbrown/poo/mcp"
+	"github.com/sdougbrown/poo/tool/callmcp"
 )
 
 // recordingLauncher is the launcher a test links when it wants to see
@@ -276,9 +277,9 @@ func fixtureServer(t *testing.T) string {
 }
 
 // clientLauncher is the launcher a test links when it wants the real
-// client behind the session: it starts the selected server the way the
-// binary does, with the session's own values and the scrub the build
-// handed it, and keeps the group so the test can call the server it
+// client behind the session: it starts the selection's servers the way
+// the binary does, with the session's own values and the scrub the build
+// handed it, and keeps the group so the test can call a server it
 // started.
 //
 // The binary's own launcher lives in package main and cannot be linked
@@ -297,7 +298,11 @@ func clientLauncher(group **mcp.Group) config.MCPLauncher {
 			return nil, err
 		}
 		*group = g
-		return g, nil
+		servers := make([]callmcp.Server, 0, len(values.Servers))
+		for _, server := range values.Servers {
+			servers = append(servers, &testMCPServer{group: g, name: server.Name})
+		}
+		return &listedSession{views: servers}, nil
 	}
 }
 

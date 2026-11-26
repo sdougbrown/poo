@@ -29,6 +29,7 @@ import (
 	"github.com/sdougbrown/poo/prompt"
 	"github.com/sdougbrown/poo/skill"
 	"github.com/sdougbrown/poo/tool/bash"
+	"github.com/sdougbrown/poo/tool/callmcp"
 	"github.com/sdougbrown/poo/tool/cliregistry"
 	toolcodemode "github.com/sdougbrown/poo/tool/codemode"
 	"github.com/sdougbrown/poo/tool/edit"
@@ -63,7 +64,12 @@ func theTools() map[string]config.ToolFactory {
 			return cliregistry.NewCall(opts.Registry).WithSearch(opts.Search).WithExecutor(opts.Executor)
 		},
 		"find_tool": func(opts config.ToolOptions) poo.Tool {
-			return cliregistry.NewFind(opts.Registry)
+			return cliregistry.NewFind(opts.Registry).WithOffered(offeredMCP(opts.MCP))
+		},
+		"call_mcp": func(opts config.ToolOptions) poo.Tool {
+			return callmcp.New(mcpServers(opts.MCP)).
+				WithInputs(opts.Inputs...).
+				WithSearch(offersTool(opts.ToolNames, cliregistry.FindToolName))
 		},
 	}
 }
