@@ -363,9 +363,16 @@ func (s *FileStore) Create(ctx context.Context, created *poo.SessionCreatedRecor
 // lease authority when the store opens sessions with a lease. The
 // authority is held for the store's own life — a lease's heartbeat ends
 // only at its release — so it takes no context from the open call.
+//
+// The lease runs on the store's clock unless its options name one, so a
+// store given a clock leases, and lists, on that one timeline.
 func (s *FileStore) takeOwner(id string) (sessionOwner, error) {
 	if s.lease != nil {
-		return AcquireLease(s.dir, id, *s.lease)
+		opts := *s.lease
+		if opts.Now == nil {
+			opts.Now = s.now
+		}
+		return AcquireLease(s.dir, id, opts)
 	}
 	return Acquire(LockPath(s.dir, id))
 }

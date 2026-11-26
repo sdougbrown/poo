@@ -126,6 +126,11 @@ func isBusy(err error) bool {
 	return false
 }
 
+// beforePrivateOpen is called between the check and the open of each
+// private file. It is nil in production: a test sets it to plant an
+// entry in that window, which is how the open's own refusal is exercised.
+var beforePrivateOpen func(path string)
+
 // ensurePrivate makes the database's files private to their owner.
 //
 // The driver would create a missing database with its own mode, so each
@@ -150,8 +155,15 @@ func ensurePrivate(path string) error {
 			return fmt.Errorf("session/sqlite: making %s private: %w", p, err)
 		}
 		// O_NOFOLLOW refuses a symlink the Lstat did not see, one planted
-		// between the check and the open.
-		f, err := os.OpenFile(p, os.O_CREATE|os.O_WRONLY|syscall.O_NOFOLLOW, 0o600)
+		// between the check and the open. O_NONBLOCK keeps a FIFO planted
+		// in that window from hanging the open, which would block on it
+		// forever: the open returns at once, and a FIFO that does open,
+		// one with a reader, is refused by the handle's regular-file check
+		// below.
+		if beforePrivateOpen != nil {
+			beforePrivateOpen(p)
+		}
+		f, err := os.OpenFile(p, os.O_CREATE|os.O_WRONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0o600)
 		if err != nil {
 			if errors.Is(err, syscall.ELOOP) {
 				return fmt.Errorf("session/sqlite: making %s private: it is not a regular file", p)

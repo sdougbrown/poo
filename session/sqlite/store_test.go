@@ -606,7 +606,10 @@ func TestADefaultStoreRefusesASecondOpen(t *testing.T) {
 // heartbeat.
 func TestADefaultStoresLeaseRenewsAndReleases(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "test.db")
-	clk := &testClock{t: time.Now()}
+	// The clock is far from wall time, so a lease stamped from
+	// time.Now rather than the store's clock fails the expiry
+	// assertion instead of passing it.
+	clk := &testClock{t: time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC)}
 	store, err := New(path, WithClock(clk.Now))
 	if err != nil {
 		t.Fatalf("opening the store: %v", err)
@@ -927,6 +930,46 @@ func TestTheDatabaseFilesArePrivate(t *testing.T) {
 	}
 }
 
+// TestALinkPlantedInTheOpenWindowIsRefused covers the open's own
+// refusal: a symlink planted after the Lstat and before the open is
+// what O_NOFOLLOW is for, and it is refused rather than followed.
+//
+// Without the hook the Lstat refuses the link first, so the test cannot
+// tell the two refusals apart, and deleting O_NOFOLLOW would leave it
+// green.
+func TestALinkPlantedInTheOpenWindowIsRefused(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.db")
+	victim := filepath.Join(dir, "victim")
+	if err := os.WriteFile(victim, []byte("not the store's"), 0o644); err != nil {
+		t.Fatalf("writing the victim file: %v", err)
+	}
+	var once sync.Once
+	beforePrivateOpen = func(p string) {
+		once.Do(func() {
+			if err := os.Symlink(victim, p); err != nil {
+				t.Fatalf("planting the symlink in the open window: %v", err)
+			}
+		})
+	}
+	t.Cleanup(func() { beforePrivateOpen = nil })
+
+	_, err := New(path)
+	if err == nil {
+		t.Fatal("the store opened over a link planted in the open window, want an error")
+	}
+	if !strings.Contains(err.Error(), "not a regular file") {
+		t.Errorf("the store returned %v, want the not-a-regular-file error", err)
+	}
+	data, err := os.ReadFile(victim)
+	if err != nil {
+		t.Fatalf("reading the victim file: %v", err)
+	}
+	if string(data) != "not the store's" {
+		t.Errorf("the victim holds %q, want it untouched", data)
+	}
+}
+
 // TestASymlinkedSiblingIsRefused covers the private files' refusal: a
 // WAL sibling that is a symlink would make the store chmod and write
 // through to a file it does not own, so the open refuses it.
@@ -937,9 +980,11 @@ func TestASymlinkedSiblingIsRefused(t *testing.T) {
 	if err := os.WriteFile(victim, []byte("not the store's"), 0o644); err != nil {
 		t.Fatalf("writing the victim file: %v", err)
 	}
-	before, err := os.Stat(victim)
-	if err != nil {
-		t.Fatalf("reading the victim's mode: %v", err)
+	// The victim's mode is set, not inherited: a wide mode is what a
+	// chmod through the link would narrow, whatever the umask.
+	wantMode := os.FileMode(0o644)
+	if err := os.Chmod(victim, wantMode); err != nil {
+		t.Fatalf("setting the victim's mode: %v", err)
 	}
 	if err := os.Symlink(victim, path+"-wal"); err != nil {
 		t.Fatalf("planting the symlink: %v", err)
@@ -959,8 +1004,8 @@ func TestASymlinkedSiblingIsRefused(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading the victim's mode: %v", err)
 	}
-	if got, want := after.Mode().Perm(), before.Mode().Perm(); got != want {
-		t.Errorf("the victim has mode %04o, want its own %04o", got, want)
+	if got := after.Mode().Perm(); got != wantMode {
+		t.Errorf("the victim has mode %04o, want its own %04o", got, wantMode)
 	}
 }
 

@@ -19,11 +19,12 @@ import (
 // It mirrors the file store's lease options: the TTL, the heartbeat
 // interval, the owner's name, and the clock. The defaults are this
 // package's: the TTL session.DefaultLeaseTTL, a heartbeat at the TTL
-// divided by three, the process's id for the owner, and an unset Now is
-// the store's clock, which WithClock sets.
+// divided by three, and the process's id for the owner.
 //
-// The file store's lease does not follow its store's clock: it hands its
-// options to AcquireLease, whose nil-Now default is time.Now.
+// The clock's default depends on who opens. When the store opens a
+// session, an unset Now is the store's clock, which WithClock sets; the
+// file store's lease follows its store's clock the same way. AcquireLease
+// called directly defaults an unset Now to time.Now.
 type LeaseOptions struct {
 	// TTL is how long a lease lasts before it expires.
 	//
@@ -39,7 +40,9 @@ type LeaseOptions struct {
 	OwnerID string
 	// Now is the lease's clock.
 	//
-	// The default is the store's clock: WithClock sets it.
+	// When the store opens a session, the default is the store's clock:
+	// WithClock sets it. AcquireLease called directly defaults an unset
+	// Now to time.Now.
 	Now func() time.Time
 }
 

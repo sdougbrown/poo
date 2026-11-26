@@ -294,6 +294,45 @@ func TestLeaseFencedWritesFailWithLeaseLost(t *testing.T) {
 	}
 }
 
+// TestLeaseAFileStoresLeaseRunsOnTheStoresClock covers the file
+// store's lease clock: a store given a clock leases on that clock, so
+// the lease's expiry is the store's now plus the TTL, not wall time.
+//
+// The store's own listing reads leases on its clock, so a lease stamped
+// from wall time is one the store disagrees with: this store's clock in
+// 2020 is far from the 2026 wall clock the lease would be stamped with.
+func TestLeaseAFileStoresLeaseRunsOnTheStoresClock(t *testing.T) {
+	dir := t.TempDir()
+	injected := time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC)
+	clk := &testClock{t: injected}
+	ttl := 90 * time.Second
+	// The lease options set no Now: the store's clock is the lease's.
+	store, err := NewStore(dir, WithClock(clk.Now), WithLeaseOptions(LeaseOptions{TTL: ttl, HeartbeatInterval: time.Hour, OwnerID: "owner1"}))
+	if err != nil {
+		t.Fatalf("opening the store: %v", err)
+	}
+	defer store.Close()
+	if _, err := store.Create(context.Background(), createdRecord("s1")); err != nil {
+		t.Fatalf("creating the session: %v", err)
+	}
+	path := LeasePath(dir, "s1")
+	state, err := readLease(path)
+	if err != nil {
+		t.Fatalf("reading the lease: %v", err)
+	}
+	if want := injected.Add(ttl); !state.ExpiresAt.Equal(want) {
+		t.Errorf("the lease expires at %s, want %s: the lease runs on the store's clock", state.ExpiresAt, want)
+	}
+	// The store's listing reads the lease on the same clock: live
+	// halfway through the TTL, expired at its end.
+	if live, err := LeaseLocked(path, injected.Add(ttl/2)); err != nil || !live {
+		t.Errorf("the lease is live = %v, %v halfway through its TTL, want it live", live, err)
+	}
+	if live, err := LeaseLocked(path, injected.Add(ttl)); err != nil || live {
+		t.Errorf("the lease is live = %v, %v at its expiry, want it expired", live, err)
+	}
+}
+
 // TestLeaseSummarizeReportsALiveLeasedSessionAsLocked covers the
 // summary: a live-leased session reports Locked: true, the way a
 // locked one does.

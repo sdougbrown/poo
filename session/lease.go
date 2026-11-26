@@ -84,7 +84,9 @@ type LeaseOptions struct {
 	OwnerID string
 	// Now is the lease's clock.
 	//
-	// The default is time.Now.
+	// AcquireLease defaults an unset Now to time.Now. A store that opens
+	// a session substitutes its own clock, the one WithClock sets,
+	// before it calls AcquireLease.
 	Now func() time.Time
 }
 
