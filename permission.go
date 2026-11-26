@@ -311,15 +311,20 @@ func (s *Session) persistPermission(owner *callOwner, p *PermissionRequest) {
 		// The ask names the call it is about, so a later load pairs a
 		// re-ask with that call rather than with the tool's last call.
 		// The batch registers every call before the policy sees it, so
-		// the call's provider id is here too.
-		rec.Handle = owner.permissionHandle
-		if rec.Handle != "" {
-			s.mu.Lock()
-			if call := owner.pendingCalls[rec.Handle]; call != nil {
-				rec.CallID = call.id
+		// the call's provider id is here too. The handle and the call id
+		// are read in one critical section: a parallel read-only batch
+		// asks from several goroutines, and the handle can change
+		// between two reads.
+		s.mu.Lock()
+		handle := owner.permissionHandle
+		var callID string
+		if handle != "" {
+			if call := owner.pendingCalls[handle]; call != nil {
+				callID = call.id
 			}
-			s.mu.Unlock()
 		}
+		s.mu.Unlock()
+		rec.Handle, rec.CallID = handle, callID
 		// The ask's deadline and its fallback ride in the record, so a
 		// reader of the log knows when the ask expires and what it
 		// resolves to. The deadline is the request's own, which a policy

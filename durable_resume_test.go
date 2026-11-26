@@ -49,6 +49,9 @@ type resumeTool struct {
 	idempotent bool
 	// call runs the tool, when the test needs a known point in it.
 	call func(ctx context.Context) (poo.ToolResult, error)
+	// nest are the calls the tool makes through the session's nested
+	// seam, when the test needs a call a tool makes of its own.
+	nest []poo.NestedCall
 
 	mu    sync.Mutex
 	calls []string
@@ -94,7 +97,16 @@ func (t *resumeTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv)
 	p := in.(resumePrepared)
 	t.mu.Lock()
 	t.calls = append(t.calls, p.text)
+	nest := append([]poo.NestedCall(nil), t.nest...)
 	t.mu.Unlock()
+	if len(nest) > 0 {
+		if env.Nested == nil {
+			return poo.ToolResult{Text: "no nested caller", IsError: true}, nil
+		}
+		if _, err := env.Nested.Call(ctx, nest); err != nil {
+			return poo.ToolResult{Text: err.Error(), IsError: true}, nil
+		}
+	}
 	if t.call != nil {
 		return t.call(ctx)
 	}
@@ -600,6 +612,116 @@ func TestDurableResumePairsAReAskWithTheCallItNames(t *testing.T) {
 	}
 	if replay.Deadline == deadline {
 		t.Errorf("the replay's ask took the recorded deadline %q, want a fresh one", replay.Deadline)
+	}
+}
+
+// TestDurableResumeDoesNotRunAnAskWhoseCallItCannotFind covers the live ask
+// whose call the log never recorded: the call was one a running tool made,
+// and the crash cut the run short between the ask and the nested call's own
+// tool.call record. The ask is not a call of its own, so the resumed run
+// replays its parent, re-asks by the tool's name, and runs nothing for the
+// ask.
+func TestDurableResumeDoesNotRunAnAskWhoseCallItCannotFind(t *testing.T) {
+	parent := &resumeTool{
+		name:  "parent",
+		class: poo.ClassReadOnly,
+		nest:  []poo.NestedCall{{Tool: "child", Arguments: json.RawMessage(`{"text":"nested"}`)}},
+	}
+	child := &resumeTool{name: "child", class: poo.ClassSideEffecting}
+	deadline := time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano)
+	dir := writeResumeLog(t,
+		resumeHeader(t, parent, child),
+		startedRun("r1"),
+		userMessage("r1", 0, "do the thing"),
+		assistantCall("r1", 1, callBlock("call_1", "parent", `{"text":"parent"}`)),
+		callRecord("r1", 1, "r1", "call_1", "parent", `{"text":"parent"}`),
+		// The ask names the nested call the parent made. The crash came
+		// between the ask and the nested call's own record, so the log
+		// holds no tool.call for the handle the ask names.
+		askedRecord("r1", "ask_1", "r2", "child", string(poo.ClassSideEffecting), deadline, "deny"),
+	)
+	store := resumeStore(t, dir)
+	asker := &allowAsker{asks: make(chan perm.Ask, 4)}
+	policy, err := perm.New(perm.Options{Askers: []perm.Asker{asker}})
+	if err != nil {
+		t.Fatalf("building the policy: %v", err)
+	}
+	opts := resumeOptions(t, scripted([]fakeResponse{{text: "done"}}), parent, child)
+	opts.Policy = policy
+
+	resumed := resumeDurable(t, store, opts)
+	if _, err := resumed.Session.ResumeRun(context.Background()); err != nil {
+		t.Fatalf("resuming the run: %v", err)
+	}
+	waitResumed(t, resumed.Session)
+
+	// The replayed batch ran the parent and no call of its own for the
+	// ask: the child ran once, from inside the parent, with the
+	// arguments the parent gave it.
+	if got := parent.Calls(); len(got) != 1 || got[0] != "parent" {
+		t.Errorf("the parent tool ran %v, want the one replayed call", got)
+	}
+	if got := child.Calls(); len(got) != 1 || got[0] != "nested" {
+		t.Errorf("the child tool ran %v, want the parent's nested call once", got)
+	}
+
+	recs := readResumeLog(t, dir, "s1")
+	// The handle the ask's record carries names the nested call the
+	// parent makes again, not a call of the resumed batch's own: a
+	// result under it is the tool that made the call reading it back,
+	// never the model.
+	const askHandle = "r2"
+	nestedCall := false
+	for _, rec := range namedRecords(recs, "tool.call") {
+		call := rec.(*poo.ToolCallRecord)
+		if call.Handle != askHandle {
+			continue
+		}
+		if call.Parent == "" {
+			t.Errorf("the ask's handle %q names a call of the resumed batch's own, want the parent's nested call", askHandle)
+		}
+		nestedCall = true
+	}
+	if !nestedCall {
+		t.Errorf("the log holds no nested call under the ask's handle %q, want the parent's", askHandle)
+	}
+	// No tool message carries the child: the model never saw the nested
+	// call, and a message with an empty call id is one the provider
+	// rejects.
+	for _, rec := range namedRecords(recs, "message") {
+		msg := rec.(*poo.MessageRecord)
+		if msg.Role != poo.RoleTool {
+			continue
+		}
+		for _, block := range msg.Content {
+			if block.Kind != poo.ContentToolResult {
+				continue
+			}
+			if block.ToolCallID == "" {
+				t.Errorf("the tool message for %q carries a result with an empty call id", block.Name)
+			}
+			if block.Name == "child" {
+				t.Errorf("the model's history holds a result for the nested tool %q", block.Name)
+			}
+		}
+	}
+	// The ask was not run as a call of its own: the batch holds the
+	// parent's ask again and nothing else.
+	asks := namedRecords(recs, "permission.asked")
+	if len(asks) != 2 {
+		t.Fatalf("the log holds %d ask(s), want the log's and the parent's re-ask", len(asks))
+	}
+	// The live ask kept the id the client was shown, and the parent's
+	// nested call asked it again by the tool's name.
+	reask := asks[1].(*poo.PermissionAskedRecord)
+	if reask.AskID != "ask_1" {
+		t.Errorf("the re-ask's id is %q, want the recorded %q", reask.AskID, "ask_1")
+	}
+	if reask.Deadline != deadline {
+		t.Errorf("the re-ask's deadline is %q, want the recorded %q", reask.Deadline, deadline)
+	}
+	if reask.Tool != "child" {
+		t.Errorf("the re-ask is about the tool %q, want %q", reask.Tool, "child")
 	}
 }
 
