@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -14,6 +15,11 @@ import (
 
 // The store the package ships.
 var _ session.Store = (*Store)(nil)
+
+// The store names its directory, so the seam that asks a store where its
+// sessions live (session.StoreDir) answers for this one as for the file
+// store.
+var _ session.DirStore = (*Store)(nil)
 
 // Store is the SQLite-backed session store.
 //
@@ -183,6 +189,14 @@ func New(path string, opts ...Option) (*Store, error) {
 
 // Path returns the database's path.
 func (s *Store) Path() string { return s.path }
+
+// Dir returns the directory the store keeps its sessions in.
+//
+// The database lives in the directory the session's files would live
+// in, so a consumer that asks where a session is (the wire's
+// session_dir, the feed fault logs beside the session's files) gets an
+// answer from this store the way it does from the file store.
+func (s *Store) Dir() string { return filepath.Dir(s.path) }
 
 // now returns the store's clock.
 func (s *Store) now() time.Time { return s.recovery.Now() }

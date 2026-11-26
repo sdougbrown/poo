@@ -219,7 +219,7 @@ type CreateParams struct {
 	// PromptOverrides changes the session's system prompt.
 	PromptOverrides *PromptOverrides `json:"prompt_overrides,omitempty"`
 	// SessionDir is where the session's records live, for a logged
-	// session.
+	// session and for a durable one whose store names a directory.
 	SessionDir string `json:"session_dir,omitempty"`
 }
 
@@ -252,8 +252,10 @@ type SessionInfo struct {
 	SessionID string `json:"session_id"`
 	// Mode is the session's persistence mode.
 	Mode string `json:"mode"`
-	// SessionDir is the session's directory. It is present only for a
-	// logged session, and a client that resumes later keeps it.
+	// SessionDir is the session's directory. It is present when the
+	// session's store names a directory — a logged session's, and a
+	// durable one's whose store answers — and a client that resumes later
+	// keeps it.
 	SessionDir string `json:"session_dir,omitempty"`
 	// Tools are the tools the session offers.
 	Tools []ToolInfo `json:"tools"`

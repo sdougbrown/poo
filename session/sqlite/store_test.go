@@ -1038,6 +1038,22 @@ func TestAFIFOPlantedInTheOpenWindowIsRefused(t *testing.T) {
 	}
 }
 
+// TestTheStoreNamesItsDirectory covers the seam: the store's sessions
+// live in the database's directory, so StoreDir answers for a sqlite store
+// the way it does for the file store, and the wire and the fault logs read
+// the one seam.
+func TestTheStoreNamesItsDirectory(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "test.db")
+	store, err := New(path)
+	if err != nil {
+		t.Fatalf("opening the store: %v", err)
+	}
+	t.Cleanup(func() { store.Close() })
+	if got := session.StoreDir(store); got != filepath.Dir(path) {
+		t.Errorf("the store's directory is %q, want %q", got, filepath.Dir(path))
+	}
+}
+
 // TestASymlinkedSiblingIsRefused covers the private files' refusal: a
 // WAL sibling that is a symlink would make the store chmod and write
 // through to a file it does not own, so the open refuses it.

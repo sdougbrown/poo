@@ -168,7 +168,7 @@ type Info struct {
 	// Mode is the session's persistence mode: "logged" or "ephemeral".
 	Mode string
 	// SessionDir is the session's directory. It is set for a logged
-	// session.
+	// session, and for a durable one whose store names a directory.
 	SessionDir string
 	// Tools are the tools the session offers.
 	Tools []protocol.ToolInfo

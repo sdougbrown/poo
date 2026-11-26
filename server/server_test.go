@@ -1202,6 +1202,11 @@ func TestAServedDurableSqliteSessionLoads(t *testing.T) {
 	if info.Mode != "durable" {
 		t.Errorf("the loaded session's mode is %q, want durable", info.Mode)
 	}
+	// The sqlite store names its directory, so a client that resumes
+	// later keeps it, as it does for a durable file session.
+	if info.SessionDir != dir {
+		t.Errorf("the loaded session's directory is %q, want %q", info.SessionDir, dir)
+	}
 }
 
 // The handshake announces the durable mode only when the settings'
