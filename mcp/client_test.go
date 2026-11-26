@@ -395,6 +395,53 @@ func TestTheResourceUpdateReachesItsWaiter(t *testing.T) {
 	}
 }
 
+// TestTheSubscriptionsAcknowledgementReachesItsWaiter covers the other
+// notification the routing carries: the acknowledgement the SDK delivers
+// for a granted subscription reaches the waiter registered for its URI,
+// so a flow that waits on it is not left hanging on a shape the routing
+// read wrong.
+func TestTheSubscriptionsAcknowledgementReachesItsWaiter(t *testing.T) {
+	t.Setenv("SECRET", "s3cret")
+	binary := buildFixture(t, "server")
+	dir := t.TempDir()
+	pidfile := filepath.Join(dir, "fixture.pid")
+	g, err := Launch(context.Background(), LaunchOptions{
+		SessionID: "s-42",
+		Dir:       dir,
+		HostEnv: func(name string) (string, bool) {
+			if name == "FIXTURE" {
+				return binary, true
+			}
+			return exec.Lookup(os.Environ())(name)
+		},
+		Servers: []manifest.Server{fixtureServer(t, binary, pidfile)},
+	})
+	if err != nil {
+		t.Fatalf("launching the fixture: %v", err)
+	}
+	defer g.Close()
+
+	g.mu.Lock()
+	state := g.byName["fixture"]
+	g.mu.Unlock()
+
+	// The waiter is registered before the subscribe round trip, so the
+	// acknowledgement lands in a waiter rather than nowhere.
+	waiter, stop := state.waiters.waitAck(counterURI)
+	defer stop()
+	if err := state.session.Subscribe(context.Background(), &sdkmcp.SubscribeParams{URI: counterURI}); err != nil {
+		t.Fatalf("subscribing to the counter: %v", err)
+	}
+	select {
+	case granted := <-waiter:
+		if !granted {
+			t.Fatalf("the acknowledgement refused the URI the server granted")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the subscription acknowledgement never reached its waiter")
+	}
+}
+
 // TestTheWaitersAnswerOnceAndStop covers the waiters' own rules: a
 // waiter is answered once and then gone, an acknowledgement answers
 // every waiter with whether its URI was granted, and a stopped waiter

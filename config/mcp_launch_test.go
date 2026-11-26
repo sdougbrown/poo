@@ -2,8 +2,11 @@ package config_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
-	"os/exec"
+	"os"
+	osexec "os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -12,6 +15,9 @@ import (
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/config"
+	"github.com/sdougbrown/poo/exec"
+	"github.com/sdougbrown/poo/mcp"
+	"github.com/sdougbrown/poo/mcp/manifest"
 )
 
 // recordingLauncher is the launcher a test links when it wants to see
@@ -148,6 +154,102 @@ func TestMCPSelectionLaunchesWithTheSessionValues(t *testing.T) {
 	}
 }
 
+// fixtureServer builds the mcp package's fixture server and returns its
+// path. The test asks a real server what environment it runs with, so
+// the server is a process the client can start.
+func fixtureServer(t *testing.T) string {
+	t.Helper()
+	binary := filepath.Join(t.TempDir(), "server")
+	cmd := osexec.Command("go", "build", "-o", binary, "github.com/sdougbrown/poo/mcp/testdata/server")
+	cmd.Env = os.Environ()
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("building the fixture server: %v\n%s", err, out)
+	}
+	return binary
+}
+
+// clientLauncher is the launcher a test links when it wants the real
+// client behind the session: it starts the selected server the way the
+// binary does, with the session's own values and the scrub the build
+// handed it, and keeps the group so the test can call the server it
+// started.
+//
+// The binary's own launcher lives in package main and cannot be linked
+// from here; this is the same wiring over the same client.
+func clientLauncher(group **mcp.Group) config.MCPLauncher {
+	hostEnv := exec.Lookup(os.Environ())
+	return func(ctx context.Context, values config.MCPLaunchValues) (config.MCPRunning, error) {
+		g, err := mcp.Launch(ctx, mcp.LaunchOptions{
+			SessionID: values.SessionID,
+			Dir:       values.WorkingDir,
+			HostEnv:   hostEnv,
+			Scrub:     values.Scrub,
+			Servers:   []manifest.Server{values.Server},
+		})
+		if err != nil {
+			return nil, err
+		}
+		*group = g
+		return g, nil
+	}
+}
+
+// TestMCPSelectedServerDoesNotInheritTheDeclaredCredential covers the
+// environment a server starts with: the name a launcher declared is
+// scrubbed from the host environment the server inherits, and the
+// manifest's explicit reference still resolves it — the operator's
+// choice, the same way a feed reaches one only through a binding.
+func TestMCPSelectedServerDoesNotInheritTheDeclaredCredential(t *testing.T) {
+	t.Setenv("POO_TEST_CREDENTIAL", "launched-by-the-parent")
+	t.Setenv("POO_CREDENTIAL_ENV", "POO_TEST_CREDENTIAL")
+	binary := fixtureServer(t)
+	path := mcpManifest(t, map[string]any{"fixture": map[string]any{
+		"command": binary,
+		"env":     map[string]any{"CRED": "${POO_TEST_CREDENTIAL}"},
+	}}, nil)
+	settings, err := config.Parse([]byte(theSelectingSettings(t, path, "picky", "fixture")), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	var group *mcp.Group
+	runtime := buildWith(t, config.BuildOptions{
+		Settings:    settings,
+		Overrides:   config.EnvOverrides(config.Overrides{}),
+		MCPLauncher: clientLauncher(&group),
+		WorkingDir:  t.TempDir(),
+	})
+	defer runtime.Store.Close()
+
+	sess, err := runtime.CreateSession(context.Background(), runtime.Store, theCreatedRecord("picky", t.TempDir()))
+	if err != nil {
+		t.Fatalf("creating the session: %v", err)
+	}
+	defer sess.Close()
+	if group == nil {
+		t.Fatal("the session started no server")
+	}
+
+	res, err := group.CallTool(context.Background(), "fixture/echo", json.RawMessage(`{"text":"hi","env":["POO_TEST_CREDENTIAL","CRED"]}`))
+	if err != nil {
+		t.Fatalf("calling the echo tool: %v", err)
+	}
+	if len(res.Text) != 1 {
+		t.Fatalf("the echo tool answered with %d text contents, want 1", len(res.Text))
+	}
+	var answer struct {
+		Env map[string]string `json:"env"`
+	}
+	if err := json.Unmarshal([]byte(res.Text[0]), &answer); err != nil {
+		t.Fatalf("the echo tool's answer is not a report: %v\n%s", err, res.Text[0])
+	}
+	if got := answer.Env["POO_TEST_CREDENTIAL"]; got != "<unset>" {
+		t.Errorf("the declared credential reached the server as %q, want it scrubbed from the host environment", got)
+	}
+	if got := answer.Env["CRED"]; got != "launched-by-the-parent" {
+		t.Errorf("the manifest's explicit reference resolved to %q, want the credential the operator asked for", got)
+	}
+}
+
 // TestMCPFailedLaunchClosesWhatItStartedAndNamesTheServer covers the
 // failed launch: a session that cannot start one of its selected
 // servers is never built, the servers that did start stop with the
@@ -221,7 +323,7 @@ func TestMCPConstructionFailureLeavesNoChild(t *testing.T) {
 	launcher := func(context.Context, config.MCPLaunchValues) (config.MCPRunning, error) {
 		// A real child, because the rollback's promise is about
 		// processes: a fake handle cannot prove one is gone.
-		child := exec.Command("sleep", "60")
+		child := osexec.Command("sleep", "60")
 		if err := child.Start(); err != nil {
 			return nil, err
 		}

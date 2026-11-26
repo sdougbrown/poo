@@ -98,10 +98,10 @@ type LaunchOptions struct {
 	// manifest's ${NAME} references. A nil HostEnv resolves no
 	// reference.
 	HostEnv func(string) (string, bool)
-	// Scrub is the rule the host environment is scrubbed with: the same
-	// one the session's feed commands resolve their environment
-	// through. The servers run with the scrubbed environment plus the
-	// manifest's own entries.
+	// Scrub is the rule the host environment is scrubbed with. The
+	// servers run with the scrubbed environment plus the manifest's own
+	// entries. Explicit ${NAME} references resolve through HostEnv, so a
+	// manifest may reintroduce a name the rule scrubbed.
 	Scrub exec.Scrub
 	// Servers are the selected servers, in selection order. Nothing
 	// starts without one.

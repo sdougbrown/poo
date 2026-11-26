@@ -25,6 +25,9 @@ type attached struct {
 	closeErr error
 	// options is the last options pointer the attach was handed.
 	options *poo.Options
+	// feeds are the feeds the attach appends to the options it is
+	// handed, the way a subsystem that brings its own source would.
+	feeds []poo.FeedSpec
 }
 
 // attach is the attach function a test's options carry.
@@ -32,11 +35,13 @@ func (a *attached) attach(_ context.Context, at *poo.Attach) (func() error, erro
 	a.mu.Lock()
 	a.calls = append(a.calls, at.SessionID+"@"+at.WorkingDir)
 	a.options = at.Options
+	feeds := append([]poo.FeedSpec(nil), a.feeds...)
 	err := a.err
 	a.mu.Unlock()
 	if err != nil {
 		return nil, err
 	}
+	at.Options.Feeds = append(at.Options.Feeds, feeds...)
 	return a.close, nil
 }
 
@@ -189,6 +194,94 @@ func TestSessionAttachCloserRunsWhenAConstructionFailsAfterIt(t *testing.T) {
 	}
 	if _, closes := recorder.attachments(); closes != 1 {
 		t.Errorf("the attach's closer ran %d times, want once on the failed construction", closes)
+	}
+}
+
+// TestSessionAttachAppendedFeedIsChecked covers the check that runs
+// after the attach: a feed the attach appends is held to the session's
+// feed rules, so one that breaks them fails the construction — and the
+// attach's closer still runs, because the attach itself succeeded.
+func TestSessionAttachAppendedFeedIsChecked(t *testing.T) {
+	sink := &recordingSink{}
+	recorder := &attached{feeds: []poo.FeedSpec{{
+		Name: "Not A Name",
+		Run:  func(context.Context, poo.FeedIO) error { return nil },
+	}}}
+	opts := testOptions(t, scripted([]fakeResponse{{text: "ok"}}), &echoTool{}, sink)
+	opts.SessionAttach = recorder.attach
+
+	_, err := poo.New(opts)
+	if err == nil {
+		t.Fatal("the session was built with an appended feed that is not a valid name")
+	}
+	var init *poo.ErrSessionInit
+	if !asSessionInit(err, &init) {
+		t.Fatalf("the construction failure is %T, want an ErrSessionInit", err)
+	}
+	if !strings.Contains(err.Error(), "Not A Name") {
+		t.Errorf("the failure says %q, want the appended feed's name", err)
+	}
+	if _, closes := recorder.attachments(); closes != 1 {
+		t.Errorf("the attach's closer ran %d times, want once on the failed construction", closes)
+	}
+	if len(sink.Records()) != 0 {
+		t.Errorf("the failed construction left %d records, want none", len(sink.Records()))
+	}
+}
+
+// TestSessionAttachAppendedDuplicateFeedFailsTheRestore covers the same
+// check on the restore path: two feeds of one name are refused however
+// they reached the options, and the restored session is never built.
+func TestSessionAttachAppendedDuplicateFeedFailsTheRestore(t *testing.T) {
+	runner := func(context.Context, poo.FeedIO) error { return nil }
+	recorder := &attached{feeds: []poo.FeedSpec{
+		{Name: "inbox", Run: runner},
+		{Name: "inbox", Run: runner},
+	}}
+	ropts := restoreOptions(t, scripted([]fakeResponse{{text: "ok"}}), &recordingSink{})
+	ropts.SessionAttach = recorder.attach
+
+	_, _, err := poo.Restore(ropts, []poo.Record{header("s1")})
+	if err == nil {
+		t.Fatal("the session was restored with the same feed twice")
+	}
+	var init *poo.ErrSessionInit
+	if !asSessionInit(err, &init) {
+		t.Fatalf("the restore failure is %T, want an ErrSessionInit", err)
+	}
+	if !strings.Contains(err.Error(), "defined twice") {
+		t.Errorf("the failure says %q, want it to name the duplicated feed", err)
+	}
+	if _, closes := recorder.attachments(); closes != 1 {
+		t.Errorf("the attach's closer ran %d times, want once on the failed restore", closes)
+	}
+}
+
+// TestSessionAttachAppendedFeedRuns covers the other side of the
+// handover: an appended feed that passes the check is the session's,
+// and the session starts it.
+func TestSessionAttachAppendedFeedRuns(t *testing.T) {
+	sink := &recordingSink{}
+	recorder := &attached{feeds: []poo.FeedSpec{{
+		Name: "appended",
+		Run: func(ctx context.Context, _ poo.FeedIO) error {
+			<-ctx.Done()
+			return ctx.Err()
+		},
+	}}}
+	opts := testOptions(t, scripted([]fakeResponse{{text: "ok"}}), &echoTool{}, sink)
+	opts.SessionAttach = recorder.attach
+	newTestSession(t, opts)
+
+	waitRecords(t, sink, "feed.started", 1)
+	started := false
+	for _, rec := range sink.allRecords() {
+		if record, ok := rec.(*poo.FeedStartedRecord); ok && record.Feed == "appended" {
+			started = true
+		}
+	}
+	if !started {
+		t.Fatal("the session started no feed the attach appended")
 	}
 }
 

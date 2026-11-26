@@ -249,10 +249,10 @@ type MCPLaunchValues struct {
 	// WorkingDir is the directory the session works in, and the
 	// directory the server runs in.
 	WorkingDir string
-	// Scrub is the rule the host environment is scrubbed with — the
-	// same one the session's feed commands resolve their environment
-	// through. The server runs with the scrubbed environment plus the
-	// manifest's own entries.
+	// Scrub is the rule the host environment is scrubbed with. The
+	// server runs with the scrubbed environment plus the manifest's
+	// own entries, and a manifest's explicit ${NAME} still resolves
+	// through the environment lookup the scrub leaves alone.
 	Scrub exec.Scrub
 	// Server is the selected server's declaration, with its templates
 	// unresolved: the launch resolves them from the values here.
@@ -328,9 +328,9 @@ type Runtime struct {
 	// none: a profile that selects a server on such a binary fails the
 	// build rather than a session that cannot start what it selected.
 	mcpLauncher MCPLauncher
-	// envScrub is the rule the session's environment was scrubbed with:
-	// the feeds resolve their environment through it, and the MCP
-	// servers a session starts run with the environment it produces.
+	// envScrub is the rule the MCP servers a session starts are launched
+	// with: the tools' scrub, and the names a launcher declared, which a
+	// server reaches only through an explicit manifest reference.
 	envScrub exec.Scrub
 	// executor is the executor the commands run through: the tools
 	// that run one, and the feeds. It is nil when nothing runs a
@@ -1983,15 +1983,6 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 		}
 	}
 	r.Env = exec.ScrubEnv(os.Environ(), scrub)
-	// The rule itself is kept, not just the environment it produced: an
-	// MCP server a session starts is launched with the host environment
-	// scrubbed by the same rules its feed commands resolve through, and
-	// the launch happens per session, long after the build.
-	r.envScrub = exec.Scrub{
-		Names:       append([]string(nil), scrub.Names...),
-		Globs:       append([]string(nil), scrub.Globs...),
-		Passthrough: append([]string(nil), scrub.Passthrough...),
-	}
 	// A launcher's credentials are different: poo's own subsystems need them,
 	// and a model-invoked subprocess must not see them. They stay in Env and
 	// join the list the tools' children are scrubbed with.
@@ -2001,9 +1992,20 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 	}
 	// The settings scrub and the endpoint credentials are gone from Env as
 	// well; these are not, so the names are recorded under a name that says so
-	// and scrubbed only from the tools' children.
+	// and scrubbed from the tools' children and the session's MCP servers.
 	r.DeclaredCredentialEnvNames = append([]string(nil), opts.Overrides.CredentialEnvNames...)
 	credentialScrub.Names = append(credentialScrub.Names, r.DeclaredCredentialEnvNames...)
+	// The rule itself is kept, not just the environment it produced: an MCP
+	// server a session starts is launched with the host environment scrubbed
+	// by the tools' rule, and the launch happens per session, long after the
+	// build. A declared credential is scrubbed here too — a server inherits
+	// nothing, and reaches the name only through an explicit reference, which
+	// resolves through the host lookup rather than this rule.
+	r.envScrub = exec.Scrub{
+		Names:       append([]string(nil), credentialScrub.Names...),
+		Globs:       append([]string(nil), scrub.Globs...),
+		Passthrough: append([]string(nil), credentialScrub.Passthrough...),
+	}
 
 	executorName := DefaultExecutor
 	if settings.Tools.Bash.Executor != nil {
