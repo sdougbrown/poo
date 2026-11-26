@@ -67,6 +67,7 @@ func handlePrompt(inv clicontract.Invocation, stdout, stderr io.Writer) exit {
 		DefaultProfile: defaultProfile,
 		UserPromptFile: defaultUserPromptFile(),
 		Tools:          linkedTools(),
+		MCPLauncher:    linkedMCPLauncher(),
 		Profiles:       linkedProfiles(),
 		Executors:      executorRegistry(),
 		Askers:         []string{"decide"},

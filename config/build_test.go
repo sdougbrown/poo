@@ -110,6 +110,13 @@ func buildWith(t *testing.T, opts config.BuildOptions) *config.Runtime {
 	if opts.Executors == nil {
 		opts.Executors = theExecutors()
 	}
+	// A build whose profile selects a server needs a launcher the way
+	// the binary links one: the default stub stands in for the linked
+	// client, and the tests that assert the missing-launcher failure
+	// build their own options without this default.
+	if opts.MCPLauncher == nil {
+		opts.MCPLauncher = theStubMCPLauncher()
+	}
 	runtime, err := config.Build(opts)
 	if err != nil {
 		t.Fatalf("building the runtime: %v", err)
@@ -1677,6 +1684,37 @@ func TestTheRuntimeCreatesAndResumesASession(t *testing.T) {
 	if len(resumed.Loaded.Records) == 0 {
 		t.Error("the loaded session holds no records")
 	}
+}
+
+// theStubMCPLauncher is the launcher the config tests link when a test
+// does not name its own: it starts nothing, and a session that asks it
+// to launch owns nothing to close.
+func theStubMCPLauncher() config.MCPLauncher {
+	return func(context.Context, config.MCPLaunchValues) (config.MCPRunning, error) {
+		running := &stubRunning{}
+		return running, nil
+	}
+}
+
+// stubRunning is a launcher handle that only counts its closes.
+type stubRunning struct {
+	mu     sync.Mutex
+	closed int
+}
+
+// Close counts.
+func (r *stubRunning) Close() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.closed++
+	return nil
+}
+
+// closes returns how many times the handle was closed.
+func (r *stubRunning) closes() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.closed
 }
 
 // readOnlyTools are the tools a binary that can change nothing links.

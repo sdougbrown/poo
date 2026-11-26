@@ -151,6 +151,7 @@ func handleRun(parent context.Context, inv clicontract.Invocation, stdout, stder
 		DefaultProfile: defaultProfile,
 		UserPromptFile: defaultUserPromptFile(),
 		Tools:          linkedTools(),
+		MCPLauncher:    linkedMCPLauncher(),
 		Profiles:       linkedProfiles(),
 		Executors:      executorRegistry(),
 		// The command has no wire client, so the chain is the decide

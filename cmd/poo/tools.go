@@ -1,10 +1,16 @@
 package main
 
 import (
+	"context"
+	"os"
+
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/codemode/quickjs"
 	codemodestarlark "github.com/sdougbrown/poo/codemode/starlark"
 	"github.com/sdougbrown/poo/config"
+	"github.com/sdougbrown/poo/exec"
+	"github.com/sdougbrown/poo/mcp"
+	"github.com/sdougbrown/poo/mcp/manifest"
 	"github.com/sdougbrown/poo/profile"
 	"github.com/sdougbrown/poo/profile/base"
 	"github.com/sdougbrown/poo/profile/code"
@@ -107,5 +113,34 @@ func linkedTools() map[string]config.ToolFactory {
 		"find_tool": func(opts config.ToolOptions) poo.Tool {
 			return cliregistry.NewFind(opts.Registry)
 		},
+	}
+}
+
+// linkedMCPLauncher returns the MCP launcher the command links.
+//
+// The launcher is the binary's one seam to the MCP client: the
+// settings and the profiles hold the declarations and the selection,
+// and this is what turns a selected server into a process a session
+// owns. It introduces itself with the binary's own version, and it
+// resolves a manifest's ${NAME} against the host environment, so an
+// explicit reference may reintroduce a variable the session scrubbed —
+// the operator's choice, and the one the launcher is told the scrub
+// rule for.
+func linkedMCPLauncher() config.MCPLauncher {
+	version := buildVersion().String()
+	hostEnv := exec.Lookup(os.Environ())
+	return func(ctx context.Context, launch config.MCPLaunchValues) (config.MCPRunning, error) {
+		group, err := mcp.Launch(ctx, mcp.LaunchOptions{
+			SessionID:     launch.SessionID,
+			Dir:           launch.WorkingDir,
+			HostEnv:       hostEnv,
+			Scrub:         launch.Scrub,
+			Servers:       []manifest.Server{launch.Server},
+			ClientVersion: version,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return group, nil
 	}
 }

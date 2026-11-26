@@ -49,6 +49,10 @@ type Options struct {
 	UserPromptFile string
 	// Tools are the tool constructors the binary links, by name.
 	Tools map[string]config.ToolFactory
+	// MCPLauncher starts the MCP servers a session's profile selected.
+	// It is the binary's link to the client, and every runtime the
+	// server builds carries it.
+	MCPLauncher config.MCPLauncher
 	// Executors are the executors the binary links.
 	Executors *exec.Registry
 	// Profiles are the profiles the binary links.
@@ -81,6 +85,7 @@ func New(opts Options) (*Server, error) {
 		DefaultProfile: opts.DefaultProfile,
 		UserPromptFile: opts.UserPromptFile,
 		Tools:          opts.Tools,
+		MCPLauncher:    opts.MCPLauncher,
 		Profiles:       opts.Profiles,
 		Executors:      opts.Executors,
 		// The server has a wire, so the chain asks the client. The
@@ -318,6 +323,9 @@ func (f *Server) runtimeFor(profileName, model string) (*config.Runtime, error) 
 	if model != "" {
 		settings.Roles[string(catalog.RoleChat)] = model
 	}
+	// The build is the one New made, carried whole: the launcher the
+	// binary linked reaches this per-profile build the same way, so a
+	// session under any profile starts what that profile selects.
 	opts := f.build
 	opts.Settings = &settings
 	if profileName != "" {
