@@ -86,6 +86,7 @@ class SessionSummary:
     compactions: int = 0
     settle_reason: str = "unknown"
     settle_source: str = ""
+    settle_seen: bool = False
     torn: bool = False
     skipped_lines: int = 0
     records: int = 0
@@ -95,12 +96,15 @@ class SessionSummary:
 def parse_session_log(path: Path) -> SessionSummary:
     """Parse a poo JSONL session log into token and execution metrics.
 
-    Mirrors the loose decoding rules in eval/log.go and eval/metrics.go:
-    unknown fields are ignored, and an undecodable line is marked torn rather
-    than failing the parse. A torn line can sit anywhere in the file, not only
-    at the end: a write that a kill interrupted can be followed by further
-    records, so the parse skips the line, keeps reading, and leaves the counts
-    as a lower bound.
+    Unknown fields are ignored, as eval/log.go ignores them.
+
+    Two rules deliberately diverge from eval/log.go. An undecodable line is
+    skipped wherever it sits and the parse continues, where the Go reader fails
+    on a torn line that is not the last one; a killed write can be followed by
+    further records, and a metrics reader that aborts loses the whole trial.
+    Turns fall back to the usage records when the log has no settle record,
+    which is the killed-run case: the same fallback eval/log.go's Turns()
+    applies, skipping the requests a compaction made.
     """
     summary = SessionSummary()
     if not path.exists():
@@ -113,6 +117,10 @@ def parse_session_log(path: Path) -> SessionSummary:
 
     cache_reported = False
     cache_total = 0
+    # usage_turns counts what eval/log.go's Turns() counts when a log has no
+    # settle record: the requests the run made, not the ones a compaction made
+    # (a compaction request is numbered 0).
+    usage_turns = 0
 
     for idx, line in enumerate(lines):
         is_last = idx == len(lines) - 1
@@ -134,6 +142,8 @@ def parse_session_log(path: Path) -> SessionSummary:
         if kind == "usage":
             summary.input_tokens += int(rec.get("input_tokens") or 0)
             summary.output_tokens += int(rec.get("output_tokens") or 0)
+            if int(rec.get("request") or 0) != 0:
+                usage_turns += 1
             cache_val = rec.get("cache_read_tokens")
             if cache_val is not None:
                 cache_reported = True
@@ -148,12 +158,15 @@ def parse_session_log(path: Path) -> SessionSummary:
         elif kind == "run.settled":
             summary.settle_reason = str(rec.get("reason") or "unknown")
             summary.turns = int(rec.get("turns") or 0)
+            summary.settle_seen = True
             detail = rec.get("detail")
             if isinstance(detail, dict):
                 summary.settle_source = str(detail.get("source") or "")
 
     if cache_reported:
         summary.cache_read_tokens = cache_total
+    if not summary.settle_seen:
+        summary.turns = usage_turns
 
     return summary
 
@@ -213,7 +226,6 @@ class PooAgent(BaseAgent):
         *,
         poo_bin: str | None = None,
         settings: str | None = None,
-        auth_file: str | None = None,
         endpoint: str | None = None,
         model_id: str | None = None,
         context_limit: int | None = None,
@@ -233,7 +245,6 @@ class PooAgent(BaseAgent):
         super().__init__(logs_dir=logs_dir, model_name=model_name, **kwargs)
         self.poo_bin = Path(poo_bin) if poo_bin else default_poo_binary()
         self.settings_path = Path(settings) if settings else None
-        self.auth_file_path = Path(auth_file) if auth_file else None
         self.endpoint, self.model_id, self.api_key_env = resolve_endpoint_and_model(
             model_name=model_name,
             endpoint=endpoint,
@@ -295,9 +306,6 @@ class PooAgent(BaseAgent):
         suffix = self.settings_path.suffix if self.settings_path else ".yaml"
         return f"{self._agent_dir()}/settings{suffix}"
 
-    def _container_auth_path(self) -> str:
-        return f"{self._agent_dir()}/auth.json"
-
     def _container_instruction_path(self) -> str:
         return f"{self._agent_dir()}/instruction.txt"
 
@@ -320,6 +328,15 @@ class PooAgent(BaseAgent):
 
         if self.settings_path is not None:
             args.extend(["--settings", self._container_settings_path()])
+            # A settings file names the model, and an explicit flag still wins
+            # over it, so a caller who passes one of these gets it applied
+            # instead of silently dropped.
+            if self.context_limit is not None:
+                args.extend(["--context-limit", str(self.context_limit)])
+            if self.api_key_env:
+                args.extend(["--api-key-env", self.api_key_env])
+            if self.tools_mode:
+                args.extend(["--tools-mode", self.tools_mode])
         else:
             if not self.endpoint or not self.model_id:
                 raise ValueError(
@@ -392,14 +409,6 @@ class PooAgent(BaseAgent):
                 target_path=self._container_settings_path(),
             )
 
-        if self.auth_file_path is not None:
-            if not self.auth_file_path.exists():
-                raise FileNotFoundError(f"Auth file not found: {self.auth_file_path}")
-            await environment.upload_file(
-                source_path=self.auth_file_path,
-                target_path=self._container_auth_path(),
-            )
-
     async def run(
         self,
         instruction: str,
@@ -453,15 +462,21 @@ class PooAgent(BaseAgent):
         *,
         return_code: int | None = None,
     ) -> None:
-        """Populate Harbor's AgentContext with token counts and poo run metadata."""
-        summary = parse_session_log(self.logs_dir / "session.jsonl")
-        if summary.records == 0:
-            return
+        """Populate Harbor's AgentContext with token counts and poo run metadata.
 
-        context.n_input_tokens = summary.input_tokens
-        context.n_output_tokens = summary.output_tokens
-        if summary.cache_read_tokens is not None:
-            context.n_cache_tokens = summary.cache_read_tokens
+        The metadata is written even when the log holds no records. A run that
+        died before writing its first record — a refused setting, a bad
+        tools mode, a container timeout, or a log that could not be downloaded —
+        then reports its return code and a `no-log` settle reason instead of
+        looking like a trial that did nothing.
+        """
+        summary = parse_session_log(self.logs_dir / "session.jsonl")
+
+        if summary.records > 0:
+            context.n_input_tokens = summary.input_tokens
+            context.n_output_tokens = summary.output_tokens
+            if summary.cache_read_tokens is not None:
+                context.n_cache_tokens = summary.cache_read_tokens
 
         existing_meta = getattr(context, "metadata", None)
         meta: dict[str, Any] = dict(existing_meta) if isinstance(existing_meta, dict) else {}
@@ -472,9 +487,11 @@ class PooAgent(BaseAgent):
                 "tool_calls": summary.tool_calls,
                 "tool_errors": summary.tool_errors,
                 "compactions": summary.compactions,
-                "settle_reason": summary.settle_reason,
+                "settle_reason": summary.settle_reason if summary.records else "no-log",
                 "settle_source": summary.settle_source,
                 "log_torn": summary.torn,
+                "skipped_lines": summary.skipped_lines,
+                "log_records": summary.records,
                 "return_code": return_code,
             }
         )

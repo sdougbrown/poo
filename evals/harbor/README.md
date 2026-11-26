@@ -71,15 +71,15 @@ PYTHONPATH=evals/harbor harbor run \
 ### Using a `poo` settings file
 
 If you want to pin compaction strategies, sampling, or built-in providers
-(e.g. OpenCode Console or Codex), pass `--ak settings=...` (and optionally
-`--ak auth_file=...`):
+(e.g. OpenCode Console or Codex), pass `--ak settings=...`. Flags you pass
+explicitly, such as `--ak context_limit=...`, still apply and override the
+file's value:
 
 ```bash
 PYTHONPATH=evals/harbor harbor run \
   --dataset terminal-bench/terminal-bench@4.1.0 \
   --agent poo_agent:PooAgent \
   --ak settings=/path/to/settings.yaml \
-  --ak auth_file=/path/to/auth.json \
   --n-tasks 3
 ```
 
@@ -131,7 +131,6 @@ PYTHONPATH=evals/harbor harbor run \
 |---|---|---|
 | `poo_bin` | `evals/harbor/bin/poo-linux-<arch>` | Path to static Linux `poo` binary (or `POO_HARBOR_BIN` env var) |
 | `settings` | none | Local `poo` settings file uploaded into `/logs/agent/` |
-| `auth_file` | none | Local `auth.json` uploaded into `/logs/agent/auth.json` |
 | `endpoint` | inferred from `--model` | OpenAI-compatible base URL (or `POO_ENDPOINT` env var) |
 | `model_id` | inferred from `--model` | Model ID passed to `--model-id` |
 | `api_key_env` | inferred from `--model` | Host env var forwarded into the container (or `POO_API_KEY_ENV`) |
