@@ -2337,6 +2337,7 @@ func TestTheOutsideAskSettingReachesThePolicy(t *testing.T) {
 		{"read true", "tools:\n  read: {ask_outside_working_dir: true}\n", "read", map[string]string{"path": "outside.txt"}, 1},
 		{"grep true", "tools:\n  grep: {ask_outside_working_dir: true}\n", "grep", map[string]string{"path": "outside.txt", "pattern": "needle"}, 1},
 		{"edit true", "tools:\n  edit: {ask_outside_working_dir: true}\n", "edit", map[string]string{"path": "outside.txt", "old": "a", "new": "b"}, 1},
+		{"write true", "tools:\n  write: {ask_outside_working_dir: true}\n", "write", map[string]string{"path": "outside.txt", "content": "c"}, 1},
 		{"grep pattern is not the path", "tools:\n  grep: {ask_outside_working_dir: true}\n", "grep", map[string]string{"pattern": "../escape"}, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
