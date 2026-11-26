@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"os"
 	"strconv"
 	"sync"
@@ -135,8 +134,7 @@ func AcquireLease(db *sql.DB, sessionID string, opts LeaseOptions) (*LeaseAuthor
 			tx.Rollback()
 			return nil, session.ErrSessionLocked
 		}
-		warning = fmt.Sprintf(session.LeaseTakeoverFormat,
-			existingOwner, existingExp.Format(time.RFC3339))
+		warning = session.LeaseTakeoverWarning(existingOwner, existingExp)
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		tx.Rollback()
 		return nil, err

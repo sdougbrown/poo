@@ -240,9 +240,10 @@ func NewStore(dir string, opts ...Option) (*FileStore, error) {
 	s := &FileStore{
 		dir:   dir,
 		codec: NewCodec(),
+		// No policy: the load settles with the interrupt policy on the
+		// store's own clock, whatever a caller set it to.
 		recovery: Recovery{
-			Policy: InterruptPolicy{},
-			Now:    time.Now,
+			Now: time.Now,
 		},
 	}
 	for _, opt := range opts {

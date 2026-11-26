@@ -28,13 +28,16 @@ const leaseFileMode = 0o600
 // owner is taken over.
 const DefaultLeaseTTL = 30 * time.Second
 
-// LeaseTakeoverFormat is the format of the warning a takeover carries:
-// the previous owner's id and the wall-clock time its lease expired, as
-// an RFC 3339 time.
+// LeaseTakeoverWarning is the warning a lease takeover carries: the
+// previous owner's id, and the time its lease expired as an RFC 3339
+// time.
 //
-// Every lease implementation warns in these words, so a supervisor that
-// reads the warning reads the same text whatever store it came from.
-const LeaseTakeoverFormat = "the lease was taken over from %s, which expired at %s"
+// Every lease implementation builds its takeover warning from it, so
+// the text never depends on the store the lease lives in.
+func LeaseTakeoverWarning(owner string, expiredAt time.Time) string {
+	return fmt.Sprintf("the lease was taken over from %s, which expired at %s",
+		owner, expiredAt.Format(time.RFC3339))
+}
 
 // leaseState is the lease's on-disk form.
 //
@@ -185,8 +188,7 @@ func AcquireLease(dir, id string, opts LeaseOptions) (*LeaseAuthority, error) {
 		if nowT.Before(existing.ExpiresAt) {
 			return nil, ErrSessionLocked
 		}
-		warning = fmt.Sprintf(LeaseTakeoverFormat,
-			existing.OwnerID, existing.ExpiresAt.Format(time.RFC3339))
+		warning = LeaseTakeoverWarning(existing.OwnerID, existing.ExpiresAt)
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return nil, err
 	}

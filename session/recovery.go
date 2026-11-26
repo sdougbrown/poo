@@ -428,33 +428,38 @@ func (p InterruptPolicy) Resolve(ctx context.Context, sink poo.RecordSink, pend 
 // Recovery is what a load reads to recover a session and to say what
 // changed since it was written.
 //
-// Every store that loads a session composes it, so the dispatch has one
-// owner: a durable session is planned and a logged one settled the same
-// way whether its records are lines in a file or rows in a table, and
-// both stores warn in the same words.
+// Every store that loads a session composes it, so a durable session is
+// planned and a logged one settled the same way whether its records are
+// lines in a file or rows in a table, and both stores warn through the
+// same comparison, when both sides name a build or a settings hash.
 type Recovery struct {
-	// Policy resolves a logged or ephemeral session's pending
-	// operations. The default is the interrupt policy.
+	// Policy settles a logged or ephemeral session's pending
+	// operations. The default is the interrupt policy, on the
+	// recovery's own clock.
 	Policy RecoveryPolicy
 	// Durable is how a durable session's continuation is planned.
 	Durable DurableOptions
-	// Now is the store's clock, which a policy or planner given none
-	// inherits. The default is time.Now.
+	// Now is the store's clock. The planner given no clock of its own
+	// inherits it, and so does the default policy.
 	Now func() time.Time
-	// Build names the binary that owns the store. A session written by
-	// another build is loaded with a warning.
+	// Build names the binary that owns the store. A session whose
+	// header names a different build is loaded with a warning; a store
+	// or a header that names no build compares nothing, so it warns
+	// nothing.
 	Build poo.BuildInfo
-	// SettingsHash is the hash of the settings the store was made with.
-	// A session written with other settings is loaded with a warning.
+	// SettingsHash is the hash of the settings the store was made
+	// with. A session whose header carries a different hash is loaded
+	// with a warning; a store or a header with no hash compares
+	// nothing, so it warns nothing.
 	SettingsHash string
 }
 
-// Resolve picks the resolver a session's mode names and resolves the
-// session's pending operations with it.
+// Resolve recovers a session according to its mode: a durable session's
+// pending operations are planned and the plan is returned; any other
+// mode's are settled by the policy, and the plan is nil.
 //
-// A durable session's run is planned for a continuation; every other
-// session's pending operations are settled, which is what this build does
-// for a logged session.
+// A store that sets no policy settles with the interrupt policy on the
+// recovery's clock.
 func (r Recovery) Resolve(ctx context.Context, sink poo.RecordSink, pending *Pending, mode Mode, meta Metadata) (*ContinuationPlan, error) {
 	if mode == ModeDurable {
 		return r.planner(meta).Plan(ctx, sink, pending)

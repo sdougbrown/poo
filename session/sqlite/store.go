@@ -162,9 +162,10 @@ func WithLeaseOptions(opts LeaseOptions) Option {
 func New(path string, opts ...Option) (*Store, error) {
 	s := &Store{
 		codec: session.NewCodec(),
+		// No policy: the load settles with the interrupt policy on the
+		// store's own clock, whatever a caller set it to.
 		recovery: session.Recovery{
-			Policy: session.InterruptPolicy{},
-			Now:    time.Now,
+			Now: time.Now,
 		},
 		lease: LeaseOptions{TTL: session.DefaultLeaseTTL},
 	}

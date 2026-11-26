@@ -1147,6 +1147,32 @@ func TestDurableLoadPlansAContinuation(t *testing.T) {
 		t.Errorf("the logged resolve wrote %v, want one settle", recordNames(settled.records))
 	}
 
+	// A load's settle runs on the store's clock, the one WithClock
+	// sets: the run's settle is stamped from it, not the wall clock.
+	clk := time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC)
+	clockStore, err := NewStore(dir, WithClock(func() time.Time { return clk }))
+	if err != nil {
+		t.Fatalf("opening the clocked store: %v", err)
+	}
+	defer clockStore.Close()
+	writeSession(t, dir, "s2", createdRecord("s2"), runStarted("r2"))
+	clockLoaded, err := clockStore.Load(ctx, "s2")
+	if err != nil {
+		t.Fatalf("loading the logged session on the clock: %v", err)
+	}
+	var clockSettled *poo.RunSettledRecord
+	for _, rec := range clockLoaded.Records {
+		if s, ok := rec.(*poo.RunSettledRecord); ok {
+			clockSettled = s
+		}
+	}
+	if clockSettled == nil {
+		t.Fatal("the clocked load settled no run")
+	}
+	if got := clockSettled.SettledAt; got != clk.UTC().Format(time.RFC3339Nano) {
+		t.Errorf("the run settled at %s, want the store's clock %s", got, clk.UTC().Format(time.RFC3339Nano))
+	}
+
 	// A store given a planner of its own reads it at load time.
 	other, err := NewStore(dir, WithDurableOptions(DurableOptions{MaxResumptions: 1}))
 	if err != nil {
