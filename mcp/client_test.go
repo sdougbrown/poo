@@ -63,6 +63,7 @@ func fixtureServer(t *testing.T, binary, pidfile string) manifest.Server {
 			"POO_FIXTURE_VALUE":   template(t, "${session:id}"),
 			"POO_FIXTURE_PIDFILE": template(t, pidfile),
 			"LEAK":                template(t, "${SECRET}"),
+			"POO_ENV_SENTINEL":    template(t, "overridden"),
 		},
 	}
 }
@@ -113,7 +114,10 @@ func waitGone(t *testing.T, what string, pid int) {
 func TestLaunchStartsTheSelectedServersWithTheSessionValues(t *testing.T) {
 	t.Setenv("SECRET", "s3cret")
 	// The sentinel is the test's own, so the assertion does not depend
-	// on the runner's environment carrying a name like HOME.
+	// on the runner's environment carrying a name like HOME. The
+	// manifest declares the same name below with a different value, so
+	// the sentinel also proves the merge replaces a base entry in
+	// place: the server must see the declared value, not the base's.
 	t.Setenv("POO_ENV_SENTINEL", "present")
 	binary := buildFixture(t, "server")
 	dir := t.TempDir()
@@ -185,8 +189,8 @@ func TestLaunchStartsTheSelectedServersWithTheSessionValues(t *testing.T) {
 	if got := answer.Env["LEAK"]; got != "s3cret" {
 		t.Errorf("the manifest's explicit ${SECRET} resolved to %q, want the scrubbed value back", got)
 	}
-	if got := answer.Env["POO_ENV_SENTINEL"]; got != "present" {
-		t.Errorf("the scrubbed base environment reached the server with the sentinel as %q, want present", got)
+	if got := answer.Env["POO_ENV_SENTINEL"]; got != "overridden" {
+		t.Errorf("the declared override of a base name reached the server as %q, want the declared value in the base entry's place", got)
 	}
 
 	if err := g.Close(); err != nil {
