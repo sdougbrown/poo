@@ -88,6 +88,10 @@ type Tool struct {
 	// inputs are the modalities the session's model reads, for a caller that
 	// names no model of its own.
 	inputs map[poo.Modality]bool
+	// catalog is the servers' catalog section, compiled once when the tool is
+	// built. Its data closure reads the tool's fields at render time, so a
+	// compile here is the one the instance ever does.
+	catalog *prompt.Template
 }
 
 // New returns the tool over the servers a session started.
@@ -98,7 +102,22 @@ type Tool struct {
 // a build starts no server; the attach replaces the tool with the session's
 // own.
 func New(servers []Server, offered []cli.Offered) *Tool {
-	return &Tool{servers: servers, offered: dispatched(offered)}
+	t := &Tool{servers: servers, offered: dispatched(offered)}
+	t.catalog = prompt.MustCompile("call_mcp_catalog", catalogText, func(prompt.Env) any {
+		tools := t.offered
+		return catalogData{
+			// A search pays for itself only when the offering is too long to
+			// show, and a session without one lists the tools whatever their
+			// number: the catalog is the only place the names are.
+			Search:   t.search && len(tools) > cli.FindThreshold,
+			Count:    len(tools),
+			Find:     cli.FindToolName,
+			Call:     CallToolName,
+			Argument: NameArgument,
+			Tools:    tools,
+		}
+	})
+	return t
 }
 
 // Entries returns the entries one server's listed tools become.
@@ -227,24 +246,10 @@ var callSection = prompt.MustCompile(CallToolName, callText, nil)
 // PromptSection renders the tool's guidance and the catalog behind it.
 func (t *Tool) PromptSection(env prompt.Env) string {
 	section := strings.TrimRight(callSection.Render(env), "\n")
-	tools := t.listing()
-	if len(tools) == 0 {
+	if len(t.offered) == 0 {
 		return section
 	}
-	catalog := prompt.MustCompile("call_mcp_catalog", catalogText, func(prompt.Env) any {
-		return catalogData{
-			// A search pays for itself only when the offering is too long to
-			// show, and a session without one lists the tools whatever their
-			// number: the catalog is the only place the names are.
-			Search:   t.search && len(tools) > cli.FindThreshold,
-			Count:    len(tools),
-			Find:     cli.FindToolName,
-			Call:     CallToolName,
-			Argument: NameArgument,
-			Tools:    tools,
-		}
-	})
-	return section + "\n\n" + strings.TrimRight(catalog.Render(env), "\n")
+	return section + "\n\n" + strings.TrimRight(t.catalog.Render(env), "\n")
 }
 
 // catalogData is the data the catalog's section renders with.
@@ -261,9 +266,6 @@ type catalogData struct {
 	// Tools are the tools, in qualified-name order.
 	Tools []cli.Offered
 }
-
-// listing returns every tool the session's servers offer, by qualified name.
-func (t *Tool) listing() []cli.Offered { return t.offered }
 
 // qualify names one tool the way the model writes it: its server's name, a
 // slash, its own.
