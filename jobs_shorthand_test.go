@@ -89,3 +89,30 @@ func TestPolicyCanRefuseATrailingAmpersandJob(t *testing.T) {
 		t.Fatal("the call did not report the policy refusal")
 	}
 }
+
+func TestTrailingAmpersandConflictsWithBackgroundFalse(t *testing.T) {
+	sink := &recordingSink{}
+	s := newTestSession(t, poo.Options{
+		Transport: scripted([]fakeResponse{
+			{calls: []poo.ToolCall{{CallID: "one", Name: "bash", Arguments: []byte(`{"command":"listen &","background":false}`)}}},
+			{text: "done"},
+		}),
+		Tools: map[string]poo.Tool{"bash": bash.New()}, Sink: sink, WorkingDir: t.TempDir(),
+		Model: poo.ModelInfo{ModelID: "test-model", ContextLimit: 32768},
+	})
+	runSession(t, s, "run it")
+	var conflict bool
+	for _, rec := range sink.allRecords() {
+		r, ok := rec.(*poo.ToolResultRecord)
+		if !ok {
+			continue
+		}
+		if r.Outcome == poo.OutcomeStarted {
+			t.Fatal("the call set \"background\": false, but a job started")
+		}
+		conflict = conflict || (r.Outcome == poo.OutcomeError && strings.Contains(r.Text, `"background": false`))
+	}
+	if !conflict {
+		t.Error("the model did not see the background conflict error")
+	}
+}

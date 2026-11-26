@@ -298,10 +298,11 @@ func (s *Session) planCalls(owner *callOwner, turn int, calls []ToolCall, trunca
 		// own background property. The tool.call record keeps the
 		// original arguments.
 		asked := false
+		present := false
 		stripped := call.Arguments
 		if s.backgroundModeOf(call.Name) != BackgroundNever {
 			var err error
-			asked, stripped, err = backgroundArg(call.Arguments)
+			asked, present, stripped, err = backgroundArg(call.Arguments)
 			if err != nil {
 				plan.invalid = true
 				plan.prepareErr = err
@@ -327,9 +328,7 @@ func (s *Session) planCalls(owner *callOwner, turn int, calls []ToolCall, trunca
 			continue
 		}
 		if !nested && s.backgroundModeOf(call.Name) == BackgroundAllowed {
-			if sh, ok := tool.(interface {
-				BackgroundShorthand(json.RawMessage) (json.RawMessage, error)
-			}); ok {
+			if sh, ok := tool.(BackgroundShorthander); ok {
 				effective, err := sh.BackgroundShorthand(call.Arguments)
 				if err != nil {
 					plan.invalid, plan.prepareErr, plan.complete = true, err, !truncated
@@ -337,12 +336,25 @@ func (s *Session) planCalls(owner *callOwner, turn int, calls []ToolCall, trunca
 					continue
 				}
 				if effective != nil {
-					plan.background, plan.stripped, err = backgroundArg(effective)
+					// A non-nil shorthand asks for the job, so the core
+					// decides the reserved argument itself: it refuses a
+					// shorthand request beside an explicit "background":
+					// false, and composes the reserved argument for the
+					// effective call.
+					if present && !asked {
+						plan.invalid = true
+						plan.prepareErr = InvalidArgsf(`the call asks for a background job but also sets %q: false; remove one of them`, BackgroundArgName)
+						plan.complete = !truncated
+						plans = append(plans, plan)
+						continue
+					}
+					_, _, plan.stripped, err = backgroundArg(effective)
 					if err != nil {
 						plan.invalid, plan.prepareErr, plan.complete = true, err, !truncated
 						plans = append(plans, plan)
 						continue
 					}
+					plan.background = true
 					plan.shorthand = effective
 				}
 			}

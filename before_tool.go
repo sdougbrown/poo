@@ -113,7 +113,7 @@ func (s *Session) toolCallInfo(turn int, handle, tool string, prepared Prepared,
 	counts := s.repeatCountFor(handle)
 	args := plan.call.Arguments
 	if plan.shorthand != nil {
-		args = plan.shorthand
+		args = backgroundAsked(plan.shorthand)
 	}
 	return ToolCallInfo{
 		// The spec is the one the model was offered: a background-capable

@@ -9,9 +9,10 @@ import (
 
 func TestBackgroundShorthand(t *testing.T) {
 	for _, tt := range []struct {
-		command string
-		want    string
-		refuse  bool
+		command    string
+		background string
+		want       string
+		refuse     bool
 	}{
 		{command: `listen&`, want: `listen`},
 		{command: `listen &# ready`, want: `listen # ready`},
@@ -25,9 +26,24 @@ func TestBackgroundShorthand(t *testing.T) {
 		{command: `listen "$(other)" &`, refuse: true},
 		{command: `setsid listen &`, refuse: true},
 		{command: "cat <<'END' &\ncontent\nEND", refuse: true},
+		// The reserved argument stays out of the shorthand: the
+		// shorthand translates the call, and the core decides the
+		// argument itself.
+		{command: `listen &`, background: "false", want: `listen`},
 	} {
-		t.Run(tt.command, func(t *testing.T) {
-			raw, _ := json.Marshal(map[string]string{"command": tt.command})
+		t.Run(tt.command+" background="+tt.background, func(t *testing.T) {
+			command, err := json.Marshal(tt.command)
+			if err != nil {
+				t.Fatal(err)
+			}
+			args := map[string]json.RawMessage{"command": command}
+			if tt.background != "" {
+				args["background"] = json.RawMessage(tt.background)
+			}
+			raw, err := json.Marshal(args)
+			if err != nil {
+				t.Fatal(err)
+			}
 			got, err := bash.New().BackgroundShorthand(raw)
 			if tt.refuse {
 				if err == nil || got != nil {
@@ -45,14 +61,17 @@ func TestBackgroundShorthand(t *testing.T) {
 				return
 			}
 			var effective struct {
-				Command    string `json:"command"`
-				Background bool   `json:"background"`
+				Command    string          `json:"command"`
+				Background json.RawMessage `json:"background"`
 			}
 			if err := json.Unmarshal(got, &effective); err != nil {
 				t.Fatal(err)
 			}
-			if effective.Command != tt.want || !effective.Background {
-				t.Fatalf("got %s; want %q in the background", got, tt.want)
+			if effective.Command != tt.want {
+				t.Fatalf("got %s; want command %q", got, tt.want)
+			}
+			if tt.background != "" && effective.Background != nil {
+				t.Fatalf("got %s; want the reserved argument out of the shorthand", got)
 			}
 		})
 	}

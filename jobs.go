@@ -2319,38 +2319,54 @@ func (s *Session) jobSummaries() []jobSummary {
 	return out
 }
 
-// backgroundArg returns the background flag a call asked for, and the
-// arguments without it.
+// backgroundArg returns the background flag a call asked for, whether
+// the call set the argument at all, and the arguments without it.
 //
 // The flag is a reserved argument: the core validates it and removes it
 // before the tool's own decoder sees the arguments. A value that is not
 // a boolean is a recoverable argument error.
-func backgroundArg(raw json.RawMessage) (bool, json.RawMessage, error) {
+func backgroundArg(raw json.RawMessage) (bool, bool, json.RawMessage, error) {
 	if len(raw) == 0 {
-		return false, raw, nil
+		return false, false, raw, nil
 	}
 	var obj map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &obj); err != nil {
-		return false, raw, nil
+		return false, false, raw, nil
 	}
 	value, ok := obj[BackgroundArgName]
 	if !ok {
-		return false, raw, nil
+		return false, false, raw, nil
 	}
 	var decoded any
 	if err := json.Unmarshal(value, &decoded); err != nil {
-		return false, raw, InvalidArgsf("the %q argument must be true or false", BackgroundArgName)
+		return false, true, raw, InvalidArgsf("the %q argument must be true or false", BackgroundArgName)
 	}
 	flag, ok := decoded.(bool)
 	if !ok {
-		return false, raw, InvalidArgsf("the %q argument must be true or false", BackgroundArgName)
+		return false, true, raw, InvalidArgsf("the %q argument must be true or false", BackgroundArgName)
 	}
 	delete(obj, BackgroundArgName)
 	stripped, err := json.Marshal(obj)
 	if err != nil {
-		return false, raw, nil
+		return false, true, raw, nil
 	}
-	return flag, stripped, nil
+	return flag, true, stripped, nil
+}
+
+// backgroundAsked returns the arguments with the reserved background
+// argument set to true: the effective call of a shorthand request, in
+// the shape the tool's schema advertises.
+func backgroundAsked(raw json.RawMessage) json.RawMessage {
+	var obj map[string]json.RawMessage
+	if json.Unmarshal(raw, &obj) != nil {
+		return raw
+	}
+	obj[BackgroundArgName] = json.RawMessage("true")
+	composed, err := json.Marshal(obj)
+	if err != nil {
+		return raw
+	}
+	return composed
 }
 
 // SchemaDefinesBackground reports that a tool's own schema defines the

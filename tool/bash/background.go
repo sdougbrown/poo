@@ -30,9 +30,6 @@ func (t *Tool) BackgroundShorthand(raw json.RawMessage) (json.RawMessage, error)
 	if len(file.Stmts) != 1 || !canBackgroundList(stmt) {
 		return nil, poo.InvalidArgsf(`bash: cannot turn this trailing & into a job; put the work in a separate call with "background": true and omit the trailing &`)
 	}
-	if string(args[poo.BackgroundArgName]) == "false" {
-		return nil, poo.InvalidArgsf(`bash: trailing & conflicts with "background": false; remove one of them`)
-	}
 	operator := int(stmt.Semicolon.Offset())
 	withoutOperator := *stmt
 	withoutOperator.Semicolon = syntax.Pos{}
@@ -49,7 +46,10 @@ func (t *Tool) BackgroundShorthand(raw json.RawMessage) (json.RawMessage, error)
 	}
 	effective := command[:end] + trail
 	args["command"], _ = json.Marshal(effective)
-	args[poo.BackgroundArgName] = json.RawMessage("true")
+	// The reserved background argument stays out of the shorthand: a
+	// non-nil return asks for the job, and the core decides the
+	// argument itself.
+	delete(args, poo.BackgroundArgName)
 	return json.Marshal(args)
 }
 
