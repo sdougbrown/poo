@@ -297,11 +297,11 @@ func TestEveryDefaultManifestKindHasItsOffSwitch(t *testing.T) {
 
 // TestAnEmptyDefaultManifestDirectoryIsNoRegistry covers the quiet
 // directory: a default directory that exists but holds no manifests
-// leaves the build exactly where it was, with no registry, no feeds,
-// and no error a binary that links no call_cli would trip.
+// leaves the build exactly where it was, with no registry, no feeds, no
+// servers, and no error a binary that links no call_cli would trip.
 func TestAnEmptyDefaultManifestDirectoryIsNoRegistry(t *testing.T) {
 	pooDir := theDefaultsPooDir(t)
-	for _, kind := range []string{"feeds", "cli-registry"} {
+	for _, kind := range []string{"feeds", "mcp", "cli-registry"} {
 		if err := os.MkdirAll(filepath.Join(pooDir, kind), 0o700); err != nil {
 			t.Fatalf("making the empty %s directory: %v", kind, err)
 		}
@@ -316,6 +316,9 @@ func TestAnEmptyDefaultManifestDirectoryIsNoRegistry(t *testing.T) {
 	}
 	if runtime.Feeds != nil && runtime.Feeds.Len() != 0 {
 		t.Errorf("an empty default directory loaded feeds %v", runtime.Feeds)
+	}
+	if names := runtime.MCPServerNames(); len(names) != 0 {
+		t.Errorf("an empty default directory loaded mcp servers %q", names)
 	}
 	if runtime.Warning != "" {
 		t.Errorf("an empty default directory warned: %s", runtime.Warning)
