@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import platform
+import subprocess
 import os
 import tempfile
 import unittest
@@ -13,6 +15,8 @@ from typing import Any
 from unittest.mock import patch
 
 import poo_agent as poo_agent_module
+ARCH = "arm64" if platform.machine().lower() in ("arm64", "aarch64") else "amd64"
+
 from poo_agent import (
     DEFAULT_BIN_TARGET,
     PooAgent,
@@ -509,6 +513,79 @@ class PooAgentFlagTests(unittest.TestCase):
                 self.assertIn("--tools-mode native", joined)
                 self.assertIn("--api-key-env OPENAI_API_KEY", joined)
 
+
+def _built_binary() -> Path | None:
+    """The static Linux poo binary, when this checkout has built one."""
+    candidate = Path(__file__).resolve().parent / "bin" / f"poo-linux-{ARCH}"
+    return candidate if candidate.exists() else None
+
+
+@unittest.skipUnless(_built_binary() is not None, "evals/harbor/bin has no built poo binary")
+class PooAgentCommandValidationTests(unittest.TestCase):
+    """The command the adapter sends is one poo actually accepts.
+
+    poo exits 2 when it refuses its arguments. Each test runs the real binary
+    against an unreachable endpoint, so what it asserts is that the command got
+    past validation. Asserting the argument list instead is how a group of flags
+    poo rejects passed the suite while every settings run died at startup.
+    """
+
+    USAGE_EXIT = 2
+
+    def _run(self, agent: PooAgent, tmp_path: Path) -> subprocess.CompletedProcess[str]:
+        argv = [
+            str(_built_binary()) if arg == DEFAULT_BIN_TARGET else arg.replace("/logs/agent", str(tmp_path))
+            for arg in agent.build_run_args()
+        ]
+        return subprocess.run(
+            [*argv, "--", "say ok"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+
+    def _settings(self, tmp_path: Path) -> Path:
+        path = tmp_path / "settings.yaml"
+        path.write_text(
+            "version: 1\n"
+            "endpoints:\n"
+            "  dead:\n"
+            "    endpoint: http://127.0.0.1:1/v1\n"
+            "models:\n"
+            "  m:\n"
+            "    endpoint: dead\n"
+            "    model_id: unused\n"
+            "    context_limit: 4096\n"
+            "roles:\n"
+            "  chat: m\n",
+            encoding="utf-8",
+        )
+        return path
+
+    def test_a_settings_run_is_accepted(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            agent = PooAgent(
+                logs_dir=tmp_path / "logs",
+                poo_bin=str(_built_binary()),
+                settings=str(self._settings(tmp_path)),
+            )
+            proc = self._run(agent, tmp_path)
+            self.assertNotEqual(proc.returncode, self.USAGE_EXIT, proc.stderr)
+
+    def test_a_run_naming_a_model_is_accepted(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            agent = PooAgent(
+                logs_dir=tmp_path / "logs",
+                poo_bin=str(_built_binary()),
+                endpoint="http://127.0.0.1:1/v1",
+                model_id="unused",
+                context_limit=4096,
+                tools_mode="native",
+            )
+            proc = self._run(agent, tmp_path)
+            self.assertNotEqual(proc.returncode, self.USAGE_EXIT, proc.stderr)
 
 def _harbor_installed() -> bool:
     try:

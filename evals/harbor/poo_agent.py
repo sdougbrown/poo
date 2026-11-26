@@ -317,6 +317,64 @@ class PooAgent(BaseAgent):
     def _container_instruction_path(self) -> str:
         return f"{self._agent_dir()}/instruction.txt"
 
+    def _model_flags(self) -> list[str]:
+        """The flags that name the model, or the settings file that names it.
+
+        poo validates these as one group. `endpointFlags.validate` rejects
+        `--context-limit`, `--api-key-env` or `--tools-mode` given without
+        `--endpoint` and `--model-id`, and the run exits with a usage code
+        before it starts, so this returns the whole group or none of it.
+
+        A settings file names its own model and takes the group's place. When a
+        caller names a model as well, both are sent and poo lets the flags win.
+        A group flag given with no model is refused here, because poo would
+        refuse the run and a silent drop would ignore the caller.
+        """
+        if not (self.endpoint and self.model_id):
+            if self.endpoint or self.model_id:
+                raise ValueError(
+                    "`endpoint` and `model_id` must be given together: poo "
+                    "rejects either one alone."
+                )
+            if self.settings_path is None:
+                raise ValueError(
+                    "PooAgent requires either `settings` (--ak settings=...) or "
+                    "both `endpoint` and `model_id` (via --model provider/model or "
+                    "--ak endpoint=... --ak model_id=...)."
+                )
+            stray = [
+                name
+                for name, given in (
+                    ("context_limit", self.context_limit is not None),
+                    ("api_key_env", bool(self.api_key_env)),
+                    ("tools_mode", bool(self.tools_mode)),
+                )
+                if given
+            ]
+            if stray:
+                raise ValueError(
+                    " and ".join(stray)
+                    + " need `endpoint` and `model_id`: poo rejects them alone,"
+                    " and a settings file already names its model"
+                )
+            return ["--settings", self._container_settings_path()]
+
+        flags = [
+            "--endpoint",
+            self.endpoint,
+            "--model-id",
+            self.model_id,
+            "--context-limit",
+            str(self.context_limit or DEFAULT_CONTEXT_LIMIT),
+        ]
+        if self.settings_path is not None:
+            flags = ["--settings", self._container_settings_path(), *flags]
+        if self.api_key_env:
+            flags.extend(["--api-key-env", self.api_key_env])
+        if self.tools_mode:
+            flags.extend(["--tools-mode", self.tools_mode])
+        return flags
+
     def build_run_args(self) -> list[str]:
         """Build the `poo run` CLI argument list (excluding the instruction)."""
         args: list[str] = [
@@ -334,56 +392,7 @@ class PooAgent(BaseAgent):
         if self.profile:
             args.extend(["--profile", self.profile])
 
-        if self.settings_path is not None:
-            args.extend(["--settings", self._container_settings_path()])
-        elif not (self.endpoint and self.model_id):
-            raise ValueError(
-                "PooAgent requires either `settings` (--ak settings=...) or "
-                "both `endpoint` and `model_id` (via --model provider/model or "
-                "--ak endpoint=... --ak model_id=...)."
-            )
-
-        # poo treats the flags that name a model as all or none: endpointFlags'
-        # validate rejects --context-limit, --api-key-env or --tools-mode given
-        # without --endpoint and --model-id, and the run exits with a usage
-        # error before it starts. One block decides, so no flag of the group
-        # reaches the run on one path and not the other.
-        #
-        # A settings file names its own model, so the group is sent only when
-        # the caller named a model too. A group flag given without one is
-        # refused here rather than dropped or sent on its own.
-        named_model = bool(self.endpoint and self.model_id)
-        if self.settings_path is not None and not named_model:
-            stray = [
-                name
-                for name, given in (
-                    ("context_limit", self.context_limit is not None),
-                    ("api_key_env", bool(self.api_key_env)),
-                    ("tools_mode", bool(self.tools_mode)),
-                )
-                if given
-            ]
-            if stray:
-                raise ValueError(
-                    " and ".join(stray)
-                    + " need `endpoint` and `model_id`: poo rejects them alone,"
-                    " and a settings file already names its model"
-                )
-        if named_model:
-            args.extend(
-                [
-                    "--endpoint",
-                    self.endpoint,
-                    "--model-id",
-                    self.model_id,
-                    "--context-limit",
-                    str(self.context_limit or DEFAULT_CONTEXT_LIMIT),
-                ]
-            )
-            if self.api_key_env:
-                args.extend(["--api-key-env", self.api_key_env])
-            if self.tools_mode:
-                args.extend(["--tools-mode", self.tools_mode])
+        args.extend(self._model_flags())
 
         if self.reasoning_effort:
             args.extend(["--reasoning-effort", self.reasoning_effort])
