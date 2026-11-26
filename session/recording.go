@@ -77,3 +77,17 @@ func (r *Recording) RecordsWith(loaded []poo.Record) []poo.Record {
 	out = append(out, r.records...)
 	return out
 }
+
+// LeaseLost returns the lease-loss channel of the store the recording
+// writes through, when that store's ownership is a lease.
+//
+// The session asserts its sink for LeaseLostWatch when it starts, and a
+// session served over the wire writes through the recording: without this
+// pass-through, the wire's sessions would keep running after their lease
+// was taken over, and only a refused write would stop them.
+func (r *Recording) LeaseLost() <-chan struct{} {
+	if watcher, ok := r.Store.(poo.LeaseLostWatch); ok {
+		return watcher.LeaseLost()
+	}
+	return nil
+}
