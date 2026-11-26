@@ -479,6 +479,63 @@ func TestEveryOtherCommandBindsItsFlags(t *testing.T) {
 		}
 	})
 
+	t.Run("daemon", func(t *testing.T) {
+		inv, err := clicontract.Parse(pooApp(io.Discard), []string{
+			"daemon",
+			"--settings", "s.yaml",
+			"--system-prompt", "system.md",
+			"--append-system-prompt", "extra",
+			"--permission-unmatched", "allow",
+			"--session-dir", "sessions",
+			"--user-prompt-file", "user.md",
+			"--ephemeral",
+			"--profile", "base",
+			"--feeds-path", "feeds.yaml",
+			"--cli-registry-path", "registry.yaml",
+			"--endpoint", "http://localhost:4000/v1",
+			"--model-id", "test-model",
+			"--context-limit", "4096",
+			"--api-key-env", "POO_KEY",
+			"--tools-mode", "auto",
+			"--session", "my-session",
+			"--auto-resume",
+			"--working-dir", "/tmp",
+		})
+		if err != nil {
+			t.Fatalf("parsing the daemon's flags: %v", err)
+		}
+		var o daemonOptions
+		o.bind(inv)
+		want := daemonOptions{
+			sharedFlags: sharedFlags{
+				settingsFile:        "s.yaml",
+				systemPrompt:        "system.md",
+				appendSystemPrompt:  "extra",
+				permissionUnmatched: "allow",
+				sessionDir:          "sessions",
+				userPromptFile:      "user.md",
+				ephemeral:           true,
+				profile:             "base",
+				feedsPaths:          []string{"feeds.yaml"},
+				cliRegistryPaths:    []string{"registry.yaml"},
+			},
+			endpointFlags: endpointFlags{
+				endpoint:     "http://localhost:4000/v1",
+				modelID:      "test-model",
+				contextLimit: 4096,
+				apiKeyEnv:    "POO_KEY",
+				toolsMode:    "auto",
+			},
+			session:         "my-session",
+			autoResume:      true,
+			autoResumeGiven: true,
+			workingDir:      "/tmp",
+		}
+		if !reflect.DeepEqual(o, want) {
+			t.Errorf("the bound options are\n%+v\nwant\n%+v", o, want)
+		}
+	})
+
 	t.Run("prompt", func(t *testing.T) {
 		inv, err := clicontract.Parse(pooApp(io.Discard), []string{
 			"prompt",
@@ -677,6 +734,7 @@ func TestEveryCommandWithItsOwnFlagsHasABindingTest(t *testing.T) {
 	covered := map[string]string{
 		"run":            "TestTheRunFlagsReachTheOptions",
 		"serve":          "TestEveryOtherCommandBindsItsFlags/serve",
+		"daemon":         "TestEveryOtherCommandBindsItsFlags/daemon",
 		"prompt":         "TestEveryOtherCommandBindsItsFlags/prompt",
 		"models":         "TestEveryOtherCommandBindsItsFlags/models",
 		"auth status":    "TestEveryOtherCommandBindsItsFlags/auth_status",
