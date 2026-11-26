@@ -1,9 +1,9 @@
 # Running `poo` on Harbor (Terminal-Bench & SWE-bench)
 
 This directory contains a [Harbor](https://github.com/harbor-framework/harbor)
-adapter (`poo_agent:PooAgent`) that uploads a static Linux `poo` binary into
-each task container, runs `poo run` headlessly, and reports token usage and
-session metrics back to Harbor.
+adapter (`poo_agent:PooAgent`). It uploads a static Linux `poo` binary into each
+task container and runs `poo run` headlessly. It reports token usage and session
+metrics back to Harbor.
 
 ## 1. Prerequisites
 
@@ -71,9 +71,10 @@ PYTHONPATH=evals/harbor harbor run \
 ### Using a `poo` settings file
 
 If you want to pin compaction strategies, sampling, or built-in providers
-(e.g. OpenCode Console or Codex), pass `--ak settings=...`. Flags you pass
-explicitly, such as `--ak context_limit=...`, still apply and override the
-file's value:
+(e.g. OpenCode Console or Codex), pass `--ak settings=...`. The file names its
+own model, so a settings run sends no model flags of its own. To override the
+model or its window, name `endpoint` and `model_id` together: poo rejects
+`context_limit`, `api_key_env` and `tools_mode` without both:
 
 ```bash
 PYTHONPATH=evals/harbor harbor run \
