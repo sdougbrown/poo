@@ -43,6 +43,10 @@ go.work.sum
 # accepted baseline at evals/baseline is what the repository keeps.
 evals/runs/
 
+# Harbor static binary and local Harbor job outputs.
+evals/harbor/bin/
+/jobs/
+
 # The poo binary, built at the repo root by `go build ./cmd/poo`
 /poo
 
