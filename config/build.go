@@ -1308,7 +1308,7 @@ func (r *Runtime) mcpAttach(ctx context.Context, a *poo.Attach) (func() error, e
 	if _, offered := a.Options.Tools[ToolCallMCP]; offered {
 		sessionOptions := r.toolOptions
 		sessionOptions.MCP = []MCPRunning{running}
-		sessionOptions.Offered = offeredEntries(r.offeredCatalog(), r.elevatedTools, []MCPRunning{running})
+		sessionOptions.Offered = offeredEntries(r.offeredCatalog(), r.elevatedTools, []MCPRunning{running}, r.offersSearch())
 		for _, name := range []string{ToolCallMCP, cli.FindToolName} {
 			factory := r.toolFactories[name]
 			if factory == nil {
@@ -2300,7 +2300,7 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 		Scrub:          credentialScrub,
 		ProtectedPaths: protected,
 		Registry:       r.offeredCatalog(),
-		Offered:        offeredEntries(r.offeredCatalog(), r.elevatedTools, nil),
+		Offered:        offeredEntries(r.offeredCatalog(), r.elevatedTools, nil, r.offersSearch()),
 		Search:         r.offersSearch(),
 		Inputs:         r.modelInputs(),
 		// A file that names an engine keeps it; an unset one gets the

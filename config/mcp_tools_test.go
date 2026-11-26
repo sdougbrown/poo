@@ -975,6 +975,46 @@ func TestASelectionTheManifestsDoNotLoadOffersTheCallToNobody(t *testing.T) {
 	}
 }
 
+// TestTheSearchBesideTheServersNarrowsOnlyTheCallDispatches covers the mixed
+// snapshot: a long catalog beside the servers puts the catalog's entries in
+// the search beside the MCP tools, and the call's catalog section still lists
+// only the tools the servers hold — a registry command never leaks into what
+// call_mcp claims to run.
+func TestTheSearchBesideTheServersNarrowsOnlyTheCallDispatches(t *testing.T) {
+	registryPath := thresholdRegistry(t, 40, 0)
+	path := mcpManifest(t, map[string]any{"fixture": stdioServer()}, nil)
+	settings, err := config.Parse([]byte(withDecider+theSessionDir(t)+theMCPPaths(path)+
+		"cli_registry:\n  paths: [\""+registryPath+"\"]\n"+
+		theMCPProfile("picky", "fixture")), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := buildWith(t, config.BuildOptions{
+		Settings:    settings,
+		MCPLauncher: listedLauncher(map[string][]mcp.Tool{"fixture": {mcpTool("echo", "answers with what it is given", false)}}),
+		WorkingDir:  t.TempDir(),
+	})
+	defer runtime.Store.Close()
+
+	text := sessionPrompt(t, runtime, "picky", t.TempDir())
+	// The catalog is searched: past the threshold the prompt leaves the
+	// commands to the search, and the search covers them beside the MCP
+	// tools.
+	if !strings.Contains(text, "too many to list") {
+		t.Errorf("the prompt does not leave the catalog to the search:\n%s", text)
+	}
+	// The call's catalog lists the tool the server holds, with the hint
+	// the server's own annotation gave it.
+	if !strings.Contains(text, "fixture/echo (args: text*) (destructive): answers with what it is given") {
+		t.Errorf("the prompt's MCP section does not list the tool the server offers:\n%s", text)
+	}
+	// A registry command never leaks into what call_mcp runs: the entries
+	// the search covers are call_cli's to dispatch.
+	if strings.Contains(text, "entry-0") {
+		t.Errorf("the prompt's MCP section lists registry commands call_mcp does not run:\n%s", text)
+	}
+}
+
 // TestTheListingOffersTheMCPCallASessionDoes covers the two paths that decide what
 // a profile offers: the profile a person reads and the session a profile runs
 // name the same tools, so a server a profile selects reaches the model on both.
