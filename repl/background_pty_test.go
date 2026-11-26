@@ -109,6 +109,7 @@ func TestBackgroundMovesTheSameProcessAcrossRunCancellation(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+	waitFor(t, term, "✓ end_turn")
 	term.press("/quit\r")
 	select {
 	case got := <-code:
