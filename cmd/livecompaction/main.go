@@ -42,6 +42,7 @@ import (
 	"github.com/sdougbrown/poo/tool/grep"
 	"github.com/sdougbrown/poo/tool/history"
 	"github.com/sdougbrown/poo/tool/read"
+	"github.com/sdougbrown/poo/tool/write"
 )
 
 // strategySettings turns the flags into the settings the config's own
@@ -182,6 +183,7 @@ func main() {
 		"grep":     grep.New(),
 		"history":  history.New(),
 		"edit":     edit.New(),
+		"write":    write.New(),
 		"bash":     bash.New(),
 		"fetch":    fetch.New(),
 		"codemode": codemodeEngine(*engine),
