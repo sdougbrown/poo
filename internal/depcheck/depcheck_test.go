@@ -162,6 +162,7 @@ func wantSkipped(m string, extra ...string) []string {
 		m + "/exec/bwrap (does not exist yet)",
 		m + "/feed (does not exist yet)",
 		m + "/internal/caps (does not exist yet)",
+		m + "/internal/jsonutil (does not exist yet)",
 		m + "/internal/schematext (does not exist yet)",
 		m + "/mcp (does not exist yet)",
 		m + "/mcp/manifest (does not exist yet)",

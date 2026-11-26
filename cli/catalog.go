@@ -35,6 +35,12 @@ const (
 	// CommandArgument is the call tool's argument that names a registered
 	// command.
 	CommandArgument = "command"
+	// CallMCPToolName is the name of the tool that calls a session's MCP
+	// tools.
+	CallMCPToolName = "call_mcp"
+	// MCPNameArgument is that call's argument that names the tool to
+	// run.
+	MCPNameArgument = "name"
 )
 
 // FindThreshold is the number of entries above which a session with a

@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"slices"
 	"strings"
 	"time"
@@ -15,8 +14,10 @@ import (
 	registry "github.com/sdougbrown/cli-registry"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/cli"
 	"github.com/sdougbrown/poo/exec"
 	"github.com/sdougbrown/poo/internal/caps"
+	"github.com/sdougbrown/poo/internal/jsonutil"
 	"github.com/sdougbrown/poo/internal/schematext"
 	"github.com/sdougbrown/poo/prompt"
 	"github.com/sdougbrown/poo/tool/bash"
@@ -142,7 +143,7 @@ type callArgs struct {
 // size. cmd/poo's test pins the list to the tools the binary builds.
 var builtinToolNames = []string{
 	"bash", "read", "grep", "history", "edit", "write", "fetch", "codemode",
-	"jobs", "cancel_job", "find_tool", "call_mcp", "subscribe_feed", "finish",
+	"jobs", "cancel_job", "find_tool", cli.CallMCPToolName, "subscribe_feed", "finish",
 }
 
 // preparedCall is a validated call_cli call.
@@ -159,7 +160,7 @@ type preparedCall struct {
 
 // Summary describes the call for a human reader.
 func (p *preparedCall) Summary() string {
-	return strings.TrimSpace(p.command + " " + string(marshal(p.args)))
+	return strings.TrimSpace(p.command + " " + string(jsonutil.Marshal(p.args)))
 }
 
 // CanonicalKey returns the call's prepared input.
@@ -182,7 +183,7 @@ func (t *CallTool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepare
 		return nil, poo.InvalidArgsf("%s: no CLI registry is configured", CallToolName)
 	}
 	var a callArgs
-	if err := decodeStrict(raw, &a); err != nil {
+	if err := jsonutil.DecodeStrict(raw, &a); err != nil {
 		return nil, poo.InvalidArgsf("%s: %v", CallToolName, err)
 	}
 	entry, ok := t.catalog.Lookup(a.Command)
@@ -205,7 +206,7 @@ func (t *CallTool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepare
 	if err != nil {
 		return nil, planError(CallToolName, a.Command, entry.Schema, err)
 	}
-	key := marshal(struct {
+	key := jsonutil.Marshal(struct {
 		Command string         `json:"command"`
 		Args    map[string]any `json:"args"`
 	}{a.Command, args})
@@ -504,34 +505,4 @@ func failed(tool string, err error, cap int) (poo.ToolResult, error) {
 		return poo.ToolResult{Text: text, Structured: structured, IsError: true}, nil
 	}
 	return poo.ToolResult{}, fmt.Errorf("%s: %w", tool, err)
-}
-
-// decodeStrict decodes one JSON value and nothing else.
-//
-// A second value, or anything after the first, is a malformed call: the
-// model sent more than it meant to, and taking the first object would
-// silently run something else.
-func decodeStrict(raw json.RawMessage, into any) error {
-	dec := json.NewDecoder(strings.NewReader(string(raw)))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(into); err != nil {
-		return err
-	}
-	var extra json.RawMessage
-	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
-		if err == nil {
-			return errors.New("the arguments hold more than one JSON value")
-		}
-		return err
-	}
-	return nil
-}
-
-// marshal encodes a value, falling back to an empty object.
-func marshal(v any) json.RawMessage {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return json.RawMessage("{}")
-	}
-	return b
 }

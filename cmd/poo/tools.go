@@ -119,7 +119,7 @@ func linkedTools() map[string]config.ToolFactory {
 			// cannot call.
 			return cliregistry.NewFind(opts.Offered)
 		},
-		"call_mcp": func(opts config.ToolOptions) poo.Tool {
+		config.ToolCallMCP: func(opts config.ToolOptions) poo.Tool {
 			// The call lists the MCP entries of the same snapshot, and its
 			// refusal points at the search only when the session offers one.
 			return callmcp.New(mcpServers(opts.MCP), opts.Offered).

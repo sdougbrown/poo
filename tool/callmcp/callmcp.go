@@ -35,23 +35,23 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"sort"
 	"strings"
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/cli"
 	"github.com/sdougbrown/poo/internal/caps"
+	"github.com/sdougbrown/poo/internal/jsonutil"
 	"github.com/sdougbrown/poo/internal/schematext"
 	"github.com/sdougbrown/poo/mcp"
 	"github.com/sdougbrown/poo/prompt"
 )
 
 // CallToolName is the name of the tool that calls an MCP tool.
-const CallToolName = "call_mcp"
+const CallToolName = cli.CallMCPToolName
 
 // NameArgument is the argument that names the tool a call runs.
-const NameArgument = "name"
+const NameArgument = cli.MCPNameArgument
 
 // Server is one MCP server a session started.
 //
@@ -310,7 +310,7 @@ func (p *preparedCall) EvidenceArguments() json.RawMessage { return p.key }
 // refusal is what the model reads.
 func (t *Tool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, error) {
 	var a callArgs
-	if err := decodeStrict(raw, &a); err != nil {
+	if err := jsonutil.DecodeStrict(raw, &a); err != nil {
 		return nil, poo.InvalidArgsf("%s: %v", CallToolName, err)
 	}
 	name := strings.TrimSpace(a.Name)
@@ -336,8 +336,8 @@ func (t *Tool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, e
 		server: strings.TrimSpace(server),
 		tool:   strings.TrimSpace(tool),
 		name:   name,
-		args:   marshal(args),
-		key: marshal(struct {
+		args:   jsonutil.Marshal(args),
+		key: jsonutil.Marshal(struct {
 			Name string         `json:"name"`
 			Args map[string]any `json:"args"`
 		}{name, args}),
@@ -483,34 +483,4 @@ func elide(text string, cap int) string {
 	}
 	head, tail := caps.SplitRunes(text, cap/2)
 	return head + fmt.Sprintf("\n[the middle of the answer was elided: %d of %d characters]\n", total-2*(cap/2), total) + tail
-}
-
-// decodeStrict decodes one JSON value and nothing else.
-//
-// A second value, or anything after the first, is a malformed call: the model
-// sent more than it meant to, and taking the first object would silently call
-// something else.
-func decodeStrict(raw json.RawMessage, into any) error {
-	dec := json.NewDecoder(strings.NewReader(string(raw)))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(into); err != nil {
-		return err
-	}
-	var extra json.RawMessage
-	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
-		if err == nil {
-			return errors.New("the arguments hold more than one JSON value")
-		}
-		return err
-	}
-	return nil
-}
-
-// marshal encodes a value, falling back to an empty object.
-func marshal(v any) json.RawMessage {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return json.RawMessage("{}")
-	}
-	return b
 }

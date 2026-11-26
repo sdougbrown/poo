@@ -55,7 +55,7 @@ const (
 	ToolBash = "bash"
 	// ToolCallMCP is the name of the tool that calls a session's MCP
 	// tools.
-	ToolCallMCP = "call_mcp"
+	ToolCallMCP = cli.CallMCPToolName
 )
 
 // The defaults the settings take when they do not say otherwise.

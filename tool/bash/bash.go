@@ -11,7 +11,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"strings"
 	"time"
 
@@ -19,6 +18,7 @@ import (
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/internal/caps"
+	"github.com/sdougbrown/poo/internal/jsonutil"
 )
 
 // Defaults for the bash tool.
@@ -227,34 +227,13 @@ func (p *prepared) EvidenceArguments() json.RawMessage {
 // Prepare validates the arguments.
 func (t *Tool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, error) {
 	var a args
-	if err := decodeStrict(raw, &a); err != nil {
+	if err := jsonutil.DecodeStrict(raw, &a); err != nil {
 		return nil, poo.InvalidArgsf("bash: %v", err)
 	}
 	if strings.TrimSpace(a.Command) == "" {
 		return nil, poo.InvalidArgsf("bash: command must not be empty")
 	}
 	return &prepared{command: a.Command, description: a.Description, timeout: requestedTimeout(a.Timeout)}, nil
-}
-
-// decodeStrict decodes one JSON value and nothing else.
-//
-// A second value, or anything after the first, is a malformed call: the
-// model sent more than it meant to, and taking the first object would
-// silently run the wrong command.
-func decodeStrict(raw json.RawMessage, into any) error {
-	dec := json.NewDecoder(strings.NewReader(string(raw)))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(into); err != nil {
-		return err
-	}
-	var extra json.RawMessage
-	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
-		if err == nil {
-			return errors.New("the arguments hold more than one JSON value")
-		}
-		return err
-	}
-	return nil
 }
 
 // requestedTimeout turns a call's `timeout`, in milliseconds, into the

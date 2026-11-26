@@ -7,6 +7,7 @@ import (
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/exec"
+	"github.com/sdougbrown/poo/internal/jsonutil"
 )
 
 // Tools returns one tool per catalog entry, in name order.
@@ -93,7 +94,7 @@ func (t *entryTool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepar
 	if err != nil {
 		return nil, planError(t.entry.Name, t.entry.Name, t.entry.Schema, err)
 	}
-	key := marshal(struct {
+	key := jsonutil.Marshal(struct {
 		Command string         `json:"command"`
 		Args    map[string]any `json:"args"`
 	}{t.entry.Name, args})

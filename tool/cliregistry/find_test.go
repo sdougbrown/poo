@@ -19,6 +19,7 @@ import (
 	"github.com/sdougbrown/poo/decide"
 	"github.com/sdougbrown/poo/pootest"
 	"github.com/sdougbrown/poo/provider/openai"
+	"github.com/sdougbrown/poo/tool/callmcp"
 	"github.com/sdougbrown/poo/tool/cliregistry"
 )
 
@@ -677,3 +678,44 @@ func (d *countingDecider) Decide(_ context.Context, _ any, _ string, questions [
 // not link the package the tool lives in, so the name a session offers is the
 // caller's to pass.
 const callmcpName = "call_mcp"
+
+// TestARepeatedToolNameKeepsItsOwnQuestion covers the identity of a question:
+// a server may list the same tool name more than once — the list is the
+// server's own, and nothing dedups it — so beyond the name and the
+// dispatcher's own form, a further copy is asked under the first numbered
+// identifier that is free. The question set stays one a decider accepts, and
+// every duplicate keeps its own hit.
+func TestARepeatedToolNameKeepsItsOwnQuestion(t *testing.T) {
+	mcpEntry := cli.Offered{
+		Name:        "fixture/echo",
+		Dispatcher:  callmcp.CallToolName,
+		Argument:    callmcp.NameArgument,
+		Description: "answers with what it is given",
+	}
+	offered := []cli.Offered{mcpEntry, mcpEntry, mcpEntry}
+	var qs []decide.Question
+	decider := decide.DeciderFunc(func(ctx context.Context, state any, instructions string, questions []decide.Question) ([]decide.Answer, error) {
+		qs = questions
+		answers := make([]decide.Answer, 0, len(questions))
+		for _, q := range questions {
+			answers = append(answers, decide.Answer{ID: q.ID, Probabilities: map[string]float64{"yes": 0.9, "no": 0.1}})
+		}
+		return answers, nil
+	})
+	res, err := preparedCall(t, cliregistry.NewFind(offered), `{"intent":"echo the words"}`, poo.ToolEnv{Decider: decider})
+	if err != nil {
+		t.Fatalf("searching: %v", err)
+	}
+	// The question set is one a decider accepts: every identifier is its
+	// own, whatever the server's list held.
+	if err := decide.ValidateQuestions(qs); err != nil {
+		t.Errorf("the question set is not a valid one: %v", err)
+	}
+	var body found
+	if err := json.Unmarshal(res.Structured, &body); err != nil {
+		t.Fatalf("decoding the result %q: %v", res.Structured, err)
+	}
+	if body.Total != 3 || len(body.Results) != 3 {
+		t.Errorf("the search returned %d of %d hits, want every repeated entry kept: %+v", len(body.Results), body.Total, body.Results)
+	}
+}

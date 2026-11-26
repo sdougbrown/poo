@@ -13,6 +13,7 @@ import (
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/cli"
 	"github.com/sdougbrown/poo/decide"
+	"github.com/sdougbrown/poo/internal/jsonutil"
 	"github.com/sdougbrown/poo/prompt"
 )
 
@@ -117,7 +118,7 @@ func (p *preparedFind) Summary() string { return p.intent }
 
 // CanonicalKey returns the call's prepared input.
 func (p *preparedFind) CanonicalKey() json.RawMessage {
-	return marshal(struct {
+	return jsonutil.Marshal(struct {
 		Intent string `json:"intent"`
 	}{p.intent})
 }
@@ -128,7 +129,7 @@ func (p *preparedFind) EvidenceArguments() json.RawMessage { return p.CanonicalK
 // Prepare validates the arguments.
 func (t *FindTool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, error) {
 	var a findArgs
-	if err := decodeStrict(raw, &a); err != nil {
+	if err := jsonutil.DecodeStrict(raw, &a); err != nil {
 		return nil, poo.InvalidArgsf("%s: %v", FindToolName, err)
 	}
 	a.Intent = strings.TrimSpace(a.Intent)
@@ -218,7 +219,11 @@ func (t *FindTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (
 //
 // The name identifies the entry, and two entries of different dispatchers may
 // share one: the second is asked under the dispatcher's own name, so the
-// answers tell the two apart and each hit still reads by its own name.
+// answers tell the two apart and each hit still reads by its own name. A
+// server may list the same tool name more than once — the list is the
+// server's own, and nothing dedups it — so a further collision takes the
+// first numbered form that is free: every question keeps an identifier of
+// its own, in the order the entries already hold.
 func questionIDs(entries []cli.Offered) []string {
 	ids := make([]string, len(entries))
 	seen := make(map[string]bool, len(entries))
@@ -226,6 +231,9 @@ func questionIDs(entries []cli.Offered) []string {
 		id := entry.Name
 		if seen[id] {
 			id = entry.Dispatcher + ":" + entry.Name
+		}
+		for n := 2; seen[id]; n++ {
+			id = fmt.Sprintf("%s#%d", entry.Dispatcher+":"+entry.Name, n)
 		}
 		seen[id] = true
 		ids[i] = id
@@ -307,7 +315,7 @@ func result(intent string, total int, hits []ranked) poo.ToolResult {
 	fmt.Fprintf(&b, "%d of %d tools fit %q, best first:\n", len(hits), total, intent)
 	for _, r := range hits {
 		fmt.Fprintf(&b, "%s%s: %s\n  args: %s\n  call it with %s, passing %q as %q.\n",
-			r.entry.Name, r.entry.Hint(), r.entry.Description, string(marshal(r.entry.Schema)),
+			r.entry.Name, r.entry.Hint(), r.entry.Description, string(jsonutil.Marshal(r.entry.Schema)),
 			r.entry.Dispatcher, r.entry.Name, r.entry.Argument)
 	}
 
