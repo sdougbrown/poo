@@ -168,8 +168,9 @@ type Tool struct {
 
 // ToolAnnotations are the hints a server attached to a tool, in the
 // shape the callers read. The protocol's omitted booleans become the
-// protocol's own defaults, so a server that said nothing reads as one
-// that said the default.
+// protocol's own defaults, and the protocol documents them: a hint the
+// server did not name reads as the protocol says — destructive and
+// open-world default to true, read-only and idempotent to false.
 type ToolAnnotations struct {
 	// Title is the tool's human name.
 	Title string
@@ -396,8 +397,10 @@ func convertTool(tool *sdkmcp.Tool) (Tool, error) {
 	}
 	out := Tool{Name: tool.Name, Description: tool.Description, InputSchema: schema}
 	if tool.Annotations != nil {
-		// The protocol's omitted booleans are its own defaults: a
-		// destructive tool that said nothing reads as destructive.
+		// The protocol's omitted booleans are its own defaults, and the
+		// protocol documents them: destructive and open-world default
+		// to true, so a destructive tool that said nothing reads as
+		// destructive.
 		out.Annotations = ToolAnnotations{
 			Title:           tool.Annotations.Title,
 			ReadOnlyHint:    tool.Annotations.ReadOnlyHint,

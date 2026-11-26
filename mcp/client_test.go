@@ -348,6 +348,51 @@ func TestConnectBuildsAGroupOverAnyTransport(t *testing.T) {
 	}
 }
 
+// TestAHintTheServerOmittedReadsTheProtocolDefault covers the
+// annotations' defaults: a server that names some hints and omits
+// others reads the omitted ones as the protocol documents them —
+// destructive and open-world true, read-only and idempotent false —
+// while the hints it named keep the values it gave them.
+func TestAHintTheServerOmittedReadsTheProtocolDefault(t *testing.T) {
+	no := false
+	server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "inline", Version: "test"}, nil)
+	server.AddTool(&sdkmcp.Tool{
+		Name:        "partial",
+		InputSchema: json.RawMessage(`{"type":"object"}`),
+		Annotations: &sdkmcp.ToolAnnotations{Title: "Partial", DestructiveHint: &no},
+	}, func(_ context.Context, req *sdkmcp.CallToolRequest) (*sdkmcp.CallToolResult, error) {
+		return &sdkmcp.CallToolResult{Content: []sdkmcp.Content{&sdkmcp.TextContent{Text: "hi"}}}, nil
+	})
+	clientTransport, serverTransport := sdkmcp.NewInMemoryTransports()
+	go func() { _ = server.Run(context.Background(), serverTransport) }()
+
+	g, err := Connect(context.Background(), "inline", clientTransport)
+	if err != nil {
+		t.Fatalf("connecting the inline server: %v", err)
+	}
+	defer g.Close()
+	tools, ok := g.Tools("inline")
+	if !ok || len(tools) != 1 || tools[0].Name != "partial" {
+		t.Fatalf("the group listed %v, want the inline server's partial", tools)
+	}
+	ann := tools[0].Annotations
+	if ann.Title != "Partial" {
+		t.Errorf("the tool's title is %q, want Partial", ann.Title)
+	}
+	if ann.DestructiveHint {
+		t.Error("the named destructive hint read as true, want the false the server sent")
+	}
+	if !ann.OpenWorldHint {
+		t.Error("the omitted open-world hint read as false, want the protocol's true")
+	}
+	if ann.ReadOnlyHint {
+		t.Error("the omitted read-only hint read as true, want the protocol's false")
+	}
+	if ann.IdempotentHint {
+		t.Error("the omitted idempotent hint read as true, want the protocol's false")
+	}
+}
+
 // TestTheResourceUpdateReachesItsWaiter covers the notification routing
 // the client installs before it connects: a subscribed resource's
 // update reaches the waiter registered for its URI.
