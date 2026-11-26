@@ -12,6 +12,9 @@ import (
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/config"
 	"github.com/sdougbrown/poo/decide"
+	pooexec "github.com/sdougbrown/poo/exec"
+	"github.com/sdougbrown/poo/mcp"
+	"github.com/sdougbrown/poo/mcp/manifest"
 	"github.com/sdougbrown/poo/pootest"
 	"github.com/sdougbrown/poo/tool/callmcp"
 	"github.com/sdougbrown/poo/tool/cliregistry"
@@ -169,6 +172,53 @@ func TestTheBinaryFindsAndCallsAnMCPTool(t *testing.T) {
 			t.Errorf("the conversation does not carry %q:\n%s", want, text)
 		}
 	}
+}
+
+// TestTheHandleOffersOnlyWhatTheCallDispatches covers the one offering: every
+// entry a launcher's handle lists in the session's snapshot is a name the call
+// over the same handle dispatches, so a handle can never be listed without
+// being dispatchable.
+func TestTheHandleOffersOnlyWhatTheCallDispatches(t *testing.T) {
+	group, err := mcp.Launch(context.Background(), mcp.LaunchOptions{
+		SessionID: "s1",
+		Dir:       t.TempDir(),
+		HostEnv:   pooexec.Lookup(os.Environ()),
+		Servers: []manifest.Server{{Name: "fixture",
+			Command: manifest.Template(mustTemplate(t, fixtureMCPServer(t)))}},
+		ClientVersion: "test",
+	})
+	if err != nil {
+		t.Fatalf("launching the fixture server: %v", err)
+	}
+	defer group.Close()
+	handle := &mcpSession{group: group, names: []string{"fixture"}}
+
+	off := handle.Offered()
+	if len(off) == 0 {
+		t.Fatal("the handle lists no entry, and the case is about the entries it lists")
+	}
+	tool := callmcp.New(mcpServers([]config.MCPRunning{handle}), off)
+	for _, entry := range off {
+		prepared, err := tool.Prepare(json.RawMessage(`{"name":"`+entry.Name+`"}`), poo.PrepareEnv{})
+		if err != nil {
+			t.Fatalf("preparing %s: %v", entry.Name, err)
+		}
+		if _, err := tool.Call(context.Background(), prepared, poo.ToolEnv{}); err != nil &&
+			strings.Contains(err.Error(), "the session started no mcp server named") {
+			t.Errorf("the call refuses %q, an entry the handle lists in the session's snapshot: %v", entry.Name, err)
+		}
+	}
+}
+
+// mustTemplate parses one literal template, which cannot fail: the value is
+// the test's own text.
+func mustTemplate(t *testing.T, source string) manifest.Template {
+	t.Helper()
+	template, err := manifest.ParseTemplate(source)
+	if err != nil {
+		t.Fatalf("parsing %q: %v", source, err)
+	}
+	return template
 }
 
 // requestTextOf returns the block text of every message the last provider

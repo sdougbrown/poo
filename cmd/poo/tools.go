@@ -180,11 +180,6 @@ func (s *mcpServer) Tools() []mcp.Tool {
 	return tools
 }
 
-// Offered returns the server's tools as the entries the model reads.
-func (s *mcpServer) Offered() []cli.Offered {
-	return callmcp.Entries(s.name, s.Tools())
-}
-
 // CallTool calls one of them, qualifying the name the way the model writes it.
 func (s *mcpServer) CallTool(ctx context.Context, tool string, args json.RawMessage) (mcp.CallResult, error) {
 	return s.group.CallTool(ctx, s.name+"/"+tool, args)
