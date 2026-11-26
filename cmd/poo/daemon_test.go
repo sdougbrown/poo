@@ -224,10 +224,9 @@ func TestTheDaemonStaysAliveOnAFeed(t *testing.T) {
 	waitRecord(t, sessionLog(dir, sessionID), "run.settled")
 
 	// The daemon is still alive: it has not exited.
-	select {
-	case <-time.After(500 * time.Millisecond):
-		// still alive
-	default:
+	time.Sleep(500 * time.Millisecond)
+	if err := daemon.cmd.Process.Signal(syscall.Signal(0)); err != nil {
+		t.Fatalf("the daemon exited before the check: %v", err)
 	}
 	if err := daemon.cmd.Process.Signal(syscall.SIGTERM); err != nil {
 		t.Fatalf("signalling the daemon: %v", err)
@@ -235,6 +234,63 @@ func TestTheDaemonStaysAliveOnAFeed(t *testing.T) {
 	daemon.waitLine("poo daemon: shutdown")
 	if code := daemon.waitExit(); code != 0 {
 		t.Errorf("the daemon exited %d, want 0", code)
+	}
+}
+
+// TestTheDaemonEphemeralFlagOpensAnEphemeralSession covers the mode
+// resolution: --ephemeral wins over the settings and the default, and
+// the session opens in the memory store, which writes no file.
+func TestTheDaemonEphemeralFlagOpensAnEphemeralSession(t *testing.T) {
+	endpoint := newFakeEndpoint(t, doneAnswer())
+	dir := t.TempDir()
+	manifestDir := t.TempDir()
+	trigger := filepath.Join(dir, "trigger")
+	feedManifest(t, manifestDir, trigger)
+	settings := daemonSettings(t, dir, endpoint.URL, manifestDir)
+	sessionDir := filepath.Join(dir, "sessions")
+
+	daemon := startDaemon(t,
+		"daemon",
+		"--ephemeral",
+		"--settings", settings,
+		"--working-dir", dir,
+		"--session-dir", sessionDir,
+	)
+	daemon.waitLine("poo daemon: started")
+	// The store is the memory: the session wrote no file.
+	entries, err := os.ReadDir(sessionDir)
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatalf("reading the session dir: %v", err)
+	}
+	if err == nil {
+		for _, entry := range entries {
+			t.Errorf("the ephemeral session wrote %s to disk", entry.Name())
+		}
+	}
+	_ = daemon.cmd.Process.Kill()
+	daemon.waitExit()
+}
+
+// TestTheDaemonRefusesABadSessionID covers the refused argument: a
+// session id that names outside the session directory is refused with
+// the usage exit code.
+func TestTheDaemonRefusesABadSessionID(t *testing.T) {
+	endpoint := newFakeEndpoint(t, doneAnswer())
+	dir := t.TempDir()
+	manifestDir := t.TempDir()
+	trigger := filepath.Join(dir, "trigger")
+	feedManifest(t, manifestDir, trigger)
+	settings := daemonSettings(t, dir, endpoint.URL, manifestDir)
+
+	daemon := startDaemon(t,
+		"daemon",
+		"--settings", settings,
+		"--working-dir", dir,
+		"--session-dir", filepath.Join(dir, "sessions"),
+		"--session", "../outside",
+	)
+	if code := daemon.waitExit(); code != 2 {
+		t.Errorf("the daemon exited %d, want 2: %v", code, daemon.allLines())
 	}
 }
 

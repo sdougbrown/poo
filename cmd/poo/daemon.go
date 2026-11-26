@@ -96,12 +96,14 @@ func handleDaemon(parent context.Context, inv clicontract.Invocation, stdout, st
 	}
 	o.endpointFlags.apply(settings)
 
-	// The mode and the auto-resume are the daemon's defaults, with the
-	// settings and the flags changing them: the last one that says
-	// something wins.
+	// The mode is resolved once: the flag over the settings over the
+	// default, and the one value goes to the build and the store.
 	mode := "durable"
 	if settings.Session.Mode != nil && *settings.Session.Mode != "" {
 		mode = *settings.Session.Mode
+	}
+	if o.ephemeral {
+		mode = "ephemeral"
 	}
 	autoResume := true
 	if settings.Session.Durable.AutoResume != nil {
@@ -117,9 +119,7 @@ func handleDaemon(parent context.Context, inv clicontract.Invocation, stdout, st
 		fmt.Fprintf(stderr, "poo daemon: %v\n", err)
 		return exit{usageExitCode}
 	}
-	if settings.Session.Mode == nil || *settings.Session.Mode == "" {
-		overrides.SessionMode = "durable"
-	}
+	overrides.SessionMode = mode
 
 	runtime, err := config.Build(config.BuildOptions{
 		Settings:       settings,
@@ -183,6 +183,11 @@ func handleDaemon(parent context.Context, inv clicontract.Invocation, stdout, st
 	} else if !errors.Is(err, session.ErrSessionNotFound) {
 		_ = store.Close()
 		fmt.Fprintf(stderr, "poo daemon: %v\n", err)
+		// A refused argument is the usage failure, not an operational
+		// one: the id names something outside the session directory.
+		if errors.Is(err, session.ErrInvalidSessionID) {
+			return exit{usageExitCode}
+		}
 		return exit{operationalExitCode}
 	} else {
 		created, err := daemonCreated(runtime, mode, workDir, sessionID)
@@ -195,6 +200,9 @@ func handleDaemon(parent context.Context, inv clicontract.Invocation, stdout, st
 		if err != nil {
 			_ = store.Close()
 			fmt.Fprintf(stderr, "poo daemon: %v\n", err)
+			if errors.Is(err, session.ErrInvalidSessionID) {
+				return exit{usageExitCode}
+			}
 			return exit{operationalExitCode}
 		}
 	}
@@ -216,16 +224,31 @@ func handleDaemon(parent context.Context, inv clicontract.Invocation, stdout, st
 		if pending := sess.PendingRun(); pending != nil {
 			// The restore did not carry it on: the daemon does.
 			if _, err := sess.ResumeRun(ctx); err != nil {
+				// A resume that failed is not health: the daemon was
+				// started for the run, and it will never run it.
 				fmt.Fprintf(stderr, "poo daemon: resuming the pending run: %v\n", err)
-			} else {
-				fmt.Fprintf(stderr, "poo daemon: resumed %s\n", pending.RunID)
+				_ = sess.Close()
+				_ = store.Close()
+				return exit{operationalExitCode}
 			}
+			fmt.Fprintf(stderr, "poo daemon: resumed %s\n", pending.RunID)
 		} else if hadPending {
 			// The restore carried it on: the settings' auto-resume did.
+			// A resume the restore could not finish leaves the session
+			// broken, and a supervisor must not read a broken takeover
+			// as a healthy resident.
+			if sess.Broken() {
+				fmt.Fprintf(stderr, "poo daemon: resuming the pending run: the session is broken\n")
+				_ = sess.Close()
+				_ = store.Close()
+				return exit{operationalExitCode}
+			}
 			fmt.Fprintf(stderr, "poo daemon: resumed %s\n", pendingRunID)
 		} else {
 			fmt.Fprintf(stderr, "poo daemon: idle\n")
 		}
+	} else if hadPending {
+		fmt.Fprintf(stderr, "poo daemon: run %s was left unsettled; auto-resume is off\n", pendingRunID)
 	} else {
 		fmt.Fprintf(stderr, "poo daemon: idle\n")
 	}
