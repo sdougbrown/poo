@@ -2383,7 +2383,7 @@ func TestTheOutsideAskSettingReachesThePolicy(t *testing.T) {
 // "path" property, or a rename would leave the policy reading an
 // argument the call no longer sends and silently fail open.
 func TestTheFileToolsTakeTheirPathInThePathArgument(t *testing.T) {
-	for _, name := range []string{"read", "grep", "edit"} {
+	for _, name := range []string{"read", "grep", "edit", "write"} {
 		t.Run(name, func(t *testing.T) {
 			spec := theTools()[name](config.ToolOptions{}).Spec()
 			var schema struct {
@@ -2693,17 +2693,20 @@ roles:
 	}
 }
 
+// TestFileToolRestrictionsAreIndependent covers the confinement flags:
+// each tool's restrict_to_working_dir reaches only its own option.
 func TestFileToolRestrictionsAreIndependent(t *testing.T) {
 	for _, tc := range []struct {
-		name             string
-		yaml             string
-		read, grep, edit bool
+		name                    string
+		yaml                    string
+		read, grep, edit, write bool
 	}{
-		{"empty", "", false, false, false},
-		{"read-true", "tools:\n  read: {restrict_to_working_dir: true}\n", true, false, false},
-		{"grep-true", "tools:\n  grep: {restrict_to_working_dir: true}\n", false, true, false},
-		{"edit-true", "tools:\n  edit: {restrict_to_working_dir: true}\n", false, false, true},
-		{"read-false", "tools:\n  read: {restrict_to_working_dir: false}\n", false, false, false},
+		{"empty", "", false, false, false, false},
+		{"read-true", "tools:\n  read: {restrict_to_working_dir: true}\n", true, false, false, false},
+		{"grep-true", "tools:\n  grep: {restrict_to_working_dir: true}\n", false, true, false, false},
+		{"edit-true", "tools:\n  edit: {restrict_to_working_dir: true}\n", false, false, true, false},
+		{"write-true", "tools:\n  write: {restrict_to_working_dir: true}\n", false, false, false, true},
+		{"read-false", "tools:\n  read: {restrict_to_working_dir: false}\n", false, false, false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			settings, err := config.Parse([]byte(theModelSettings+tc.yaml), config.FormatYAML)
@@ -2711,8 +2714,8 @@ func TestFileToolRestrictionsAreIndependent(t *testing.T) {
 				t.Fatal(err)
 			}
 			opts := build(t, settings, config.Overrides{}).Options
-			if opts.RestrictRead != tc.read || opts.RestrictGrep != tc.grep || opts.RestrictEdit != tc.edit {
-				t.Fatalf("restrictions: read=%t grep=%t edit=%t", opts.RestrictRead, opts.RestrictGrep, opts.RestrictEdit)
+			if opts.RestrictRead != tc.read || opts.RestrictGrep != tc.grep || opts.RestrictEdit != tc.edit || opts.RestrictWrite != tc.write {
+				t.Fatalf("restrictions: read=%t grep=%t edit=%t write=%t", opts.RestrictRead, opts.RestrictGrep, opts.RestrictEdit, opts.RestrictWrite)
 			}
 		})
 	}

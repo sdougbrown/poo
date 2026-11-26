@@ -11,6 +11,7 @@ import (
 	"github.com/sdougbrown/poo/pootest"
 	"github.com/sdougbrown/poo/tool/edit"
 	"github.com/sdougbrown/poo/tool/read"
+	writetool "github.com/sdougbrown/poo/tool/write"
 )
 
 // The summary strategy: the oldest turns become a model-written summary,
@@ -652,7 +653,7 @@ func requestText(req poo.ChatRequest) string {
 }
 
 // TestTheDefaultFileListNamesTheToolsPooShips covers the default file
-// operation against the tools themselves: the strategy holds the two
+// operation against the tools themselves: the strategy holds the three
 // names and the argument key as literals, so the test reads them from the
 // tools' own specs. A renamed tool or a renamed argument key fails here
 // instead of quietly emptying the summary's file list.
@@ -666,6 +667,7 @@ func TestTheDefaultFileListNamesTheToolsPooShips(t *testing.T) {
 	}{
 		{read.New(), false},
 		{edit.New(), true},
+		{writetool.New(), true},
 	} {
 		spec := tc.tool.Spec()
 		var schema struct {
@@ -677,8 +679,8 @@ func TestTheDefaultFileListNamesTheToolsPooShips(t *testing.T) {
 		if _, ok := schema.Properties["path"]; !ok {
 			t.Fatalf("the %s tool's schema has no path argument: %s", spec.Name, spec.Schema)
 		}
-		if spec.Name != "read" && spec.Name != "edit" {
-			t.Fatalf("the tool is named %q, and the default knows read and edit", spec.Name)
+		if spec.Name != "read" && spec.Name != "edit" && spec.Name != "write" {
+			t.Fatalf("the tool is named %q, and the default knows read, edit and write", spec.Name)
 		}
 
 		path := "internal/" + spec.Name + ".go"
