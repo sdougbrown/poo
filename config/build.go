@@ -1589,11 +1589,15 @@ func registryToolNames(find bool) []string {
 // addMCPTools offers the tools over the MCP servers a profile selects.
 //
 // A selection is a set of processes the session starts, and the model reaches
-// their tools through one call: the session needs it, so a binary that links
-// none cannot honour the selection and says which tool is missing. The search
-// comes with it when the session has a decision model, because a server may
-// list more tools than the prompt holds. Both are the profile's offering, so a
-// tool the settings disable does not come back here.
+// their tools through one call: a binary that links none cannot honour the
+// selection and says which tool is missing — the requirement is the declared
+// selection's, the way the launcher requirement is, whatever the manifests
+// load. The tools the session offers are the ones over the servers it will
+// start: a selection the manifests do not load starts nothing, so it earns
+// neither the call nor the search, and the listing judges the same way. The
+// search comes with the call when the session has a decision model, because a
+// server may list more tools than the prompt holds. Both are the profile's
+// offering, so a tool the settings disable does not come back here.
 //
 // Adding MCP tools never changes what the catalog's entries are offered as: a
 // session whose catalog is short enough to show still offers each entry as a
@@ -1617,6 +1621,18 @@ func (r *Runtime) addMCPTools(opts BuildOptions) error {
 			Message: fmt.Sprintf("the profile %q selects the mcp servers [%s], and this binary does not link the %q tool",
 				r.profileName(opts), strings.Join(r.MCPServers, ", "), name),
 		}
+	}
+	// The offering is what the session reaches: the attach starts the
+	// servers the manifests load, judged by the same lookup, so a
+	// selection that loads none offers no tools over one.
+	selected := 0
+	for _, server := range r.MCPServers {
+		if _, ok := r.mcpSet.Lookup(server); ok {
+			selected++
+		}
+	}
+	if selected == 0 {
+		return nil
 	}
 	for _, name := range names {
 		if slices.Contains(disabled, name) || slices.Contains(r.toolNames, name) {

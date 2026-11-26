@@ -941,6 +941,40 @@ func TestAPrefixRuleAllowsOneMCPServer(t *testing.T) {
 	}
 }
 
+// TestASelectionTheManifestsDoNotLoadOffersTheCallToNobody covers the typo
+// case: a profile that selects a server the manifests do not load starts
+// nothing, so neither the listing nor the session offers the tools over one —
+// the same lookup the attach launches through judges both. A selection that
+// also names a loadable server still offers them.
+func TestASelectionTheManifestsDoNotLoadOffersTheCallToNobody(t *testing.T) {
+	path := mcpManifest(t, map[string]any{"fixture": stdioServer()}, nil)
+	settings, err := config.Parse([]byte(withDecider+theSessionDir(t)+theMCPPaths(path)+
+		"profiles:\n  ghostly:\n    base: code\n    mcp_servers: [ghost]\n  mixed:\n    base: code\n    mcp_servers: [fixture, ghost]\nprofile: ghostly\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+	defer runtime.Store.Close()
+
+	off := map[string][]string{}
+	for _, listed := range runtime.Profiles {
+		for _, tool := range listed.Tools {
+			off[listed.Name] = append(off[listed.Name], tool.Name)
+		}
+	}
+	if hasTool(off["ghostly"], config.ToolCallMCP) || hasTool(off["ghostly"], cliregistry.FindToolName) {
+		t.Errorf("the listing offers the tools over a selection the manifests do not load: %v", off["ghostly"])
+	}
+	if !hasTool(off["mixed"], config.ToolCallMCP) || !hasTool(off["mixed"], cliregistry.FindToolName) {
+		t.Errorf("the listing offers the mixed selection %v, and not the tools over the loadable server", off["mixed"])
+	}
+	// The session agrees with the listing: it starts nothing for the
+	// ghost-only selection, so it offers no call over one either.
+	if hasTool(runtime.Options.ToolOrder, config.ToolCallMCP) || hasTool(runtime.Options.ToolOrder, cliregistry.FindToolName) {
+		t.Errorf("the session offers the tools over a selection the manifests do not load: %v", runtime.Options.ToolOrder)
+	}
+}
+
 // TestTheListingOffersTheMCPCallASessionDoes covers the two paths that decide what
 // a profile offers: the profile a person reads and the session a profile runs
 // name the same tools, so a server a profile selects reaches the model on both.

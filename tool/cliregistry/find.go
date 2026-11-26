@@ -75,7 +75,7 @@ func (t *FindTool) WithTopK(k int) *FindTool {
 func (t *FindTool) Spec() poo.ToolSpec {
 	return poo.ToolSpec{
 		Name:        FindToolName,
-		Description: "Search the registered tools for the ones that fit what you want to do.",
+		Description: "Search the tools this session offers — registered commands and MCP tools — for the ones that fit what you want to do.",
 		Schema: json.RawMessage(`{
   "type": "object",
   "properties": {
