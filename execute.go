@@ -31,6 +31,11 @@ const (
 	// finalization cancelled. The run was settling while the call ran,
 	// and no user interrupt happened.
 	CancelledSettlingText = "Cancelled: the run settled before the call finished."
+	// CancelledCallerText is the result of a call the caller's context
+	// cancelled. The callers are a job the session stopped, a script
+	// engine on its own deadline, and the consumer's own context. The
+	// run the call belongs to was not settling.
+	CancelledCallerText = "Cancelled: the call's caller stopped before the call finished."
 )
 
 // callPlan is one call of a batch, with everything the core needs to
@@ -740,8 +745,10 @@ func (s *Session) executeOne(owner *callOwner, turn int, plan callPlan) {
 		text := result.Text
 		if s.interruptPending(owner) {
 			text = interruptNote(text)
-		} else {
+		} else if s.runWindingDown(owner) {
 			text = cancelledSettlingNote(text)
+		} else {
+			text = cancelledCallerNote(text)
 		}
 		result = ToolResult{Text: text, IsError: true}
 		outcome = OutcomeCancelled
@@ -758,17 +765,14 @@ func (s *Session) executeOne(owner *callOwner, turn int, plan callPlan) {
 			// The call was cut short. The outcome says which: a call
 			// that never started is skipped, and one that was running
 			// is cancelled. The partial output the tool returned stays
-			// in the result, with the note.
+			// in the result, with the note naming what ended it — the
+			// same discrimination the carried-result branch applies.
 			if s.interruptPending(owner) {
 				result = ToolResult{Text: interruptNote(result.Text), IsError: true}
+			} else if s.runWindingDown(owner) {
+				result = ToolResult{Text: cancelledSettlingNote(result.Text), IsError: true}
 			} else {
-				text := result.Text
-				if text == "" {
-					text = err.Error()
-				} else {
-					text = text + "\n" + err.Error()
-				}
-				result = ToolResult{Text: text, IsError: true}
+				result = ToolResult{Text: cancelledCallerNote(result.Text), IsError: true}
 			}
 			outcome = OutcomeCancelled
 		case errors.Is(err, ErrFatal):
@@ -1435,6 +1439,19 @@ func cancelledSettlingNote(text string) string {
 		return CancelledSettlingText
 	}
 	return text + "\n" + CancelledSettlingText
+}
+
+// cancelledCallerNote adds the caller-stopped note to a result's text.
+//
+// The call's caller ended it: a job the session cancelled, a script
+// engine's own deadline, or the consumer's own context. The run the
+// call belongs to was not settling, so the note names neither a
+// settle nor a user interrupt.
+func cancelledCallerNote(text string) string {
+	if text == "" {
+		return CancelledCallerText
+	}
+	return text + "\n" + CancelledCallerText
 }
 
 // ErrFatal marks a tool error as fatal.
