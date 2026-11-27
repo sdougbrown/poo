@@ -177,6 +177,39 @@ func TestMCPSelectionWithoutTheCallToolFailsTheBuild(t *testing.T) {
 	}
 }
 
+// TestADisabledUnlinkedSearchIsRefusedByTheSettings pins the validation
+// order the MCP offering sits behind: a settings file that disables a tool
+// the binary does not link is refused by the disabled-names validation
+// before the linkage check could speak — the refusal names the tool and
+// the field, so an operator who shares settings across binaries learns
+// which name and which word to change.
+func TestADisabledUnlinkedSearchIsRefusedByTheSettings(t *testing.T) {
+	path := mcpManifest(t, map[string]any{"fixture": stdioServer()}, nil)
+	settings, err := config.Parse([]byte(withDecider+theMCPPaths(path)+theMCPProfile("picky", "fixture")+
+		"tools:\n  disabled: ["+cliregistry.FindToolName+"]\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	tools := theTools()
+	delete(tools, cliregistry.FindToolName)
+	_, err = config.Build(config.BuildOptions{
+		Settings:       settings,
+		WorkingDir:     t.TempDir(),
+		DefaultProfile: "code",
+		Tools:          tools,
+		Profiles:       theProfiles(),
+		Executors:      theExecutors(),
+		MCPLauncher:    theStubMCPLauncher(),
+	})
+	if err == nil {
+		t.Fatal("a binary without the search accepted a settings file that disables it")
+	}
+	for _, want := range []string{"tools.disabled", "find_tool", "does not link"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the failure is %q, want it to name %q", err.Error(), want)
+		}
+	}
+}
 // TestADisabledMCPCallOffersTheServersToNobody covers the operator's word: a
 // session that turns call_mcp off lists no MCP tool, and its search returns
 // none either — a hit the model cannot call is worse than no hit.

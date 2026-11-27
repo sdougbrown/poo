@@ -1637,7 +1637,7 @@ func (r *Runtime) addMCPTools(opts BuildOptions) error {
 	// reaches its tools through this call alone: a binary that links no call
 	// would start servers nothing could use.
 	for _, name := range names {
-		if linksTool(opts, name) {
+		if slices.Contains(disabled, name) || linksTool(opts, name) {
 			continue
 		}
 		return &Error{
