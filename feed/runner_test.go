@@ -238,6 +238,31 @@ func TestTheStderrGoesToTheLogAndNotToTheModel(t *testing.T) {
 	}
 }
 
+// TestADiagnosticSurvivesATeardownPastTheKillGrace covers the teardown's
+// last window: a descendant holds the stderr write end open past the kill
+// grace, so no EOF ends the drain, and the pipes close at the grace's
+// deadline. The diagnostic the command wrote while it ran stays in the
+// log, and the attempt still ends bounded.
+func TestADiagnosticSurvivesATeardownPastTheKillGrace(t *testing.T) {
+	for _, c := range executorCases(t) {
+		t.Run(c.name, func(t *testing.T) {
+			log := &logLines{}
+			got, cancel, done := start(t, c, feed.Spec{Name: "held", Command: []string{script(t, "held")}}, log.logger())
+			waitFor(t, "the diagnostic", func() bool {
+				return strings.Contains(log.text(), "the diagnostic the model must not see")
+			})
+			cancel()
+			_ = result(t, done)
+			if !strings.Contains(log.text(), "the diagnostic the model must not see") {
+				t.Fatalf("the teardown lost the diagnostic; the log is\n%s", log.text())
+			}
+			if len(got.all()) != 1 {
+				t.Errorf("the attempt emitted %d inputs, want the one message", len(got.all()))
+			}
+		})
+	}
+}
+
 // TestACommandThatExitsWithAnErrorFailsTheAttempt covers the exit
 // status: a command that ends without a message and without a zero
 // status is a failure that names the status.

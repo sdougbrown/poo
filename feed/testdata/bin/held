@@ -1,0 +1,8 @@
+#!/bin/sh
+# A fixture feed: a message on stdout and a diagnostic on stderr, with a
+# descendant that ignores SIGTERM and holds the stderr write end open
+# past the kill grace.
+printf '{"text": "the message"}\n'
+printf 'the diagnostic the model must not see\n' >&2
+(trap '' TERM; sleep 30) &
+wait
