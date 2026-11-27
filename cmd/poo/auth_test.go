@@ -683,7 +683,7 @@ func TestTheAuthStatusLeavesAnUnreadableExpiryEmpty(t *testing.T) {
 			expires = line
 		}
 	}
-	if !strings.Contains(expires, "none") {
-		t.Errorf("the report is %q, want the expiry line to say none", out)
+	if !strings.Contains(expires, "none (no readable expiry)") {
+		t.Errorf("the report is %q, want the expiry line to say the expiry cannot be read", out)
 	}
 }

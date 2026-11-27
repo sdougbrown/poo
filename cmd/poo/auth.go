@@ -156,7 +156,14 @@ func printAuthStatus(report authStatus, status auth.Status, stdout io.Writer) {
 	fmt.Fprintf(w, "CLIENT\t%s\n", report.ClientID)
 	fmt.Fprintf(w, "ACCOUNT\t%s\n", report.AccountID)
 	if status.Expires.IsZero() {
-		fmt.Fprintf(w, "EXPIRES\t%s (%s)\n", "none", "it does not expire")
+		// A key does not expire. An oauth token whose expiry cannot be read may
+		// well have: the word says what poo cannot know, the same one the state
+		// and the store's own refusal carry.
+		none := "it does not expire"
+		if status.Kind == auth.KindOAuth {
+			none = "no readable expiry"
+		}
+		fmt.Fprintf(w, "EXPIRES\t%s (%s)\n", "none", none)
 	} else {
 		fmt.Fprintf(w, "EXPIRES\t%s (%s)\n", report.Expires, life(status.Expires))
 	}
