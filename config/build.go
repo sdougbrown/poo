@@ -1209,11 +1209,13 @@ func (r *Runtime) resolveMCPLauncher(opts BuildOptions) error {
 				r.profileName(opts), strings.Join(r.MCPServers, ", ")),
 		}
 	}
-	// The attach is set on the runtime's own options, not added per
-	// call: every path that builds a session — a created one, a
-	// resumed one, a headless run — goes through the same options,
-	// and each of them attaches exactly once.
-	r.Options.SessionAttach = r.mcpAttach
+	// The attach is not set on the runtime's own options: the caller's
+	// options apply after the base, so a caller's WithSessionAttach
+	// would silently replace the attach there and the profile's
+	// selected servers would never start. The session-building entry
+	// points append MCPAttachOption after the caller's options — the
+	// way the policy is appended — so the build's attach composes with
+	// the caller's instead of losing to it.
 	return nil
 }
 
@@ -1258,6 +1260,49 @@ func (r *Runtime) mcpAttach(ctx context.Context, a *poo.Attach) (func() error, e
 		}
 	}
 	return running.Close, nil
+}
+
+// MCPAttachOption returns the option that starts the servers the
+// chosen profile selected for a live session.
+//
+// The option is appended after the caller's options, so it composes
+// with any attach the caller named: the build's attach runs first, the
+// caller's second, and the returned close stops them in the reverse
+// order with their errors joined. When the caller's attach fails after
+// the build's started, the failure is the caller's own and the close
+// the build's attach handed back runs, so nothing it started survives
+// the failed construction.
+func (r *Runtime) MCPAttachOption() poo.Option {
+	mcp := r.mcpAttach
+	return func(o *poo.Options) {
+		caller := o.SessionAttach
+		if caller == nil {
+			o.SessionAttach = mcp
+			return
+		}
+		o.SessionAttach = func(ctx context.Context, a *poo.Attach) (func() error, error) {
+			mcpClose, err := mcp(ctx, a)
+			if err != nil {
+				return nil, err
+			}
+			callerClose, err := caller(ctx, a)
+			if err != nil {
+				if mcpClose != nil {
+					_ = mcpClose()
+				}
+				return nil, err
+			}
+			switch {
+			case mcpClose == nil:
+				return callerClose, nil
+			case callerClose == nil:
+				return mcpClose, nil
+			}
+			return func() error {
+				return errors.Join(callerClose(), mcpClose())
+			}, nil
+		}
+	}
 }
 
 // missingMCPServerWarning is what the build says when a profile selects a
@@ -3134,7 +3179,7 @@ func (r *Runtime) CreateSession(ctx context.Context, store session.Store, create
 	}
 	opts.Sink = store
 	opts.SessionID = created.SessionID
-	sess, err := poo.New(opts, append(fns, poo.WithPolicy(r.Policy))...)
+	sess, err := poo.New(opts, append(fns, poo.WithPolicy(r.Policy), r.MCPAttachOption())...)
 	if err != nil {
 		if errors.Is(err, poo.ErrPromptRender) {
 			return nil, PromptRenderError(err)
@@ -3171,7 +3216,7 @@ func (r *Runtime) ResumeSession(ctx context.Context, store session.Store, id str
 	// in: the core takes the recorded directory when the options name
 	// none.
 	opts.WorkingDir = ""
-	return session.Resume(ctx, store, id, opts, append(fns, poo.WithPolicy(r.Policy), poo.WithPromptLoader(r.SessionPrompt))...)
+	return session.Resume(ctx, store, id, opts, append(fns, poo.WithPolicy(r.Policy), r.MCPAttachOption(), poo.WithPromptLoader(r.SessionPrompt))...)
 }
 
 // PromptOverrides are the prompt changes a client asks for.

@@ -157,6 +157,11 @@ func WithPromptLoader(load func(dir string) ([]func(*prompt.Builder), error)) Op
 // restore runs it too, even when the records hold a prompt: the
 // attach is not the prompt loader, and a resumed session owns what a
 // new one does.
+//
+// A build that owns an attach of its own — the MCP servers a profile
+// selected, say — appends it after the caller's options, so the
+// option composes with the build's attach instead of replacing it:
+// the build's attach runs first, the caller's second.
 func WithSessionAttach(fn AttachFunc) Option {
 	return func(opts *Options) { opts.SessionAttach = fn }
 }

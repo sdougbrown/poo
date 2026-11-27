@@ -469,3 +469,86 @@ func TestMCPConstructionFailureLeavesNoChild(t *testing.T) {
 		}
 	}
 }
+
+// TestMCPAttachComposesWithTheCallerAttach covers the composition the
+// build's attach answers to: a caller of CreateSession or ResumeSession
+// that names its own attach with WithSessionAttach does not lose the
+// build's — the profile's selected servers start, the caller's attach
+// runs after them, and closing the session closes both.
+func TestMCPAttachComposesWithTheCallerAttach(t *testing.T) {
+	path := mcpManifest(t, map[string]any{"one": stdioServer()}, nil)
+	settings, err := config.Parse([]byte(theSelectingSettings(t, path, "picky", "one")), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	launcher := &recordingLauncher{}
+	runtime := buildWith(t, config.BuildOptions{Settings: settings, MCPLauncher: launcher.launch, WorkingDir: t.TempDir()})
+	defer runtime.Store.Close()
+
+	var callerRuns, callerCloses int
+	caller := func(context.Context, *poo.Attach) (func() error, error) {
+		callerRuns++
+		// The build's attach runs first: the server it started is
+		// already recorded when the caller's attach runs.
+		if starts := launcher.recorded(); len(starts) != 1 {
+			t.Errorf("the caller's attach ran with %d servers started, want the build's one attached first", len(starts))
+		}
+		return func() error { callerCloses++; return nil }, nil
+	}
+	workDir := t.TempDir()
+	sess, err := runtime.CreateSession(context.Background(), runtime.Store, theCreatedRecord("picky", workDir),
+		poo.WithSessionAttach(caller))
+	if err != nil {
+		t.Fatalf("creating the session: %v", err)
+	}
+	if starts := launcher.recorded(); len(starts) != 1 || starts[0] != "one@s1@"+workDir {
+		t.Fatalf("the session with a caller attach launched %q, want the selected server with the session's values", starts)
+	}
+	if callerRuns != 1 {
+		t.Errorf("the caller's attach ran %d times, want once", callerRuns)
+	}
+	if err := sess.Close(); err != nil {
+		t.Fatalf("closing the session: %v", err)
+	}
+	if closes := launcher.runnings[0].closes(); closes != 1 {
+		t.Errorf("the session's server was closed %d times, want once", closes)
+	}
+	if callerCloses != 1 {
+		t.Errorf("the caller's attach was closed %d times, want once", callerCloses)
+	}
+}
+
+// TestMCPCallerAttachFailureClosesTheServersItStarted covers the
+// composition's failure: when the caller's attach fails after the
+// build's started, the construction fails and nothing the build's
+// attach started survives it.
+func TestMCPCallerAttachFailureClosesTheServersItStarted(t *testing.T) {
+	path := mcpManifest(t, map[string]any{"one": stdioServer()}, nil)
+	settings, err := config.Parse([]byte(theSelectingSettings(t, path, "picky", "one")), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	launcher := &recordingLauncher{}
+	runtime := buildWith(t, config.BuildOptions{Settings: settings, MCPLauncher: launcher.launch, WorkingDir: t.TempDir()})
+	defer runtime.Store.Close()
+
+	_, err = runtime.CreateSession(context.Background(), runtime.Store, theCreatedRecord("picky", t.TempDir()),
+		poo.WithSessionAttach(func(context.Context, *poo.Attach) (func() error, error) {
+			return nil, errors.New("the caller's attach failed")
+		}))
+	if err == nil {
+		t.Fatal("the session was built with a failing caller attach")
+	}
+	if !strings.Contains(err.Error(), "the caller's attach failed") {
+		t.Errorf("the failure says %q, want the caller's attach named", err)
+	}
+	if starts := launcher.recorded(); len(starts) != 1 {
+		t.Errorf("the failed session launched %q, want the build's attach to have run first", starts)
+	}
+	if len(launcher.runnings) != 1 {
+		t.Fatalf("the failed session holds %d running handles, want the build's one", len(launcher.runnings))
+	}
+	if closes := launcher.runnings[0].closes(); closes != 1 {
+		t.Errorf("the failed session's server was closed %d times, want the rollback to have closed it", closes)
+	}
+}
