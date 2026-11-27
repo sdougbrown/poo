@@ -381,10 +381,16 @@ func feedRunManifest(t *testing.T, name, script, description string, env map[str
 	return path
 }
 
+// waitUntilCap is the hang guard for the config tests' condition waits.
+// The waits poll state that only the settle chain writes, so a healthy
+// settle is fast; under CI load it can take longer than any fixed
+// deadline, and the cap exists to catch a settle that never comes.
+const waitUntilCap = 60 * time.Second
+
 // waitUntil waits for a condition, so a test does not sleep for a guess.
 func waitUntil(t *testing.T, what string, cond func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(30 * time.Second)
+	deadline := time.Now().Add(waitUntilCap)
 	for time.Now().Before(deadline) {
 		if cond() {
 			return
