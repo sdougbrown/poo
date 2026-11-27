@@ -307,6 +307,22 @@ type PromptVariantContributor interface {
 	PromptVariants(env prompt.Env) map[string]string
 }
 
+// BackgroundShorthander is implemented by a tool that can turn a call's
+// trailing & into a request for a managed background job.
+//
+// The core consults the shorthand only for a tool that may run in the
+// background, and never for a nested call. It receives the raw arguments
+// the model wrote and returns the effective arguments: the command
+// rewritten, the reserved background argument left as the model wrote
+// it. A non-nil return asks for the job, and the core owns the reserved
+// argument — it validates, strips and composes it. A list the tool
+// cannot safely translate is a recoverable argument error.
+type BackgroundShorthander interface {
+	// BackgroundShorthand returns the call's effective arguments, or
+	// nil when the call does not end with a shorthand request.
+	BackgroundShorthand(raw json.RawMessage) (json.RawMessage, error)
+}
+
 // ErrInvalidArgs marks a validation failure. It is recoverable: the model
 // sees the message and may correct the call.
 type ErrInvalidArgs struct {

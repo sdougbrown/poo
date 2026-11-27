@@ -271,9 +271,13 @@ type jobState struct {
 	// prepared is the validated call the job runs, so a completion the
 	// close owns can still name the call to its hooks.
 	prepared Prepared
-	// arguments are the call's raw arguments, so a completion still
-	// shows the call to its hooks.
+	// arguments are the call's raw arguments, so the completion hook
+	// sees the call the admission hooks saw.
 	arguments json.RawMessage
+	// shorthand holds the effective arguments of a shorthand request,
+	// so the completion hook composes the shape the admission hooks
+	// saw.
+	shorthand json.RawMessage
 	// dupKey is the key the duplicate rule matches on: the tool plus
 	// the canonical form of the call's data, without the reserved
 	// background argument.
@@ -458,9 +462,11 @@ func WithJobs(o JobOptions) Option {
 // or broken; the caller renders its own text for that.
 //
 // The raw and stripped arguments both ride in: the job keeps the raw
-// call for its records, and the duplicate key keys the stripped form,
-// the same data prepare saw.
-func (s *Session) startJob(run *runState, turn int, handle, tool string, prepared Prepared, summary string, raw, stripped json.RawMessage) (jobID string, ok bool, winding bool, refusal string) {
+// call for its records and its completion hooks, the duplicate key
+// keys the stripped form — the same data prepare saw — and the
+// shorthand rides in so the completion hook composes the shape the
+// admission hooks saw.
+func (s *Session) startJob(run *runState, turn int, handle, tool string, prepared Prepared, summary string, raw, stripped, shorthand json.RawMessage) (jobID string, ok bool, winding bool, refusal string) {
 	// The slot is reserved under the lock, and the job is registered
 	// there too, so a job that is admitted is a job the session knows
 	// about. A run that is winding down admits nothing: no new effect
@@ -517,6 +523,7 @@ func (s *Session) startJob(run *runState, turn int, handle, tool string, prepare
 		done:      make(chan struct{}),
 		prepared:  prepared,
 		arguments: cloneArguments(raw),
+		shorthand: shorthand,
 		dupKey:    dupKey,
 	}
 	s.jobs[jobID] = job
@@ -780,7 +787,7 @@ func (s *Session) completeJob(job *jobState, result ToolResult, outcome Outcome,
 		result.Text = closedJobText(result.Text)
 	}
 
-	info := s.toolCallInfo(0, job.handle, job.tool, prepared, callPlan{call: ToolCall{Name: job.tool, Arguments: job.arguments}})
+	info := s.toolCallInfo(0, job.handle, job.tool, prepared, callPlan{call: ToolCall{Name: job.tool, Arguments: job.arguments}, shorthand: job.shorthand})
 	info.JobID = job.id
 	chain, hookErr := s.runAfterTool(completionCtx, job.runID, job.id, 0, info, result)
 
@@ -2319,38 +2326,54 @@ func (s *Session) jobSummaries() []jobSummary {
 	return out
 }
 
-// backgroundArg returns the background flag a call asked for, and the
-// arguments without it.
+// backgroundArg returns the background flag a call asked for, whether
+// the call set the argument at all, and the arguments without it.
 //
 // The flag is a reserved argument: the core validates it and removes it
 // before the tool's own decoder sees the arguments. A value that is not
 // a boolean is a recoverable argument error.
-func backgroundArg(raw json.RawMessage) (bool, json.RawMessage, error) {
+func backgroundArg(raw json.RawMessage) (bool, bool, json.RawMessage, error) {
 	if len(raw) == 0 {
-		return false, raw, nil
+		return false, false, raw, nil
 	}
 	var obj map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &obj); err != nil {
-		return false, raw, nil
+		return false, false, raw, nil
 	}
 	value, ok := obj[BackgroundArgName]
 	if !ok {
-		return false, raw, nil
+		return false, false, raw, nil
 	}
 	var decoded any
 	if err := json.Unmarshal(value, &decoded); err != nil {
-		return false, raw, InvalidArgsf("the %q argument must be true or false", BackgroundArgName)
+		return false, true, raw, InvalidArgsf("the %q argument must be true or false", BackgroundArgName)
 	}
 	flag, ok := decoded.(bool)
 	if !ok {
-		return false, raw, InvalidArgsf("the %q argument must be true or false", BackgroundArgName)
+		return false, true, raw, InvalidArgsf("the %q argument must be true or false", BackgroundArgName)
 	}
 	delete(obj, BackgroundArgName)
 	stripped, err := json.Marshal(obj)
 	if err != nil {
-		return false, raw, nil
+		return false, true, raw, nil
 	}
-	return flag, stripped, nil
+	return flag, true, stripped, nil
+}
+
+// backgroundAsked returns the arguments with the reserved background
+// argument set to true: the effective call of a shorthand request, in
+// the shape the tool's schema advertises.
+func backgroundAsked(raw json.RawMessage) json.RawMessage {
+	var obj map[string]json.RawMessage
+	if json.Unmarshal(raw, &obj) != nil {
+		return raw
+	}
+	obj[BackgroundArgName] = json.RawMessage("true")
+	composed, err := json.Marshal(obj)
+	if err != nil {
+		return raw
+	}
+	return composed
 }
 
 // SchemaDefinesBackground reports that a tool's own schema defines the

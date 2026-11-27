@@ -152,7 +152,7 @@ func (n *nestedCaller) call(ctx context.Context, calls []NestedCall, parallel bo
 		}
 		toolCalls[i] = ToolCall{Name: call.Tool, Arguments: call.Arguments}
 	}
-	plans := s.planCalls(owner, n.turn, toolCalls, false)
+	plans := s.planCalls(owner, n.turn, toolCalls, false, true)
 	if err := s.validateNestedPlans(plans); err != nil {
 		return nil, err
 	}

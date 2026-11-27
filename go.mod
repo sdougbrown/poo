@@ -19,6 +19,7 @@ require (
 	go.starlark.net v0.0.0-20261021141710-4f4267fb140d
 	golang.org/x/net v0.55.0
 	golang.org/x/term v0.43.0
+	mvdan.cc/sh/v3 v3.13.1
 )
 
 require (

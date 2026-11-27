@@ -49,9 +49,12 @@ type callPlan struct {
 	// prepareErr is the failure the validation produced, when it
 	// failed.
 	prepareErr error
-	// background reports that the model asked for the call to run in
-	// the background.
+	// background reports that the call asked to run in the background:
+	// the model's reserved argument, or the tool's shorthand request.
 	background bool
+	// shorthand holds the effective arguments when the tool rewrites a
+	// background shorthand. The call keeps the original for the record.
+	shorthand json.RawMessage
 	// stripped is the call's arguments without the reserved background
 	// argument, so a job's duplicate key keys the same data prepare
 	// saw.
@@ -80,7 +83,7 @@ type callPlan struct {
 // It reports whether any call was processed: a call that got a result
 // other than skipped: truncated.
 func (s *Session) executeBatch(run *runState, turn int, calls []ToolCall, truncated bool) bool {
-	plans := s.planCalls(&run.callOwner, turn, calls, truncated)
+	plans := s.planCalls(&run.callOwner, turn, calls, truncated, false)
 	if len(plans) == 0 {
 		return false
 	}
@@ -198,7 +201,15 @@ func (s *Session) batchStopped(owner *callOwner) bool {
 func (s *Session) decideCall(owner *callOwner, turn int, p *callPlan) {
 	primary := s.primaryArgOf(p.call.Name)
 	exact := exactKeyOf(p.call.Name, p.prepared, p.call.Arguments)
-	near := nearKeyOf(p.call.Name, primary, p.call.Arguments, p.invalid)
+	// The near key counts one effective call however the model spelled
+	// it: a trailing & and an explicit background request are the same
+	// call to the counter, so alternating them still accumulates the
+	// streak.
+	nearArgs := p.call.Arguments
+	if p.shorthand != nil {
+		nearArgs = p.shorthand
+	}
+	near := nearKeyOf(p.call.Name, primary, nearArgs, p.invalid)
 	if p.invalid {
 		exact = "invalid:" + p.call.Name
 	}
@@ -271,7 +282,7 @@ func (s *Session) nextHandle() string {
 // The plan validates every call, so a call that failed its validation
 // is known before its repeat counts are taken, and is counted toward
 // the near key.
-func (s *Session) planCalls(owner *callOwner, turn int, calls []ToolCall, truncated bool) []callPlan {
+func (s *Session) planCalls(owner *callOwner, turn int, calls []ToolCall, truncated, nested bool) []callPlan {
 	var plans []callPlan
 	for i, call := range calls {
 		handle := s.nextHandle()
@@ -281,8 +292,6 @@ func (s *Session) planCalls(owner *callOwner, turn int, calls []ToolCall, trunca
 			plans = append(plans, plan)
 			continue
 		}
-		// The call is validated now, so the batch knows which calls
-		// failed before it counts them.
 		tool, ok := s.opts.Tools[call.Name]
 		if !ok {
 			plans = append(plans, plan)
@@ -295,10 +304,11 @@ func (s *Session) planCalls(owner *callOwner, turn int, calls []ToolCall, trunca
 		// own background property. The tool.call record keeps the
 		// original arguments.
 		asked := false
+		present := false
 		stripped := call.Arguments
 		if s.backgroundModeOf(call.Name) != BackgroundNever {
 			var err error
-			asked, stripped, err = backgroundArg(call.Arguments)
+			asked, present, stripped, err = backgroundArg(call.Arguments)
 			if err != nil {
 				plan.invalid = true
 				plan.prepareErr = err
@@ -314,7 +324,41 @@ func (s *Session) planCalls(owner *callOwner, turn int, calls []ToolCall, trunca
 		}
 		plan.background = asked
 		plan.stripped = stripped
-		if err := s.argSchemas.validate(call.Name, stripped); err != nil {
+		if !nested && s.backgroundModeOf(call.Name) == BackgroundAllowed {
+			if sh, ok := tool.(BackgroundShorthander); ok {
+				effective, err := sh.BackgroundShorthand(call.Arguments)
+				if err != nil {
+					plan.invalid, plan.prepareErr, plan.complete = true, err, !truncated
+					plans = append(plans, plan)
+					continue
+				}
+				if effective != nil {
+					// A non-nil shorthand asks for the job, so the core
+					// decides the reserved argument itself: it refuses a
+					// shorthand request beside an explicit "background":
+					// false, and strips the reserved argument from the
+					// effective call.
+					if present && !asked {
+						plan.invalid = true
+						plan.prepareErr = InvalidArgsf(`the call asks for a background job but also sets %q: false; remove one of them`, BackgroundArgName)
+						plan.complete = !truncated
+						plans = append(plans, plan)
+						continue
+					}
+					_, _, plan.stripped, err = backgroundArg(effective)
+					if err != nil {
+						plan.invalid, plan.prepareErr, plan.complete = true, err, !truncated
+						plans = append(plans, plan)
+						continue
+					}
+					plan.background = true
+					plan.shorthand = effective
+				}
+			}
+		}
+		// The call is validated on the arguments it will prepare with,
+		// so a shorthand rewrite is validated like any other input.
+		if err := s.argSchemas.validate(call.Name, plan.stripped); err != nil {
 			plan.invalid = true
 			plan.prepareErr = err
 			if truncated {
@@ -323,7 +367,7 @@ func (s *Session) planCalls(owner *callOwner, turn int, calls []ToolCall, trunca
 			plans = append(plans, plan)
 			continue
 		}
-		prepared, err := tool.Prepare(stripped, s.prepareEnv())
+		prepared, err := tool.Prepare(plan.stripped, s.prepareEnv())
 		if err != nil {
 			plan.invalid = true
 			plan.prepareErr = err
@@ -760,7 +804,7 @@ func (s *Session) executeOne(owner *callOwner, turn int, plan callPlan) {
 // starts. The call's own result is the "started" one, and the batch
 // carries on.
 func (s *Session) startJobCall(owner *callOwner, turn int, handle string, call ToolCall, plan callPlan) {
-	jobID, ok, winding, refusal := s.startJob(owner.run, turn, handle, call.Name, plan.prepared, plan.summary, call.Arguments, plan.stripped)
+	jobID, ok, winding, refusal := s.startJob(owner.run, turn, handle, call.Name, plan.prepared, plan.summary, call.Arguments, plan.stripped, plan.shorthand)
 	if winding {
 		// The run settled while the job was being accepted; nothing
 		// else starts, and the finalization owns the run.
@@ -782,6 +826,9 @@ func (s *Session) startJobCall(owner *callOwner, turn int, handle string, call T
 	}
 
 	text := fmt.Sprintf(StartedText, jobID, call.Name)
+	if plan.shorthand != nil {
+		text += " The trailing & requested this job."
+	}
 	s.recordResult(owner, turn, handle, call.Name, call.CallID, ToolResult{Text: text}, OutcomeStarted)
 	s.events.emit(EventJobStarted, map[string]any{
 		"job":    jobID,
