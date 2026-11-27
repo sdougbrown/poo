@@ -35,6 +35,7 @@ import (
 	"github.com/sdougbrown/poo/provider/anthropic"
 	"github.com/sdougbrown/poo/provider/auth"
 	"github.com/sdougbrown/poo/provider/catalog"
+	"github.com/sdougbrown/poo/provider/interactions"
 	"github.com/sdougbrown/poo/provider/openai"
 	"github.com/sdougbrown/poo/session"
 	"github.com/sdougbrown/poo/skill"
@@ -2986,6 +2987,15 @@ func (r *Runtime) Transport(model poo.ModelInfo) (poo.ChatTransport, error) {
 			Sampling:      model.Sampling,
 			HTTPClient:    r.httpClient,
 			UserAgent:     r.Build.UserAgent(),
+		}), nil
+	case poo.APIGoogleInteractions:
+		return interactions.New(interactions.Options{
+			Endpoint:   model.Endpoint,
+			Model:      model.ModelID,
+			APIKey:     r.EndpointKey(model),
+			ModelInfo:  model,
+			HTTPClient: r.httpClient,
+			UserAgent:  r.Build.UserAgent(),
 		}), nil
 	default:
 		return nil, &Error{

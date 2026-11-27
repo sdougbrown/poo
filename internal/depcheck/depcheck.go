@@ -129,6 +129,9 @@ func (c Checker) rules() []rule {
 		// The Messages API's wire half composes the same as its two
 		// siblings, and nothing but the core beyond them.
 		{path: m + "/provider/internal/anthropic", allowed: []string{m, m + "/provider/internal/support", m + "/provider/internal/transport"}},
+		// The Interactions API's wire half composes the same as the
+		// other three, and nothing but the core beyond them.
+		{path: m + "/provider/internal/interactions", allowed: []string{m, m + "/provider/internal/support", m + "/provider/internal/transport"}},
 		{path: m + "/perm", allowed: []string{m, m + "/internal/urlnorm", m + "/protect"}},
 		{path: m + "/perm/decide", allowed: []string{m, m + "/perm", m + "/decide"}},
 		{path: m + "/session", allowed: []string{m, m + "/decide"}},
@@ -194,15 +197,20 @@ func (c Checker) rules() []rule {
 				// thinking signatures an Anthropic-compatible
 				// transport composes.
 				m + "/provider/internal/anthropic",
+				// The Interactions API's wire half: the request
+				// shape, the steps, the event stream and the
+				// thought signatures a Gemini transport composes.
+				m + "/provider/internal/interactions",
 				// The settings package builds a Codex transport and
 				// reads pi's credential for it, so the server reaches
 				// both through the build.
 				m + "/provider/codex",
 				// The transports the build composes for the
-				// catalog's models: the Chat Completions one and
-				// the Messages one.
+				// catalog's models: the Chat Completions one, the
+				// Messages one and the Interactions one.
 				m + "/provider/openai",
 				m + "/provider/anthropic",
+				m + "/provider/interactions",
 				m + "/provider/auth",
 				m + "/session",
 				m + "/wire",

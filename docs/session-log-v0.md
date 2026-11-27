@@ -253,8 +253,8 @@ A `provider` block holds:
 
 | Field | Type | Meaning |
 |---|---|---|
-| `api` | string | The wire API the payload belongs to: `"chat_completions"`, `"responses"` or `"anthropic_messages"`. |
-| `type` | string | The provider's own name for the payload, e.g. `"thinking_signature"`, `"reasoning"`, `"redacted_thinking"` or `"compaction"`. |
+| `api` | string | The wire API the payload belongs to: `"chat_completions"`, `"responses"`, `"anthropic_messages"` or `"google_interactions"`. |
+| `type` | string | The provider's own name for the payload, e.g. `"thinking_signature"`, `"reasoning"`, `"redacted_thinking"`, `"compaction"` or `"thought_signature"`. |
 | `data` | any | The payload, verbatim. The core never interprets it. |
 | `required` | boolean | `true` when a request cannot be made without the payload. Absent when false. |
 

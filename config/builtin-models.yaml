@@ -20,6 +20,12 @@
 # The name is the provider's, not the API's, so the prefix an operator types
 # is the one the sign-in writes the credential under.
 #
+# The google endpoint is the Interactions API, which is not the OpenAI shape at
+# all: one stateless POST carries the conversation as steps and answers with a
+# step stream. Its models are declared because the endpoint's own model list is
+# not the OpenAI probe's shape, and the thinking levels are the ones each model
+# documents, lowest first.
+#
 # The typesafe endpoint is a third shape: a decisions endpoint, not a chat
 # one. Jev answers the questions a run asks about its state and serves no
 # chat turns, so its models declare ops: [systemone] and can be the
@@ -189,6 +195,102 @@ endpoints:
           mode: effort
           param: output_config.effort
         reasoning_levels: [low, medium, high, xhigh, max]
+  google:
+    endpoint: https://generativelanguage.googleapis.com/v1beta
+    api: google_interactions
+    api_key_env: GEMINI_API_KEY
+    skip_probe: true
+    models:
+      gemini-3-flash-preview:
+        inputs: [text, image]
+        context_limit: 1048576
+        max_output: 65536
+        tools_mode: native
+        reasoning:
+          mode: effort
+          param: generation_config.thinking_level
+        reasoning_levels: [minimal, low, medium, high]
+      gemini-3.1-flash-lite:
+        inputs: [text, image]
+        context_limit: 1048576
+        max_output: 65536
+        tools_mode: native
+        reasoning:
+          mode: effort
+          param: generation_config.thinking_level
+        reasoning_levels: [minimal, low, medium, high]
+      gemini-3.1-pro-preview:
+        inputs: [text, image]
+        context_limit: 1048576
+        max_output: 65536
+        tools_mode: native
+        reasoning:
+          mode: effort
+          param: generation_config.thinking_level
+        reasoning_levels: [low, medium, high]
+      gemini-3.5-flash-lite:
+        inputs: [text, image]
+        context_limit: 1048576
+        max_output: 65536
+        tools_mode: native
+        reasoning:
+          mode: effort
+          param: generation_config.thinking_level
+        reasoning_levels: [minimal, low, medium, high]
+      gemini-3.6-flash:
+        inputs: [text, image]
+        context_limit: 1048576
+        max_output: 65536
+        tools_mode: native
+        reasoning:
+          mode: effort
+          param: generation_config.thinking_level
+        reasoning_levels: [minimal, low, medium, high]
+      gemini-3.8-flash:
+        inputs: [text, image]
+        context_limit: 1048576
+        max_output: 65536
+        tools_mode: native
+        reasoning:
+          mode: effort
+          param: generation_config.thinking_level
+        reasoning_levels: [low, medium, high]
+      gemini-4-argon:
+        inputs: [text, image]
+        context_limit: 1048576
+        max_output: 65536
+        tools_mode: native
+        reasoning:
+          mode: effort
+          param: generation_config.thinking_level
+        reasoning_levels: [low, medium, high]
+      gemini-4-carbon:
+        inputs: [text, image]
+        context_limit: 1048576
+        max_output: 65536
+        tools_mode: native
+        reasoning:
+          mode: effort
+          param: generation_config.thinking_level
+        reasoning_levels: [low, medium, high]
+      gemini-4-hydrogen:
+        inputs: [text, image]
+        context_limit: 1048576
+        max_output: 65536
+        tools_mode: native
+        reasoning:
+          mode: effort
+          param: generation_config.thinking_level
+        reasoning_levels: [low, medium, high, xhigh]
+      gemini-4-neon:
+        inputs: [text, image]
+        context_limit: 1048576
+        max_output: 65536
+        tools_mode: native
+        reasoning:
+          mode: effort
+          param: generation_config.thinking_level
+        reasoning_levels: [low, medium, high, xhigh]
   typesafe:
     endpoint: https://api.typesafe.ai/v1
     api_key_env: TYPESAFE_API_KEY

@@ -1,8 +1,8 @@
 # Wire API mapping
 
-A paper round-trip through poo's internal message model, for the three wire
+A paper round-trip through poo's internal message model, for the four wire
 APIs the model has to survive: **Chat Completions**, **OpenAI Responses
-(stateless)** and **Anthropic Messages**.
+(stateless)**, **Anthropic Messages** and **Google Interactions**.
 
 The question every row answers is the same one: if a provider sends a piece of
 content, does poo's internal model hold it, and can poo put it back on the
@@ -133,6 +133,49 @@ Two placement rules belong to the API, and a transport has to honour them:
 - Thinking blocks come **first** in an assistant message. poo preserves block
   order, so the transport keeps the order and the rule holds.
 
+## Google Interactions
+
+`POST /v1beta/interactions`, with `store: false` and the whole history as steps:
+the API keeps no conversation of its own, which is poo's rule.
+
+The history is flat. The API has no roles and no alternation: a message becomes
+the steps its content spells, and a tool's result is the step that answers its
+call. The answer is a stream of step events (`step.start`, `step.delta`,
+`step.stop`) closed by `interaction.completed`.
+
+| # | Wire | Internal | Back | Lossless |
+|---|---|---|---|---|
+| G1 | `{"type":"user_input","content":[{"type":"text","text":"…"}]}` | `Message{Role:user, Origin:user, Content:[text]}` | an input step | **yes** |
+| G2 | `{"type":"model_output","content":[{"type":"text","text":"…"}]}` | `Message{Role:assistant, Origin:model, Content:[text]}` | an output step | **yes** |
+| G3 | `{"type":"thought","signature":"…","summary":[{"type":"text","text":"…"}]}` | `Content{kind:thinking, text:"…", provider:{api:google_interactions, type:"thought_signature", data:"…"}}` | one thought step again: the summary from the thinking text, the signature from the provider block | **in the summary shape** — the text is one string, so a thought whose summary arrived as several parts comes back as one part |
+| G4 | `{"type":"function_call","id":"call_1","name":"bash","arguments":{"command":"ls"}}` | `Content{kind:tool_call, tool_call_id:"call_1", name:"bash", arguments:{"command":"ls"}}` | the same step | **yes** — the arguments are a JSON *object* here, not a string |
+| G5 | `{"type":"function_result","call_id":"call_1","name":"bash","result":"out"}` | `Message{Role:tool, Origin:tool, Content:[{kind:tool_result, tool_call_id:"call_1", name:"bash", text:"out"}]}` | the same step | **yes** — a result that answers with an attachment sends the parts beside the text |
+| G6 | `system_instruction` (a string) | `Message{Role:system, Origin:system, Content:[text]}` | the `system_instruction` field | **yes, in content** |
+| G7 | `generation_config.max_output_tokens` | `ChatRequest.MaxTokens` | the same | **yes** |
+| G8 | `generation_config.thinking_level` | `ReasoningControl{Mode:effort}` and the session's level | the same, with `thinking_summaries: "auto"` beside it | **yes** |
+| G9 | `usage.total_input_tokens`, `total_output_tokens`, `total_cached_tokens`, `total_thought_tokens` | `UsageReport` | — (response side) | **yes** — the input count is the whole prompt, and the output count takes the thought tokens the API reports apart |
+| G10 | `status: "completed"｜"requires_action"｜"incomplete"` | `FinishReason` | — (response side) | **yes** |
+| G11 | `step.start` of `thought`, `model_output` or `function_call`, and its `step.delta`s | `thinking`/`text` deltas and `tool_call` fragments | — (response side) | **yes** |
+| G12 | server-side tool steps (`google_search_call`, `code_execution_call`, …) | — | — | **no** — see *Scope decisions* |
+| G13 | an `image` or `audio` delta of a `model_output` step | — | — | **no** — see *Scope decisions* |
+
+Two placement rules belong to this API, and a transport has to honour them:
+
+- **A call of the current turn must follow a signed thought.** The API checks a
+  returned call against the thought that asked for it, and a call poo holds
+  without a signature — one that came from another API, or from a text-parsed
+  one — is replayed with Google's own sentinel,
+  `skip_thought_signature_validator`, as the signature of a thought that says
+  nothing.
+- **A thought's text is a summary, not the reasoning.** The API returns the
+  reasoning only as a summary and as an encrypted signature, so the thinking poo
+  keeps is what the model chose to say about its thinking, and the signature is
+  what makes the next request valid.
+
+The generation config has no sampling field. A temperature, a `top_p` or a
+`top_k` a model declares is not sent, and a request that stops short of its
+answer stopped on the output limit.
+
 ## Gaps this round trip found, and how they are closed
 
 1. **Opaque provider data had nowhere to go.** Anthropic's thinking
@@ -202,6 +245,14 @@ These are deliberate, and they are not gaps in the model:
 - **A foreign API's opaque block** is omitted from a request when it is not
   required, and fails the request with `session_incompatible` when it is.
   The rule needs no model change: the block says which API it belongs to.
+- **Server-side tool steps** — Google Search, code execution, URL context, the
+  Files API — are not carried. poo's model holds the tools it runs itself, and
+  a step the API ran on its own would arrive as content the model never saw it
+  ask for. The turn is read as the model's own answer, and the steps the API
+  ran are dropped with the parts of the answer they produced.
+- **An image or a sound the model generates** is not carried: a provider's
+  answer reaches poo as text, thinking and tool calls, and a `model_output`
+  step's media delta is left out of the view.
 
 ## Where this document is not sure
 
@@ -242,10 +293,22 @@ the transport that implements it:
 - **Anthropic's `cache_creation_input_tokens`.** The field name is taken
   from the usage block's shape; the value is not carried, so a wrong guess
   costs nothing.
+- **Google's context-overflow wording.** The Interactions API's error
+  reference lists no code for a prompt that is too long, so a request
+  rejected for it is classified by its message. The shared table's needles
+  are the wording the OpenAI-shaped endpoints use; a Google message that
+  words it differently settles as an invalid request, and the run compacts
+  on poo's own estimate instead of on the answer.
+- **Google's per-day quota.** A 429 is a rate limit whose retry is worth the
+  attempt the policy allows, unless the code names a quota. The per-minute
+  and the per-day limit answer the same way, so a daily limit costs the two
+  retries the policy has before it settles.
 
 ## What the model therefore has to carry
 
-The three APIs together need: text, thinking, tool calls, tool results, one
+The four APIs together need: text, thinking, tool calls, tool results, one
 opaque companion per visible block, and whole opaque items. That is exactly
 `ContentKind`'s five values plus `ProviderBlock`, and nothing more. The model
-is frozen.
+is frozen, and the fourth API is the round trip that confirms it: the
+Interactions API's thought signature rides where Anthropic's does, and its
+steps take the same blocks in a different order.
