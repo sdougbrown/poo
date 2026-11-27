@@ -378,12 +378,22 @@ func watchInterrupts(interrupts <-chan os.Signal, cancel context.CancelFunc, clo
 // The catalog resolves the model the settings name, and the flags
 // change what it resolved: the limit and the reasoning control are
 // the operator's.
+//
+// The reasoning flag names a level for a model that takes one, so a
+// named effort level forces the effort control on. "off" is not one of
+// those: it asks whatever control the model has to quiet the model, and
+// forcing the effort control here would send an effort field to an
+// endpoint that controls its reasoning another way, or none at all.
+// "default" is inert: it asks for no field on any control.
 func modelWithFlags(runtime *config.Runtime, o *runOptions) poo.ModelInfo {
 	model := runtime.Options.Model
 	if o.maxOutput > 0 {
 		model.MaxOutput = o.maxOutput
 	}
-	if o.reasoningEffort != "" {
+	switch o.reasoningEffort {
+	case "":
+	case "off", "default":
+	default:
 		model.Reasoning = poo.ReasoningControl{Mode: poo.ReasoningEffort, Param: poo.ReasoningPathEffort}
 	}
 	return model

@@ -84,9 +84,13 @@ func (m Model) ModelInfo() poo.ModelInfo {
 		ContextLimit: m.ContextLimit,
 		Tools:        poo.ToolCalling{Mode: poo.ToolsMode(m.EffectiveToolsMode())},
 	}
-	if m.ReasoningEffort != "" {
-		// The catalog names an effort level, and the effort level is what
-		// the model takes.
+	// The catalog names an effort level, and the effort level is what
+	// the model takes. "off" and "default" are beside the forcing: off
+	// asks the model's own control for quiet, and default asks for no
+	// field, so neither forces the effort control on.
+	switch m.ReasoningEffort {
+	case "", "off", "default":
+	default:
 		info.Reasoning = poo.ReasoningControl{Mode: poo.ReasoningEffort, Param: poo.ReasoningPathEffort}
 	}
 	return info
