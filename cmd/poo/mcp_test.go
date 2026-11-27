@@ -590,13 +590,3 @@ func TestTheMCPRemoveNamesTheScopeWhenTheNameIsNowhere(t *testing.T) {
 		t.Errorf("the diagnostics are %q, want them to name the scope searched", errOut)
 	}
 }
-
-// readFile returns a file's content for the tests that assert on it.
-func readFile(t *testing.T, path string) string {
-	t.Helper()
-	body, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return string(body)
-}
