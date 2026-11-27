@@ -111,9 +111,10 @@ entries stay as they are.`,
 // handleMCPList executes `poo mcp list`.
 //
 // The listing is the set the same resolution a session loads: the
-// default directory when the settings' word keeps it on, the settings'
-// paths, and the paths the flags add. A server poo does not start is a
-// warning on the diagnostics, the way the session reports it.
+// default directory when the settings' word keeps it on, then the
+// settings' paths, then the paths the flags add. A server poo does not
+// start is a warning on the diagnostics, the way the session reports
+// it.
 func handleMCPList(inv clicontract.Invocation, stdout, stderr io.Writer) exit {
 	var o mcpOptions
 	o.bind(inv)
@@ -202,11 +203,11 @@ func sortedEnvKeys(env map[string]manifest.Template) []string {
 
 // handleMCPAdd executes `poo mcp add`.
 //
-// The entry is written into the scope's manifest file — poo's own mcp
-// directory, or the project's .poo directory — and the file the write
+// The entry goes into the scope's manifest file: poo's own mcp
+// directory, or the project's .poo directory. The file the write
 // produces is validated by the same load a session runs. A load that
 // fails puts the file back as it was, so a refused add leaves the
-// manifest exactly as it found it.
+// manifest as it found it.
 func handleMCPAdd(inv clicontract.Invocation, stdout, stderr io.Writer) exit {
 	var o mcpOptions
 	o.bind(inv)
@@ -258,9 +259,9 @@ func handleMCPAdd(inv clicontract.Invocation, stdout, stderr io.Writer) exit {
 // handleMCPRemove executes `poo mcp remove`.
 //
 // The removal edits the file the load read the entry from, found
-// through the set's own source of each server, and the file the removal
-// produces is validated by the same load a session runs. A load that
-// fails puts the file back as it was.
+// through the set's own source of each server. The same load a session
+// runs validates the result; a load that fails puts the file back as it
+// was.
 func handleMCPRemove(inv clicontract.Invocation, stdout, stderr io.Writer) exit {
 	var o mcpOptions
 	o.bind(inv)
@@ -366,10 +367,10 @@ func theEnv(words []string) (map[string]string, error) {
 	return env, nil
 }
 
-// theProjectHint tells an add that wrote a project manifest whether the
-// session loads it. The project's settings name the manifests their
-// sessions read, and a file the settings do not name is one no session
-// reads, so the add says so with the exact path to name.
+// theProjectHint tells an add that wrote a project manifest whether
+// the session loads it. The project's settings name the manifests their
+// sessions read, so a file the settings do not name is one no session
+// reads. The hint gives the exact path to name.
 func theProjectHint(target string) string {
 	workingDir, err := os.Getwd()
 	if err != nil {
@@ -396,9 +397,9 @@ func theProjectHint(target string) string {
 }
 
 // writeServer writes one mcpServers entry into a manifest file,
-// preserving the file's other content. The file the write produces is
-// validated by the load a session runs; a load that fails puts the
-// original bytes back.
+// preserving the file's other content. The load a session runs
+// validates the result; a load that fails puts the original bytes
+// back.
 func writeServer(target, name string, entry map[string]any) error {
 	original, err := os.ReadFile(target)
 	present := err == nil
