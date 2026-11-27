@@ -410,6 +410,68 @@ func TestMCPFeedNameCollision(t *testing.T) {
 	}
 }
 
+// TestAListingDropsACollidingResourceFeed covers the shared namespace in the
+// listing: a profile whose selected server declares a resource feed whose name
+// a feed manifest's feed already holds is offered without that server's feed
+// earning the job tools, and the warning names the profile and the colliding
+// feed, the way a variant whose manifests do not load is offered without them
+// — a session under the profile refuses the build. The profile stays offered,
+// the way a variant whose manifests do not load is.
+func TestAListingDropsACollidingResourceFeed(t *testing.T) {
+	feeds := feedManifestNamed(t, "inbox")
+	poo := map[string]any{"servers": map[string]any{
+		"avenor": map[string]any{"feeds": map[string]any{
+			"inbox": map[string]any{"resource": "avenor://inbox"},
+		}},
+		"notes": map[string]any{"feeds": map[string]any{
+			"outbox": map[string]any{"resource": "notes://outbox"},
+		}},
+	}}
+	path := mcpManifest(t, map[string]any{"avenor": stdioServer(), "notes": stdioServer()}, poo)
+	document := theMCPSettings(path) + "feeds:\n  paths: [\"" + feeds + "\"]\nprofiles:\n  watcher:\n    base: base\n    mcp_servers: [avenor]\n  mixed:\n    base: base\n    mcp_servers: [avenor, notes]\nprofile: code\n"
+	settings, err := config.Parse([]byte(document), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+	offered := map[string]map[string]bool{}
+	listedProfiles := map[string]bool{}
+	for _, listed := range runtime.Profiles {
+		listedProfiles[listed.Name] = true
+		offered[listed.Name] = map[string]bool{}
+		for _, tool := range listed.Tools {
+			offered[listed.Name][tool.Name] = true
+		}
+	}
+	if !listedProfiles["watcher"] {
+		t.Fatal("the listing does not offer the watcher profile, and a profile whose feed collides is offered without the colliding feed")
+	}
+	// The manifest's own feeds are the session's whatever the profile
+	// selects, so the job tools stay; what the collision costs the profile
+	// is its server's resource feed, and the warning says so.
+	for _, name := range []string{"jobs", "cancel_job"} {
+		if !offered["watcher"][name] {
+			t.Errorf("the listing does not offer the %q tool for the watcher profile, and the settings' feed manifest holds feeds the session runs", name)
+		}
+	}
+	if !listedProfiles["mixed"] {
+		t.Fatal("the listing does not offer the mixed profile")
+	}
+	for _, name := range []string{"jobs", "cancel_job"} {
+		if !offered["mixed"][name] {
+			t.Errorf("the listing does not offer the %q tool for the mixed profile, and its notes server declares a feed no manifest feed holds", name)
+		}
+	}
+	for _, want := range []string{"watcher", `"inbox"`, "avenor"} {
+		if !strings.Contains(runtime.Warning, want) {
+			t.Errorf("the build warned %q, want it to name %q", runtime.Warning, want)
+		}
+	}
+	if strings.Contains(runtime.Warning, `"outbox"`) {
+		t.Errorf("the build warned %q, and the outbox feed holds no name a manifest feed holds", runtime.Warning)
+	}
+}
+
 // TestAProfilesDeclaredFeedCountsASelectedServersResourceFeed covers the other
 // side of the namespace: a profile that declares a feed by name is satisfied by
 // a resource feed a selected server declares, and the build does not warn about

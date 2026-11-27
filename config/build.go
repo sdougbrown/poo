@@ -1550,11 +1550,25 @@ func (r *Runtime) resolveProfiles(opts BuildOptions, definitions []profile.Profi
 		}
 		// A selected server's resource feed is a feed the session runs, so
 		// it earns the job tools the way a manifest's feed does; it is
-		// never optional, so it earns no subscribe tool.
+		// never optional, so it earns no subscribe tool. A feed whose name
+		// a manifest's feed already holds is one the session refuses
+		// (checkMCPFeedNames), so that server's feeds earn no tools here:
+		// the profile is offered without them, and the warning is the
+		// manifest-load failure's.
 		for _, server := range variant.mcpServers {
-			if len(pair.mcp.Feeds(server)) > 0 {
+			decls := pair.mcp.Feeds(server)
+			if len(decls) == 0 {
+				continue
+			}
+			collides := false
+			for _, decl := range decls {
+				if pair.feeds.Has(decl.Name) {
+					collides = true
+					r.warn(fmt.Sprintf("profiles.%s: the resource feed %q of the mcp server %q is also a feed the settings load, and the profile is offered without it", definition.Name, decl.Name, server))
+				}
+			}
+			if !collides {
 				feeds = true
-				break
 			}
 		}
 		disabled := r.disabledTools(definition.Name)
