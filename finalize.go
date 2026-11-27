@@ -654,7 +654,7 @@ func (s *Session) settleIssuedCalls(run *runState, issued []*issuedCall) {
 		text := SkippedSettlingText
 		if call.started {
 			outcome = OutcomeCancelled
-			text = "Cancelled: the run settled before the call finished."
+			text = CancelledSettlingText
 		}
 		// The call is already marked as settled, so the record is
 		// written directly.

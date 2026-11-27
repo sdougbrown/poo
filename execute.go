@@ -27,6 +27,10 @@ const (
 	// CancelledInterruptedText is the result of a call that an
 	// interrupt cut short while it ran.
 	CancelledInterruptedText = "Cancelled: interrupted by the user."
+	// CancelledSettlingText is the result of a call the run's
+	// finalization cancelled. The run was settling while the call ran,
+	// and no user interrupt happened.
+	CancelledSettlingText = "Cancelled: the run settled before the call finished."
 )
 
 // callPlan is one call of a batch, with everything the core needs to
@@ -737,7 +741,7 @@ func (s *Session) executeOne(owner *callOwner, turn int, plan callPlan) {
 		if s.interruptPending(owner) {
 			text = interruptNote(text)
 		} else {
-			text = text + "\n" + CancelledInterruptedText
+			text = cancelledSettlingNote(text)
 		}
 		result = ToolResult{Text: text, IsError: true}
 		outcome = OutcomeCancelled
@@ -1419,6 +1423,18 @@ func interruptNote(text string) string {
 		return CancelledInterruptedText
 	}
 	return text + "\n" + CancelledInterruptedText
+}
+
+// cancelledSettlingNote adds the settling note to a result's text.
+//
+// The run's finalization cancelled the call, so the note says the run
+// settled rather than naming a user interrupt that did not happen.
+// The result keeps whatever the tool managed to produce.
+func cancelledSettlingNote(text string) string {
+	if text == "" {
+		return CancelledSettlingText
+	}
+	return text + "\n" + CancelledSettlingText
 }
 
 // ErrFatal marks a tool error as fatal.

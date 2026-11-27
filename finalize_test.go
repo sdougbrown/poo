@@ -459,6 +459,68 @@ func TestEveryIssuedCallGetsAResult(t *testing.T) {
 	}
 }
 
+// TestAFinalizationEndedCallIsNotToldTheUserInterrupted covers the note
+// a carried result gets when the run's finalization ended the call: the
+// note says the run settled, not that the user interrupted.
+func TestAFinalizationEndedCallIsNotToldTheUserInterrupted(t *testing.T) {
+	started := make(chan struct{})
+	tool := &echoTool{result: "echoed"}
+	tool.call = func(ctx context.Context) (poo.ToolResult, error) {
+		close(started)
+		<-ctx.Done()
+		return poo.ToolResult{Text: "partial output"}, nil
+	}
+	tr := scripted([]fakeResponse{
+		{
+			calls: []poo.ToolCall{{
+				CallID:    "call_1",
+				Name:      "echo",
+				Arguments: json.RawMessage(`{"text":"hello"}`),
+			}},
+		},
+		{text: "the second answer"},
+	})
+	sink := &recordingSink{}
+
+	s := newTestSession(t, testOptions(t, tr, tool, sink))
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	<-started
+	// The finalization's cancellation ends the call: no interrupt was
+	// sent, so the note must not say the user interrupted.
+	s.Cancel("cancel:test")
+	res, err := s.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	if res.Reason != poo.ReasonCancelled {
+		t.Errorf("the run settled %q, want cancelled", res.Reason)
+	}
+
+	var result *poo.ToolResultRecord
+	for _, rec := range sink.allRecords() {
+		if r, ok := rec.(*poo.ToolResultRecord); ok && r.Handle == "r1" {
+			result = r
+		}
+	}
+	if result == nil {
+		t.Fatal("the log holds no result for the call")
+	}
+	if result.Outcome != poo.OutcomeCancelled {
+		t.Errorf("the outcome is %q, want cancelled", result.Outcome)
+	}
+	if !strings.Contains(result.Text, "partial output") {
+		t.Errorf("the result's text is %q, want the partial output", result.Text)
+	}
+	if strings.Contains(result.Text, poo.CancelledInterruptedText) {
+		t.Errorf("the result's text is %q, want no user-interrupt note", result.Text)
+	}
+	if !strings.Contains(result.Text, poo.CancelledSettlingText) {
+		t.Errorf("the result's text is %q, want the settling note", result.Text)
+	}
+}
+
 // TestALateCompletionDoesNotMutateTheSettledRun covers the rule:
 // a completion that arrives after the commit point is dropped.
 func TestALateCompletionDoesNotMutateTheSettledRun(t *testing.T) {
