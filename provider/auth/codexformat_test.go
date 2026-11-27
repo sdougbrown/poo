@@ -194,11 +194,13 @@ func TestACodexFileInAPIKeyModeHoldsNoCredential(t *testing.T) {
 	}
 }
 
-// TestAReadOnlyStoreDoesNotWriteItsOwnFileEither covers the flag's reach: it
-// is the store's mode, not the format's. poo's own file under a read-only
-// store refuses its writes too, and a live credential is reported live with
-// no leeway — there is no refresh to front-run.
-func TestAReadOnlyStoreDoesNotWriteItsOwnFileEither(t *testing.T) {
+// TestAReadOnlyStoreRefusesAPiFileToo covers the flag's reach: it is the
+// store's mode, not the format's. The fixture is pi-shaped — the providers at
+// the top level, no version field — and its writes are refused the same way a
+// poo-format file's would be, because the read-only check fires before any
+// format check. A live credential is reported live with no leeway: there is
+// no refresh to front-run.
+func TestAReadOnlyStoreRefusesAPiFileToo(t *testing.T) {
 	path := authFile(t, fmt.Sprintf(stored, expires(2*time.Minute)))
 	credentials := auth.Credentials{Path: path, ReadOnly: true, Now: clock}
 

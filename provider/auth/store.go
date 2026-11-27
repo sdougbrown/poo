@@ -364,7 +364,12 @@ func (c Credentials) status(doc document, p Provider, stored credential) Status 
 	// nothing.
 	if status.Kind == KindOAuth {
 		status.ClientID = stored.ClientID
-		status.Expires = time.UnixMilli(stored.Expires)
+		// An access token whose expiry is not readable has none to report: a
+		// time rendered for it would be a time nothing enforces, and the
+		// report's own rule for a key is the rule here.
+		if stored.Expires != 0 {
+			status.Expires = time.UnixMilli(stored.Expires)
+		}
 		status.Live = stored.live(c.now(), c.readiness())
 	}
 	return status
@@ -376,7 +381,8 @@ func (c Credentials) status(doc document, p Provider, stored credential) Status 
 type Status struct {
 	// Path is the file the credential was read from.
 	Path string
-	// Format is the shape that file is written with: FormatPi or FormatPoo.
+	// Format is the shape that file is written with: FormatPi, FormatPoo or
+	// FormatCodex.
 	Format string
 	// Provider is the id the credential is stored under.
 	Provider string

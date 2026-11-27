@@ -3,10 +3,12 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sdougbrown/poo/provider/auth"
 )
@@ -617,4 +619,60 @@ func withoutATerminal(t *testing.T) *os.File {
 		_ = writer.Close()
 	})
 	return reader
+}
+
+// TestTheAuthStatusNamesTheReadOnlyMode covers the state a shared file's
+// report gives: an expired credential under auth_readonly is not "refresh
+// needed" — poo would refuse the trade — and the state names the tool that
+// owns the refresh instead.
+func TestTheAuthStatusNamesTheReadOnlyMode(t *testing.T) {
+	dir := t.TempDir()
+	// The token stopped working an hour ago.
+	credential := codexCredential(t, dir, time.Now().Add(-time.Hour).UnixMilli())
+	settingsPath := authSettings(t, dir, credential)
+	settings, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("reading the settings: %v", err)
+	}
+	if err := os.WriteFile(settingsPath, append(settings, []byte("auth_readonly: true\n")...), 0o644); err != nil {
+		t.Fatalf("writing the settings: %v", err)
+	}
+
+	out := captureStdout(t, func() {
+		if code := run([]string{"auth", "status", "--settings", settingsPath}); code != 0 {
+			t.Errorf("poo auth status exited with %d", code)
+		}
+	})
+	if !strings.Contains(out, "expired (read-only: refresh with the tool that owns the file)") {
+		t.Errorf("the report is %q, want the state that names the owning tool", out)
+	}
+	if strings.Contains(out, "refresh needed") {
+		t.Errorf("the report is %q, want no state a read-only file cannot act on", out)
+	}
+}
+
+// TestTheAuthStatusLeavesAnUnreadableExpiryEmpty covers the access token that
+// names no exp: the report carries no expiry at all, not the epoch a zero
+// millisecond count renders as.
+func TestTheAuthStatusLeavesAnUnreadableExpiryEmpty(t *testing.T) {
+	dir := t.TempDir()
+	credential := filepath.Join(dir, "auth.json")
+	// The access token is not a JWT, so its expiry cannot be read.
+	body := fmt.Sprintf(`{"openai-codex":{"type":"oauth","access":"not-a-jwt","refresh":"a-refresh","expires":%d,"accountId":"acct-test"}}`, time.Now().Add(time.Hour).UnixMilli())
+	if err := os.WriteFile(credential, []byte(body), 0o600); err != nil {
+		t.Fatalf("writing the credential file: %v", err)
+	}
+	settings := authSettings(t, dir, "auth.json")
+
+	out := captureStdout(t, func() {
+		if code := run([]string{"auth", "status", "--settings", settings}); code != 0 {
+			t.Errorf("poo auth status exited with %d", code)
+		}
+	})
+	if strings.Contains(out, "1970") {
+		t.Errorf("the report is %q, want no expiry rendered from a zero time", out)
+	}
+	if !strings.Contains(out, "EXPIRES") {
+		t.Errorf("the report is %q, want the expiry line", out)
+	}
 }
