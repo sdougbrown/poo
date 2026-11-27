@@ -86,6 +86,11 @@ const callDescription = CallToolName + " runs one of the commands registered in 
 	"It is not a general dispatcher: the tools this session offers beside it are called directly, and " +
 	CallToolName + " cannot run them, itself, a shell, or anything the catalog does not list."
 
+// CanBackgroundRunningCall reports that a call's running command can
+// finish under a job without restarting: the process runs detached from
+// the run, the way a bash command does.
+func (*CallTool) CanBackgroundRunningCall() bool { return true }
+
 // Spec describes the tool.
 func (t *CallTool) Spec() poo.ToolSpec {
 	return poo.ToolSpec{
