@@ -48,6 +48,14 @@ var typesafe = auth.Flow{
 	Method:   auth.MethodKey,
 }
 
+// google is the fifth way in: a Gemini API key, which the AI Studio console
+// issues and the Interactions endpoint reads.
+var google = auth.Flow{
+	Name:     "Google Gemini",
+	Provider: auth.Google,
+	Method:   auth.MethodKey,
+}
+
 // probeClient is the client a sign-in's probe uses. The binary leaves it nil, and
 // the catalog makes its own; a test stands a fixture in its place, the way listenOn
 // stands in for a listener, because a probe reaches a provider and no test does.
@@ -55,7 +63,7 @@ var probeClient *http.Client
 
 // logins are the sign-ins this command offers, in the order the picker shows them.
 func logins() []auth.Flow {
-	return []auth.Flow{auth.CodexLogin, ollamaCloud, opencode, typesafe}
+	return []auth.Flow{auth.CodexLogin, ollamaCloud, opencode, typesafe, google}
 }
 
 // loginOptions are the flags of `poo login`.

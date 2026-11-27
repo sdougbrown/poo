@@ -63,6 +63,11 @@ const (
 	// key belongs to one workspace and the workspace says which plan it runs.
 	ProviderOpencode = "opencode"
 
+	// ProviderGoogle is the provider id a Gemini API key is stored under. It
+	// is also the name of the endpoint the Interactions transport reaches, so
+	// the sign-in and the endpoint meet at the key's environment variable.
+	ProviderGoogle = "google"
+
 	// ProviderTypesafe is the provider id the TypeSafe key is stored
 	// under. It is the entry's name in poo's own credential file. The
 	// endpoint reads the credential by declaring the same environment

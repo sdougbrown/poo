@@ -176,6 +176,9 @@ const (
 	APIResponses API = "responses"
 	// APIAnthropicMessages is the Anthropic Messages API.
 	APIAnthropicMessages API = "anthropic_messages"
+	// APIGoogleInteractions is Google's Interactions API, the one Gemini's
+	// models are reached through by default.
+	APIGoogleInteractions API = "google_interactions"
 )
 
 // ContentKind names the type of a content block.
