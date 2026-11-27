@@ -775,3 +775,62 @@ func TestTheMCPAddRefusesANameASiblingInScopeHolds(t *testing.T) {
 		t.Errorf("the refused add left %s behind", filepath.Join(globalDir, "mcp.json"))
 	}
 }
+
+func TestTheMCPRemoveRefusesATargetThatDoesNotParse(t *testing.T) {
+	globalDir := theIsolatedHome(t)
+	target := filepath.Join(globalDir, "mcp.json")
+	if err := os.WriteFile(target, []byte("{not json at all"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before := readFile(t, target)
+
+	_, errOut := captureBoth(t, func() {
+		if code := run([]string{"mcp", "remove", "fixture", "--global"}); code == 0 {
+			t.Error("poo mcp remove accepted a manifest that does not parse")
+		}
+	})
+	// The load a session runs refuses the unreadable file, and the
+	// diagnostics carry that refusal: the edit never replaced content it
+	// could not read.
+	if !strings.Contains(errOut, "invalid character") || !strings.Contains(errOut, "mcp.json") {
+		t.Errorf("the diagnostics are %q, want the load's refusal naming the file", errOut)
+	}
+	if after := readFile(t, target); after != before {
+		t.Errorf("the refused remove changed the file: %s", after)
+	}
+}
+
+func TestTheMCPProjectScopeWalksUpToTheProjectRoot(t *testing.T) {
+	globalDir := theIsolatedHome(t)
+	_ = globalDir
+	// The project root is an ancestor: its .poo holds the settings, and
+	// the working directory is a child of the root with no .poo of its
+	// own, so the edit lands where the session's discovery reads.
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".poo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	theMCPSettings(t, filepath.Join(root, ".poo"))
+	child := filepath.Join(root, "cmd", "tool")
+	if err := os.MkdirAll(child, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	inDir(t, child, func() {
+		out := captureStdout(t, func() {
+			if code := run([]string{"mcp", "add", "fixture", "--project", "--", "echo"}); code != 0 {
+				t.Errorf("poo mcp add exited with %d", code)
+			}
+		})
+		if !strings.Contains(out, filepath.Join(root, ".poo", "mcp.json")) {
+			t.Errorf("the report is %q, want it to name the project root's file", out)
+		}
+		set, err := loadManifests(t, filepath.Join(root, ".poo"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := set.Lookup("fixture"); !ok {
+			t.Errorf("the project root's manifest holds no fixture server: %+v", set.Names())
+		}
+	})
+}

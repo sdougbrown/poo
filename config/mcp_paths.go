@@ -47,10 +47,14 @@ func MCPManifestDir() (string, error) {
 	return filepath.Join(dir, "mcp"), nil
 }
 
-// ProjectDir returns the project's poo directory: the .poo directory of
-// the nearest ancestor of workingDir that holds one, or workingDir's own
-// .poo when no ancestor does. The directory need not exist yet: a command
-// that writes into the project's poo directory creates it there.
+// ProjectDir returns the project's poo directory, resolved the way the
+// project's own settings discovery resolves it: the nearest ancestor's
+// .poo directory that holds a settings file is the project's, so an edit
+// lands where the session's own resolution reads. A chain that holds no
+// settings-bearing .poo falls back to the nearest .poo directory to the
+// working directory — the project's, when one exists without settings
+// yet — and to workingDir's own .poo when the chain holds none, which a
+// first write creates.
 func ProjectDir(workingDir string) (string, error) {
 	dir := workingDir
 	if dir == "" {
@@ -61,13 +65,22 @@ func ProjectDir(workingDir string) (string, error) {
 		}
 	}
 	start := dir
+	var nearest string
 	for {
 		candidate := filepath.Join(dir, ProjectDirName)
 		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
-			return candidate, nil
+			if nearest == "" {
+				nearest = candidate
+			}
+			if _, ok := settingsFileIn(candidate); ok {
+				return candidate, nil
+			}
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
+			if nearest != "" {
+				return nearest, nil
+			}
 			return filepath.Join(start, ProjectDirName), nil
 		}
 		dir = parent
