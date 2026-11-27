@@ -166,6 +166,7 @@ func wantSkipped(m string, extra ...string) []string {
 		m + "/internal/schematext (does not exist yet)",
 		m + "/mcp (does not exist yet)",
 		m + "/mcp/manifest (does not exist yet)",
+		m + "/mcp/wire (does not exist yet)",
 		m + "/perm (does not exist yet)",
 		m + "/perm/decide (does not exist yet)",
 		m + "/prompt (does not exist yet)",

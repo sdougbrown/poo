@@ -81,6 +81,9 @@ func (g *stubGroup) Close() error {
 // Offered returns the entries the servers hold: the tests' stubs list none.
 func (g *stubGroup) Offered() []cli.Offered { return nil }
 
+// Servers returns the per-server views: the tests' stubs hold none.
+func (g *stubGroup) Servers() []config.MCPServer { return nil }
+
 // recorded returns the launches the launcher saw.
 func (l *recordingLauncher) recorded() []string {
 	l.mu.Lock()
@@ -426,6 +429,10 @@ func (c childCloser) Close() error { return c.kill() }
 // Offered returns no entry: the handle stands for a child process, and the
 // test reads none of its tools.
 func (childCloser) Offered() []cli.Offered { return nil }
+
+// Servers returns no view: the handle stands for a child process, and the
+// test reads no server of it.
+func (childCloser) Servers() []config.MCPServer { return nil }
 
 // failingSessionStart is a session-start hook that always fails.
 type failingSessionStart struct{}

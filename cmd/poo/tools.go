@@ -139,9 +139,11 @@ type mcpSession struct {
 	names []string
 }
 
-// servers are the per-server views the tools over them read.
-func (h *mcpSession) servers() []callmcp.Server {
-	servers := make([]callmcp.Server, 0, len(h.names))
+// Servers are the per-server views the tools over them read: the settings'
+// interface carries them, so the snapshot and the dispatch read the same
+// views, and a handle that lists a tool offers one the call reaches.
+func (h *mcpSession) Servers() []config.MCPServer {
+	servers := make([]config.MCPServer, 0, len(h.names))
 	for _, name := range h.names {
 		servers = append(servers, &mcpServer{group: h.group, name: name})
 	}
@@ -152,7 +154,7 @@ func (h *mcpSession) servers() []callmcp.Server {
 // over the same per-server views the dispatch reads, so a handle is never
 // listed without being dispatchable.
 func (h *mcpSession) Offered() []cli.Offered {
-	return callmcp.Offered(h.servers())
+	return callmcp.Offered(dispatchServers(h.Servers()))
 }
 
 // Close stops the servers and waits for their processes to end.
@@ -185,21 +187,28 @@ func (s *mcpServer) CallTool(ctx context.Context, tool string, args json.RawMess
 	return s.group.CallTool(ctx, s.name+"/"+tool, args)
 }
 
+// dispatchServers reads the settings' per-server views as the servers the
+// dispatch holds: the two interfaces name the same methods, so a view the
+// snapshot reads is a server the call reaches.
+func dispatchServers(views []config.MCPServer) []callmcp.Server {
+	servers := make([]callmcp.Server, 0, len(views))
+	for _, view := range views {
+		servers = append(servers, view)
+	}
+	return servers
+}
+
 // mcpServers keeps the servers a session started, as the tools over them read
 // them.
 //
-// The settings hold the handles as their launcher returned them, and the tools
-// over them are this binary's, so this is where the two meet: a handle that the
-// tools cannot read is left out, and the launcher's own return type is pinned
-// to what they read.
+// The settings hold the handles as their launcher returned them, and the
+// interface carries the per-server views, so the handles' own answers are the
+// servers the call dispatches through — the same views the session's snapshot
+// read.
 func mcpServers(running []config.MCPRunning) []callmcp.Server {
 	var servers []callmcp.Server
 	for _, handle := range running {
-		session, ok := handle.(interface{ servers() []callmcp.Server })
-		if !ok {
-			continue
-		}
-		servers = append(servers, session.servers()...)
+		servers = append(servers, dispatchServers(handle.Servers())...)
 	}
 	return servers
 }

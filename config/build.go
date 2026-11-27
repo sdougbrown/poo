@@ -27,6 +27,7 @@ import (
 	"github.com/sdougbrown/poo/feed"
 	"github.com/sdougbrown/poo/internal/caps"
 	"github.com/sdougbrown/poo/mcp/manifest"
+	"github.com/sdougbrown/poo/mcp/wire"
 	"github.com/sdougbrown/poo/perm"
 	permissive "github.com/sdougbrown/poo/perm/decide"
 	"github.com/sdougbrown/poo/profile"
@@ -263,6 +264,23 @@ type MCPLaunchSelection struct {
 	Servers []manifest.Server
 }
 
+// MCPServer is one server a session started, as the tools over the servers
+// read it.
+//
+// config does not import the tool packages, so the seam is structural: the
+// per-server views the binary's call tool dispatches through answer to this,
+// the way the generated toolset does. The settings read the same views for
+// the session's snapshot, so what a handle lists is what the call reaches,
+// and no second list stands between them.
+type MCPServer interface {
+	// Name is the server's declared name.
+	Name() string
+	// Tools returns the tools the server listed at startup.
+	Tools() []wire.Tool
+	// CallTool calls one of them, by the server's own name for it.
+	CallTool(ctx context.Context, tool string, args json.RawMessage) (wire.CallResult, error)
+}
+
 // MCPRunning is what a launcher started for a session.
 //
 // The session closes it when it ends. Close is idempotent, and the
@@ -271,11 +289,18 @@ type MCPLaunchSelection struct {
 type MCPRunning interface {
 	// Close stops the server and waits for its process to end.
 	Close() error
-	// Offered returns the tools the server listed at startup, as the
+	// Servers returns the per-server views the tools over the servers read:
+	// one per server the launch started, in the selection's order. The
+	// snapshot and the dispatch read the same views, so a tool the handle
+	// lists is one the call reaches.
+	Servers() []MCPServer
+	// Offered returns the tools the servers listed at startup, as the
 	// entries the model reaches through the MCP call: one per tool,
 	// qualified with the server's name, naming the call that runs it and
-	// the argument that names it. The build reads them once, at attach,
-	// so the session's search and its prompt list the same value.
+	// the argument that names it. It is the entries of the views Servers
+	// returns, derived the way the dispatch's own tool derives them, so the
+	// session's search and its prompt list the same value the call
+	// dispatches. The build reads them once, at attach.
 	Offered() []cli.Offered
 }
 

@@ -15,6 +15,7 @@ import (
 	"github.com/sdougbrown/poo/cli"
 	"github.com/sdougbrown/poo/config"
 	"github.com/sdougbrown/poo/decide"
+	"github.com/sdougbrown/poo/exec"
 	"github.com/sdougbrown/poo/mcp"
 	"github.com/sdougbrown/poo/pootest"
 	"github.com/sdougbrown/poo/prompt"
@@ -55,15 +56,14 @@ func (s *testMCPServer) CallTool(ctx context.Context, tool string, args json.Raw
 }
 
 // mcpServers keeps the servers a session started, as the tools over them read
-// them: the same conversion cmd/poo's own factory makes.
+// them: the same conversion cmd/poo's own factory makes. The interface
+// carries the per-server views, so every handle answers for itself.
 func mcpServers(running []config.MCPRunning) []callmcp.Server {
 	var servers []callmcp.Server
 	for _, handle := range running {
-		session, ok := handle.(interface{ servers() []callmcp.Server })
-		if !ok {
-			continue
+		for _, view := range handle.Servers() {
+			servers = append(servers, view)
 		}
-		servers = append(servers, session.servers()...)
 	}
 	return servers
 }
@@ -371,8 +371,14 @@ func (h *listedSession) Close() error {
 // over the same per-server views the dispatch reads.
 func (h *listedSession) Offered() []cli.Offered { return callmcp.Offered(h.views) }
 
-// servers are the views the tools read.
-func (h *listedSession) servers() []callmcp.Server { return h.views }
+// Servers are the per-server views the tools read.
+func (h *listedSession) Servers() []config.MCPServer {
+	views := make([]config.MCPServer, 0, len(h.views))
+	for _, view := range h.views {
+		views = append(views, view)
+	}
+	return views
+}
 
 // listedLauncher returns a launcher whose servers list the tools the test
 // names, so a test reads what a session offers without starting a process.
@@ -802,6 +808,110 @@ func TestEachSessionCarriesItsOwnMCPCatalog(t *testing.T) {
 		if strings.Contains(text, "fixture/"+other+"-tool") {
 			t.Errorf("the session %s lists the tool another session's server offered:\n%s", id, text)
 		}
+	}
+}
+
+// bareSession is a launcher handle that carries nothing beyond the settings'
+// interface: no method for a dispatch to recover beyond the ones the
+// interface names, the way a launcher outside this binary would return one.
+// Its entries derive over the same per-server views its Servers return.
+type bareSession struct {
+	// views are the per-server views, one per declared server.
+	views []config.MCPServer
+	// stop stops the servers the launch started.
+	stop func() error
+}
+
+// bareSession is a handle of the interface alone.
+var _ config.MCPRunning = (*bareSession)(nil)
+
+// Close stops the servers the launch started.
+func (h *bareSession) Close() error {
+	if h.stop == nil {
+		return nil
+	}
+	return h.stop()
+}
+
+// Servers are the per-server views the tools over them read.
+func (h *bareSession) Servers() []config.MCPServer { return h.views }
+
+// Offered returns every entry the servers hold, derived over the same views
+// the dispatch reads.
+func (h *bareSession) Offered() []cli.Offered {
+	var entries []cli.Offered
+	for _, server := range h.views {
+		entries = append(entries, callmcp.Entries(server.Name(), server.Tools())...)
+	}
+	return entries
+}
+
+// TestAHandleOfTheInterfaceAloneIsListedAndDispatchable covers the one
+// surface: a handle that carries nothing beyond the settings' interface has
+// its entries listed by the snapshot and dispatched by the call over the same
+// views. A handle the snapshot lists is one the call reaches, so the
+// listed-but-undispatchable state is not one a conforming handle can reach.
+func TestAHandleOfTheInterfaceAloneIsListedAndDispatchable(t *testing.T) {
+	binary := fixtureServer(t)
+	path := mcpManifest(t, map[string]any{"fixture": map[string]any{"command": binary}}, nil)
+	settings, err := config.Parse([]byte(theModelSettings+theSessionDir(t)+theMCPPaths(path)+theMCPProfile("picky", "fixture")), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	launcher := func(ctx context.Context, values config.MCPLaunchSelection) (config.MCPRunning, error) {
+		group, err := mcp.Launch(ctx, mcp.LaunchOptions{
+			SessionID: values.SessionID,
+			Dir:       values.WorkingDir,
+			HostEnv:   exec.Lookup(os.Environ()),
+			Servers:   values.Servers,
+		})
+		if err != nil {
+			return nil, err
+		}
+		views := make([]config.MCPServer, 0, len(values.Servers))
+		for _, server := range values.Servers {
+			views = append(views, &testMCPServer{group: group, name: server.Name})
+		}
+		return &bareSession{views: views, stop: group.Close}, nil
+	}
+	runtime := buildWith(t, config.BuildOptions{Settings: settings, MCPLauncher: launcher, WorkingDir: t.TempDir()})
+	defer runtime.Store.Close()
+	transport := pootest.NewTransport(
+		pootest.Turn{Calls: []pootest.Call{{
+			Name:      config.ToolCallMCP,
+			ID:        "c1",
+			Arguments: json.RawMessage(`{"name":"fixture/echo","args":{"text":"hello"}}`),
+		}}},
+		pootest.Turn{Text: "done"},
+	)
+	runtime.Options.Transport = transport
+
+	workDir := t.TempDir()
+	sess, err := runtime.CreateSession(context.Background(), runtime.Store, theCreatedRecord("picky", workDir))
+	if err != nil {
+		t.Fatalf("creating the session: %v", err)
+	}
+	defer sess.Close()
+	// The snapshot lists the tool: the prompt reads the handle's own entries.
+	if text := sess.PromptState().Text; !strings.Contains(text, "fixture/echo") {
+		t.Errorf("the prompt does not list the tool the handle lists:\n%s", text)
+	}
+	if _, err := sess.Prompt(context.Background(), "call the fixture"); err != nil {
+		t.Fatalf("prompting: %v", err)
+	}
+	if _, err := sess.Wait(context.Background()); err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	text := requestText(transport)
+	// The call reached the server the handle holds: the fixture answers with
+	// what it was given and the world it runs in.
+	for _, want := range []string{`"text":"hello"`, workDir} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the call's answer does not carry %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "the session started no mcp server named") {
+		t.Errorf("the call refused a server the snapshot lists:\n%s", text)
 	}
 }
 

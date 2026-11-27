@@ -1720,6 +1720,9 @@ func (r *stubRunning) Close() error {
 // Offered returns no entry: a handle that starts nothing lists no tool.
 func (r *stubRunning) Offered() []cli.Offered { return nil }
 
+// Servers returns no view: a handle that starts nothing holds no server.
+func (r *stubRunning) Servers() []config.MCPServer { return nil }
+
 // closes returns how many times the handle was closed.
 func (r *stubRunning) closes() int {
 	r.mu.Lock()
