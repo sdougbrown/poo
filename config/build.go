@@ -1017,21 +1017,18 @@ func (r *Runtime) loadFeeds(opts BuildOptions, workingDir string, on bool) (*fee
 // selects. No paths is no set: the resolver returns nil, and no server can be
 // selected. It reports whether the default directory was the only source.
 func (r *Runtime) loadMCP(opts BuildOptions, workingDir string, on bool) (*manifest.Set, bool, error) {
-	paths, fromDefaultsOnly := manifestPaths(
-		append(append([]string{}, r.Settings.MCP.Paths...), opts.Overrides.MCPPaths...), "mcp", on)
-	if len(paths) == 0 {
-		return nil, fromDefaultsOnly, nil
-	}
-	resolved, err := againstDir(paths, workingDir)
+	// The one resolution the session and the mcp commands share; the
+	// word is the caller's own, the one chosenWords resolved.
+	paths, fromDefaultsOnly, err := MCPManifestPaths(r.Settings, workingDir, opts.Overrides.MCPPaths, on)
 	if err != nil {
-		return nil, fromDefaultsOnly, &Error{
+		return nil, false, &Error{
 			Code:    CodeInvalid,
 			Field:   "mcp.paths",
 			Message: "the mcp paths cannot be resolved",
 			Err:     err,
 		}
 	}
-	set, err := manifest.Load(resolved...)
+	set, err := manifest.Load(paths...)
 	if err != nil {
 		return nil, fromDefaultsOnly, &Error{
 			Code:    CodeInvalid,

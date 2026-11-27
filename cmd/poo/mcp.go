@@ -205,12 +205,34 @@ func sortedEnvKeys(env map[string]manifest.Template) []string {
 
 // theSessionPaths resolves the manifest paths a session in this
 // directory loads: the settings' own, the defaults the profile's word
-// keeps on, and the paths the flags and the environment add. It is the
-// one resolution the mcp commands read, so what list shows is what a
-// session starts.
+// keeps on, and the paths the flags and the environment add. The
+// profile's name resolves the way a session's own does — the flag, then
+// the settings' profile key, then the binary's default — and the word
+// comes from the profile resolution a build runs, so what list shows is
+// what a session starts.
 func theSessionPaths(settings *config.Settings, workingDir string, o mcpOptions) ([]string, error) {
 	extras := config.EnvOverrides(config.Overrides{MCPPaths: o.mcpPaths}).MCPPaths
-	return config.MCPManifestPaths(settings, workingDir, extras, config.ProfileMCPDefaults(settings, o.profile))
+	word, err := config.ProfileMCPDefaults(settings, config.BuildOptions{
+		Tools:     linkedTools(),
+		Profiles:  linkedProfiles(),
+		Executors: executorRegistry(),
+	}, theProfileName(settings, o.profile))
+	if err != nil {
+		return nil, err
+	}
+	paths, _, err := config.MCPManifestPaths(settings, workingDir, extras, config.MCPDefaultsOn(settings.MCP.Defaults, word))
+	return paths, err
+}
+
+// theProfileName resolves the profile the session runs under, the way a
+// build's own resolution does: the flag's name, then the settings',
+// then the binary's default. The binary's default is a linked profile,
+// whose word is the settings' own.
+func theProfileName(settings *config.Settings, fromFlag string) string {
+	if fromFlag != "" {
+		return fromFlag
+	}
+	return settings.Profile
 }
 
 // handleMCPAdd executes `poo mcp add`.
@@ -447,7 +469,15 @@ func theProjectHint(target string, o mcpOptions) string {
 	if err != nil {
 		return fmt.Sprintf("the project settings at %s do not load: %v", path, err)
 	}
-	paths, err := config.MCPManifestPaths(settings, workingDir, nil, config.ProfileMCPDefaults(settings, o.profile))
+	word, err := config.ProfileMCPDefaults(settings, config.BuildOptions{
+		Tools:     linkedTools(),
+		Profiles:  linkedProfiles(),
+		Executors: executorRegistry(),
+	}, theProfileName(settings, o.profile))
+	if err != nil {
+		return fmt.Sprintf("the project settings' profiles do not resolve: %v", err)
+	}
+	paths, _, err := config.MCPManifestPaths(settings, workingDir, nil, config.MCPDefaultsOn(settings.MCP.Defaults, word))
 	if err != nil {
 		return fmt.Sprintf("the project settings' mcp.paths do not resolve: %v", err)
 	}
@@ -543,6 +573,15 @@ func applyEdit(target string, original []byte, present bool, servers map[string]
 	}
 	scratchName := scratch.Name()
 	defer os.Remove(scratchName)
+	if info, err := os.Stat(target); err == nil {
+		// The rename gives the manifest the scratch's mode, so the
+		// scratch takes the mode the file had: a shared manifest stays
+		// readable to the harnesses that read it.
+		if err := os.Chmod(scratchName, info.Mode().Perm()); err != nil {
+			scratch.Close()
+			return err
+		}
+	}
 	if _, err := scratch.Write(body); err != nil {
 		scratch.Close()
 		return err

@@ -11,20 +11,24 @@ import (
 // word on the defaults keeps it on, then the settings' paths, then the
 // extras a flag or the environment adds. Each path is resolved against
 // the working directory the way the session resolves the settings' own.
+// It reports whether the default directory was the only source, the way
+// the session's own load reports it.
 //
-// The defaults word is the profile's: the caller resolves it along the
-// profile's base chain with ProfileMCPDefaults, so a command that
-// reports on the manifests reads the one word the session's own profile
-// runs under.
-func MCPManifestPaths(settings *Settings, workingDir string, extra []string, profileDefaults *bool) ([]string, error) {
-	paths, _ := manifestPaths(
-		append(append([]string{}, settings.MCP.Paths...), extra...), "mcp",
-		defaultsOn(settings.MCP.Defaults, profileDefaults))
+// The word is the caller's own resolution — for a session the profile
+// word its build chose, for a command the one MCPDefaultsOn resolves
+// from the profile's word — so the paths and the word a command reads
+// are the session's own.
+func MCPManifestPaths(settings *Settings, workingDir string, extra []string, on bool) ([]string, bool, error) {
+	paths, fromDefaultsOnly := manifestPaths(
+		append(append([]string{}, settings.MCP.Paths...), extra...), "mcp", on)
+	if len(paths) == 0 {
+		return nil, fromDefaultsOnly, nil
+	}
 	resolved, err := againstDir(paths, workingDir)
 	if err != nil {
-		return nil, fmt.Errorf("mcp.paths: %w", err)
+		return nil, fromDefaultsOnly, fmt.Errorf("mcp.paths: %w", err)
 	}
-	return resolved, nil
+	return resolved, fromDefaultsOnly, nil
 }
 
 // MCPManifestDir returns the default mcp manifest directory the
@@ -81,21 +85,29 @@ func ProjectSettingsPath(workingDir string) (string, bool) {
 }
 
 // ProfileMCPDefaults returns the mcp defaults word the named profile
-// runs under: the nearest mcp_defaults on the profile's base chain, the
-// way a build resolves the profile's own word. A name the settings do
-// not define — a linked binary profile, or no name at all — leaves the
-// settings' word standing, as does a chain that names no mcp_defaults.
-func ProfileMCPDefaults(settings *Settings, profileName string) *bool {
-	seen := map[string]bool{}
-	for name := profileName; name != "" && !seen[name]; name = settings.Profiles[name].Base {
-		seen[name] = true
-		definition, ok := settings.Profiles[name]
-		if !ok {
-			break
-		}
-		if definition.MCPDefaults != nil {
-			return definition.MCPDefaults
-		}
+// runs under, resolved by the profile resolution a build itself runs:
+// the nearest mcp_defaults on the profile's base chain, with cycles and
+// unknown bases failing the way the build's own would. A name no
+// settings profile defines — a linked binary profile, or no name at
+// all — leaves the settings' word standing, as does a chain that names
+// no mcp_defaults.
+func ProfileMCPDefaults(settings *Settings, opts BuildOptions, profileName string) (*bool, error) {
+	runtime := &Runtime{Settings: settings}
+	_, resolved, err := runtime.resolveProfileDefinitions(opts)
+	if err != nil {
+		return nil, err
 	}
-	return nil
+	if profile, ok := resolved[profileName]; ok {
+		return profile.mcpDefaults, nil
+	}
+	return nil, nil
+}
+
+// MCPDefaultsOn applies the defaults word the way a session does: the
+// profile's word wins, the settings' word stands when the profile names
+// none, and the defaults load when neither says off. A command pairs it
+// with ProfileMCPDefaults to read the word the session's own profile
+// runs under.
+func MCPDefaultsOn(settingsDefault, profileDefault *bool) bool {
+	return defaultsOn(settingsDefault, profileDefault)
 }

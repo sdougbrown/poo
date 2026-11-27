@@ -268,6 +268,7 @@ mcp:
   paths: [` + dir + `]
 profiles:
   quiet:
+    base: code
     mcp_defaults: false
 profile: quiet
 `
@@ -589,4 +590,158 @@ func TestTheMCPRemoveNamesTheScopeWhenTheNameIsNowhere(t *testing.T) {
 	if !strings.Contains(errOut, globalDir) {
 		t.Errorf("the diagnostics are %q, want them to name the scope searched", errOut)
 	}
+}
+
+func TestTheMCPListHonorsTheSettingsProfileWithoutAFlag(t *testing.T) {
+	dir := t.TempDir()
+	theMCPManifest(t, filepath.Join(dir, "mcp.json"), map[string]any{
+		"fixture": map[string]any{"command": "echo"},
+	})
+	path := filepath.Join(dir, "settings.yaml")
+	body := `version: 1
+mcp:
+  paths: [` + dir + `]
+profiles:
+  quiet:
+    base: code
+    mcp_defaults: false
+profile: quiet
+`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	globalDir := theIsolatedHome(t)
+	theMCPManifest(t, filepath.Join(globalDir, "mcp.json"), map[string]any{
+		"ambient": map[string]any{"command": "echo"},
+	})
+
+	out, _ := captureBoth(t, func() {
+		if code := run([]string{"mcp", "list", "--settings", path}); code != 0 {
+			t.Errorf("poo mcp list exited with %d", code)
+		}
+	})
+	if !strings.Contains(out, "fixture") {
+		t.Errorf("the listing is %q, want the server the settings name", out)
+	}
+	if strings.Contains(out, "ambient") {
+		t.Errorf("the listing is %q, want no server from the defaults the settings' profile turns off", out)
+	}
+}
+
+func TestTheMCPListShowsTheTemplateTheFileSpells(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "mcp.json"), []byte(`{
+  "mcpServers": {"fixture": {"command": "echo", "args": ["${API_KEY}"], "env": {"KEY": "${KEY}"}}}
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	settings := theMCPSettings(t, dir)
+
+	out := captureStdout(t, func() {
+		if code := run([]string{"mcp", "list", "--json", "--settings", settings}); code != 0 {
+			t.Errorf("poo mcp list exited with %d", code)
+		}
+	})
+	var listed []struct {
+		Args []string          `json:"args"`
+		Env  map[string]string `json:"env"`
+	}
+	if err := json.Unmarshal([]byte(out), &listed); err != nil {
+		t.Fatalf("the listing is not JSON: %v\n%s", err, out)
+	}
+	if len(listed) != 1 || len(listed[0].Args) != 1 || listed[0].Args[0] != "${API_KEY}" {
+		t.Errorf("the listing is %+v, want the argument the file spells", listed)
+	}
+	if listed[0].Env["KEY"] != "${KEY}" {
+		t.Errorf("the environment entry is %q, want the reference the file holds", listed[0].Env["KEY"])
+	}
+}
+
+func TestTheMCPAddStoresTheEnvTemplateUnresolved(t *testing.T) {
+	globalDir := theIsolatedHome(t)
+	target := filepath.Join(globalDir, "mcp.json")
+
+	captureStdout(t, func() {
+		if code := run([]string{"mcp", "add", "fixture", "--global", "--env", "API_KEY=${API_KEY}", "--", "echo"}); code != 0 {
+			t.Errorf("poo mcp add exited with %d", code)
+		}
+	})
+	body := readFile(t, target)
+	if !strings.Contains(body, "${API_KEY}") {
+		t.Errorf("the manifest is %s, want the template stored as the words gave it", body)
+	}
+}
+
+func TestTheMCPRemoveRefusesAFileOutsideTheScope(t *testing.T) {
+	configHome := theIsolatedHome(t)
+	_ = configHome
+	dir := t.TempDir()
+	theMCPManifest(t, filepath.Join(dir, "settings-path.json"), map[string]any{
+		"fixture": map[string]any{"command": "echo"},
+	})
+	if err := os.MkdirAll(filepath.Join(dir, ".poo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `version: 1
+mcp:
+  paths: [` + dir + `]
+  defaults: false
+`
+	if err := os.WriteFile(filepath.Join(dir, ".poo", "settings.yaml"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before := readFile(t, filepath.Join(dir, "settings-path.json"))
+
+	settings := filepath.Join(dir, ".poo", "settings.yaml")
+	inDir(t, dir, func() {
+		_, errOut := captureBoth(t, func() {
+			if code := run([]string{"mcp", "remove", "fixture", "--project", "--settings", settings}); code != usageExitCode {
+				t.Errorf("poo mcp remove exited with %d, want %d", code, usageExitCode)
+			}
+		})
+		if !strings.Contains(errOut, "settings-path.json") || !strings.Contains(errOut, "outside") {
+			t.Errorf("the diagnostics are %q, want the refusal naming the outside file", errOut)
+		}
+	})
+	if after := readFile(t, filepath.Join(dir, "settings-path.json")); after != before {
+		t.Errorf("the refused removal changed %s", after)
+	}
+}
+
+func TestTheMCPAddPrintsNoHintWhenTheProjectLoadsTheManifest(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "config"))
+	t.Setenv("HOME", filepath.Join(dir, "home"))
+	if err := os.MkdirAll(filepath.Join(dir, ".poo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `version: 1
+mcp:
+  paths: [.poo]
+  defaults: false
+`
+	if err := os.WriteFile(filepath.Join(dir, ".poo", "settings.yaml"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	inDir(t, dir, func() {
+		out := captureStdout(t, func() {
+			if code := run([]string{"mcp", "add", "fixture", "--project", "--", "echo"}); code != 0 {
+				t.Errorf("poo mcp add exited with %d", code)
+			}
+		})
+		if strings.Contains(out, "do not load this manifest yet") {
+			t.Errorf("the report is %q, want no hint when the settings load the manifest", out)
+		}
+	})
+}
+
+// readFile returns a file's content for the tests that assert on it.
+func readFile(t *testing.T, path string) string {
+	t.Helper()
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(body)
 }
