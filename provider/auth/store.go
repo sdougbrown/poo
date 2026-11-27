@@ -727,9 +727,7 @@ func shapeOf(top map[string]json.RawMessage) format {
 	if _, ok := top[versionField]; ok {
 		return pooFormat{}
 	}
-	_, tokens := top[codexTokensField]
-	_, key := top[codexKeyField]
-	if tokens || key {
+	if claimsCodexShape(top) {
 		return codexFormat{}
 	}
 	return piFormat{}

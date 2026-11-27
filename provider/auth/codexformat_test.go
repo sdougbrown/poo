@@ -272,3 +272,25 @@ func TestAReadOnlyAccessToAMissingFileIsNoCredential(t *testing.T) {
 		t.Errorf("the missing file failed as %v, want ErrNoCredential", err)
 	}
 }
+
+// TestAProviderNamedTokensIsStillPisFile covers the misread the key's presence
+// alone would make: a pi auth.json can carry a provider of any id, and one
+// named "tokens" is not the CLI's grant. The file stays pi's, and the real
+// credential is read from it rather than lost.
+func TestAProviderNamedTokensIsStillPisFile(t *testing.T) {
+	body := `{
+  "tokens": {"type": "oauth", "access": "x", "refresh": "y"},
+  "openai-codex": {"type": "oauth", "access": "` + oldAccess + `", "refresh": "` + oldRefresh + `", "expires": %d, "accountId": "` + oldAccount + `"}
+}`
+	path := authFile(t, fmt.Sprintf(body, expires(time.Hour)))
+	status, err := (auth.Credentials{Path: path, Now: clock}).Status(auth.Codex)
+	if err != nil {
+		t.Fatalf("the pi file with a provider named tokens did not read: %v", err)
+	}
+	if status.Format != auth.FormatPi {
+		t.Errorf("the file read as format %q, want %q", status.Format, auth.FormatPi)
+	}
+	if status.AccountID != oldAccount || !status.Live {
+		t.Errorf("the credential is %+v, want the file's own live codex credential", status)
+	}
+}

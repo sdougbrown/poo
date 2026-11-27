@@ -42,7 +42,8 @@ type authStatus struct {
 	AccountID string `json:"account_id"`
 	// Expires is when the access token stops working.
 	Expires string `json:"expires"`
-	// State is live, or refresh needed.
+	// State is live, refresh needed, no readable expiry, or expired under a
+	// read-only file.
 	State string `json:"state"`
 }
 

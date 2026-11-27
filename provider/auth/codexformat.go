@@ -28,6 +28,28 @@ type codexFormat struct{}
 // name is the shape's own name, for a report to say which file it read.
 func (codexFormat) name() string { return FormatCodex }
 
+// claimsCodexShape answers whether a file's top level carries the shape the
+// Codex CLI writes. A pi-shaped file can carry a provider of any id, and one
+// named "tokens" is not the CLI's grant — so the key's presence alone is not
+// the word: the tokens object must carry a token the CLI spells, or the api
+// key must stand beside no tokens at all.
+func claimsCodexShape(top map[string]json.RawMessage) bool {
+	raw, hasTokens := top[codexTokensField]
+	if hasTokens && string(raw) != "null" {
+		var tokens struct {
+			AccessToken  string `json:"access_token"`
+			RefreshToken string `json:"refresh_token"`
+		}
+		if err := json.Unmarshal(raw, &tokens); err == nil &&
+			(tokens.AccessToken != "" || tokens.RefreshToken != "") {
+			return true
+		}
+		return false
+	}
+	_, hasKey := top[codexKeyField]
+	return hasKey
+}
+
 // credentials returns the file's credential, projected into the entry shape
 // the other two files spell.
 //
