@@ -218,3 +218,33 @@ func TestAReadOnlyStoreDoesNotWriteItsOwnFileEither(t *testing.T) {
 		t.Errorf("the access got %q, want the token the file holds", token.Access)
 	}
 }
+
+// TestACodexFileWithoutTheFlagIsNeverTraded covers the misconfiguration the
+// flag exists to prevent: the settings name the CLI's file without
+// auth_readonly. An access that would trade is refused before the endpoint is
+// asked — a trade the file could not record would spend the CLI's refresh
+// token — and the file's bytes are what they were.
+func TestACodexFileWithoutTheFlagIsNeverTraded(t *testing.T) {
+	path := aCodexFile(t, -time.Minute)
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading the file: %v", err)
+	}
+	endpoint := anUnusedEndpoint(t)
+	credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
+
+	_, err = credentials.Access(context.Background(), auth.Codex)
+	if !errors.Is(err, auth.ErrForeignFile) {
+		t.Fatalf("the trade failed as %v, want ErrForeignFile", err)
+	}
+	if !strings.Contains(err.Error(), "auth_readonly") {
+		t.Errorf("the failure says %q, want the setting that shares the file", err.Error())
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading the file: %v", err)
+	}
+	if string(before) != string(after) {
+		t.Errorf("the file changed under a trade that was refused")
+	}
+}

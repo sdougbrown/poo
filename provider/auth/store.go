@@ -575,6 +575,12 @@ func (c Credentials) token(ctx context.Context, p Provider, force bool) (Token, 
 		}
 		changed := false
 		if force || !stored.live(c.now(), c.leeway()) {
+			// A file the format never writes back is refused before the trade, not
+			// after it: a trade the write cannot record would spend the refresh
+			// token and leave the file holding the spent one.
+			if _, isCodex := doc.format.(codexFormat); isCodex {
+				return Status{}, false, fmt.Errorf("%w: %s is the Codex CLI's auth.json, and poo does not refresh it: set auth_readonly to share the file, and let the CLI keep the credential alive", ErrForeignFile, doc.path)
+			}
 			refreshed, err := c.trade(ctx, p, stored)
 			if err != nil {
 				return Status{}, false, err

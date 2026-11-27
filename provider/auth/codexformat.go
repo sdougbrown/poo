@@ -66,8 +66,9 @@ func (codexFormat) credentials(top map[string]json.RawMessage) (map[string]json.
 	return map[string]json.RawMessage{ProviderCodex: encoded}, nil
 }
 
-// envelope is never reached by the store — a read-only file is refused before
-// a write is composed — and refuses here all the same.
+// envelope is the last line of a rule the store applies earlier — a codex
+// document is refused before a trade is composed, and a read-only store
+// before any write — and refuses here all the same.
 func (codexFormat) envelope(map[string]json.RawMessage) (map[string]json.RawMessage, error) {
 	return nil, fmt.Errorf("the Codex CLI's auth.json is never written by poo")
 }
