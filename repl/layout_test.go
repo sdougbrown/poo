@@ -577,7 +577,7 @@ func TestFooterGrowthNeverScrollsPendingRows(t *testing.T) {
 // scrolls the region and takes the standing preview above it with it,
 // and a repainted preview stacks a mangled copy of itself. The frame
 // anchors the cursor inside the live screen and paints nothing else.
-func TestAFrameDuringAResizePaintsNothingAtTheOldWidth(t *testing.T) {
+func TestAFrameAnchorsAndAWriteRelaysTheTailDuringAResize(t *testing.T) {
 	vt := vt10x.New(vt10x.WithSize(40, 12))
 	rec := &recordingScreen{vt: vt}
 	l := aLayout(t, rec, 40, 12)
@@ -598,14 +598,24 @@ func TestAFrameDuringAResizePaintsNothingAtTheOldWidth(t *testing.T) {
 			t.Fatalf("frame %d painted %q, want only the cursor anchored inside the live screen", frame, painted)
 		}
 	}
-	// A transcript write or status update landing before the resize
-	// records its state without painting old-width rows to the terminal.
+	// A transcript write landing before the resize lays the tail out at
+	// the live size: the standing rows were wrapped at a width the pane
+	// no longer has, and no rebuild the debounce would run may follow
+	// the write — the seal of a stream the resize stalled ends it. The
+	// status update lands after and paints its own row.
 	l.write("arrived during resize\n")
-	l.setStatus("status during resize")
-	if painted := rec.take(); painted != "" {
-		t.Fatalf("write/status painted %q during resize mismatch, want nothing", painted)
-	}
+	rec.take() // The tail relay paints; its content is asserted on the screen below.
 	shown := trimScreen(vt.String())
+	if !strings.Contains(shown, "arrived during resize") {
+		t.Fatalf("the write during the resize did not paint the tail:\n%s", shown)
+	}
+	if n := strings.Count(shown, "committed row"); n != 1 {
+		t.Errorf("the tail repaint holds %d copies of the committed row:\n%s", n, shown)
+	}
+	l.setStatus("status during resize")
+	if statusPaint := rec.take(); statusPaint == "" {
+		t.Fatal("the status update painted nothing after the tail relay")
+	}
 	for _, row := range previewRows(3) {
 		if n := strings.Count(shown, row); n != 1 {
 			t.Fatalf("the standing row %q shows %d time(s) across the frames:\n%s", row, n, shown)

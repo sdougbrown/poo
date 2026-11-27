@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/glamour/styles"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/chubin/vt10x"
 
 	"github.com/sdougbrown/poo/wire/protocol"
 )
@@ -551,5 +552,46 @@ func TestClearStallResumesPaintingAndFlushesParkedSegments(t *testing.T) {
 	}
 	if got := l.transcriptText() + "\n" + strings.Join(l.previewRows, "\n"); !strings.Contains(got, "first thought") || !strings.Contains(got, "reply after stall") {
 		t.Fatalf("clearStall lost buffered stream text:\n%s", got)
+	}
+}
+
+func TestTheResizeBurstKeepsTheWholeStreamOnScreen(t *testing.T) {
+	vt := vt10x.New(vt10x.WithSize(40, 12))
+	l := aLayout(t, vt, 40, 12)
+	l.getSize = func() (int, int, bool) {
+		cols, rows := vt.Size()
+		return cols, rows, true
+	}
+	r := &renderer{out: vt, term: true, layout: l, width: 40, wrap: 38}
+	// The markdown renders word-wrapped at the renderer's width, the
+	// way a real session's palette-armed renderer does: a rebuild at a
+	// new width rewraps, and no word splits across a row.
+	r.armPalette(func() string { return styles.DarkStyle })
+
+	// The thought streams while a drag crosses the terminal: the deltas
+	// paint, the winches stall the paint, the parked text waits for the
+	// rebuild the debounce settles on — and the run settles first, so
+	// the seal runs with the stall still latched and the pane already
+	// large. The screen must still hold the whole stream at the size
+	// the drag ended on.
+	for i := 0; i < 24; i++ {
+		r.streamDelta("m1", "thinking", "thought"+itoa(i)+"| ")
+		if i%4 == 3 {
+			r.paintPending()
+		}
+		if i == 11 {
+			r.stallForResize()
+		}
+	}
+	vt.Resize(60, 20)
+	r.streamDelta("m1", "thinking", "and it settles.")
+	r.finish()
+
+	screen := vt.String()
+	for i := 0; i < 24; i++ {
+		marker := "thought" + itoa(i) + "|"
+		if n := strings.Count(screen, marker); n != 1 {
+			t.Fatalf("%q shows %d time(s) after the burst:\n%s", marker, n, screen)
+		}
 	}
 }
