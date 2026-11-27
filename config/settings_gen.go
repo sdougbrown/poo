@@ -43,6 +43,8 @@ type SettingsFields struct {
 	LimitsMaxTokensPerRun           *float64 "json:\"limits.max_tokens_per_run,omitempty\""
 	LimitsMaxTurns                  *float64 "json:\"limits.max_turns,omitempty\""
 	LimitsTruncationRetries         *float64 "json:\"limits.truncation_retries,omitempty\""
+	McpDefaults                     *bool    "json:\"mcp.defaults,omitempty\""
+	McpPaths                        []string "json:\"mcp.paths,omitempty\""
 	ModelsFile                      *string  "json:\"models_file,omitempty\""
 	PermissionAskers                []string "json:\"permission.askers,omitempty\""
 	PermissionChainTimeoutS         *float64 "json:\"permission.chain_timeout_s,omitempty\""
@@ -148,6 +150,8 @@ type SettingsAvailability struct {
 	LimitsMaxTokensPerRun           FieldStatus
 	LimitsMaxTurns                  FieldStatus
 	LimitsTruncationRetries         FieldStatus
+	McpDefaults                     FieldStatus
+	McpPaths                        FieldStatus
 	ModelsFile                      FieldStatus
 	PermissionAskers                FieldStatus
 	PermissionChainTimeoutS         FieldStatus
@@ -319,6 +323,10 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 	LimitsMaxTurnsSatisfied := f.LimitsMaxTurns != nil
 	LimitsTruncationRetriesEnabled := true
 	LimitsTruncationRetriesSatisfied := f.LimitsTruncationRetries != nil
+	McpDefaultsEnabled := true
+	McpDefaultsSatisfied := f.McpDefaults != nil
+	McpPathsEnabled := true
+	McpPathsSatisfied := len(f.McpPaths) > 0
 	ModelsFileEnabled := true
 	ModelsFileSatisfied := func() bool { v := f.ModelsFile; return v != nil && *v != "" }()
 	PermissionAskersEnabled := (c.HasDecider || !(contains(f.PermissionAskers, "decide")))
@@ -1317,6 +1325,50 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 				if !(f.LimitsTruncationRetries != nil && *f.LimitsTruncationRetries >= 0) && "limits.truncation_retries must not be negative" != "" {
 					reasons = append(reasons, "limits.truncation_retries must not be negative")
 				}
+				if reasons == nil {
+					reasons = []string{}
+				}
+				return reasons
+			}(),
+			Valid: nil,
+			Error: "",
+		},
+		McpDefaults: FieldStatus{
+			Required:  McpDefaultsEnabled && false,
+			Enabled:   McpDefaultsEnabled,
+			Satisfied: McpDefaultsSatisfied,
+			Fair:      true,
+			Reason: func() *string {
+				var reasons []string
+				if len(reasons) == 0 {
+					return nil
+				}
+				return &reasons[0]
+			}(),
+			Reasons: func() []string {
+				var reasons []string
+				if reasons == nil {
+					reasons = []string{}
+				}
+				return reasons
+			}(),
+			Valid: nil,
+			Error: "",
+		},
+		McpPaths: FieldStatus{
+			Required:  McpPathsEnabled && false,
+			Enabled:   McpPathsEnabled,
+			Satisfied: McpPathsSatisfied,
+			Fair:      true,
+			Reason: func() *string {
+				var reasons []string
+				if len(reasons) == 0 {
+					return nil
+				}
+				return &reasons[0]
+			}(),
+			Reasons: func() []string {
+				var reasons []string
 				if reasons == nil {
 					reasons = []string{}
 				}
@@ -2893,6 +2945,10 @@ func depSatisfied(f SettingsFields, name string) bool {
 		return f.LimitsMaxTurns != nil
 	case "LimitsTruncationRetries":
 		return f.LimitsTruncationRetries != nil
+	case "McpDefaults":
+		return f.McpDefaults != nil
+	case "McpPaths":
+		return len(f.McpPaths) > 0
 	case "ModelsFile":
 		v := f.ModelsFile
 		return v != nil && *v != ""
@@ -3440,6 +3496,18 @@ func Challenge(fieldName string, f SettingsFields, c SettingsConditions, prev Se
 			explanations = append(explanations, "* "+*status.Reason)
 		}
 		explanations = append(explanations, "* check: limits.truncation_retries must not be negative")
+	case "McpDefaults", "mcp.defaults":
+		found = true
+		status = avail.McpDefaults
+		if status.Reason != nil {
+			explanations = append(explanations, "* "+*status.Reason)
+		}
+	case "McpPaths", "mcp.paths":
+		found = true
+		status = avail.McpPaths
+		if status.Reason != nil {
+			explanations = append(explanations, "* "+*status.Reason)
+		}
 	case "ModelsFile", "models_file":
 		found = true
 		status = avail.ModelsFile

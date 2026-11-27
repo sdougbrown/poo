@@ -62,6 +62,21 @@ func theDefaultRegistry(t *testing.T, pooDir string) string {
 	return dir
 }
 
+// theDefaultMCPServer writes one stdio server into the default mcp
+// directory and returns the directory.
+func theDefaultMCPServer(t *testing.T, pooDir string) string {
+	t.Helper()
+	dir := filepath.Join(pooDir, "mcp")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("making the default mcp directory: %v", err)
+	}
+	body := `{"mcpServers": {"avenor": {"command": "true"}}}`
+	if err := os.WriteFile(filepath.Join(dir, "mcp.json"), []byte(body), 0o600); err != nil {
+		t.Fatalf("writing the manifest: %v", err)
+	}
+	return dir
+}
+
 // TestTheDefaultManifestDirectoriesLoad covers the defaults: manifests
 // in poo's own feeds and cli-registry directories load beside the
 // settings' paths, and a settings file that names neither loads them
@@ -258,6 +273,8 @@ func TestEveryDefaultManifestKindHasItsOffSwitch(t *testing.T) {
 		switch m.SettingsKey {
 		case "feeds":
 			theDefaultFeedManifest(t, pooDir)
+		case "mcp":
+			theDefaultMCPServer(t, pooDir)
 		case "cli_registry":
 			theDefaultRegistry(t, pooDir)
 		default:
@@ -270,9 +287,9 @@ func TestEveryDefaultManifestKindHasItsOffSwitch(t *testing.T) {
 			if off.Feeds != nil && off.Feeds.Len() != 0 {
 				t.Errorf("the %q switch left feeds loaded: %v", m.SettingsKey, off.Feeds)
 			}
-		case "cli_registry":
-			if off.Registry != nil && off.Registry.Len() != 0 {
-				t.Errorf("the %q switch left a registry loaded: %v", m.SettingsKey, off.Registry)
+		case "mcp":
+			if names := off.MCPServerNames(); len(names) != 0 {
+				t.Errorf("the %q switch left mcp servers loaded: %v", m.SettingsKey, names)
 			}
 		}
 	}
@@ -280,11 +297,11 @@ func TestEveryDefaultManifestKindHasItsOffSwitch(t *testing.T) {
 
 // TestAnEmptyDefaultManifestDirectoryIsNoRegistry covers the quiet
 // directory: a default directory that exists but holds no manifests
-// leaves the build exactly where it was, with no registry, no feeds,
-// and no error a binary that links no call_cli would trip.
+// leaves the build exactly where it was, with no registry, no feeds, no
+// servers, and no error a binary that links no call_cli would trip.
 func TestAnEmptyDefaultManifestDirectoryIsNoRegistry(t *testing.T) {
 	pooDir := theDefaultsPooDir(t)
-	for _, kind := range []string{"feeds", "cli-registry"} {
+	for _, kind := range []string{"feeds", "mcp", "cli-registry"} {
 		if err := os.MkdirAll(filepath.Join(pooDir, kind), 0o700); err != nil {
 			t.Fatalf("making the empty %s directory: %v", kind, err)
 		}
@@ -299,6 +316,9 @@ func TestAnEmptyDefaultManifestDirectoryIsNoRegistry(t *testing.T) {
 	}
 	if runtime.Feeds != nil && runtime.Feeds.Len() != 0 {
 		t.Errorf("an empty default directory loaded feeds %v", runtime.Feeds)
+	}
+	if names := runtime.MCPServerNames(); len(names) != 0 {
+		t.Errorf("an empty default directory loaded mcp servers %q", names)
 	}
 	if runtime.Warning != "" {
 		t.Errorf("an empty default directory warned: %s", runtime.Warning)

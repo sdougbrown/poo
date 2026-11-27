@@ -33,7 +33,14 @@ type resolvedProfile struct {
 	RegistryDefaults *bool
 	ModelFamily      *bool
 	DisabledTools    []string
-	promptSteps      []profilePromptStep
+	// mcpServers are the MCP servers the profile selects: its base
+	// chain's selection followed by its own, each name once, in the order
+	// of first appearance.
+	mcpServers []string
+	// mcpDefaults is the profile's word on the default mcp directory, or
+	// nil when the chain names none.
+	mcpDefaults *bool
+	promptSteps []profilePromptStep
 }
 
 func (r *Runtime) resolveProfileDefinitions(opts BuildOptions) ([]profile.Profile, map[string]resolvedProfile, error) {
@@ -60,6 +67,11 @@ func (r *Runtime) resolveProfileDefinitions(opts BuildOptions) ([]profile.Profil
 		for _, feed := range definition.Feeds {
 			if feed == "" {
 				return nil, nil, &Error{Code: CodeInvalid, Field: field + ".feeds", Message: "a declared feed name cannot be empty"}
+			}
+		}
+		for _, server := range definition.MCPServers {
+			if server == "" {
+				return nil, nil, &Error{Code: CodeInvalid, Field: field + ".mcp_servers", Message: "a selected server name cannot be empty"}
 			}
 		}
 	}
@@ -123,6 +135,8 @@ func (r *Runtime) resolveProfileDefinitions(opts BuildOptions) ([]profile.Profil
 			RegistryDefaults: parent.RegistryDefaults,
 			ModelFamily:      parent.ModelFamily,
 			DisabledTools:    slices.Clone(parent.DisabledTools),
+			mcpServers:       slices.Clone(parent.mcpServers),
+			mcpDefaults:      parent.mcpDefaults,
 		}
 		if definition.FeedsDefaults != nil {
 			merged.FeedsDefaults = definition.FeedsDefaults
@@ -130,8 +144,20 @@ func (r *Runtime) resolveProfileDefinitions(opts BuildOptions) ([]profile.Profil
 		if definition.RegistryDefaults != nil {
 			merged.RegistryDefaults = definition.RegistryDefaults
 		}
+		if definition.MCPDefaults != nil {
+			merged.mcpDefaults = definition.MCPDefaults
+		}
 		if definition.ModelFamily != nil {
 			merged.ModelFamily = definition.ModelFamily
+		}
+		// The selection adds to the base chain's, the way the declared feeds
+		// do: a specialization starts at least the servers its base starts.
+		// A name the chain already selects is kept once, in the order the
+		// chain first names it.
+		for _, server := range definition.MCPServers {
+			if !slices.Contains(merged.mcpServers, server) {
+				merged.mcpServers = append(merged.mcpServers, server)
+			}
 		}
 		for _, tool := range definition.Tools.Disabled {
 			canonical := canonicalToolName(tool)

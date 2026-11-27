@@ -298,7 +298,14 @@ func filterOutput(out []byte) ([]filterMessage, *poo.FeedFault) {
 	var messages []filterMessage
 	decoder := json.NewDecoder(bytes.NewReader(out))
 	for {
+		// The record's own bytes are what the cap measures. The decoder
+		// skips the whitespace between records only while it reads the
+		// next one, so the measure skips it first: a separator a filter
+		// writes between records is none of the record's bytes.
 		start := decoder.InputOffset()
+		for start < int64(len(out)) && (out[start] == ' ' || out[start] == '\t' || out[start] == '\n' || out[start] == '\r') {
+			start++
+		}
 		var message filterMessage
 		if err := decoder.Decode(&message); err != nil {
 			if errors.Is(err, io.EOF) {
@@ -309,8 +316,6 @@ func filterOutput(out []byte) ([]filterMessage, *poo.FeedFault) {
 				Message: fmt.Sprintf("the filter's output is not a record: %v", err),
 			}
 		}
-		// The record's own bytes are what the cap measures: the decoder's
-		// position advances over the value it read, whitespace included.
 		if size := decoder.InputOffset() - start; size > feed.MaxLineBytes {
 			return nil, &poo.FeedFault{
 				Code:    poo.FeedFaultRecord,

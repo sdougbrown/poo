@@ -111,6 +111,8 @@ func fieldsOf(s *Settings) SettingsFields {
 	f.SkillsPaths = list(s.Skills.Paths)
 	f.FeedsPaths = list(s.Feeds.Paths)
 	f.FeedsDefaults = flag(s.Feeds.Defaults)
+	f.McpPaths = list(s.MCP.Paths)
+	f.McpDefaults = flag(s.MCP.Defaults)
 
 	f.SessionMode = pointer(s.Session.Mode)
 	f.SessionDir = pointer(s.Session.Dir)

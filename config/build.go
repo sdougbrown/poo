@@ -26,6 +26,7 @@ import (
 	"github.com/sdougbrown/poo/exec"
 	"github.com/sdougbrown/poo/feed"
 	"github.com/sdougbrown/poo/internal/caps"
+	"github.com/sdougbrown/poo/mcp/manifest"
 	"github.com/sdougbrown/poo/perm"
 	permissive "github.com/sdougbrown/poo/perm/decide"
 	"github.com/sdougbrown/poo/profile"
@@ -102,6 +103,8 @@ type Overrides struct {
 	AppendSystemPrompt string
 	// FeedsPaths are additional feed manifest paths.
 	FeedsPaths []string
+	// MCPPaths are additional mcp manifest paths.
+	MCPPaths []string
 	// CLIRegistryPaths are additional cli registry manifest paths.
 	CLIRegistryPaths []string
 	// SkillsPaths are additional directories of skills.
@@ -124,6 +127,8 @@ type Overrides struct {
 const (
 	// EnvFeedsPath names the feed manifest paths.
 	EnvFeedsPath = "POO_FEEDS_PATH"
+	// EnvMCPPath names the mcp manifest paths.
+	EnvMCPPath = "POO_MCP_PATH"
 	// EnvCLIRegistryPath names the cli registry manifest paths.
 	EnvCLIRegistryPath = "POO_CLI_REGISTRY_PATH"
 	// EnvCredentialEnv names the environment names a launcher declares
@@ -135,14 +140,14 @@ const (
 
 // EnvOverrideNames are the variables EnvOverrides reads, in the order it
 // reads them. The same names are kept out of a tool's child environment.
-var EnvOverrideNames = []string{EnvFeedsPath, EnvCLIRegistryPath, EnvCredentialEnv, EnvSkillsPath}
+var EnvOverrideNames = []string{EnvFeedsPath, EnvMCPPath, EnvCLIRegistryPath, EnvCredentialEnv, EnvSkillsPath}
 
 // EnvOverrides adds what the environment names after the caller's own values.
 //
-// POO_FEEDS_PATH, POO_CLI_REGISTRY_PATH and POO_SKILLS_PATH are path lists,
-// and POO_CREDENTIAL_ENV is a list of environment names a launcher declares
-// for poo's own subsystems. The returned overrides hold fresh slices, so appending
-// to them never writes into the caller's.
+// POO_FEEDS_PATH, POO_MCP_PATH, POO_CLI_REGISTRY_PATH and POO_SKILLS_PATH are
+// path lists, and POO_CREDENTIAL_ENV is a list of environment names a launcher
+// declares for poo's own subsystems. The returned overrides hold fresh slices,
+// so appending to them never writes into the caller's.
 func EnvOverrides(o Overrides) Overrides {
 	paths := func(existing []string, name string) []string {
 		result := append([]string{}, existing...)
@@ -156,6 +161,7 @@ func EnvOverrides(o Overrides) Overrides {
 		return result
 	}
 	o.FeedsPaths = paths(o.FeedsPaths, EnvFeedsPath)
+	o.MCPPaths = paths(o.MCPPaths, EnvMCPPath)
 	o.CLIRegistryPaths = paths(o.CLIRegistryPaths, EnvCLIRegistryPath)
 	o.CredentialEnvNames = paths(o.CredentialEnvNames, EnvCredentialEnv)
 	o.SkillsPaths = paths(o.SkillsPaths, EnvSkillsPath)
@@ -261,6 +267,14 @@ type Runtime struct {
 	// Feeds are the feed manifests the settings name, or nil when the
 	// settings name none.
 	Feeds *feed.Set
+	// MCPServers are the MCP servers the chosen profile selects, in
+	// selection order. Nothing starts without one: the manifests load
+	// the declarations, and the selection is what a session starts.
+	MCPServers []string
+	// mcpSet are the MCP servers the manifests declare, or nil when the
+	// settings name no manifest. The selection reads it, and a session
+	// starts the servers its profile selects from it.
+	mcpSet *manifest.Set
 	// executor is the executor the commands run through: the tools
 	// that run one, and the feeds. It is nil when nothing runs a
 	// command.
@@ -370,6 +384,9 @@ func WithOverrides(settings *Settings, overrides Overrides) *Settings {
 	if len(overrides.FeedsPaths) > 0 {
 		effective.Feeds.Paths = append(append([]string(nil), settings.Feeds.Paths...), overrides.FeedsPaths...)
 	}
+	if len(overrides.MCPPaths) > 0 {
+		effective.MCP.Paths = append(append([]string(nil), settings.MCP.Paths...), overrides.MCPPaths...)
+	}
 	if len(overrides.CLIRegistryPaths) > 0 {
 		effective.CLIRegistry.Paths = append(append([]string(nil), settings.CLIRegistry.Paths...), overrides.CLIRegistryPaths...)
 	}
@@ -452,6 +469,9 @@ func Build(opts BuildOptions) (*Runtime, error) {
 	if err := runtime.resolveFeeds(opts, workingDir); err != nil {
 		return nil, err
 	}
+	if err := runtime.resolveMCP(opts, workingDir); err != nil {
+		return nil, err
+	}
 	if err := runtime.resolveModels(opts); err != nil {
 		return nil, err
 	}
@@ -522,9 +542,10 @@ func (r *Runtime) resolveProfile(opts BuildOptions, workingDir string) error {
 	// The declared feeds are a presence assertion, not a switch: the
 	// operator's feeds.paths still control which feeds run. A
 	// declared feed the settings do not load is skipped with a
-	// warning, never a failure.
+	// warning, never a failure. A selected MCP server's resource feed is
+	// a feed the session runs, so its name answers the assertion too.
 	for _, feedName := range chosen.Feeds {
-		if !r.Feeds.Has(feedName) {
+		if !r.hasFeed(feedName) {
 			r.warn(poo.MissingFeedWarning(chosen.Name, feedName))
 		}
 	}
@@ -584,16 +605,41 @@ func (r *Runtime) resolveProfile(opts BuildOptions, workingDir string) error {
 	return nil
 }
 
+// sessionFeeds returns the feeds the session runs: the feed manifests'
+// feeds, and the resource feeds the selected MCP servers declare, for a
+// resource feed is a feed the session runs. Each entry is the feed's
+// name and whether the model may start it: a manifest's feed by its own
+// word, and a resource feed never, for the session starts it beside
+// itself and the subscribe tool is not the model's to call for one.
+func (r *Runtime) sessionFeeds() map[string]bool {
+	feeds := map[string]bool{}
+	for _, spec := range r.Feeds.Specs() {
+		feeds[spec.Name] = spec.Optional
+	}
+	for _, server := range r.MCPServers {
+		for _, decl := range r.mcpSet.Feeds(server) {
+			feeds[decl.Name] = false
+		}
+	}
+	return feeds
+}
+
+// hasFeed reports whether the session runs a feed by the name.
+func (r *Runtime) hasFeed(name string) bool {
+	_, ok := r.sessionFeeds()[name]
+	return ok
+}
+
 // hasFeeds reports whether the session runs feeds.
 func (r *Runtime) hasFeeds() bool {
-	return r.Feeds.Len() > 0
+	return len(r.sessionFeeds()) > 0
 }
 
 // hasOptionalFeeds reports whether the session loads a feed the model may
 // start.
 func (r *Runtime) hasOptionalFeeds() bool {
-	for _, spec := range r.Feeds.Specs() {
-		if spec.Optional {
+	for _, optional := range r.sessionFeeds() {
+		if optional {
 			return true
 		}
 	}
@@ -736,18 +782,20 @@ func defaultsOn(settingsDefault, profileDefault *bool) bool {
 // the manifest defaults.
 type manifestWords struct {
 	feeds    bool
+	mcp      bool
 	registry bool
 }
 
 // chosenWords resolves the manifest defaults words the session's own
 // profile runs under: the settings' key speaks first, the chosen
-// profile's word wins. resolveRegistry, resolveFeeds, and the listing's
-// cache seed read this one resolution, so what the session loaded and
-// what the seed keys agree by construction.
+// profile's word wins. resolveRegistry, resolveFeeds, resolveMCP and the
+// listing's cache seed read this one resolution, so what the session
+// loaded and what the seed keys agree by construction.
 func (r *Runtime) chosenWords(opts BuildOptions) manifestWords {
 	chosen := r.chosenProfile(opts)
 	return manifestWords{
 		feeds:    defaultsOn(r.Settings.Feeds.Defaults, chosen.FeedsDefaults),
+		mcp:      defaultsOn(r.Settings.MCP.Defaults, chosen.mcpDefaults),
 		registry: defaultsOn(r.Settings.CLIRegistry.Defaults, chosen.RegistryDefaults),
 	}
 }
@@ -821,6 +869,36 @@ func (r *Runtime) loadFeeds(opts BuildOptions, workingDir string, on bool) (*fee
 			Code:    CodeInvalid,
 			Field:   "feeds.paths",
 			Message: "the feeds do not load",
+			Err:     err,
+		}
+	}
+	return set, fromDefaultsOnly, nil
+}
+
+// loadMCP loads the mcp.json manifests the kind's word on the defaults
+// selects. No paths is no set: the resolver returns nil, and no server can be
+// selected. It reports whether the default directory was the only source.
+func (r *Runtime) loadMCP(opts BuildOptions, workingDir string, on bool) (*manifest.Set, bool, error) {
+	paths, fromDefaultsOnly := manifestPaths(
+		append(append([]string{}, r.Settings.MCP.Paths...), opts.Overrides.MCPPaths...), "mcp", on)
+	if len(paths) == 0 {
+		return nil, fromDefaultsOnly, nil
+	}
+	resolved, err := againstDir(paths, workingDir)
+	if err != nil {
+		return nil, fromDefaultsOnly, &Error{
+			Code:    CodeInvalid,
+			Field:   "mcp.paths",
+			Message: "the mcp paths cannot be resolved",
+			Err:     err,
+		}
+	}
+	set, err := manifest.Load(resolved...)
+	if err != nil {
+		return nil, fromDefaultsOnly, &Error{
+			Code:    CodeInvalid,
+			Field:   "mcp.paths",
+			Message: "the mcp manifests do not load",
 			Err:     err,
 		}
 	}
@@ -921,6 +999,7 @@ type DefaultManifest struct {
 // others or loaded nowhere.
 var defaultManifests = []DefaultManifest{
 	{Kind: "feeds", SettingsKey: "feeds"},
+	{Kind: "mcp", SettingsKey: "mcp"},
 	{Kind: "cli-registry", SettingsKey: "cli_registry"},
 }
 
@@ -1000,6 +1079,75 @@ func (r *Runtime) resolveFeeds(opts BuildOptions, workingDir string) error {
 	}
 	r.feedsFromDefaults = set != nil && fromDefaultsOnly
 	r.Feeds = set
+	return nil
+}
+
+// resolveMCP loads the mcp.json manifests the kind's word on the defaults
+// selects, and takes the servers the chosen profile selects from them.
+//
+// The paths are resolved by againstDir, the warnings the load produced are the
+// session's, and nothing starts: the manifests declare the servers a session
+// may start, and the profile's selection is what starts one.
+func (r *Runtime) resolveMCP(opts BuildOptions, workingDir string) error {
+	set, fromDefaultsOnly, err := r.loadMCP(opts, workingDir, r.chosenWords(opts).mcp)
+	if err != nil {
+		return err
+	}
+	for _, warning := range set.Warnings() {
+		r.warn(warning)
+	}
+	// An empty set the defaults alone produced is no server set at all: a
+	// person who created the directory and holds no manifest left the build
+	// where it was. Its warnings are already the session's, so the set itself
+	// says nothing more.
+	if set != nil && len(set.Names()) == 0 && fromDefaultsOnly {
+		set = nil
+	}
+	r.mcpSet = set
+	profile := r.profileName(opts)
+	r.MCPServers = append([]string(nil), r.chosenProfile(opts).mcpServers...)
+	for _, server := range r.MCPServers {
+		if _, ok := set.Lookup(server); ok {
+			continue
+		}
+		r.warn(missingMCPServerWarning(profile, server))
+	}
+	return r.checkMCPFeedNames()
+}
+
+// missingMCPServerWarning is what the build says when a profile selects a
+// server the manifests do not load.
+//
+// The profile selects; the operator's mcp.paths still control which servers
+// load, so the loss is a warning, never a failure, the way a declared feed the
+// settings do not load is one.
+func missingMCPServerWarning(profile, server string) string {
+	return fmt.Sprintf("the profile %q selects the mcp server %q, and the settings load no server by that name", profile, server)
+}
+
+// checkMCPFeedNames refuses a resource feed a selected server declares whose
+// name a feed manifest's feed already holds.
+//
+// A feed's name picks one feed, in the session's jobs, its origins and its
+// prompt alike: two feeds of one name would leave a subscription and a
+// manifest spelling the same name for different sources, so the build refuses
+// what it cannot tell apart.
+func (r *Runtime) checkMCPFeedNames() error {
+	if r.Feeds == nil {
+		return nil
+	}
+	for _, server := range r.MCPServers {
+		for _, decl := range r.mcpSet.Feeds(server) {
+			if !r.Feeds.Has(decl.Name) {
+				continue
+			}
+			return &Error{
+				Code:    CodeInvalid,
+				Field:   "mcp.paths",
+				Message: fmt.Sprintf("the resource feed %q of the mcp server %q is also a feed the settings load", decl.Name, server),
+			}
+		}
+	}
 	return nil
 }
 
@@ -1338,13 +1486,21 @@ func withoutDisabled(tools []poo.ToolInfo, disabled []string) []poo.ToolInfo {
 // profile the settings empty is not offered, and a profile earns the
 // registry tools its own entries leave for it.
 func (r *Runtime) resolveProfiles(opts BuildOptions, definitions []profile.Profile, workingDir string) ([]poo.Profile, error) {
-	type manifestKey struct{ feeds, registry bool }
+	type manifestKey struct{ feeds, registry, mcp bool }
 	type manifestPair struct {
 		feeds    *feed.Set
 		registry *cli.Catalog
+		mcp      *manifest.Set
 	}
-	chosenKey := manifestKey(r.chosenWords(opts))
-	sets := map[manifestKey]manifestPair{chosenKey: {feeds: r.Feeds, registry: r.loaded}}
+	// The listing judges a profile's tools by the feeds it resolves — the
+	// feed manifests', and the resource feeds the selected servers
+	// declare — and by the registry it resolves: a feed the session will
+	// run is one the listing offers the job tools for, whatever manifest
+	// holds it. The selection itself still names what a session starts,
+	// and no listed tool stands for a server.
+	words := r.chosenWords(opts)
+	chosenKey := manifestKey{feeds: words.feeds, registry: words.registry, mcp: words.mcp}
+	sets := map[manifestKey]manifestPair{chosenKey: {feeds: r.Feeds, registry: r.loaded, mcp: r.mcpSet}}
 	pairFor := func(key manifestKey) (manifestPair, error) {
 		if pair, ok := sets[key]; ok {
 			return pair, nil
@@ -1357,7 +1513,11 @@ func (r *Runtime) resolveProfiles(opts BuildOptions, definitions []profile.Profi
 		if err != nil {
 			return manifestPair{}, err
 		}
-		pair := manifestPair{feeds: feeds, registry: registry}
+		mcp, _, err := r.loadMCP(opts, workingDir, key.mcp)
+		if err != nil {
+			return manifestPair{}, err
+		}
+		pair := manifestPair{feeds: feeds, registry: registry, mcp: mcp}
 		sets[key] = pair
 		return pair, nil
 	}
@@ -1369,6 +1529,7 @@ func (r *Runtime) resolveProfiles(opts BuildOptions, definitions []profile.Profi
 		pair, err := pairFor(manifestKey{
 			feeds:    defaultsOn(r.Settings.Feeds.Defaults, variant.FeedsDefaults),
 			registry: defaultsOn(r.Settings.CLIRegistry.Defaults, variant.RegistryDefaults),
+			mcp:      defaultsOn(r.Settings.MCP.Defaults, variant.mcpDefaults),
 		})
 		if err != nil {
 			// A variant whose manifests fail the load is offered
@@ -1385,6 +1546,29 @@ func (r *Runtime) resolveProfiles(opts BuildOptions, definitions []profile.Profi
 			if spec.Optional {
 				optionalFeed = true
 				break
+			}
+		}
+		// A selected server's resource feed is a feed the session runs, so
+		// it earns the job tools the way a manifest's feed does; it is
+		// never optional, so it earns no subscribe tool. A feed whose name
+		// a manifest's feed already holds is one the session refuses
+		// (checkMCPFeedNames), so that server's feeds earn no tools here:
+		// the profile is offered without them, and the warning is the
+		// manifest-load failure's.
+		for _, server := range variant.mcpServers {
+			decls := pair.mcp.Feeds(server)
+			if len(decls) == 0 {
+				continue
+			}
+			collides := false
+			for _, decl := range decls {
+				if pair.feeds.Has(decl.Name) {
+					collides = true
+					r.warn(fmt.Sprintf("profiles.%s: the resource feed %q of the mcp server %q is also a feed the settings load, and the profile is offered without it", definition.Name, decl.Name, server))
+				}
+			}
+			if !collides {
+				feeds = true
 			}
 		}
 		disabled := r.disabledTools(definition.Name)
@@ -1707,6 +1891,12 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 		feedSource := ""
 		if r.hasFeeds() {
 			switch {
+			case len(r.Feeds.Specs()) == 0:
+				// The feed manifests named nothing, so the feed the session
+				// runs is a resource feed a selected mcp server declares:
+				// the source is the selection, not the feeds the settings
+				// never named.
+				feedSource = "a selected mcp server declares a feed, and "
 			case r.feedsFromDefaults:
 				feedSource = "the default feeds directory names a feed, and "
 			default:

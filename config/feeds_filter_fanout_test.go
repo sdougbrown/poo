@@ -136,6 +136,33 @@ func TestFilterFanOutCap(t *testing.T) {
 	}
 }
 
+// TestFilterFanOutMaxSecondRecord covers the record cap's measure: the bytes
+// between records are the separator's, not a record's, so a filter's second
+// record of exactly the bytes a record may be is delivered, not refused.
+func TestFilterFanOutMaxSecondRecord(t *testing.T) {
+	_, _, sink, _, _ := filterFeedSession(t, "chat", map[string]any{
+		"command": []string{feedScript(t, "filterless-data")},
+		"on_idle": "wake",
+		"filter":  map[string]any{"command": []string{filterScript(t, "filter-fanout-max")}},
+	})
+	waitUntil(t, "the filter's two records to be queued", func() bool {
+		return len(queuedRecords(sink)) >= 2
+	})
+	queued := queuedRecords(sink)
+	if len(queued) != 2 {
+		t.Fatalf("the session queued %d records, want the filter's two", len(queued))
+	}
+	if queued[0].Text != `<feed name="chat">the first message</feed>` {
+		t.Errorf("the first record is %q, want the filter's first", queued[0].Text)
+	}
+	// The second record is exactly the bytes a record may be: the record's
+	// own bytes, the separator between the records not among them.
+	value := strings.Repeat("x", feed.MaxLineBytes-len(`{"text": "`)-len(`"}`))
+	if queued[1].Text != `<feed name="chat">`+value+`</feed>` {
+		t.Errorf("the second record is not the one of exactly %d bytes", feed.MaxLineBytes)
+	}
+}
+
 // TestFilterFanOutOverOneMiBTotal covers the total an output may reach
 // below the run cap: three records that fit individually are all delivered,
 // though their sum is past the 1 MiB a single record may be.

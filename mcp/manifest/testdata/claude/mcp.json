@@ -1,0 +1,31 @@
+{
+  "mcpServers": {
+    "avenor": {
+      "type": "stdio",
+      "command": "${AVENOR_BIN:-avenor}",
+      "args": ["mcp", "serve", "--session", "${session:id}"],
+      "env": {
+        "AVENOR_URL": "${AVENOR_URL:-http://127.0.0.1:8787}",
+        "AVENOR_PRICE": "$$5"
+      },
+      "alwaysAllow": [],
+      "disabled": false
+    }
+  },
+  "poo": {
+    "servers": {
+      "avenor": {
+        "feeds": {
+          "inbox": {
+            "resource": "avenor://inbox",
+            "description": "The messages Avenor holds for this session.",
+            "on_idle": "wake",
+            "filter": {
+              "command": ["avenor", "feed", "filter"]
+            }
+          }
+        }
+      }
+    }
+  }
+}

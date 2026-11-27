@@ -62,6 +62,16 @@ const manifestVersion = 1
 // job ids and records, so it stays lowercase and short.
 var namePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 
+// ValidName reports whether name is a feed name: the shape a manifest's
+// feed entry takes, and the shape a resource feed's name takes when an
+// mcp manifest declares one, for a resource feed is a feed.
+func ValidName(name string) error {
+	if namePattern.MatchString(name) {
+		return nil
+	}
+	return fmt.Errorf("feed name %q is not a valid feed name", name)
+}
+
 // scopeNamePattern is scopeschema.ScopeNamePattern, compiled.
 var scopeNamePattern = regexp.MustCompile(scopeschema.ScopeNamePattern)
 
@@ -310,8 +320,8 @@ func readFile(path string) ([]Spec, error) {
 
 // readFeed validates one feed's manifest entry.
 func readFeed(path, name string, raw json.RawMessage) (Spec, error) {
-	if !namePattern.MatchString(name) {
-		return Spec{}, fmt.Errorf("feed manifest %s: feed name %q is not a valid feed name", path, name)
+	if err := ValidName(name); err != nil {
+		return Spec{}, fmt.Errorf("feed manifest %s: %w", path, err)
 	}
 	// The entry is already JSON: Decode normalized the whole file, in
 	// whatever format it was written, and checked it for duplicate keys.
@@ -336,7 +346,7 @@ func readFeed(path, name string, raw json.RawMessage) (Spec, error) {
 		}
 		maxPending = *b.MaxPending
 	}
-	if err := readFilter(path, name, b.Filter); err != nil {
+	if err := ValidateFilter(path, name, b.Filter); err != nil {
 		return Spec{}, err
 	}
 	scope, err := readScope(path, name, b)
@@ -384,13 +394,17 @@ func readFeed(path, name string, raw json.RawMessage) (Spec, error) {
 	}, nil
 }
 
-// readFilter validates a feed's filter.
+// ValidateFilter validates a feed's filter.
 //
 // A feed's filter is one of the two kinds, so a manifest that names both a
 // command and a question fails the load: the record would either go to the
 // filter's process or be put to the decision model, and a feed that means
 // both means neither.
-func readFilter(path, name string, f *Filter) error {
+//
+// A resource feed's manifest carries a filter of the same shape, and it
+// validates here too: one record reaches one screen, whatever declared the
+// feed.
+func ValidateFilter(path, name string, f *Filter) error {
 	if f == nil {
 		return nil
 	}

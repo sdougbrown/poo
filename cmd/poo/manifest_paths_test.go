@@ -13,9 +13,11 @@ func TestServeReportsManifestOverrides(t *testing.T) {
 	dir := t.TempDir()
 	feed := filepath.Join(dir, "feed.json")
 	registry := filepath.Join(dir, "registry.json")
+	mcp := filepath.Join(dir, "mcp.json")
 	for path, body := range map[string]string{
 		feed:     `{"version":1,"feeds":{"flagfeed":{"command":["true"]}}}`,
 		registry: `{"version":1,"tools":{"flagtool":{"description":"command","command":["true"],"inputSchema":{"type":"object","properties":{},"additionalProperties":false}}}}`,
+		mcp:      `{"mcpServers":{"flagserver":{"command":"true"}}}`,
 	} {
 		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 			t.Fatal(err)
@@ -28,7 +30,7 @@ func TestServeReportsManifestOverrides(t *testing.T) {
 	t.Setenv("POO_FEEDS_PATH", envFeed)
 	endpoint := newFakeEndpoint(t, "")
 	settings := theSettings(t, dir, endpoint.URL+"/v1")
-	client := startServe(t, "--settings", settings, "--feeds-path", feed, "--cli-registry-path", registry)
+	client := startServe(t, "--settings", settings, "--feeds-path", feed, "--cli-registry-path", registry, "--mcp-path", mcp)
 	handshake := result(t, client.call(t, "poo/initialize", map[string]any{"protocol_versions": []int{1}, "client": map[string]any{"name": "test", "version": "test"}}))
 	if !strings.Contains(fmt.Sprint(handshake), "flagtool") {
 		t.Fatalf("registry tool missing: %v", handshake)
@@ -41,6 +43,10 @@ func TestServeReportsManifestOverrides(t *testing.T) {
 	registries, _ := effective["cli_registry"].(map[string]any)
 	if !strings.Contains(fmt.Sprint(registries["paths"]), registry) {
 		t.Fatalf("registry path missing: %v", registries)
+	}
+	servers, _ := effective["mcp"].(map[string]any)
+	if !strings.Contains(fmt.Sprint(servers["paths"]), mcp) {
+		t.Fatalf("mcp paths missing: %v", servers)
 	}
 }
 
@@ -57,6 +63,7 @@ func TestPromptLoadsEnvironmentPaths(t *testing.T) {
 func TestRunLoadsPathsInSettingsFlagEnvironmentOrder(t *testing.T) {
 	for _, kind := range []struct{ field, flag, env string }{
 		{"feeds", "--feeds-path", "POO_FEEDS_PATH"},
+		{"mcp", "--mcp-path", "POO_MCP_PATH"},
 		{"cli_registry", "--cli-registry-path", "POO_CLI_REGISTRY_PATH"},
 	} {
 		t.Run(kind.field, func(t *testing.T) {

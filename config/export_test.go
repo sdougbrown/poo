@@ -4,6 +4,12 @@ package config
 // tests that check the settings refuse to disable one.
 var CoreToolNames = coreToolNames
 
+// MCPServerNames is the servers the build's mcp manifests declare, in name
+// order, for the tests that check which manifests a build loaded.
+func (r *Runtime) MCPServerNames() []string {
+	return r.mcpSet.Names()
+}
+
 // ModelAPIKey is the key the runtime sends for a model, for the tests that check
 // which credential an endpoint resolves to.
 //
