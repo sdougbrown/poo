@@ -47,6 +47,12 @@ type entryTool struct {
 	executor exec.Executor
 }
 
+// CanBackgroundRunningCall reports that an entry's running command can
+// finish under a job without restarting: the entry runs where the call
+// over the catalog runs it, so its process runs detached from the run
+// the same way.
+func (*entryTool) CanBackgroundRunningCall() bool { return true }
+
 // Spec describes the tool.
 func (t *entryTool) Spec() poo.ToolSpec {
 	schema := entrySchema(t.entry.Schema)

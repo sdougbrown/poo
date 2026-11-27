@@ -208,36 +208,19 @@ func waitForFile(t *testing.T, dir, name string, within time.Duration) {
 	}
 }
 
-// TestBackgroundCallMovesARunningCLI covers the rule: a call_cli call
-// moves to a job while it runs, and the job delivers the command's
-// output once it ends.
-func TestBackgroundCallMovesARunningCLI(t *testing.T) {
+// moveHeldCommand runs a session whose one call holds a command open,
+// moves the call to a job, and waits for the job to deliver the
+// command's output once it ends. The tool is the one the session
+// offers, and callArgs is the call that starts the command.
+func moveHeldCommand(t *testing.T, tool poo.Tool, callArgs string) {
 	dir := t.TempDir()
 	sink := &recordingSink{}
-	body, err := json.Marshal(map[string]any{"version": 1, "tools": map[string]any{
-		"hold": map[string]any{
-			"description": "Hold until released",
-			"command":     []string{"/bin/bash", "-c", "echo $$ > started; until [ -f release ]; do /bin/sleep 0.02; done; echo held-$$"},
-			"inputSchema": map[string]any{"type": "object", "properties": map[string]any{}, "additionalProperties": false},
-		},
-	}})
-	if err != nil {
-		t.Fatalf("encoding the manifest: %v", err)
-	}
-	manifest := filepath.Join(dir, "hold.json")
-	if err := os.WriteFile(manifest, body, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	catalog, err := cliregistry.Load(manifest)
-	if err != nil {
-		t.Fatalf("loading the registry: %v", err)
-	}
 	s := newTestSession(t, poo.Options{
 		Transport: scripted([]fakeResponse{
-			{calls: []poo.ToolCall{{CallID: "one", Name: "call_cli", Arguments: []byte(`{"command":"hold"}`)}}},
+			{calls: []poo.ToolCall{{CallID: "one", Name: tool.Spec().Name, Arguments: []byte(callArgs)}}},
 			{text: "done"},
 		}),
-		Tools: map[string]poo.Tool{"call_cli": cliregistry.NewCall(catalog)}, Sink: sink, WorkingDir: dir,
+		Tools: map[string]poo.Tool{tool.Spec().Name: tool}, Sink: sink, WorkingDir: dir,
 		Model: poo.ModelInfo{ModelID: "test-model", ContextLimit: 32768},
 	})
 	done := make(chan error, 1)
@@ -282,4 +265,47 @@ func TestBackgroundCallMovesARunningCLI(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
+}
+
+// holdCallTool loads a catalog whose one entry holds a command open
+// until a release file appears beside it.
+func holdCallTool(t *testing.T) *cliregistry.CallTool {
+	t.Helper()
+	body, err := json.Marshal(map[string]any{"version": 1, "tools": map[string]any{
+		"hold": map[string]any{
+			"description": "Hold until released",
+			"command":     []string{"/bin/bash", "-c", "echo $$ > started; until [ -f release ]; do /bin/sleep 0.02; done; echo held-$$"},
+			"inputSchema": map[string]any{"type": "object", "properties": map[string]any{}, "additionalProperties": false},
+		},
+	}})
+	if err != nil {
+		t.Fatalf("encoding the manifest: %v", err)
+	}
+	manifest := filepath.Join(t.TempDir(), "hold.json")
+	if err := os.WriteFile(manifest, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := cliregistry.Load(manifest)
+	if err != nil {
+		t.Fatalf("loading the registry: %v", err)
+	}
+	return cliregistry.NewCall(catalog)
+}
+
+// TestBackgroundCallMovesARunningCLI covers the rule: a call_cli call
+// moves to a job while it runs.
+func TestBackgroundCallMovesARunningCLI(t *testing.T) {
+	moveHeldCommand(t, holdCallTool(t), `{"command":"hold"}`)
+}
+
+// TestBackgroundCallMovesARunningEntry covers the rule: the same
+// catalog entry offered directly as its own tool moves to a job while
+// it runs, the way the call over the catalog does.
+func TestBackgroundCallMovesARunningEntry(t *testing.T) {
+	tool := holdCallTool(t)
+	entries := tool.Tools()
+	if len(entries) == 0 {
+		t.Fatal("the catalog offered no direct entry tool")
+	}
+	moveHeldCommand(t, entries[0], `{}`)
 }
