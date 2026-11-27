@@ -1,0 +1,5 @@
+#!/bin/sh
+# A fixture filter: it answers in jq's default shape, one record
+# pretty-printed across several lines.
+cat >/dev/null
+printf '{\n  "text": "the pretty message",\n  "from": "alice"\n}\n'

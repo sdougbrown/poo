@@ -14,10 +14,11 @@ import (
 // The limits one attempt reads under.
 const (
 	// MaxLineBytes is the longest line a feed's stdout may carry, and
-	// the longest record a filter's stdout may carry. A line is one
-	// message, so a longer one is a feed or a filter printing
-	// something that is not a message: the attempt fails rather than
-	// the session holding it in memory.
+	// the longest record a filter may write. A line is one message, so
+	// a longer one is a feed or a filter printing something that is not
+	// a message: the attempt fails rather than the session holding it
+	// in memory. A filter run writes a stream of records, each this
+	// long at most, under a total cap its caller sets.
 	MaxLineBytes = 1 << 20
 	// maxStderrBytes is how much of a command's stderr one attempt
 	// logs. A feed that floods its diagnostics loses the rest: the log

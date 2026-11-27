@@ -1,0 +1,8 @@
+#!/bin/sh
+# A fixture filter: it answers with three records whose sizes add up to more
+# than a record may be, though each of them fits.
+cat >/dev/null
+text=$(head -c 400000 /dev/zero | tr '\0' 'x')
+printf '{"text": "%s"}\n' "$text"
+printf '{"text": "%s"}\n' "$text"
+printf '{"text": "%s"}\n' "$text"
