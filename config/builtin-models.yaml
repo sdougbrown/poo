@@ -20,6 +20,12 @@
 # The name is the provider's, not the API's, so the prefix an operator types
 # is the one the sign-in writes the credential under.
 #
+# The google-ai-plan endpoint is the same API with the plan's own quota method,
+# reached with the person's Google AI plan sign-in rather than a key: the
+# credential is an OAuth grant bound to a key pair created on this machine, so
+# the endpoint is offered when the file holds one. Its models are the four the
+# partner docs name, and their thinking levels are the ones those docs give.
+#
 # The google endpoint is the Interactions API, which is not the OpenAI shape at
 # all: one stateless POST carries the conversation as steps and answers with a
 # step stream. Its models are declared because the endpoint's own model list is
@@ -195,6 +201,47 @@ endpoints:
           mode: effort
           param: output_config.effort
         reasoning_levels: [low, medium, high, xhigh, max]
+  google-ai-plan:
+    endpoint: https://generativelanguage.googleapis.com/v1beta/interactions:createPerUserQuota
+    api: google_interactions
+    skip_probe: true
+    models:
+      gemini-3.5-flash-lite:
+        inputs: [text, image]
+        context_limit: 1048576
+        max_output: 65536
+        tools_mode: native
+        reasoning:
+          mode: effort
+          param: generation_config.thinking_level
+        reasoning_levels: [minimal, low, medium, high]
+      gemini-4-carbon:
+        inputs: [text, image]
+        context_limit: 1048576
+        max_output: 65536
+        tools_mode: native
+        reasoning:
+          mode: effort
+          param: generation_config.thinking_level
+        reasoning_levels: [low, medium, high]
+      gemini-4-hydrogen:
+        inputs: [text, image]
+        context_limit: 1048576
+        max_output: 65536
+        tools_mode: native
+        reasoning:
+          mode: effort
+          param: generation_config.thinking_level
+        reasoning_levels: [low, medium, high, xhigh]
+      gemini-4-neon:
+        inputs: [text, image]
+        context_limit: 1048576
+        max_output: 65536
+        tools_mode: native
+        reasoning:
+          mode: effort
+          param: generation_config.thinking_level
+        reasoning_levels: [low, medium, high, xhigh]
   google:
     endpoint: https://generativelanguage.googleapis.com/v1beta
     api: google_interactions

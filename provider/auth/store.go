@@ -213,6 +213,11 @@ type Credential struct {
 	ClientID string
 	// TokenURL is where that client trades its tokens, when it is not the provider's.
 	TokenURL string
+	// DPoP is the key pair the grant is bound to, for a provider that binds
+	// one. The endpoint checks a signature from it on every token request.
+	DPoP *DPoPKey
+	// DPoPNonce is the latest nonce the endpoint sent with a token answer.
+	DPoPNonce string
 }
 
 // check reports what a credential is missing, as the write that stores one reports it.
@@ -452,6 +457,11 @@ type credential struct {
 	ClientID string
 	// TokenURL is where that client trades its tokens.
 	TokenURL string
+	// DPoP is the key pair the grant is bound to, for a provider that binds
+	// one.
+	DPoP *DPoPKey
+	// DPoPNonce is the latest nonce the endpoint sent.
+	DPoPNonce string
 }
 
 // Credentials are the credentials in one auth file, by provider id, and the protocol that

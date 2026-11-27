@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 )
@@ -50,11 +51,19 @@ type Flow struct {
 	RedirectURI string
 	// Scopes are what the sign-in asks for.
 	Scopes []string
+	// Nonce asks the authorization to return an ID token that carries a value
+	// only this attempt knows. A flow that sets it checks the token, and one
+	// that does not reads no ID token at all.
+	Nonce bool
 	// Params are what a provider's own flow adds to the authorization request.
 	Params map[string]string
 	// Originator names the agent the sign-in came from. It is a label the endpoint records, not
 	// a host, and it is never used to authorize anything. Empty sends none.
 	Originator string
+	// Unavailable says why the sign-in cannot run, when it cannot: a registration the operator
+	// has not made yet, named by what it is missing. Empty means it can, and a flow that says
+	// why tells the operator what to fix before a browser opens.
+	Unavailable string
 }
 
 // CodexLogin is OpenAI's Codex sign-in, the one pi calls legacy: the Codex CLI's public client,
@@ -91,6 +100,9 @@ type Attempt struct {
 	State string
 	// Verifier is the PKCE verifier the code is traded with.
 	Verifier string
+	// Nonce is the value this attempt's ID token must carry. Empty when the
+	// flow asks for none.
+	Nonce string
 	// Flow is the sign-in this attempt belongs to, so the code is traded by the flow that asked
 	// for it.
 	Flow Flow
@@ -102,6 +114,9 @@ type Attempt struct {
 // The flow is PKCE: the URL carries the challenge, only this process holds the verifier, and a
 // code intercepted in the browser is useless without it.
 func (f Flow) Authorize() (Attempt, error) {
+	if f.Unavailable != "" {
+		return Attempt{}, fmt.Errorf("auth: %s: %s", f.Name, f.Unavailable)
+	}
 	if f.Method != MethodBrowser {
 		return Attempt{}, fmt.Errorf("auth: %s does not sign in through a browser", f.Name)
 	}
@@ -116,6 +131,12 @@ func (f Flow) Authorize() (Attempt, error) {
 	if err != nil {
 		return Attempt{}, err
 	}
+	nonce := ""
+	if f.Nonce {
+		if nonce, err = randomValue(32); err != nil {
+			return Attempt{}, err
+		}
+	}
 	digest := sha256.Sum256([]byte(verifier))
 	endpoint, err := url.Parse(f.AuthorizeURL)
 	if err != nil {
@@ -129,6 +150,9 @@ func (f Flow) Authorize() (Attempt, error) {
 	query.Set("state", state)
 	query.Set("code_challenge", base64.RawURLEncoding.EncodeToString(digest[:]))
 	query.Set("code_challenge_method", "S256")
+	if nonce != "" {
+		query.Set("nonce", nonce)
+	}
 	for name, value := range f.Params {
 		query.Set(name, value)
 	}
@@ -136,7 +160,7 @@ func (f Flow) Authorize() (Attempt, error) {
 		query.Set("originator", f.Originator)
 	}
 	endpoint.RawQuery = query.Encode()
-	return Attempt{URL: endpoint.String(), State: state, Verifier: verifier, Flow: f}, nil
+	return Attempt{URL: endpoint.String(), State: state, Verifier: verifier, Nonce: nonce, Flow: f}, nil
 }
 
 // Callback is what the authorization endpoint sent back, as a browser's redirect or a paste
@@ -217,33 +241,74 @@ func (a Attempt) Exchange(ctx context.Context, client *http.Client, callback Cal
 		return Credential{}, fmt.Errorf("%w: the callback's state is not this sign-in's", ErrSignIn)
 	}
 	flow := a.Flow
-	endpoint := endpointFor(flow.TokenURL, flow.Provider, DefaultTokenURL)
-	clientID := clientFor(flow.ClientID, flow.Provider, DefaultClientID)
-	ctx, cancel := context.WithTimeout(ctx, DefaultTimeout)
-	defer cancel()
-	answer, err := postForm(ctx, ErrSignIn, client, endpoint, url.Values{
+	provider := flow.Provider
+	endpoint := endpointFor(flow.TokenURL, provider, DefaultTokenURL)
+	clientID := clientFor(flow.ClientID, provider, DefaultClientID)
+	form := url.Values{
 		"grant_type":    {"authorization_code"},
 		"client_id":     {clientID},
 		"code":          {callback.Code},
 		"code_verifier": {a.Verifier},
 		"redirect_uri":  {flow.RedirectURI},
-	})
+	}
+	// A desktop client trades its code with the secret Google issued it. The
+	// secret is public by design and comes from the environment, so it is
+	// named here and not read from the credential.
+	if provider.ClientSecret != "" {
+		form.Set("client_secret", provider.ClientSecret)
+	}
+	// A grant bound to a key pair proves itself on the code exchange too, with
+	// the code's own hash as the proof's identifier: a random one fails, and
+	// the code is single-use.
+	var key *DPoPKey
+	headers := map[string]string{}
+	if provider.ProofKeys {
+		created, err := newDPoPKey()
+		if err != nil {
+			return Credential{}, fmt.Errorf("%w: %v", ErrSignIn, err)
+		}
+		private, err := parseDPoPKey(&created)
+		if err != nil {
+			return Credential{}, err
+		}
+		proof, err := (dpopProof{JTI: proofID(callback.Code), HTU: endpoint}).sign(private, time.Now)
+		if err != nil {
+			return Credential{}, fmt.Errorf("%w: %v", ErrSignIn, err)
+		}
+		key = &created
+		headers["DPoP"] = proof
+	}
+	ctx, cancel := context.WithTimeout(ctx, DefaultTimeout)
+	defer cancel()
+	answer, err := postForm(ctx, ErrSignIn, client, endpoint, form, headers)
 	if err != nil {
 		return Credential{}, err
 	}
 	if answer.AccessToken == "" || answer.RefreshToken == "" || answer.ExpiresIn <= 0 {
 		return Credential{}, fmt.Errorf("%w: %s: the answer carries no credential", ErrSignIn, endpoint)
 	}
+	// A grant that does not carry the scope the provider needs is a sign-in
+	// that bought nothing: the endpoint took the person's consent and gave back
+	// less than it was asked for.
+	if provider.RequiredScope != "" && !slices.Contains(strings.Fields(answer.Scope), provider.RequiredScope) {
+		return Credential{}, fmt.Errorf("%w: %s did not grant %s", ErrSignIn, endpoint, provider.RequiredScope)
+	}
+	if flow.Nonce {
+		if err := checkIDToken(answer.IDToken, clientID, a.Nonce, time.Now()); err != nil {
+			return Credential{}, err
+		}
+	}
 	credential := Credential{
 		Kind:      KindOAuth,
 		Access:    answer.AccessToken,
 		Refresh:   answer.RefreshToken,
 		Expires:   time.Now().Add(time.Duration(answer.ExpiresIn * float64(time.Second))),
-		AccountID: flow.Provider.account(answer.AccessToken, ""),
+		AccountID: provider.account(answer.AccessToken, ""),
 		ClientID:  clientID,
 		TokenURL:  endpoint,
+		DPoP:      key,
 	}
-	if err := validate(credential, flow.Provider); err != nil {
+	if err := validate(credential, provider); err != nil {
 		return Credential{}, fmt.Errorf("%w: %s: %v", ErrSignIn, endpoint, err)
 	}
 	return credential, nil

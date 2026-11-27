@@ -56,6 +56,13 @@ var google = auth.Flow{
 	Method:   auth.MethodKey,
 }
 
+// googlePlan is the sixth way in: the Google AI plan's own sign-in, which needs
+// the operator's app client and answers on the plan's quota. It is offered with
+// what is missing named, so a client that is not registered yet reads as one.
+func googlePlan() auth.Flow {
+	return auth.GoogleAIPlanFlow()
+}
+
 // probeClient is the client a sign-in's probe uses. The binary leaves it nil, and
 // the catalog makes its own; a test stands a fixture in its place, the way listenOn
 // stands in for a listener, because a probe reaches a provider and no test does.
@@ -63,7 +70,7 @@ var probeClient *http.Client
 
 // logins are the sign-ins this command offers, in the order the picker shows them.
 func logins() []auth.Flow {
-	return []auth.Flow{auth.CodexLogin, ollamaCloud, opencode, typesafe, google}
+	return []auth.Flow{auth.CodexLogin, ollamaCloud, opencode, typesafe, google, googlePlan()}
 }
 
 // loginOptions are the flags of `poo login`.

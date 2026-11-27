@@ -41,6 +41,11 @@ type Options struct {
 	Endpoint string
 	// APIKey is the key the endpoint reads, empty when it needs none.
 	APIKey string
+	// Token resolves the bearer token a request is sent with, once per attempt,
+	// for an endpoint whose credential is a grant that expires. A resolver
+	// failure is the request's failure, and the retry policy reads it like any
+	// other. Nil sends APIKey in the key header instead.
+	Token func(context.Context) (string, error)
 	// Model is the model identifier.
 	Model string
 	// ModelInfo is the model's info. It names the reasoning control, the
@@ -289,7 +294,13 @@ func (t *Transport) open(ctx context.Context, body []byte) (*interactions.Reader
 			}
 			req.Header.Set("Content-Type", "application/json")
 			req.Header.Set("Accept", "text/event-stream")
-			if t.cfg.APIKey != "" {
+			if t.cfg.Token != nil {
+				token, err := t.cfg.Token(ctx)
+				if err != nil {
+					return nil, err
+				}
+				req.Header.Set("Authorization", "Bearer "+token)
+			} else if t.cfg.APIKey != "" {
 				req.Header.Set(APIKeyHeader, t.cfg.APIKey)
 			}
 			if t.cfg.UserAgent != "" {

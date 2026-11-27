@@ -33,6 +33,20 @@ type Provider struct {
 	Env string
 	// ClientID is the OAuth client the credential belongs to. Empty means DefaultClientID.
 	ClientID string
+	// ClientSecret is the secret that client trades its tokens with. It is
+	// public by design for an installed app, and it is never stored in the
+	// credential file: the id is recorded with the grant, and the secret is
+	// read from where the operator put it.
+	ClientSecret string
+	// ProofKeys reports that the provider binds its grants to a key pair
+	// created on this machine (RFC 9449). Every token request then carries a
+	// proof signed with it, and a credential without the key is one that must
+	// sign in again.
+	ProofKeys bool
+	// RequiredScope is a scope the grant must carry to be worth anything. A
+	// sign-in that does not receive it is a sign-in that bought nothing, and a
+	// provider that names none checks no scope.
+	RequiredScope string
 	// Account names the account a credential belongs to, given its access token and the id
 	// the entry stored. It returns "" when the credential names none, which is a credential
 	// this provider cannot use.
@@ -116,6 +130,9 @@ func validate(c Credential, p Provider) error {
 	case KindOAuth:
 		if c.Access == "" || c.Refresh == "" {
 			return fmt.Errorf("an oauth credential needs an access token and a refresh token")
+		}
+		if p.ProofKeys && c.DPoP == nil {
+			return fmt.Errorf("the %s provider binds its grant to a key pair, and this credential carries none", p.ID)
 		}
 		if c.Key != "" {
 			return fmt.Errorf("an oauth credential carries a key")

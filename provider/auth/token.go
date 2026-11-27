@@ -38,7 +38,7 @@ func refusingClient(base *http.Client) *http.Client {
 	}
 }
 
-// tokenResponse is the token endpoint's answer to a refresh.
+// tokenResponse is the token endpoint's answer to a refresh or a sign-in.
 type tokenResponse struct {
 	// AccessToken is the new bearer token.
 	AccessToken string `json:"access_token"`
@@ -47,50 +47,179 @@ type tokenResponse struct {
 	RefreshToken string `json:"refresh_token"`
 	// ExpiresIn is how many seconds the access token lives.
 	ExpiresIn float64 `json:"expires_in"`
+	// Scope is what the grant carries, as the endpoint words it.
+	Scope string `json:"scope"`
+	// IDToken is the token that names the person, for a sign-in that asks for
+	// one.
+	IDToken string `json:"id_token"`
+	// Error and ErrorDescription are the refusal, when the answer is one.
+	Error            string `json:"error"`
+	ErrorDescription string `json:"error_description"`
+}
+
+// tokenAnswer is one answer from a token endpoint, before it is turned into a
+// credential or a failure.
+//
+// A key-bound grant's refresh decides by these fields rather than by the status
+// alone: a stale nonce and a clock the endpoint disagrees with are answers it
+// retries, and both are reported beside the status.
+type tokenAnswer struct {
+	// Status is the HTTP status.
+	Status int
+	// Body is the answer's own fields.
+	Body tokenResponse
+	// Nonce is the DPoP-Nonce the answer carried, when it carried one.
+	Nonce string
+	// ServerTime is the answer's Date header in Unix seconds, which a proof
+	// dated by a wrong local clock is dated by instead.
+	ServerTime int64
 }
 
 // trade trades the credential's refresh token for a new access token.
 //
-// The request is the one pi sends: a form POST carrying the refresh grant,
-// the refresh token and the client id. The answer carries the new pair and
-// the access token's lifetime. The account is read from the new token, and a
-// token that names no account keeps the one already stored.
+// The request is the one pi sends: a form POST carrying the refresh grant, the
+// refresh token and the client id, and the client's secret for a client that
+// has one. The answer carries the new pair and the access token's lifetime. The
+// account is read from the new token, and a token that names no account keeps
+// the one already stored.
+//
+// A provider that binds its grants to a key pair is traded through that key:
+// every attempt carries a proof, and two refusals are retried once — a stale
+// nonce with the one the endpoint sends, and a local clock the endpoint
+// disagrees with with the endpoint's own time.
 //
 // A failure reports the status and a standard OAuth error code, and nothing
-// else from the answer. An answer is untrusted, and a caller's log is no
-// place for its words.
+// else from the answer. An answer is untrusted, and a caller's log is no place
+// for its words.
 func (c Credentials) trade(ctx context.Context, p Provider, stored credential) (credential, error) {
 	endpoint := c.tokenURL(p, stored)
-	ctx, cancel := context.WithTimeout(ctx, DefaultTimeout)
-	defer cancel()
 	form := url.Values{
 		"grant_type":    {"refresh_token"},
 		"refresh_token": {stored.Refresh},
 		"client_id":     {c.clientID(p, stored)},
 	}
-	answer, err := postForm(ctx, ErrRefresh, c.HTTP, endpoint, form)
+	if p.ClientSecret != "" {
+		form.Set("client_secret", p.ClientSecret)
+	}
+	ctx, cancel := context.WithTimeout(ctx, DefaultTimeout)
+	defer cancel()
+	if p.ProofKeys {
+		return c.tradeBound(ctx, p, stored, endpoint, form)
+	}
+	answer, err := postForm(ctx, ErrRefresh, c.HTTP, endpoint, form, nil)
 	if err != nil {
 		return credential{}, err
 	}
+	return c.refreshed(p, stored, answer, nil, "")
+}
+
+// tradeBound trades a key-bound grant, retrying the two refusals a proof can be
+// fixed for.
+//
+// The two are independent, so the loop retries while either applies and stops
+// when the answer asks for neither. A third round buys nothing: the nonce the
+// endpoint sent was already the one sent back, and the clock was already the
+// endpoint's.
+func (c Credentials) tradeBound(ctx context.Context, p Provider, stored credential, endpoint string, form url.Values) (credential, error) {
+	key, err := parseDPoPKey(stored.DPoP)
+	if err != nil {
+		return credential{}, err
+	}
+	nonce := stored.DPoPNonce
+	var iat int64
+	var answer tokenAnswer
+	for round := 0; ; round++ {
+		proof, err := dpopProof{JTI: randomValueOrEmpty(24), HTU: endpoint, Nonce: nonce, IAT: iat}.sign(key, c.now)
+		if err != nil {
+			return credential{}, fmt.Errorf("%w: %v", ErrRefresh, err)
+		}
+		answer, err = postToken(ctx, ErrRefresh, c.HTTP, endpoint, form, map[string]string{"DPoP": proof})
+		if err != nil {
+			return credential{}, err
+		}
+		if round == 2 {
+			break
+		}
+		// A nonce the endpoint has just named is the one to send back, and a
+		// proof dated by a clock the endpoint disagrees with is dated by the
+		// endpoint's own time.
+		if answer.Body.Error == "use_dpop_nonce" && answer.Nonce != "" && answer.Nonce != nonce {
+			nonce = answer.Nonce
+			continue
+		}
+		if answer.Body.Error == "invalid_dpop_proof" && iat == 0 && answer.ServerTime != 0 {
+			iat = answer.ServerTime
+			continue
+		}
+		break
+	}
+	if answer.Status < 200 || answer.Status > 299 || answer.Body.AccessToken == "" {
+		// The two the endpoint names as final: the grant expired or was
+		// revoked, or the client is no longer allowed for this token.
+		switch answer.Body.Error {
+		case "invalid_grant", "unauthorized_client":
+			return credential{}, fmt.Errorf("%w: %s: sign in again", ErrRefresh, endpoint)
+		}
+		return credential{}, fmt.Errorf("%w: %s: status %d%s", ErrRefresh, endpoint, answer.Status, errorCodeOf(answer.Body.Error))
+	}
+	// The newest nonce is kept, and one the successful answer did not send is
+	// the one that just worked.
+	if answer.Nonce != "" {
+		nonce = answer.Nonce
+	}
+	return c.refreshed(p, stored, answer.Body, stored.DPoP, nonce)
+}
+
+// refreshed builds the credential a traded answer grants.
+//
+// The grant is the same grant: the client, the endpoint and the proof key stay
+// the credential's own, whatever the provider declares by default.
+func (c Credentials) refreshed(p Provider, stored credential, answer tokenResponse, key *DPoPKey, nonce string) (credential, error) {
 	if answer.AccessToken == "" || answer.ExpiresIn <= 0 {
-		return credential{}, fmt.Errorf("%w: %s: the answer carries no token or no lifetime", ErrRefresh, endpoint)
+		return credential{}, fmt.Errorf("%w: the answer carries no token or no lifetime", ErrRefresh)
 	}
 	refresh := answer.RefreshToken
 	if refresh == "" {
 		refresh = stored.Refresh
 	}
-	refreshed := credential{
+	return credential{
 		Type:      string(KindOAuth),
 		Access:    answer.AccessToken,
 		Refresh:   refresh,
 		Expires:   c.now().Add(time.Duration(answer.ExpiresIn * float64(time.Second))).UnixMilli(),
 		AccountID: p.account(answer.AccessToken, stored.AccountID),
-		// The grant is the same grant: the client and the endpoint it was made with stay the
-		// credential's own, whatever the provider declares by default.
-		ClientID: stored.ClientID,
-		TokenURL: stored.TokenURL,
+		ClientID:  stored.ClientID,
+		TokenURL:  stored.TokenURL,
+		DPoP:      key,
+		DPoPNonce: nonce,
+	}, nil
+}
+
+// randomValueOrEmpty is randomValue for a path that has already failed once, so
+// an identifier that cannot be made ends the proof instead of the process.
+func randomValueOrEmpty(n int) string {
+	value, err := randomValue(n)
+	if err != nil {
+		return ""
 	}
-	return refreshed, nil
+	return value
+}
+
+// errorCodeOf renders a refused grant's code as the suffix an error carries.
+//
+// Only a code from the OAuth error set is carried: everything else an answer
+// says is untrusted.
+func errorCodeOf(code string) string {
+	for _, known := range []string{
+		"invalid_request", "invalid_client", "invalid_grant", "unauthorized_client",
+		"unsupported_grant_type", "invalid_scope", "server_error", "temporarily_unavailable",
+		"use_dpop_nonce", "invalid_dpop_proof",
+	} {
+		if code == known {
+			return " (" + code + ")"
+		}
+	}
+	return ""
 }
 
 // errorCode is the endpoint's own error, as a suffix an error carries.
@@ -120,7 +249,10 @@ func errorCode(body []byte) string {
 	// server's own failure.
 	switch code {
 	case "invalid_request", "invalid_client", "invalid_grant", "unauthorized_client",
-		"unsupported_grant_type", "invalid_scope", "server_error", "temporarily_unavailable":
+		"unsupported_grant_type", "invalid_scope", "server_error", "temporarily_unavailable",
+		// RFC 9449's two: the endpoint wants a nonce, or it does not accept
+		// the proof's signature or its date.
+		"use_dpop_nonce", "invalid_dpop_proof":
 		return " (" + code + ")"
 	}
 	return ""
@@ -172,34 +304,58 @@ func clientFor(override string, p Provider, fallback string) string {
 	return fallback
 }
 
-// postForm posts a form to a token endpoint and reads its answer.
+// postForm posts a form to a token endpoint and reads its answer, and turns a
+// refusal into the error the caller reports.
+func postForm(ctx context.Context, refused error, client *http.Client, endpoint string, form url.Values, headers map[string]string) (tokenResponse, error) {
+	answer, err := postToken(ctx, refused, client, endpoint, form, headers)
+	if err != nil {
+		return tokenResponse{}, err
+	}
+	if answer.Status < 200 || answer.Status > 299 {
+		return tokenResponse{}, fmt.Errorf("%w: %s: status %d%s", refused, endpoint, answer.Status, errorCodeOf(answer.Body.Error))
+	}
+	return answer.Body, nil
+}
+
+// postToken posts a form to a token endpoint and reads its answer as it came.
 //
-// A redirect is refused rather than followed: a token request's body carries a code or a
-// refresh token, and Go would replay it wherever the redirect pointed. The answer is bounded,
-// and a failure reports the status and a standard OAuth error code, and nothing else the
-// answer said.
-func postForm(ctx context.Context, refused error, client *http.Client, endpoint string, form url.Values) (tokenResponse, error) {
+// A redirect is refused rather than followed: a token request's body carries a
+// code or a refresh token, and Go would replay it wherever the redirect
+// pointed. The answer is bounded, and the two headers a key-bound grant reads
+// are kept: the nonce the endpoint wants next, and the endpoint's own clock,
+// which a proof is dated by when this machine's is wrong.
+func postToken(ctx context.Context, refused error, client *http.Client, endpoint string, form url.Values, headers map[string]string) (tokenAnswer, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
 	if err != nil {
-		return tokenResponse{}, fmt.Errorf("%w: %s: %w", refused, endpoint, err)
+		return tokenAnswer{}, fmt.Errorf("%w: %s: %w", refused, endpoint, err)
 	}
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	request.Header.Set("Accept", "application/json")
+	for name, value := range headers {
+		request.Header.Set(name, value)
+	}
 	response, err := refusingClient(client).Do(request)
 	if err != nil {
-		return tokenResponse{}, fmt.Errorf("%w: %s: %w", refused, endpoint, err)
+		return tokenAnswer{}, fmt.Errorf("%w: %s: %w", refused, endpoint, err)
 	}
 	defer response.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(response.Body, maxTokenResponse))
 	if err != nil {
-		return tokenResponse{}, fmt.Errorf("%w: %s: %w", refused, endpoint, err)
+		return tokenAnswer{}, fmt.Errorf("%w: %s: %w", refused, endpoint, err)
 	}
-	if response.StatusCode < 200 || response.StatusCode > 299 {
-		return tokenResponse{}, fmt.Errorf("%w: %s: status %d%s", refused, endpoint, response.StatusCode, errorCode(body))
+	answer := tokenAnswer{
+		Status: response.StatusCode,
+		Nonce:  response.Header.Get("DPoP-Nonce"),
 	}
-	var answer tokenResponse
-	if err := json.Unmarshal(body, &answer); err != nil {
-		return tokenResponse{}, fmt.Errorf("%w: %s: %w", refused, endpoint, err)
+	if seconds := response.Header.Get("Date"); seconds != "" {
+		if at, err := http.ParseTime(seconds); err == nil {
+			answer.ServerTime = at.Unix()
+		}
+	}
+	if len(body) > 0 {
+		// A refusal and a grant are the same object, and a body that does not
+		// parse is reported by the status alone.
+		_ = json.Unmarshal(body, &answer.Body)
 	}
 	return answer, nil
 }
