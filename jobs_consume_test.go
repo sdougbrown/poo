@@ -74,12 +74,14 @@ func TestTheJobResultIsDeliveredInCompletionOrder(t *testing.T) {
 	waitFor(t, "the jobs to start", func() bool {
 		return tool.Calls() == 2
 	})
-	// The jobs end one after the other, and their results are queued in
-	// completion order. The first job is released first, so it has the
-	// lower id.
-	before := sink.count("job.ended")
+	// The input ids follow the jobs' completion order — finishJob
+	// assigns the id when the job ends — and the queue drains FIFO. The
+	// gate keeps the second release from landing inside the first job's
+	// pipeline: the queue append follows the end record's write, so a
+	// second release that lands in between can queue the second job
+	// ahead of the first, and the drain then delivers the ids backwards.
 	tool.Release()
-	waitRecords(t, sink, "job.ended", before+1)
+	waitRecords(t, sink, "input.delivered", 1)
 	tool.Release()
 	waitRecords(t, sink, "input.delivered", 2)
 	// The queue hands the results out in the order they were finished,
