@@ -232,7 +232,7 @@ func (p *localProcess) Wait() (int, error) {
 			case <-drained:
 			case <-deadline:
 				p.killGroup(syscall.SIGKILL)
-				p.closePipes()
+				exec.FlushPipes(p.pipes)
 				<-drained
 			}
 		}

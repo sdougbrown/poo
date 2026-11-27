@@ -14,6 +14,8 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
+	"time"
 )
 
 // ErrStdinIncomplete reports that not all stdin bytes were written to the pipe.
@@ -24,6 +26,21 @@ import (
 // stopped keeps the stop alone, so a cancellation is never reported as an
 // input failure.
 var ErrStdinIncomplete = errors.New("exec: stdin write was incomplete")
+
+// PipeFlushGrace is the read deadline FlushPipes sets on the capture
+// pipes before an executor's teardown closes them.
+const PipeFlushGrace = 250 * time.Millisecond
+
+// FlushPipes gives a teardown's drains a last bounded window before the
+// pipes close: the command's process is gone, so bytes already in a
+// pipe's buffer go to the sink when the drain is next scheduled, and a
+// drain still blocked ends with the deadline instead of holding the
+// close behind a writer that outlived the command.
+func FlushPipes(pipes []*os.File) {
+	for _, pipe := range pipes {
+		_ = pipe.SetReadDeadline(time.Now().Add(PipeFlushGrace))
+	}
+}
 
 // Executor runs the command a tool asks for.
 //

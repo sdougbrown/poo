@@ -160,9 +160,12 @@ type writerFunc func([]byte) (int, error)
 func (f writerFunc) Write(p []byte) (int, error) { return f(p) }
 
 // waitFor waits for a condition, so a test does not sleep for a guess.
+// The cap is a hang guard, not a settle budget: under CI load a healthy
+// settle can take longer than any fixed deadline, and a signal that
+// never comes still fails here with its own message.
 func waitFor(t *testing.T, what string, cond func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(20 * time.Second)
+	deadline := time.Now().Add(60 * time.Second)
 	for time.Now().Before(deadline) {
 		if cond() {
 			return

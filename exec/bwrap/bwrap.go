@@ -880,7 +880,7 @@ func (p *process) Wait() (int, error) {
 			select {
 			case <-drained:
 			case <-deadline:
-				p.closePipes()
+				pooexec.FlushPipes(p.pipes)
 				<-drained
 			}
 		}

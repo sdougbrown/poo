@@ -217,12 +217,39 @@ func TestTheStderrGoesToTheLogAndNotToTheModel(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			log := &logLines{}
 			got, cancel, done := start(t, c, feed.Spec{Name: "noisy", Command: []string{script(t, "noisy")}}, log.logger())
-			waitFor(t, "the message", func() bool { return got.len() == 1 })
+			// The command writes its diagnostic while it runs, so the log
+			// holds it before the attempt ends: waiting for both here
+			// keeps the wait off the teardown, whose pipes close at the
+			// kill grace and can leave a drain's last read behind.
+			waitFor(t, "the message and the diagnostic", func() bool {
+				return got.len() == 1 && strings.Contains(log.text(), "the diagnostic the model must not see")
+			})
 			cancel()
 			_ = result(t, done)
-			waitFor(t, "the diagnostic in the log", func() bool {
+			for _, in := range got.all() {
+				if strings.Contains(in.text, "diagnostic") {
+					t.Errorf("the diagnostics reached the model: %+v", in)
+				}
+			}
+		})
+	}
+}
+
+// TestATeardownPastTheKillGraceStaysBounded covers the teardown's last
+// window: a descendant holds the stderr write end open past the kill
+// grace, so no EOF ends the drain and the pipes close at the grace's
+// deadline. The attempt ends bounded, its diagnostic is the log's, and
+// the model saw only the message.
+func TestATeardownPastTheKillGraceStaysBounded(t *testing.T) {
+	for _, c := range executorCases(t) {
+		t.Run(c.name, func(t *testing.T) {
+			log := &logLines{}
+			got, cancel, done := start(t, c, feed.Spec{Name: "held", Command: []string{script(t, "held")}}, log.logger())
+			waitFor(t, "the diagnostic", func() bool {
 				return strings.Contains(log.text(), "the diagnostic the model must not see")
 			})
+			cancel()
+			_ = result(t, done)
 			for _, in := range got.all() {
 				if strings.Contains(in.text, "diagnostic") {
 					t.Errorf("the diagnostics reached the model: %+v", in)
