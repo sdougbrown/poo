@@ -176,12 +176,21 @@ func TestTheCodexFileIsNeverWritten(t *testing.T) {
 
 // TestACodexFileInAPIKeyModeHoldsNoCredential covers the mode the Codex
 // provider does not read: an api key reaches the platform API, not the
-// endpoint the ChatGPT token serves, so the file answers no credential.
+// endpoint the ChatGPT token serves, so the file answers no credential — and
+// holds none, so the endpoint is not offered on a credential no request can
+// use.
 func TestACodexFileInAPIKeyModeHoldsNoCredential(t *testing.T) {
 	path := authFile(t, codexKeyStored)
 	credentials := auth.Credentials{Path: path, Now: clock}
 	if _, err := credentials.Status(auth.Codex); !errors.Is(err, auth.ErrNoCredential) {
 		t.Errorf("the api-key file's credential failed as %v, want ErrNoCredential", err)
+	}
+	held, err := credentials.Holds(auth.ProviderCodex)
+	if err != nil {
+		t.Fatalf("reading what the file holds: %v", err)
+	}
+	if held {
+		t.Errorf("the api-key file holds a credential for %s, want none", auth.ProviderCodex)
 	}
 }
 

@@ -205,6 +205,22 @@ func TestCodexCredentialErrorKeepsAnUncertainRefreshTerminal(t *testing.T) {
 	}
 }
 
+// TestCodexCredentialErrorKeepsAReadOnlyCredentialTerminal covers the
+// read-only file whose token has expired: poo does not trade it, so another
+// attempt fails the same way, and the failure keeps the auth-failed settle
+// classification rather than falling through as a bare error.
+func TestCodexCredentialErrorKeepsAReadOnlyCredentialTerminal(t *testing.T) {
+	err := fmt.Errorf("%w: the access token expired at 2026-01-01T00:00:00Z", auth.ErrReadOnly)
+	mapped := codexCredentialError(context.Background(), err)
+	var failure *poo.ProviderError
+	if !errors.As(mapped, &failure) {
+		t.Fatalf("the read-only credential is %v, want a provider failure", mapped)
+	}
+	if failure.Retryable() {
+		t.Errorf("the read-only credential is retryable: %+v", failure)
+	}
+}
+
 // TestCodexCredentialErrorPreservesCancellation covers the context: a
 // resolution that ended with it is the caller's cancellation, whatever the
 // credential file was doing.

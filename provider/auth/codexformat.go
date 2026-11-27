@@ -38,7 +38,11 @@ func (codexFormat) name() string { return FormatCodex }
 // credential the Codex provider reads, and answers no entry here.
 func (codexFormat) credentials(top map[string]json.RawMessage) (map[string]json.RawMessage, error) {
 	raw, ok := top[codexTokensField]
-	if !ok {
+	// A JSON null is the api-key mode's way of writing no tokens: the key is
+	// there and the grant is not. It answers no entry, like an absent field
+	// would, or the provider would be offered on a credential no request can
+	// use.
+	if !ok || string(raw) == "null" {
 		return map[string]json.RawMessage{}, nil
 	}
 	var tokens struct {
