@@ -20,6 +20,11 @@ type liveCall struct {
 	done     chan struct{}
 	transfer chan *jobState
 	receipt  chan struct{}
+	// jobID is the id the job takes when the call moves to one. It is
+	// reserved when the call goes live, so the env the tool holds names
+	// the job the call may become from the start: the env rides into the
+	// tool's Call once and cannot be revisited when the move happens.
+	jobID string
 	// The session lock orders completion and the reservation against cancellation.
 	finished bool
 	moving   bool
@@ -91,6 +96,11 @@ func (s *Session) runLiveCall(owner *callOwner, turn int, plan callPlan, tool To
 	if activity.Err() != nil {
 		cancel(context.Cause(activity))
 	}
+	// The job's id is reserved here, under the lock, so a call that
+	// never moves skips the number and one that moves takes the id the
+	// tool's env already carries.
+	s.jobSeq++
+	c.jobID = fmt.Sprintf("j%d", s.jobSeq)
 	c.stopRun = context.AfterFunc(activity, func() {
 		s.mu.Lock()
 		defer s.mu.Unlock()
@@ -102,6 +112,14 @@ func (s *Session) runLiveCall(owner *callOwner, turn int, plan callPlan, tool To
 		issued.live = c
 	}
 	s.mu.Unlock()
+	// The call runs as the job's own from the start: the env names the
+	// job it may become, so a tool that keys on the job id — the per-call
+	// timeout, say — sees it, and the deadline is the session's job
+	// timeout, not the per-call one. The timer stops when the call's
+	// ownership resolves: a move hands the deadline to the job, which
+	// arms its own; a call that ends in the run stops it here.
+	stopDeadline := s.armJobTimeout(cancel)
+	env.JobID = c.jobID
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -127,11 +145,13 @@ func (s *Session) runLiveCall(owner *callOwner, turn int, plan callPlan, tool To
 		}
 	}
 	if job != nil {
+		stopDeadline()
 		s.recordJobReceipt(owner, turn, plan.handle, plan.call, job.id, plan.shorthand)
 		close(c.receipt)
 		return ToolResult{}, nil, true
 	}
 	<-c.done
+	stopDeadline()
 	c.stopRun()
 	cancel(nil)
 	return c.result, c.err, false

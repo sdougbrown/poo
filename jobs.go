@@ -466,7 +466,8 @@ func WithJobs(o JobOptions) Option {
 // keys the stripped form — the same data prepare saw — the
 // shorthand rides in so the completion hook composes the shape the
 // admission hooks saw, and a live call rides in when the job moves a
-// running Bash call into the session's jobs.
+// running call into the session's jobs: the move keys on the tool's
+// CanBackgroundRunningCall, not on any one tool.
 func (s *Session) startJob(run *runState, turn int, handle, tool string, prepared Prepared, summary string, raw, stripped, shorthand json.RawMessage, live *liveCall) (jobID string, ok bool, winding bool, refusal string) {
 	// The slot is reserved under the lock, and the job is registered
 	// there too, so a job that is admitted is a job the session knows
@@ -498,8 +499,14 @@ func (s *Session) startJob(run *runState, turn int, handle, tool string, prepare
 		s.mu.Unlock()
 		return "", false, false, fmt.Sprintf(DuplicateJobText, tool, dup)
 	}
-	s.jobSeq++
-	jobID = fmt.Sprintf("j%d", s.jobSeq)
+	if live != nil {
+		// The live call reserved its job's id when it went live, so the
+		// id the env its tool carries is the id this job takes.
+		jobID = live.jobID
+	} else {
+		s.jobSeq++
+		jobID = fmt.Sprintf("j%d", s.jobSeq)
+	}
 	var ctx context.Context
 	var cancel context.CancelCauseFunc
 	var acceptanceCtx context.Context

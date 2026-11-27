@@ -723,6 +723,44 @@ func (t *panicTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) 
 	panic("the tool exploded")
 }
 
+// TestAPanickingMovableCallStillSettles covers the promise the live
+// call makes: a tool that panics while its call may move to a job does
+// not bring the process down — the run settles tool_fatal the way a
+// foreground call's panic does, from the live call's own recovery.
+func TestAPanickingMovableCallStillSettles(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{{CallID: "one", Name: "echo", Arguments: []byte(`{"text":"boom"}`)}}},
+		{text: "the answer"},
+	})
+	sink := &recordingSink{}
+	tool := &echoTool{background: poo.BackgroundAllowed}
+	tool.call = func(ctx context.Context) (poo.ToolResult, error) {
+		panic("the tool panicked")
+	}
+
+	s := newTestSession(t, poo.Options{
+		Transport: tr,
+		Tools:     map[string]poo.Tool{"echo": movableEcho{tool}},
+		Sink:      sink, WorkingDir: t.TempDir(),
+		Model: poo.ModelInfo{ModelID: "test-model", ContextLimit: 32768},
+	}, poo.WithJobs(poo.JobOptions{OnIdle: poo.OnIdleHold}))
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	res, err := s.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	if res.Reason != poo.ReasonToolFatal {
+		t.Errorf("the run settled %q, want tool_fatal", res.Reason)
+	}
+	// The live call's own recovery reports the panic: the source names
+	// the tool, not the run's panic handler.
+	if res.Detail.Source != "tool:echo" {
+		t.Errorf("the settle source is %q, want tool:echo", res.Detail.Source)
+	}
+}
+
 // TestAPanickingJobEndsWithAFatalError covers the promise the log makes:
 // a tool that panics as a background job does not bring the process
 // down. The job ends exactly once, with the panic as its error result,

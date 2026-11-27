@@ -208,6 +208,13 @@ const callDescription = CallToolName + " runs one of the tools the MCP servers t
 	"It is not a general dispatcher: the tools this session offers beside it are called directly, and " +
 	CallToolName + " cannot run them, itself, a shell, or anything the servers do not list."
 
+// CanBackgroundRunningCall reports that a call's running RPC can
+// finish under a job without restarting: the MCP server is owned by
+// the session, so the call keeps waiting on its reply detached from
+// the run, and a server that dies ends the job the way a dead process
+// ends a bash job.
+func (*Tool) CanBackgroundRunningCall() bool { return true }
+
 // Spec describes the tool.
 func (t *Tool) Spec() poo.ToolSpec {
 	return poo.ToolSpec{

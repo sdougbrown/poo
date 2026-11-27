@@ -309,3 +309,123 @@ func TestBackgroundCallMovesARunningEntry(t *testing.T) {
 	}
 	moveHeldCommand(t, entries[0], `{}`)
 }
+
+// TestAMovedCallRunsAsTheJob covers the rule: a call the run moves to a
+// job runs as the job's own — the env its tool holds names the job it
+// became, so a tool that keys on the job id sees it from the start.
+func TestAMovedCallRunsAsTheJob(t *testing.T) {
+	release := make(chan struct{})
+	tool := &echoTool{
+		background: poo.BackgroundAllowed,
+		call: func(ctx context.Context) (poo.ToolResult, error) {
+			<-release
+			return poo.ToolResult{Text: "held"}, nil
+		},
+	}
+	sink := &recordingSink{}
+	s := newTestSession(t, poo.Options{
+		Transport: scripted([]fakeResponse{
+			{calls: []poo.ToolCall{{CallID: "one", Name: "echo", Arguments: []byte(`{"text":"hold"}`)}}},
+			{text: "done"},
+		}),
+		Tools: map[string]poo.Tool{"echo": movableEcho{tool}},
+		Sink:  sink, WorkingDir: t.TempDir(),
+		Model: poo.ModelInfo{ModelID: "test-model", ContextLimit: 32768},
+	}, poo.WithJobs(poo.JobOptions{OnIdle: poo.OnIdleHold}))
+	go func() {
+		_, _ = s.Prompt(context.Background(), "run it")
+	}()
+	var runID string
+	for end := time.Now().Add(10 * time.Second); ; {
+		for _, rec := range sink.allRecords() {
+			if r, ok := rec.(*poo.ToolCallRecord); ok && r.Handle == "r1" {
+				runID = r.RunID
+			}
+		}
+		if runID != "" && len(tool.Envs()) == 1 {
+			break
+		}
+		if time.Now().After(end) {
+			t.Fatal("the held call never started")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	jobID, err := s.BackgroundCall(runID, "r1")
+	if err != nil {
+		t.Fatalf("moving the held call: %v", err)
+	}
+	close(release)
+	if _, err := s.Wait(context.Background()); err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	envs := tool.Envs()
+	if len(envs) != 1 {
+		t.Fatalf("the tool ran %d times, want 1", len(envs))
+	}
+	if envs[0].JobID != jobID {
+		t.Errorf("the tool's env names job %q, want the job the call moved to (%q)", envs[0].JobID, jobID)
+	}
+}
+
+// movableEcho is an echo tool whose running call may move to a job.
+type movableEcho struct{ *echoTool }
+
+// CanBackgroundRunningCall reports that the echo's running call can
+// finish under a job without restarting.
+func (movableEcho) CanBackgroundRunningCall() bool { return true }
+
+// TestAMovedCallKeepsTheJobTimeout covers the rule: a moved call runs
+// under the job timeout, not the per-call one — a bash call held past
+// its own timeout survives until the job's bound ends it, and the
+// job.ended says the job timed out.
+func TestAMovedCallKeepsTheJobTimeout(t *testing.T) {
+	dir := t.TempDir()
+	sink := &recordingSink{}
+	bt := bash.New()
+	bt.Timeout = 200 * time.Millisecond
+	s := newTestSession(t, poo.Options{
+		Transport: scripted([]fakeResponse{
+			{calls: []poo.ToolCall{{CallID: "one", Name: "bash", Arguments: []byte(`{"command":"echo $$ > started; until [ -f release ]; do /bin/sleep 0.02; done"}`)}}},
+			{text: "done"},
+		}),
+		Tools: map[string]poo.Tool{"bash": bt}, Sink: sink, WorkingDir: dir,
+		Model: poo.ModelInfo{ModelID: "test-model", ContextLimit: 32768},
+	}, poo.WithJobs(poo.JobOptions{Timeout: time.Second, OnIdle: poo.OnIdleHold}))
+	done := make(chan error, 1)
+	go func() {
+		_, err := s.Prompt(context.Background(), "run it")
+		done <- err
+	}()
+	waitForFile(t, dir, "started", 10*time.Second)
+	var runID string
+	for _, rec := range sink.allRecords() {
+		if r, ok := rec.(*poo.ToolCallRecord); ok && r.Handle == "r1" {
+			runID = r.RunID
+		}
+	}
+	if runID == "" {
+		t.Fatal("the run recorded no call for r1")
+	}
+	if _, err := s.BackgroundCall(runID, "r1"); err != nil {
+		t.Fatalf("moving the held call: %v", err)
+	}
+	var ended *poo.JobEndedRecord
+	waitForSink(t, sink, "the moved call's job to end", func() bool {
+		for _, rec := range sink.allRecords() {
+			if r, ok := rec.(*poo.JobEndedRecord); ok && r.JobID == "j1" {
+				ended = r
+				return true
+			}
+		}
+		return false
+	})
+	if !ended.TimedOut {
+		t.Errorf("the moved call's job ended timed_out=%v; the job timeout, not the per-call one, owns the deadline", ended.TimedOut)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "release"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
