@@ -69,13 +69,13 @@ const (
 // The texts the plan fixes.
 const (
 	// StartedText is the model-facing text of a call that became a job.
-	StartedText = "[started job %s · %s; its result will arrive as a message]"
+	StartedText = "[started job %s · %s; its result arrives as a message, and ending your turn is how you wait]"
 	// TooManyJobsText is the model-facing text of a call that found no
 	// free job slot.
-	TooManyJobsText = "too many jobs running; wait or cancel one"
+	TooManyJobsText = "too many jobs running; cancel one or end your turn: a job's result arrives as a message"
 	// DuplicateJobText is the model-facing text of a call whose tool and
 	// arguments match a job that is already running.
-	DuplicateJobText = "the same %s call is already running as job %s; wait for it or cancel it"
+	DuplicateJobText = "the same %s call is already running as job %s; end your turn to wait for its result, or cancel it"
 )
 
 // BackgroundArgName is the reserved argument that asks for a background
@@ -2468,7 +2468,7 @@ func withBackgroundSchema(schema json.RawMessage) json.RawMessage {
 	}
 	props[BackgroundArgName] = map[string]any{
 		"type":        "boolean",
-		"description": "Run the call asynchronously in the background: it returns at once, you keep working, and its result arrives later as a message.",
+		"description": "Run the call asynchronously in the background: it returns at once and its result arrives later as a message. Ending your turn is how you wait.",
 	}
 	parsed["properties"] = props
 	out, err := json.Marshal(parsed)

@@ -92,8 +92,9 @@ func TestABackgroundCallReturnsStarted(t *testing.T) {
 		}
 		if r.Outcome == poo.OutcomeStarted {
 			found = true
-			if !strings.Contains(r.Text, "[started job j1 · job;") {
-				t.Errorf("the started result is %q, want the started text", r.Text)
+			if !strings.Contains(r.Text, "[started job j1 · job;") ||
+				!strings.Contains(r.Text, "ending your turn is how you wait") {
+				t.Errorf("the started result is %q, want the started text with the end-turn guidance", r.Text)
 			}
 		}
 	}
