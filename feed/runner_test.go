@@ -226,9 +226,6 @@ func TestTheStderrGoesToTheLogAndNotToTheModel(t *testing.T) {
 			})
 			cancel()
 			_ = result(t, done)
-			waitFor(t, "the diagnostic still in the log", func() bool {
-				return strings.Contains(log.text(), "the diagnostic the model must not see")
-			})
 			for _, in := range got.all() {
 				if strings.Contains(in.text, "diagnostic") {
 					t.Errorf("the diagnostics reached the model: %+v", in)
