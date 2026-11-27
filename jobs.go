@@ -726,8 +726,9 @@ func (s *Session) runJob(job *jobState, prepared Prepared, live *liveCall) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(job.ctx, s.jobTimeout())
-	defer cancel()
+	ctx, cancel := context.WithCancelCause(job.ctx)
+	defer cancel(nil)
+	defer s.armJobTimeout(cancel)()
 
 	env := s.jobToolEnv(job)
 	result, err := tool.Call(ctx, prepared, env)

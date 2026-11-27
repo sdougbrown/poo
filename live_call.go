@@ -139,10 +139,18 @@ func (s *Session) runLiveCall(owner *callOwner, turn int, plan callPlan, tool To
 
 func (s *Session) finishLiveJob(job *jobState, c *liveCall) {
 	defer c.cancel(nil)
-	timer := time.AfterFunc(s.jobTimeout(), func() { c.cancel(context.DeadlineExceeded) })
-	defer timer.Stop()
+	defer s.armJobTimeout(c.cancel)()
 	<-c.done
-	timer.Stop()
 	<-c.receipt
 	s.completeJobCall(job, c.ctx, c.result, c.err)
+}
+
+// armJobTimeout stops a job when the job's timeout fires: the single
+// owner of the bound, it reads the same knob for a job that started
+// normally and one a live call moved into, and the cancel carries the
+// deadline cause, so the completion classifies the job as timed out.
+// The returned stop releases the timer.
+func (s *Session) armJobTimeout(cancel context.CancelCauseFunc) (stop func()) {
+	timer := time.AfterFunc(s.jobTimeout(), func() { cancel(context.DeadlineExceeded) })
+	return func() { timer.Stop() }
 }
