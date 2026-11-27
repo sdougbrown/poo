@@ -15,9 +15,11 @@ import (
 	"time"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/cli"
 	"github.com/sdougbrown/poo/config"
 	"github.com/sdougbrown/poo/exec"
 	"github.com/sdougbrown/poo/mcp"
+	"github.com/sdougbrown/poo/tool/callmcp"
 )
 
 // recordingLauncher is the launcher a test links when it wants to see
@@ -75,6 +77,12 @@ func (g *stubGroup) Close() error {
 	}
 	return errors.Join(errs...)
 }
+
+// Offered returns the entries the servers hold: the tests' stubs list none.
+func (g *stubGroup) Offered() []cli.Offered { return nil }
+
+// Servers returns the per-server views: the tests' stubs hold none.
+func (g *stubGroup) Servers() []config.MCPServer { return nil }
 
 // recorded returns the launches the launcher saw.
 func (l *recordingLauncher) recorded() []string {
@@ -276,9 +284,9 @@ func fixtureServer(t *testing.T) string {
 }
 
 // clientLauncher is the launcher a test links when it wants the real
-// client behind the session: it starts the selected server the way the
-// binary does, with the session's own values and the scrub the build
-// handed it, and keeps the group so the test can call the server it
+// client behind the session: it starts the selection's servers the way
+// the binary does, with the session's own values and the scrub the build
+// handed it, and keeps the group so the test can call a server it
 // started.
 //
 // The binary's own launcher lives in package main and cannot be linked
@@ -297,7 +305,11 @@ func clientLauncher(group **mcp.Group) config.MCPLauncher {
 			return nil, err
 		}
 		*group = g
-		return g, nil
+		servers := make([]callmcp.Server, 0, len(values.Servers))
+		for _, server := range values.Servers {
+			servers = append(servers, &testMCPServer{group: g, name: server.Name})
+		}
+		return &listedSession{views: servers, stop: g.Close}, nil
 	}
 }
 
@@ -413,6 +425,14 @@ type childCloser struct {
 
 // Close stops the child.
 func (c childCloser) Close() error { return c.kill() }
+
+// Offered returns no entry: the handle stands for a child process, and the
+// test reads none of its tools.
+func (childCloser) Offered() []cli.Offered { return nil }
+
+// Servers returns no view: the handle stands for a child process, and the
+// test reads no server of it.
+func (childCloser) Servers() []config.MCPServer { return nil }
 
 // failingSessionStart is a session-start hook that always fails.
 type failingSessionStart struct{}

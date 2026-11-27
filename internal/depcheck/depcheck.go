@@ -21,8 +21,13 @@
 //     package and the decide package
 //   - the tool/cliregistry package may import the standard library, the core
 //     package, the cli package, the prompt package, the decide package, the
-//     bash package and the packages outside the module that hold a cli
-//     registry
+//     bash package, the arguments' shared JSON rules and the packages outside
+//     the module that hold a cli registry
+//   - the tool/callmcp package may import the standard library, the core
+//     package, the cli package, the prompt package, the mcp client, the
+//     cap and schema renderers and the arguments' shared JSON rules, for it
+//     is the tool over the client and names the entries a session's search
+//     returns
 //   - the cli package may import the standard library, the prompt package
 //     and the packages outside the module that hold a cli registry
 //   - the feed package may import the standard library, the exec package,
@@ -36,10 +41,14 @@
 //     package and the feed package, plus the packages outside the module
 //     that hold a cli registry: an mcp manifest's resource feed carries a
 //     feed's filter, and its templates carry a session reference
+//   - the mcp/wire package may import the standard library only, for it
+//     holds the vocabulary a server's tools and answers travel in: a reader
+//     of the tools names it without linking the client that speaks the
+//     protocol
 //   - the mcp package, the client itself, may import the standard
-//     library, the exec package and the mcp manifests, plus the SDK it
-//     wraps: it is the one package that imports the go-sdk, so a binary
-//     that links no launcher for it never links the SDK at all
+//     library, the exec package, the mcp manifests and the wire vocabulary,
+//     plus the SDK it wraps: it is the one package that imports the go-sdk,
+//     so a binary that links no launcher for it never links the SDK at all
 //   - the server package may import the packages it composes: the core,
 //     the settings, the profiles, the executors, the permission policy,
 //     the sessions, the catalogs, the feeds and the wire
@@ -144,16 +153,21 @@ func (c Checker) rules() []rule {
 		{path: m + "/exec/bwrap", allowed: []string{m + "/exec"}},
 		{path: m + "/protect"},
 		{path: m + "/internal/caps"},
+		{path: m + "/internal/jsonutil"},
 		{path: m + "/internal/schematext", allowed: []string{"github.com/sdougbrown/cli-registry/schema"}},
 		{path: m + "/cli", allowed: []string{m + "/prompt", m + "/internal/schematext"}, external: true},
 		{path: m + "/feed", allowed: []string{m + "/exec", m + "/scopeschema"}, external: true},
 		// An mcp manifest's resource feed carries a feed's filter, and its
 		// templates carry the session reference the exec package validates.
 		{path: m + "/mcp/manifest", allowed: []string{m + "/exec", m + "/feed"}, external: true},
+		// The vocabulary a server's tools and answers travel in: the
+		// standard library alone, so a reader of the tools names them
+		// without linking the client that speaks the protocol.
+		{path: m + "/mcp/wire"},
 		// The client itself: it launches the declared servers with the
 		// environment the exec package's rules scrub, and it wraps the
 		// SDK alone, so no other package may reach the SDK through it.
-		{path: m + "/mcp", allowed: []string{m + "/exec", m + "/mcp/manifest"}, external: true},
+		{path: m + "/mcp", allowed: []string{m + "/exec", m + "/mcp/manifest", m + "/mcp/wire"}, external: true},
 		{path: m + "/scopeschema"},
 		{
 			path: m + "/server",
@@ -177,6 +191,10 @@ func (c Checker) rules() []rule {
 				// The mcp manifests the settings load: the declarations a
 				// session's servers are selected from.
 				m + "/mcp/manifest",
+				// The vocabulary a server's tools and answers travel in: the
+				// per-server views the settings read name it, so the snapshot
+				// and the dispatch read the same views.
+				m + "/mcp/wire",
 				m + "/perm",
 				m + "/perm/decide",
 				m + "/profile",
@@ -230,7 +248,16 @@ func (c Checker) rules() []rule {
 		},
 		{
 			path:     m + "/tool/cliregistry",
-			allowed:  []string{m, m + "/cli", m + "/decide", m + "/exec", m + "/internal/caps", m + "/internal/envelope", m + "/internal/schematext", m + "/prompt", m + "/tool/bash"},
+			allowed:  []string{m, m + "/cli", m + "/decide", m + "/exec", m + "/internal/caps", m + "/internal/envelope", m + "/internal/jsonutil", m + "/internal/schematext", m + "/prompt", m + "/tool/bash"},
+			external: true,
+		},
+		{
+			// The tool over the client: it reads the servers a session
+			// started and the MCP names the model writes, so it links the
+			// client and the settings' own vocabulary, and nothing of the
+			// session it is called in.
+			path:     m + "/tool/callmcp",
+			allowed:  []string{m, m + "/cli", m + "/internal/caps", m + "/internal/jsonutil", m + "/internal/schematext", m + "/mcp", m + "/prompt"},
 			external: true,
 		},
 		{

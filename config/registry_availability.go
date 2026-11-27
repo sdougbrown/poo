@@ -34,6 +34,33 @@ func (r *Runtime) offeredCatalog() *cli.Catalog {
 	return r.Registry
 }
 
+// offeredEntries returns the session's snapshot: every entry the model reaches
+// through a tool that calls it.
+//
+// The catalog's entries come first when the search covers the catalog — the
+// same rule that lists it in the prompt and points call_cli's refusal at the
+// search — then the tools of the servers the session started, each naming the
+// call that runs it. One value serves the search, the prompt's catalogs and
+// the refusals, so none of them can name a dispatcher another does not offer.
+// A search the servers brought does not cover a catalog the prompt already
+// lists: below the threshold the entries are the model's to read, and a
+// decision-model round trip over them is what the threshold rule exists to
+// avoid.
+//
+// An elevated catalog contributes nothing: its entries are tools of their own
+// by now, so a hit for one would name a call the session does not offer, and
+// the model already reads each entry in the tool list.
+func offeredEntries(catalog *cli.Catalog, elevated []poo.ToolInfo, started []MCPRunning, searched bool) []cli.Offered {
+	var entries []cli.Offered
+	if len(elevated) == 0 && searched {
+		entries = catalog.Offered()
+	}
+	for _, running := range started {
+		entries = append(entries, running.Offered()...)
+	}
+	return entries
+}
+
 // offeredRegistry returns the registry entries a profile offering tools may
 // see, or nil when it may see none.
 //

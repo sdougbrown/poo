@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/cli"
 	"github.com/sdougbrown/poo/codemode/quickjs"
 	codemodestarlark "github.com/sdougbrown/poo/codemode/starlark"
 	"github.com/sdougbrown/poo/config"
@@ -15,6 +17,7 @@ import (
 	"github.com/sdougbrown/poo/profile/code"
 	"github.com/sdougbrown/poo/profile/search"
 	"github.com/sdougbrown/poo/tool/bash"
+	"github.com/sdougbrown/poo/tool/callmcp"
 	"github.com/sdougbrown/poo/tool/cliregistry"
 	"github.com/sdougbrown/poo/tool/codemode"
 	"github.com/sdougbrown/poo/tool/edit"
@@ -110,9 +113,114 @@ func linkedTools() map[string]config.ToolFactory {
 			return cliregistry.NewCall(opts.Registry).WithSearch(opts.Search).WithSessionTools(opts.ToolNames).WithExecutor(opts.Executor)
 		},
 		"find_tool": func(opts config.ToolOptions) poo.Tool {
-			return cliregistry.NewFind(opts.Registry)
+			// The search narrows the session's snapshot: the catalog's entries,
+			// and the MCP tools behind call_mcp. Those are already the entries
+			// the session can reach, so the search offers nothing the model
+			// cannot call.
+			return cliregistry.NewFind(opts.Offered)
+		},
+		config.ToolCallMCP: func(opts config.ToolOptions) poo.Tool {
+			// The call lists the MCP entries of the same snapshot, and its
+			// refusal points at the search only when the session offers one.
+			return callmcp.New(mcpServers(opts.MCP), opts.Offered).
+				WithInputs(opts.Inputs...).
+				WithSearch(offersTool(opts.ToolNames, cliregistry.FindToolName))
 		},
 	}
+}
+
+// mcpSession is the launcher's handle for one session's launch: the group
+// that owns the session's server processes, and the names the selection
+// declared.
+type mcpSession struct {
+	// group is the client the launcher started, which owns the processes.
+	group *mcp.Group
+	// names are the servers the selection declared, in selection order.
+	names []string
+}
+
+// Servers are the per-server views the tools over them read: the settings'
+// interface carries them, so the snapshot and the dispatch read the same
+// views, and a handle that lists a tool offers one the call reaches.
+func (h *mcpSession) Servers() []config.MCPServer {
+	servers := make([]config.MCPServer, 0, len(h.names))
+	for _, name := range h.names {
+		servers = append(servers, &mcpServer{group: h.group, name: name})
+	}
+	return servers
+}
+
+// Offered returns every entry the servers hold: the package's own derivation
+// over the same per-server views the dispatch reads, so a handle is never
+// listed without being dispatchable.
+func (h *mcpSession) Offered() []cli.Offered {
+	return callmcp.Offered(dispatchServers(h.Servers()))
+}
+
+// Close stops the servers and waits for their processes to end.
+func (h *mcpSession) Close() error { return h.group.Close() }
+
+// mcpServer is one MCP server the launcher started, as the tools over it see
+// it: the server's own name, the tools it listed, and a call that qualifies the
+// tool with that name.
+type mcpServer struct {
+	// group is the client the launcher started, which owns the process.
+	group *mcp.Group
+	// name is the server's declared name.
+	name string
+}
+
+// mcpServer implements the servers the tools over them read.
+var _ callmcp.Server = (*mcpServer)(nil)
+
+// Name is the server's declared name.
+func (s *mcpServer) Name() string { return s.name }
+
+// Tools returns the tools the server listed at startup.
+func (s *mcpServer) Tools() []mcp.Tool {
+	tools, _ := s.group.Tools(s.name)
+	return tools
+}
+
+// CallTool calls one of them, qualifying the name the way the model writes it.
+func (s *mcpServer) CallTool(ctx context.Context, tool string, args json.RawMessage) (mcp.CallResult, error) {
+	return s.group.CallTool(ctx, s.name+"/"+tool, args)
+}
+
+// dispatchServers reads the settings' per-server views as the servers the
+// dispatch holds: the two interfaces name the same methods, so a view the
+// snapshot reads is a server the call reaches.
+func dispatchServers(views []config.MCPServer) []callmcp.Server {
+	servers := make([]callmcp.Server, 0, len(views))
+	for _, view := range views {
+		servers = append(servers, view)
+	}
+	return servers
+}
+
+// mcpServers keeps the servers a session started, as the tools over them read
+// them.
+//
+// The settings hold the handles as their launcher returned them, and the
+// interface carries the per-server views, so the handles' own answers are the
+// servers the call dispatches through — the same views the session's snapshot
+// read.
+func mcpServers(running []config.MCPRunning) []callmcp.Server {
+	var servers []callmcp.Server
+	for _, handle := range running {
+		servers = append(servers, dispatchServers(handle.Servers())...)
+	}
+	return servers
+}
+
+// offersTool reports whether a session's tool list holds a name.
+func offersTool(names []string, name string) bool {
+	for _, offered := range names {
+		if offered == name {
+			return true
+		}
+	}
+	return false
 }
 
 // linkedMCPLauncher returns the MCP launcher the command links.
@@ -140,6 +248,10 @@ func linkedMCPLauncher() config.MCPLauncher {
 		if err != nil {
 			return nil, err
 		}
-		return group, nil
+		names := make([]string, 0, len(launch.Servers))
+		for _, server := range launch.Servers {
+			names = append(names, server.Name)
+		}
+		return &mcpSession{group: group, names: names}, nil
 	}
 }

@@ -27,6 +27,7 @@ import (
 	"github.com/sdougbrown/poo/feed"
 	"github.com/sdougbrown/poo/internal/caps"
 	"github.com/sdougbrown/poo/mcp/manifest"
+	"github.com/sdougbrown/poo/mcp/wire"
 	"github.com/sdougbrown/poo/perm"
 	permissive "github.com/sdougbrown/poo/perm/decide"
 	"github.com/sdougbrown/poo/profile"
@@ -53,6 +54,9 @@ const (
 	UserSection = "user"
 	// ToolBash is the name of the bash tool.
 	ToolBash = "bash"
+	// ToolCallMCP is the name of the tool that calls a session's MCP
+	// tools.
+	ToolCallMCP = cli.CallMCPToolName
 )
 
 // The defaults the settings take when they do not say otherwise.
@@ -260,6 +264,23 @@ type MCPLaunchSelection struct {
 	Servers []manifest.Server
 }
 
+// MCPServer is one server a session started, as the tools over the servers
+// read it.
+//
+// config does not import the tool packages, so the seam is structural: the
+// per-server views the binary's call tool dispatches through answer to this,
+// the way the generated toolset does. The settings read the same views for
+// the session's snapshot, so what a handle lists is what the call reaches,
+// and no second list stands between them.
+type MCPServer interface {
+	// Name is the server's declared name.
+	Name() string
+	// Tools returns the tools the server listed at startup.
+	Tools() []wire.Tool
+	// CallTool calls one of them, by the server's own name for it.
+	CallTool(ctx context.Context, tool string, args json.RawMessage) (wire.CallResult, error)
+}
+
 // MCPRunning is what a launcher started for a session.
 //
 // The session closes it when it ends. Close is idempotent, and the
@@ -268,6 +289,19 @@ type MCPLaunchSelection struct {
 type MCPRunning interface {
 	// Close stops the server and waits for its process to end.
 	Close() error
+	// Servers returns the per-server views the tools over the servers read:
+	// one per server the launch started, in the selection's order. The
+	// snapshot and the dispatch read the same views, so a tool the handle
+	// lists is one the call reaches.
+	Servers() []MCPServer
+	// Offered returns the tools the servers listed at startup, as the
+	// entries the model reaches through the MCP call: one per tool,
+	// qualified with the server's name, naming the call that runs it and
+	// the argument that names it. It is the entries of the views Servers
+	// returns, derived the way the dispatch's own tool derives them, so the
+	// session's search and its prompt list the same value the call
+	// dispatches. The build reads them once, at attach.
+	Offered() []cli.Offered
 }
 
 // Runtime is what a build produced.
@@ -330,6 +364,13 @@ type Runtime struct {
 	// none: a profile that selects a server on such a binary fails the
 	// build rather than a session that cannot start what it selected.
 	mcpLauncher MCPLauncher
+	// toolFactories are the tools the binary links, and toolOptions the
+	// settings' own options for them. The attach builds the tools over the
+	// servers a session started a second time, from the same two values, so
+	// the offering a session reaches is the one it launched and never a
+	// second wiring.
+	toolFactories map[string]ToolFactory
+	toolOptions   ToolOptions
 	// envScrub is the rule the MCP servers a session starts are launched
 	// with: the tools' scrub, and the names a launcher declared, which a
 	// server reaches only through an explicit manifest reference.
@@ -484,6 +525,23 @@ type ToolOptions struct {
 	// whose refusal points at another tool offers that tool only when
 	// this list holds its name.
 	ToolNames []string
+	// Offered are the entries the session's models reach through a tool that
+	// calls them: the catalog's registered commands, which the call tool runs,
+	// and the MCP tools the session's servers listed, which the MCP call runs.
+	// It is one snapshot, so a search hit, a prompt line and a refusal name the
+	// same dispatcher and the same argument. A build's snapshot holds no MCP
+	// entry, because a build starts no server; the attach the build set
+	// rebuilds the tools over the servers with the session's own.
+	Offered []cli.Offered
+	// MCP are the MCP servers a live session started, in selection order:
+	// the handles the binary's own launcher returned, which the binary's own
+	// tools over them read. The settings pass them through and never read
+	// them, because the settings hold no MCP client; a build has none, since
+	// a build starts no server. The attach the build set replaces the tools
+	// over the servers with per-session instances, so a tool built here
+	// describes the offering and the session's own describes what it can
+	// reach.
+	MCP []MCPRunning
 }
 
 // Build turns the settings into the runtime a session is built from.
@@ -652,6 +710,11 @@ func (r *Runtime) resolveProfile(opts BuildOptions, workingDir string) error {
 	// The registry is the settings' opt-in: a session whose settings name
 	// a registry offers its tools as well.
 	if err := r.addRegistryTools(opts); err != nil {
+		return err
+	}
+	// The MCP servers a profile selects are the session's own processes, and
+	// the model reaches their tools through one call beside the registry's.
+	if err := r.addMCPTools(opts); err != nil {
 		return err
 	}
 	// The core adds the job tools on its own whenever a linked tool may
@@ -1220,7 +1283,8 @@ func (r *Runtime) resolveMCPLauncher(opts BuildOptions) error {
 }
 
 // mcpAttach starts the servers the chosen profile selected for one
-// live session, and returns what that session runs when it ends.
+// live session, binds the tools over them to what this session started,
+// and returns what that session runs when it ends.
 //
 // The attach runs inside the session's construction, under the
 // session's own lifetime context, after the id and the working
@@ -1257,6 +1321,28 @@ func (r *Runtime) mcpAttach(ctx context.Context, a *poo.Attach) (func() error, e
 			Field:   "mcp.paths",
 			Message: err.Error(),
 			Err:     err,
+		}
+	}
+	// The tools over the servers read what this session started, so they are
+	// built again now: the build's instances describe the offering, and these
+	// describe what this session can reach. The entries are the session's
+	// snapshot, built once for both dispatchers, so a search hit and a catalog
+	// line name the same call. The search is bound with the call, so a session
+	// without the call returns no MCP entry at all — a search that named a
+	// tool the model cannot call would be worse than no hit.
+	if _, offered := a.Options.Tools[ToolCallMCP]; offered {
+		sessionOptions := r.toolOptions
+		sessionOptions.MCP = []MCPRunning{running}
+		sessionOptions.Offered = offeredEntries(r.offeredCatalog(), r.elevatedTools, []MCPRunning{running}, r.offersSearch())
+		for _, name := range []string{ToolCallMCP, cli.FindToolName} {
+			factory := r.toolFactories[name]
+			if factory == nil {
+				continue
+			}
+			if _, ok := a.Options.Tools[name]; !ok {
+				continue
+			}
+			a.Options.Tools[name] = factory(sessionOptions)
 		}
 	}
 	return running.Close, nil
@@ -1383,14 +1469,17 @@ func (r *Runtime) modelInputs() []poo.Modality {
 	return model.Inputs
 }
 
-// offersSearch reports whether the session offers the search over the catalog.
+// offersSearch reports whether the session searches the catalog.
 //
-// The count decides whether a search is worth offering, and the operator's
-// disabled list decides whether the session has one: a session that turned
-// find_tool off lists the catalog its prompt shows, and points the model at
-// nothing it cannot call.
+// The catalog's own count decides it, and the operator's disabled list decides
+// whether the session has the search at all: a session that turned find_tool
+// off lists the catalog its prompt shows, and points the model at nothing it
+// cannot call. A search another offering brought — the one over the MCP tools
+// — says nothing about this catalog: its entries are few enough to list, and a
+// catalog that vanished behind a search would cost a decision-model round trip
+// for a list the model could read.
 func (r *Runtime) offersSearch() bool {
-	return slices.Contains(r.toolNames, cli.FindToolName)
+	return r.findTool() && slices.Contains(r.toolNames, cli.FindToolName)
 }
 
 // offersRegistry reports whether the session offers the registry's tools.
@@ -1520,6 +1609,84 @@ func registryToolNames(find bool) []string {
 		return []string{cli.CallToolName, cli.FindToolName}
 	}
 	return []string{cli.CallToolName}
+}
+
+// addMCPTools offers the tools over the MCP servers a profile selects.
+//
+// A selection is a set of processes the session starts, and the model reaches
+// their tools through one call: a binary that links none cannot honour the
+// selection and says which tool is missing — the requirement is the declared
+// selection's, the way the launcher requirement is, whatever the manifests
+// load. The tools the session offers are the ones over the servers it will
+// start: a selection the manifests do not load starts nothing, so it earns
+// neither the call nor the search, and the listing judges the same way. The
+// search comes with the call when the session has a decision model, because a
+// server may list more tools than the prompt holds. Both are the profile's
+// offering, so a tool the settings disable does not come back here.
+//
+// Adding MCP tools never changes what the catalog's entries are offered as: a
+// session whose catalog is short enough to show still offers each entry as a
+// tool of its own.
+func (r *Runtime) addMCPTools(opts BuildOptions) error {
+	if len(r.MCPServers) == 0 {
+		return nil
+	}
+	disabled := r.disabledTools(r.Profile.Name)
+	names := r.mcpToolNames(disabled)
+	// A selected server is a process the session starts, and the model
+	// reaches its tools through this call alone: a binary that links no call
+	// would start servers nothing could use.
+	for _, name := range names {
+		if slices.Contains(disabled, name) || linksTool(opts, name) {
+			continue
+		}
+		return &Error{
+			Code:  CodeUnsupported,
+			Field: "mcp.paths",
+			Message: fmt.Sprintf("the profile %q selects the mcp servers [%s], and this binary does not link the %q tool",
+				r.profileName(opts), strings.Join(r.MCPServers, ", "), name),
+		}
+	}
+	// The offering is what the session reaches: the attach starts the
+	// servers the manifests load, judged by the same lookup, so a
+	// selection that loads none offers no tools over one.
+	selected := 0
+	for _, server := range r.MCPServers {
+		if _, ok := r.mcpSet.Lookup(server); ok {
+			selected++
+		}
+	}
+	if selected == 0 {
+		return nil
+	}
+	for _, name := range names {
+		if slices.Contains(disabled, name) || slices.Contains(r.toolNames, name) {
+			continue
+		}
+		r.Profile.Tools = append(r.Profile.Tools, toolInfo(opts.Tools[name]))
+		r.toolNames = append(r.toolNames, name)
+	}
+	return nil
+}
+
+// mcpToolNames names the tools over a session's MCP servers.
+//
+// The call is the one a selection needs. The search comes with it when the
+// session has a decision model to ask, because a server may list more tools
+// than the prompt holds; a session without one lists the tools the servers
+// offer instead. The search is bound with the call, so the operator's disabled
+// call leaves it out too: a session with no way to call an MCP tool needs no way
+// to search for one, and a search that named a tool the model cannot call would
+// be worse than no hit.
+func (r *Runtime) mcpToolNames(disabled []string) []string {
+	names := []string{ToolCallMCP}
+	if slices.Contains(disabled, ToolCallMCP) {
+		return names
+	}
+	if r.deciderErr == nil && r.decider != nil {
+		names = append(names, cli.FindToolName)
+	}
+	return names
 }
 
 // offersSideEffects reports whether a tool set can change anything.
@@ -1687,7 +1854,9 @@ func (r *Runtime) resolveProfiles(opts BuildOptions, definitions []profile.Profi
 	// declare — and by the registry it resolves: a feed the session will
 	// run is one the listing offers the job tools for, whatever manifest
 	// holds it. The selection itself still names what a session starts,
-	// and no listed tool stands for a server.
+	// and no listed tool stands for a server. The tool that calls them
+	// joins the listing too: a person reading what a profile offers reads
+	// what a session of it offers.
 	words := r.chosenWords(opts)
 	chosenKey := manifestKey{feeds: words.feeds, registry: words.registry, mcp: words.mcp}
 	sets := map[manifestKey]manifestPair{chosenKey: {feeds: r.Feeds, registry: r.loaded, mcp: r.mcpSet}}
@@ -1744,8 +1913,14 @@ func (r *Runtime) resolveProfiles(opts BuildOptions, definitions []profile.Profi
 		// a manifest's feed already holds is one the session refuses
 		// (checkMCPFeedNames), so that server's feeds earn no tools here:
 		// the profile is offered without them, and the warning is the
-		// manifest-load failure's.
+		// manifest-load failure's. The servers a selection the manifests
+		// do not load starts nothing, so it earns neither the feeds'
+		// tools nor the call over them.
+		selected := 0
 		for _, server := range variant.mcpServers {
+			if _, ok := pair.mcp.Lookup(server); ok {
+				selected++
+			}
 			decls := pair.mcp.Feeds(server)
 			if len(decls) == 0 {
 				continue
@@ -1790,6 +1965,19 @@ func (r *Runtime) resolveProfiles(opts BuildOptions, definitions []profile.Profi
 					}
 					resolved.Tools = append(resolved.Tools, toolInfo(opts.Tools[name]))
 				}
+			}
+		}
+		if selected > 0 && linksTool(opts, ToolCallMCP) {
+			// A session of this profile reaches its servers through these
+			// tools, so the listing names them the way that session does.
+			for _, name := range r.mcpToolNames(disabled) {
+				if !linksTool(opts, name) || slices.Contains(disabled, name) {
+					continue
+				}
+				if slices.ContainsFunc(resolved.Tools, func(tool poo.ToolInfo) bool { return tool.Name == name }) {
+					continue
+				}
+				resolved.Tools = append(resolved.Tools, toolInfo(opts.Tools[name]))
 			}
 		}
 		resolved.Tools = withJobTools(resolved.Tools, feeds)
@@ -2137,6 +2325,7 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 		Scrub:          credentialScrub,
 		ProtectedPaths: protected,
 		Registry:       r.offeredCatalog(),
+		Offered:        offeredEntries(r.offeredCatalog(), r.elevatedTools, nil, r.offersSearch()),
 		Search:         r.offersSearch(),
 		Inputs:         r.modelInputs(),
 		// A file that names an engine keeps it; an unset one gets the
@@ -2179,6 +2368,11 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 	}
 	tools, order = r.addElevatedTools(opts, toolOptions, tools, order)
 
+	// The attach builds the tools over the servers a session starts from these
+	// two values, so the offering a session reaches is one wiring and not a
+	// second one written beside it.
+	r.toolFactories = opts.Tools
+	r.toolOptions = toolOptions
 	r.Options.Tools = tools
 	r.Options.ToolOrder = order
 	return nil
