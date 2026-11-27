@@ -21,10 +21,10 @@ const (
 // api key beside the tokens object the CLI's sign-in wrote.
 //
 // The file is the CLI's. The CLI signs in and the CLI refreshes, and poo
-// reads the credential it holds. Keeping that true is the caller's word: a
+// reads the credential it holds. The caller's word keeps that true: a
 // read-only store (Credentials.ReadOnly) is the mode a shared file is read
-// in, and a read-only store never writes. The format refuses a write here
-// too, so a second writer cannot grow.
+// in. A read-only store never writes. The format refuses a write here too,
+// so a second writer cannot grow.
 type codexFormat struct{}
 
 // name is the shape's own name, for a report to say which file it read.
@@ -33,12 +33,11 @@ func (codexFormat) name() string { return FormatCodex }
 // credentials returns the file's credential, projected into the entry shape
 // the other two files spell.
 //
-// The projection is by the names the CLI spells: the tokens object's fields
-// are the access token, the refresh token and the account, and the entry's
-// expiry is read from the access token's own exp claim, because the file
-// records no expiry of its own. A file in api-key mode — an api key and no
-// tokens — holds no credential the Codex provider reads, and answers no
-// entry here.
+// The projection is by the names the CLI spells. The tokens object holds the
+// access token, the refresh token and the account. The expiry is read from
+// the access token's own exp claim, because the file records no expiry of
+// its own. A file in api-key mode — an api key and no tokens — holds no
+// credential the Codex provider reads, and answers no entry here.
 func (codexFormat) credentials(top map[string]json.RawMessage) (map[string]json.RawMessage, error) {
 	raw, ok := top[codexTokensField]
 	if !ok {
