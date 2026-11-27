@@ -232,7 +232,7 @@ func (p *localProcess) Wait() (int, error) {
 			case <-drained:
 			case <-deadline:
 				p.killGroup(syscall.SIGKILL)
-				p.flushPipes()
+				exec.FlushPipes(p.pipes)
 				<-drained
 			}
 		}
@@ -255,12 +255,6 @@ func (p *localProcess) Stopped() bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.stopped
-}
-
-func (p *localProcess) flushPipes() {
-	for _, pipe := range p.pipes {
-		_ = pipe.SetReadDeadline(time.Now().Add(pipeFlushGrace))
-	}
 }
 
 // closePipes closes the read ends the wait has finished with.

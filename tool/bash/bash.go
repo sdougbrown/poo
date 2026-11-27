@@ -33,11 +33,6 @@ const (
 	// KillGrace is how long the process group gets between SIGTERM and
 	// SIGKILL.
 	KillGrace = 2 * time.Second
-	// pipeFlushGrace is the read deadline the teardown sets on the
-	// capture pipes before it closes them: bytes already in the pipe's
-	// buffer go to the sink, and a drain still blocked ends with the
-	// deadline instead of holding the close.
-	pipeFlushGrace = 250 * time.Millisecond
 	// ObservationCapMax is the largest observation the model ever sees.
 	ObservationCapMax = caps.ObservationMax
 	// CharsPerToken is the plan's estimate of characters per token.
