@@ -826,7 +826,7 @@ func (s *Session) startJobCall(owner *callOwner, turn int, handle string, call T
 	if !ok {
 		// The admission refused the call: no free slot, or a duplicate
 		// of a running job. The failure is recoverable: the model sees
-		// the message and may wait or cancel one.
+		// the message and may cancel one or end its turn.
 		text := TooManyJobsText
 		if refusal != "" {
 			text = refusal
