@@ -162,8 +162,9 @@ func (t *Transport) tools(info poo.ModelInfo, specs []poo.ToolSpec) ([]responses
 // that controls its reasoning another way is therefore a configuration error.
 // Such a request would silently reason as much as it likes.
 //
-// Off is spelled "none" here whatever word the model's catalog uses: the
-// endpoint takes none, and a model told off is asked for none.
+// The default names the request that carries no reasoning, and it sends
+// none. Off is spelled "none" here whatever word the model's catalog
+// uses: the endpoint takes none, and a model told off is asked for none.
 func (t *Transport) shapeReasoning(req poo.ChatRequest, info poo.ModelInfo, out *responses.Request) error {
 	setting := t.reasoningSetting(req)
 	fields, err := info.ReasoningFields(setting)
@@ -183,20 +184,14 @@ func (t *Transport) shapeReasoning(req poo.ChatRequest, info poo.ModelInfo, out 
 		effort = value
 		off = slices.Contains(poo.ReasoningOffWords, effort)
 	}
+	if effort == "" {
+		// No control was asked for: the default leaves the endpoint's own
+		// effort in charge, and the request names no reasoning.
+		return nil
+	}
 	if off {
 		// The endpoint spells off "none" whatever word the model's
 		// catalog uses, and there is no reasoning to summarize.
-		out.Reasoning = &responses.Reasoning{Effort: "none"}
-		return nil
-	}
-	if effort == "" && info.Reasoning.Mode != poo.ReasoningEffort {
-		// The model controls no reasoning, or it was told off and its
-		// control says so by sending nothing.
-		return nil
-	}
-	if effort == "" {
-		// A reasoning model that is told off still asks the endpoint for
-		// no reasoning: the level's own spelling of off is "none".
 		out.Reasoning = &responses.Reasoning{Effort: "none"}
 		return nil
 	}
