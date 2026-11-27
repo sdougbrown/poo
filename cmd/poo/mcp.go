@@ -157,12 +157,12 @@ func handleMCPList(inv clicontract.Invocation, stdout, stderr io.Writer) exit {
 		server, _ := set.Lookup(name)
 		source, _ := set.Source(name)
 		entry := listed{Name: name, Source: source, Args: []string{}, Env: map[string]string{}}
-		entry.Command = render(server.Command)
+		entry.Command = server.Command.Source()
 		for _, arg := range server.Args {
-			entry.Args = append(entry.Args, render(arg))
+			entry.Args = append(entry.Args, arg.Source())
 		}
 		for _, key := range sortedEnvKeys(server.Env) {
-			entry.Env[key] = render(server.Env[key])
+			entry.Env[key] = server.Env[key].Source()
 		}
 		servers = append(servers, entry)
 	}
@@ -184,13 +184,6 @@ func handleMCPList(inv clicontract.Invocation, stdout, stderr io.Writer) exit {
 	}
 	_ = w.Flush()
 	return exit{}
-}
-
-// render shows one template the way the manifest writes it: the
-// listing is a reading of the file, not a resolution of one session's
-// environment.
-func render(template manifest.Template) string {
-	return template.Source()
 }
 
 // sortedEnvKeys returns an environment's keys, sorted.
@@ -224,10 +217,12 @@ func theSessionPaths(settings *config.Settings, workingDir string, o mcpOptions)
 	return paths, err
 }
 
-// theProfileName resolves the profile the session runs under, the way a
-// build's own resolution does: the flag's name, then the settings',
-// then the binary's default. The binary's default is a linked profile,
-// whose word is the settings' own.
+// theProfileName resolves the profile the session runs under: the
+// flag's name, then the settings'. The build's own resolution falls on
+// to the binary's default and the first linked profile, but a name only
+// the binary links is not one the settings resolution carries, and it
+// holds no mcp_defaults of its own — so the settings' word stands, the
+// word this resolution answers with.
 func theProfileName(settings *config.Settings, fromFlag string) string {
 	if fromFlag != "" {
 		return fromFlag

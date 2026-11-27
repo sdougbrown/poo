@@ -1,7 +1,6 @@
 package config
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 )
@@ -26,7 +25,7 @@ func MCPManifestPaths(settings *Settings, workingDir string, extra []string, on 
 	}
 	resolved, err := againstDir(paths, workingDir)
 	if err != nil {
-		return nil, fromDefaultsOnly, fmt.Errorf("mcp.paths: %w", err)
+		return nil, fromDefaultsOnly, err
 	}
 	return resolved, fromDefaultsOnly, nil
 }

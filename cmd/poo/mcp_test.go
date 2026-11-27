@@ -10,6 +10,7 @@ import (
 
 	"github.com/sdougbrown/poo/config"
 	"github.com/sdougbrown/poo/mcp/manifest"
+	"github.com/sdougbrown/poo/pootest"
 )
 
 // TestMCPSelectionWithoutALauncherFailsTheBuild covers the binary's
@@ -159,8 +160,7 @@ func loadManifests(t *testing.T, dir string) (*manifest.Set, error) {
 func theIsolatedHome(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "xdg"))
+	pootest.IsolateUserConfigDirT(t, home)
 	dir, err := config.UserConfigDir()
 	if err != nil {
 		t.Fatal(err)
@@ -744,4 +744,27 @@ func readFile(t *testing.T, path string) string {
 		t.Fatal(err)
 	}
 	return string(body)
+}
+
+func TestTheMCPAddRefusesANameASiblingInScopeHolds(t *testing.T) {
+	globalDir := theIsolatedHome(t)
+	theMCPManifest(t, filepath.Join(globalDir, "sibling.json"), map[string]any{
+		"fixture": map[string]any{"command": "echo"},
+	})
+	// The settings turn the defaults off and name no paths, so the
+	// session's resolution is empty: only the scope's own directory,
+	// which the edit joins, can hold the name.
+	settings := theMCPSettings(t, t.TempDir())
+
+	_, errOut := captureBoth(t, func() {
+		if code := run([]string{"mcp", "add", "fixture", "--global", "--settings", settings, "--", "echo", "hi"}); code != usageExitCode {
+			t.Errorf("poo mcp add exited with %d, want %d", code, usageExitCode)
+		}
+	})
+	if !strings.Contains(errOut, "sibling.json") {
+		t.Errorf("the diagnostics are %q, want them to name the sibling file", errOut)
+	}
+	if _, err := os.Stat(filepath.Join(globalDir, "mcp.json")); !os.IsNotExist(err) {
+		t.Errorf("the refused add left %s behind", filepath.Join(globalDir, "mcp.json"))
+	}
 }
