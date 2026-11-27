@@ -414,9 +414,12 @@ func (s *fakeServer) modelLevels(name string) ([]string, bool) {
 
 // acceptsLocked reports whether the session's model takes a level.
 //
+// Off and the default are beside the declared list, as CheckReasoning
+// takes them: every model accepts both, whatever its list holds.
+//
 // The caller holds the server's lock.
 func (s *fakeServer) acceptsLocked(level string) bool {
-	if level == "" {
+	if level == "" || level == "off" || level == "default" {
 		return true
 	}
 	levels, _ := s.modelLevels(s.chat)

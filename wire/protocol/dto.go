@@ -317,8 +317,8 @@ type ConfigureParams struct {
 	// Models changes the models the session talks to.
 	Models *ModelRoles `json:"models,omitempty"`
 	// Reasoning is the chat model's reasoning level: default, minimal, low,
-	// medium, high, xhigh, or a token budget such as "4096". Empty leaves
-	// the level the session runs at unchanged.
+	// medium, high, xhigh, off, or a token budget such as "4096". Empty
+	// leaves the level the session runs at unchanged.
 	//
 	// The level takes effect at the next run. A level the chat model does
 	// not take is refused, and the refusal names the levels it does.

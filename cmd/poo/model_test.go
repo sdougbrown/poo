@@ -112,6 +112,27 @@ func TestTheModelDescriptorComesFromTheFlags(t *testing.T) {
 	}
 }
 
+// TestTheOffFlagKeepsTheModelOwnControl covers the flag's beside-the-list
+// values: "off" and "default", in any case the operator types, leave the
+// resolved model's reasoning control alone, so the toggle family keeps
+// its switch and a control-less model stays control-less. A regression
+// that forces the effort control on for them sends an effort field a
+// toggle endpoint ignores, which this test fails on.
+func TestTheOffFlagKeepsTheModelOwnControl(t *testing.T) {
+	for _, flag := range []string{"off", "OFF", "Default", "default"} {
+		t.Run(flag, func(t *testing.T) {
+			o := runOptions{
+				endpointFlags:   endpointFlags{endpoint: "http://localhost:4000/v1", modelID: "gemma4", contextLimit: 32768, toolsMode: "native"},
+				reasoningEffort: flag,
+			}
+			info := modelFromFlags(t, &o)
+			if info.Reasoning.Mode != poo.ReasoningToggle {
+				t.Errorf("the reasoning control is %q, want %q", info.Reasoning.Mode, poo.ReasoningToggle)
+			}
+		})
+	}
+}
+
 // TestTheModelWithoutAReasoningFlagHasTheFamilyRule covers the model
 // that is asked to think by nobody: the flags name no control, and the
 // catalog's family rule does. The rule knows how the family thinks,

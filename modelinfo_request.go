@@ -235,6 +235,26 @@ var ReasoningLevelNames = []string{"default", "minimal", "low", "medium", "high"
 // first entry, "off", is sent only when the model declares "off" itself.
 var ReasoningOffWords = []string{"off", "none"}
 
+// ForcesEffortControl reports whether a reasoning setting names an effort
+// level, the only setting that justifies overwriting a resolved model's
+// reasoning control with the effort one.
+//
+// The sites that shape a model from a recorded or commanded level — the
+// run command's flag, the eval catalog and the restore — force the
+// effort control when the setting names a level, because a level is
+// meaningless to a model whose control is a toggle, a budget or none.
+// "off" and "default" are beside the forcing: off asks the model's own
+// control for quiet, and default asks for no field, so neither may
+// overwrite the control the model resolved to. The setting is
+// normalized before the check, so "OFF" reads as the word it is.
+func ForcesEffortControl(setting string) bool {
+	switch strings.ToLower(strings.TrimSpace(setting)) {
+	case "minimal", "low", "medium", "high", "xhigh":
+		return true
+	}
+	return false
+}
+
 // ReasoningSetting is the settings' reasoning value.
 //
 // The setting is the default, off, an effort level or a token budget.

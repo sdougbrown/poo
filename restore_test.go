@@ -806,6 +806,40 @@ func TestTheRestoreSendsTheRecordedToolsModeAndReasoning(t *testing.T) {
 	}
 }
 
+// TestTheRestoreKeepsTheResolvedControlWhenTheRecordedLevelIsBesideTheList
+// covers the forcing rule's other side: a recorded "off" is beside the
+// declared levels, so the resolved model keeps its own reasoning control,
+// and the restored request shapes itself by that control, not by an
+// effort one. A regression that forces on "off" sends an effort field to
+// a toggle or budget model, which this test fails on.
+func TestTheRestoreKeepsTheResolvedControlWhenTheRecordedLevelIsBesideTheList(t *testing.T) {
+	for _, recorded := range []string{"off", "default", "OFF"} {
+		t.Run(recorded, func(t *testing.T) {
+			created := header("s1")
+			created.ReasoningEffort = recorded
+			// The recorded role is the model the session resolved to, and
+			// this one declares a toggle control, the way a gemma-family
+			// model does.
+			created.Roles.Chat.Reasoning = poo.ReasoningControl{Mode: poo.ReasoningToggle, Param: poo.ReasoningPathToggle}
+			tr := scripted([]fakeResponse{{text: "done"}})
+			opts := restoreOptions(t, tr, &recordingSink{})
+			sess, _, err := poo.Restore(opts, []poo.Record{created})
+			if err != nil {
+				t.Fatalf("restoring the session: %v", err)
+			}
+			t.Cleanup(func() { sess.Close() })
+			runSession(t, sess, "again")
+			requests := tr.Requests()
+			if len(requests) != 1 {
+				t.Fatalf("the restored session made %d requests, want 1", len(requests))
+			}
+			if got := requests[0].ModelInfo.Reasoning.Mode; got != poo.ReasoningToggle {
+				t.Errorf("the restored request's reasoning mode is %q, want %q", got, poo.ReasoningToggle)
+			}
+		})
+	}
+}
+
 // TestTheRestoreRefusesADurableSession covers the mode check on the core
 // path: a durable session is not one this build continues.
 func TestTheRestoreRefusesADurableSession(t *testing.T) {
