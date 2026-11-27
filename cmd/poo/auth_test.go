@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -651,14 +650,17 @@ func TestTheAuthStatusNamesTheReadOnlyMode(t *testing.T) {
 	}
 }
 
-// TestTheAuthStatusLeavesAnUnreadableExpiryEmpty covers the access token that
-// names no exp: the report carries no expiry at all, not the epoch a zero
-// millisecond count renders as.
+// TestTheAuthStatusLeavesAnUnreadableExpiryEmpty covers the access token
+// whose exp claim cannot be read: a codex-shaped file whose access token is
+// not a JWT stores no expiry, and the report renders none — not the epoch a
+// zero millisecond count spells.
 func TestTheAuthStatusLeavesAnUnreadableExpiryEmpty(t *testing.T) {
 	dir := t.TempDir()
 	credential := filepath.Join(dir, "auth.json")
-	// The access token is not a JWT, so its expiry cannot be read.
-	body := fmt.Sprintf(`{"openai-codex":{"type":"oauth","access":"not-a-jwt","refresh":"a-refresh","expires":%d,"accountId":"acct-test"}}`, time.Now().Add(time.Hour).UnixMilli())
+	body := `{
+  "OPENAI_API_KEY": null,
+  "tokens": {"access_token": "not-a-jwt", "refresh_token": "a-refresh", "account_id": "acct-test"}
+}`
 	if err := os.WriteFile(credential, []byte(body), 0o600); err != nil {
 		t.Fatalf("writing the credential file: %v", err)
 	}
@@ -672,7 +674,13 @@ func TestTheAuthStatusLeavesAnUnreadableExpiryEmpty(t *testing.T) {
 	if strings.Contains(out, "1970") {
 		t.Errorf("the report is %q, want no expiry rendered from a zero time", out)
 	}
-	if !strings.Contains(out, "EXPIRES") {
-		t.Errorf("the report is %q, want the expiry line", out)
+	expires := ""
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "EXPIRES") {
+			expires = line
+		}
+	}
+	if !strings.Contains(expires, "none") {
+		t.Errorf("the report is %q, want the expiry line to say none", out)
 	}
 }

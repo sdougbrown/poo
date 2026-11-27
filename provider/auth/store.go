@@ -546,13 +546,20 @@ func (c Credentials) oauthToken(p Provider, stored credential) (Token, error) {
 
 // readOnlyToken returns the credential the file holds, as it is.
 //
-// A read-only file is read without the lock: nothing is traded, so there is
-// nothing two writers could do to each other. The credential is used until
-// its access token has expired, with no leeway — there is no refresh to
-// front-run, and a token the file holds is one to send. An expired one is the
-// failure a caller cannot get past on its own, reported as ErrReadOnly with
-// the moment the token stopped working.
-func (c Credentials) readOnlyToken(p Provider) (Token, error) {
+// The read holds the lock even though nothing is written: the owner of the
+// file writes in place, and a read in that window would see a truncated file.
+// The lock is the owner's own, so the wait is the owner finishing its write,
+// not a trade poo could make. The credential is used until its access token
+// has expired, with no leeway — there is no refresh to front-run, and a token
+// the file holds is one to send. An expired one is the failure a caller
+// cannot get past on its own, reported as ErrReadOnly with the moment the
+// token stopped working.
+func (c Credentials) readOnlyToken(ctx context.Context, p Provider) (Token, error) {
+	hold, err := acquire(ctx, c.Path, c.wait())
+	if err != nil {
+		return Token{}, err
+	}
+	defer hold.release()
 	stored, _, err := c.read(p)
 	if err != nil {
 		return Token{}, err
@@ -575,7 +582,7 @@ func (c Credentials) token(ctx context.Context, p Provider, force bool) (Token, 
 		return Token{}, errors.New("auth: no auth.json path")
 	}
 	if c.ReadOnly {
-		return c.readOnlyToken(p)
+		return c.readOnlyToken(ctx, p)
 	}
 	var token Token
 	_, err := c.writeLocked(ctx, false, func(doc document) (Status, bool, error) {
