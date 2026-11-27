@@ -2,6 +2,7 @@ package poo_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/tool/bash"
+	"github.com/sdougbrown/poo/tool/cliregistry"
 )
 
 // TestAMovedCallTimesOutUnderTheJobTimeout covers the rule: a moved
@@ -203,5 +205,81 @@ func waitForFile(t *testing.T, dir, name string, within time.Duration) {
 			t.Fatalf("%s never appeared", name)
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// TestBackgroundCallMovesARunningCLI covers the rule: a call_cli call
+// moves to a job while it runs, and the job delivers the command's
+// output once it ends.
+func TestBackgroundCallMovesARunningCLI(t *testing.T) {
+	dir := t.TempDir()
+	sink := &recordingSink{}
+	body, err := json.Marshal(map[string]any{"version": 1, "tools": map[string]any{
+		"hold": map[string]any{
+			"description": "Hold until released",
+			"command":     []string{"/bin/bash", "-c", "echo $$ > started; until [ -f release ]; do /bin/sleep 0.02; done; echo held-$$"},
+			"inputSchema": map[string]any{"type": "object", "properties": map[string]any{}, "additionalProperties": false},
+		},
+	}})
+	if err != nil {
+		t.Fatalf("encoding the manifest: %v", err)
+	}
+	manifest := filepath.Join(dir, "hold.json")
+	if err := os.WriteFile(manifest, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := cliregistry.Load(manifest)
+	if err != nil {
+		t.Fatalf("loading the registry: %v", err)
+	}
+	s := newTestSession(t, poo.Options{
+		Transport: scripted([]fakeResponse{
+			{calls: []poo.ToolCall{{CallID: "one", Name: "call_cli", Arguments: []byte(`{"command":"hold"}`)}}},
+			{text: "done"},
+		}),
+		Tools: map[string]poo.Tool{"call_cli": cliregistry.NewCall(catalog)}, Sink: sink, WorkingDir: dir,
+		Model: poo.ModelInfo{ModelID: "test-model", ContextLimit: 32768},
+	})
+	done := make(chan error, 1)
+	go func() {
+		_, err := s.Prompt(context.Background(), "run it")
+		done <- err
+	}()
+	waitForFile(t, dir, "started", 10*time.Second)
+	var runID string
+	for _, rec := range sink.allRecords() {
+		if r, ok := rec.(*poo.ToolCallRecord); ok && r.Handle == "r1" {
+			runID = r.RunID
+		}
+	}
+	jobID, err := s.BackgroundCall(runID, "r1")
+	if err != nil {
+		t.Fatalf("moving the held call: %v", err)
+	}
+	if jobID != "j1" {
+		t.Errorf("the move returned job %q; want j1", jobID)
+	}
+	var started bool
+	for _, rec := range sink.allRecords() {
+		if r, ok := rec.(*poo.ToolResultRecord); ok && r.Outcome == poo.OutcomeStarted {
+			started = strings.Contains(r.Text, "job j1")
+		}
+	}
+	if !started {
+		t.Error("the foreground run did not record the started receipt")
+	}
+	if err := os.WriteFile(filepath.Join(dir, "release"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	waitForSink(t, sink, "the moved command's output", func() bool {
+		for _, rec := range sink.allRecords() {
+			if r, ok := rec.(*poo.JobEndedRecord); ok && r.Outcome == poo.OutcomeOK && strings.Contains(r.Text, "held-") {
+				return true
+			}
+		}
+		return false
+	})
+	if err := <-done; err != nil {
+		t.Fatal(err)
 	}
 }
