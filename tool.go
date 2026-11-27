@@ -323,6 +323,19 @@ type BackgroundShorthander interface {
 	BackgroundShorthand(raw json.RawMessage) (json.RawMessage, error)
 }
 
+// BackgroundableCaller is implemented by a tool whose running call can
+// finish under a job without restarting the process, so the core may
+// move the call into a session job while it runs.
+//
+// The core consults it for a top-level call in a tool whose background
+// mode allows jobs; the tool.call event carries the answer as
+// "backgroundable".
+type BackgroundableCaller interface {
+	// CanBackgroundRunningCall reports that the tool's running call
+	// can finish under a job without restarting.
+	CanBackgroundRunningCall() bool
+}
+
 // ErrInvalidArgs marks a validation failure. It is recoverable: the model
 // sees the message and may correct the call.
 type ErrInvalidArgs struct {

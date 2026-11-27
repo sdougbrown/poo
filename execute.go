@@ -865,7 +865,7 @@ func (s *Session) backgroundableCall(tool, parent string) bool {
 	if !ok {
 		return false
 	}
-	eligible, ok := t.(interface{ CanBackgroundRunningCall() bool })
+	eligible, ok := t.(BackgroundableCaller)
 	return ok && eligible.CanBackgroundRunningCall() && parent == "" && s.backgroundModeOf(tool) == BackgroundAllowed
 }
 
