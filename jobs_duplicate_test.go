@@ -69,8 +69,9 @@ func TestAJobThatMatchesARunningJobIsRefused(t *testing.T) {
 			if !r.IsError {
 				t.Errorf("the reordered call was admitted, want refused: %q", r.Text)
 			}
-			if !strings.Contains(r.Text, "already running as job j1") {
-				t.Errorf("the refusal is %q, want it to name the running job j1", r.Text)
+			if !strings.Contains(r.Text, "already running as job j1") ||
+				!strings.Contains(r.Text, "end your turn to wait") {
+				t.Errorf("the refusal is %q, want it to name the running job j1 and the end-turn guidance", r.Text)
 			}
 			refused = true
 		case "call_3":
