@@ -40,9 +40,13 @@ type terminal struct {
 	// vt reads the same bytes the terminal is sent, so a test asserts
 	// the screen the person sees instead of the stream that drew it.
 	vt vt10x.Terminal
-	// sig is the draw signal: the next batch of drawn bytes closes it,
-	// so a wait ends on the draw instead of a poll.
+	// sig is the draw signal: it closes when the drawn bytes have gone
+	// quiet, so a wait ends on the settled frame instead of a poll.
 	sig changedSignal
+	// frameTimer debounces sig: the renderer's frame spans several reads
+	// and lands the cursor last, so a signal per read would wake a wait
+	// between the two.
+	frameTimer *time.Timer
 }
 
 // openTerminal opens a terminal pair and drains what is drawn on it.
@@ -98,6 +102,12 @@ func (term *terminal) resize(cols, rows int) {
 	}
 }
 
+// frameQuiet is how long the drawn bytes must go quiet before the draw
+// signal fires. The renderer writes a frame in several batches and places
+// the cursor last, so a signal per read would wake a wait between the
+// content and the cursor it belongs with.
+const frameQuiet = 20 * time.Millisecond
+
 // drain holds what the repl drew.
 func (term *terminal) drain() {
 	buf := make([]byte, 4096)
@@ -110,12 +120,25 @@ func (term *terminal) drain() {
 				term.vt.Write(buf[:n])
 			}
 			term.mu.Unlock()
-			term.signalChanged()
+			term.signalSettled()
 		}
 		if err != nil {
 			return
 		}
 	}
+}
+
+// signalSettled fires the draw signal once the drawn bytes have gone
+// quiet for frameQuiet. Each batch pushes the fire time back, so the
+// signal closes only when a frame's writes have stopped arriving and
+// the state a wait reads is the one the frame settled.
+func (term *terminal) signalSettled() {
+	term.mu.Lock()
+	defer term.mu.Unlock()
+	if term.frameTimer != nil {
+		term.frameTimer.Stop()
+	}
+	term.frameTimer = time.AfterFunc(frameQuiet, term.sig.signal)
 }
 
 // changed hands out the draw signal.
