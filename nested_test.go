@@ -858,6 +858,78 @@ func TestANestedCallSettledWithTheRunLeavesNoHistory(t *testing.T) {
 	}
 }
 
+// TestACallerCancelledNestedCallIsNotToldTheRunSettled covers the note
+// a nested call's carried result gets when the caller's own context
+// ended it: the call ends because its owner stopped, not because the
+// run settled, so the note names neither the run's settle nor a user
+// interrupt.
+func TestACallerCancelledNestedCallIsNotToldTheRunSettled(t *testing.T) {
+	blocker := &namedTool{echoTool: echoTool{
+		call: func(ctx context.Context) (poo.ToolResult, error) {
+			<-ctx.Done()
+			return poo.ToolResult{Text: "partial output"}, nil
+		},
+	}, name: "blocker"}
+	nest := &nestedTool{script: []string{`blocker {}`}}
+	sink := &recordingSink{}
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "nest", Arguments: json.RawMessage(`{}`)}}},
+		{text: "done"},
+	})
+	opts := poo.Options{
+		Transport:    tr,
+		Tools:        map[string]poo.Tool{"nest": nest, "blocker": blocker},
+		ToolOrder:    []string{"nest", "blocker"},
+		Sink:         sink,
+		SessionID:    "s1",
+		Model:        poo.ModelInfo{ModelID: "test-model", ContextLimit: 32768},
+		SystemPrompt: "the system prompt",
+		WorkingDir:   t.TempDir(),
+	}
+	s := newTestSession(t, opts)
+	if _, err := s.Prompt(context.Background(), "start"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	// The nested call is in flight when its caller's context ends: the
+	// batch runs under a context of the tool's own, which the test
+	// cancels directly once the nested call has been issued.
+	seamCtx, stopSeam := context.WithCancel(context.Background())
+	nest.seamCtx = seamCtx
+	waitFor(t, "the nested call to start", func() bool {
+		for _, ev := range s.Events() {
+			if ev.Name != poo.EventToolCall || ev.Payload["parent"] != "r1" {
+				continue
+			}
+			return ev.Payload["handle"] != ""
+		}
+		return false
+	})
+	stopSeam()
+	if _, err := s.Wait(context.Background()); err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+
+	nest.mu.Lock()
+	results := nest.results
+	nest.mu.Unlock()
+	if len(results) != 1 {
+		t.Fatalf("the seam returned %d results, want 1", len(results))
+	}
+	res := results[0]
+	if res.Outcome != poo.OutcomeCancelled {
+		t.Errorf("the nested call's outcome is %q, want cancelled", res.Outcome)
+	}
+	if !strings.Contains(res.Text, "partial output") {
+		t.Errorf("the nested call's text is %q, want the partial output", res.Text)
+	}
+	if strings.Contains(res.Text, poo.CancelledSettlingText) {
+		t.Errorf("the nested call's text is %q, want no settling note", res.Text)
+	}
+	if strings.Contains(res.Text, poo.CancelledInterruptedText) {
+		t.Errorf("the nested call's text is %q, want no user-interrupt note", res.Text)
+	}
+}
+
 // TestASkippedNestedCallIsData covers the script's view of a nested call
 // that never ran: the first call of a side-effecting batch blocks until
 // the run is cancelled, and the second call does not start.
