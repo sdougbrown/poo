@@ -555,11 +555,16 @@ func (c Credentials) oauthToken(p Provider, stored credential) (Token, error) {
 // cannot get past on its own, reported as ErrReadOnly with the moment the
 // token stopped working.
 func (c Credentials) readOnlyToken(ctx context.Context, p Provider) (Token, error) {
-	hold, err := acquire(ctx, c.Path, c.wait())
-	if err != nil {
-		return Token{}, err
+	// A file that is not there is not mid-write, and a lock guards nothing:
+	// the read answers no credential, the way every other path does, instead
+	// of a lock error about a directory that does not exist.
+	if _, err := os.Stat(c.Path); !errors.Is(err, fs.ErrNotExist) {
+		hold, err := acquire(ctx, c.Path, c.wait())
+		if err != nil {
+			return Token{}, err
+		}
+		defer hold.release()
 	}
-	defer hold.release()
 	stored, _, err := c.read(p)
 	if err != nil {
 		return Token{}, err

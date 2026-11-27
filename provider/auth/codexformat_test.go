@@ -259,3 +259,16 @@ func TestACodexFileWithoutTheFlagIsNeverTraded(t *testing.T) {
 		t.Errorf("the file changed under a trade that was refused")
 	}
 }
+
+// TestAReadOnlyAccessToAMissingFileIsNoCredential covers the fresh-install
+// case: the settings share a credential file the owning tool has not created
+// yet. The answer is the no-credential one, not a lock's storage failure —
+// a file that is not there is not mid-write, and no lock guards it.
+func TestAReadOnlyAccessToAMissingFileIsNoCredential(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "missing-dir", "auth.json")
+	credentials := auth.Credentials{Path: path, ReadOnly: true, Now: clock}
+
+	if _, err := credentials.Access(context.Background(), auth.Codex); !errors.Is(err, auth.ErrNoCredential) {
+		t.Errorf("the missing file failed as %v, want ErrNoCredential", err)
+	}
+}
