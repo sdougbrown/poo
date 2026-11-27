@@ -46,9 +46,10 @@
 //     of the tools names it without linking the client that speaks the
 //     protocol
 //   - the mcp package, the client itself, may import the standard
-//     library, the exec package, the mcp manifests and the wire vocabulary,
-//     plus the SDK it wraps: it is the one package that imports the go-sdk,
-//     so a binary that links no launcher for it never links the SDK at all
+//     library, the core package, the exec package, the feed package, the
+//     mcp manifests, the wire vocabulary and the SDK it wraps: it is the
+//     one package that imports the go-sdk, so a binary that links no
+//     launcher for it never links the SDK at all
 //   - the server package may import the packages it composes: the core,
 //     the settings, the profiles, the executors, the permission policy,
 //     the sessions, the catalogs, the feeds and the wire
@@ -167,7 +168,11 @@ func (c Checker) rules() []rule {
 		// The client itself: it launches the declared servers with the
 		// environment the exec package's rules scrub, and it wraps the
 		// SDK alone, so no other package may reach the SDK through it.
-		{path: m + "/mcp", allowed: []string{m + "/exec", m + "/mcp/manifest", m + "/mcp/wire"}, external: true},
+		// The client itself: it launches the declared servers with the
+		// environment the exec package's rules scrub, its resource feeds run
+		// as the core's feed runners, and it wraps the SDK alone, so no other
+		// package may reach the SDK through it.
+		{path: m + "/mcp", allowed: []string{m, m + "/exec", m + "/feed", m + "/mcp/manifest", m + "/mcp/wire"}, external: true},
 		{path: m + "/scopeschema"},
 		{
 			path: m + "/server",

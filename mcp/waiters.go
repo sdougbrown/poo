@@ -16,6 +16,17 @@ import (
 // The waiters are per server, because the notifications are: a URI two
 // servers hold is two resources, and each server's waiters answer to
 // that server alone.
+//
+// Updates reach two shapes of registration. A waiter is a channel of
+// one signal, fired once and then gone: it suits the attempt that
+// asks one question — whether the subscription was acknowledged — and
+// an attempt that ended never hears a notification that arrives late.
+// A listener is the running feed's own registration: it is called for
+// every update until it is stopped, because a feed that re-registered
+// per update would leave a window in which an update lands on no one,
+// and a drain the feed never learns of would sit unread. One
+// notification, one routing: both shapes are answered by the same
+// updated call, which is the only path an update takes.
 
 // acknowledgedMethod is the notification a server sends when it
 // grants the subscriptions a client asked to listen for. The SDK has
@@ -28,13 +39,17 @@ const acknowledgedMethod = "notifications/subscriptions/acknowledged"
 //
 // A waiter is a channel of one signal, fired once and then gone: an
 // attempt that ended never hears a notification that arrives late, and
-// a late notification never satisfies a later attempt, because the
-// later attempt registered a waiter of its own.
+// the waiter a later attempt registers is answered only by a
+// notification its own URI carries.
 type resourceWaiters struct {
 	// mu guards both tables.
 	mu sync.Mutex
 	// updates holds the update waiters, by URI.
 	updates map[string][]chan struct{}
+	// listeners holds the update listeners, by URI: the running feeds'
+	// own registrations, called for every update until they are
+	// stopped.
+	listeners map[string][]*listener
 	// acks holds the acknowledgement waiters, by URI.
 	acks map[string][]chan bool
 }
@@ -65,10 +80,11 @@ func (w *resourceWaiters) dropUpdate(uri string, ch chan struct{}) {
 }
 
 // waitAck registers a waiter for the URI's acknowledgement. The
-// channel receives one answer: true when the acknowledgement grants
-// the URI, false when it does not. The waiter answers the first
-// acknowledgement and then is gone, so a grant that names another
-// resource ends the wait with its own answer.
+// channel receives one answer: true when an acknowledgement grants
+// the URI, false when its own stream's subscription was refused. The
+// waiter answers one acknowledgement and then is gone, and an
+// acknowledgement that names another resource is not this waiter's
+// answer: another feed's grant leaves it waiting for its own.
 func (w *resourceWaiters) waitAck(uri string) (<-chan bool, func()) {
 	ch := make(chan bool, 1)
 	w.mu.Lock()
@@ -97,6 +113,7 @@ func (w *resourceWaiters) updated(uri string) {
 	w.mu.Lock()
 	waiting := w.updates[uri]
 	delete(w.updates, uri)
+	hearing := w.listeners[uri]
 	w.mu.Unlock()
 	for _, ch := range waiting {
 		select {
@@ -104,32 +121,103 @@ func (w *resourceWaiters) updated(uri string) {
 		default:
 		}
 	}
+	// The listeners are called with no lock held, in the order they
+	// registered, so a listener may register and stop listeners itself.
+	for _, l := range hearing {
+		l.called()
+	}
 }
 
-// acknowledged answers every registered acknowledgement waiter with
-// whether the server granted its URI. The acknowledgement is one
-// answer for the whole listen: every waiter is answered and
-// unregistered, whatever its URI came to.
+// listener is one running feed's update registration. The pointer is
+// the registration's identity: a stop removes the listener its own
+// call registered, where a bare func value cannot say which one it
+// was.
+type listener struct {
+	// called runs when the URI is updated.
+	called func()
+}
+
+// listenUpdates registers a listener the URI's updates call until stop
+// unregisters it.
+//
+// The listener is the running feed's own registration, and it belongs
+// to one attempt: the attempt stops it when it ends, so a later
+// attempt hears only the updates its own listener carries, the way a
+// later attempt waits for an acknowledgement of its own.
+func (w *resourceWaiters) listenUpdates(uri string, listen func()) (stop func()) {
+	l := &listener{called: listen}
+	w.mu.Lock()
+	if w.listeners == nil {
+		w.listeners = map[string][]*listener{}
+	}
+	w.listeners[uri] = append(w.listeners[uri], l)
+	w.mu.Unlock()
+	return func() {
+		w.mu.Lock()
+		w.listeners[uri] = removeListener(w.listeners[uri], l)
+		if len(w.listeners[uri]) == 0 {
+			delete(w.listeners, uri)
+		}
+		w.mu.Unlock()
+	}
+}
+
+// removeListener returns the list without the listener.
+func removeListener(list []*listener, l *listener) []*listener {
+	for i, held := range list {
+		if held == l {
+			return append(list[:i], list[i+1:]...)
+		}
+	}
+	return list
+}
+
+// acknowledged answers the waiters the acknowledgement grants.
+//
+// A SEP-2575 acknowledgement belongs to one listen stream and names
+// only that stream's URIs. Two feeds on one server are two streams, so
+// the grant each acknowledgement carries answers its own URI's waiter
+// alone, and every other attempt keeps waiting for its own: one feed's
+// acknowledgement is never another feed's refusal.
+//
+// An acknowledgement that names no resource URI has refused its own
+// stream's subscription, and nothing it carries says which stream that
+// was. One attempt waiting to hear it is that attempt's answer;
+// several waiting are each answered by the acknowledgement of their
+// own stream, and the attempt's own bound ends any whose answer never
+// comes. An acknowledgement whose URIs no one is waiting for has no
+// one to answer.
 func (w *resourceWaiters) acknowledged(granted []string) {
 	w.mu.Lock()
-	waiting := w.acks
-	w.acks = map[string][]chan bool{}
-	w.mu.Unlock()
-	if len(waiting) == 0 {
-		return
-	}
-	set := make(map[string]bool, len(granted))
+	answers := make([]ackAnswer, 0, len(granted)+1)
 	for _, uri := range granted {
-		set[uri] = true
+		if chans := w.acks[uri]; len(chans) > 0 {
+			answers = append(answers, ackAnswer{waiters: chans, granted: true})
+			delete(w.acks, uri)
+		}
 	}
-	for uri, chans := range waiting {
-		for _, ch := range chans {
+	if len(granted) == 0 && len(w.acks) == 1 {
+		for uri, chans := range w.acks {
+			answers = append(answers, ackAnswer{waiters: chans})
+			delete(w.acks, uri)
+		}
+	}
+	w.mu.Unlock()
+	for _, answer := range answers {
+		for _, ch := range answer.waiters {
 			select {
-			case ch <- set[uri]:
+			case ch <- answer.granted:
 			default:
 			}
 		}
 	}
+}
+
+// ackAnswer is one acknowledgement's answers: the waiters a grant
+// names, or the ones a refusal answers, and the word they all hear.
+type ackAnswer struct {
+	waiters []chan bool
+	granted bool
 }
 
 // removeWaiter returns the list without the waiter.

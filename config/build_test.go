@@ -1723,6 +1723,17 @@ func (r *stubRunning) Offered() []cli.Offered { return nil }
 // Servers returns no view: a handle that starts nothing holds no server.
 func (r *stubRunning) Servers() []config.MCPServer { return nil }
 
+// Subscribes reports that a handle that starts nothing advertises
+// nothing, so a declared feed on a stub-launched server fails the
+// attach naming the server — the stub is not the client.
+func (r *stubRunning) Subscribes(server string) bool { return false }
+
+// ResourceFeed is never called: a handle that starts nothing holds no
+// resource a feed could read.
+func (r *stubRunning) ResourceFeed(server, uri string) poo.FeedRunner {
+	return func(context.Context, poo.FeedIO) error { return nil }
+}
+
 // closes returns how many times the handle was closed.
 func (r *stubRunning) closes() int {
 	r.mu.Lock()

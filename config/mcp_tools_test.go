@@ -388,6 +388,10 @@ func (s *listedServer) CallTool(context.Context, string, json.RawMessage) (mcp.C
 type listedSession struct {
 	// views are the per-server views, one per declared server.
 	views []callmcp.Server
+	// group is the started client when the launch ran the real client:
+	// the capability and resource questions answer from it. A launch
+	// that started no process leaves it unset.
+	group *mcp.Group
 	// stop stops the servers the launch started, the way the client's own
 	// handle closes the group it keeps. The listed servers hold no
 	// process, so a launcher that started none leaves it unset.
@@ -413,6 +417,26 @@ func (h *listedSession) Servers() []config.MCPServer {
 		views = append(views, view)
 	}
 	return views
+}
+
+// Subscribes reports that a listed session's servers advertise nothing:
+// they hold no process, so a declared feed on one fails the attach naming
+// the server.
+func (h *listedSession) Subscribes(server string) bool {
+	if h.group == nil {
+		return false
+	}
+	return h.group.Subscribes(server)
+}
+
+// ResourceFeed returns the started group's own runner when the launch
+// ran the real client; a listed session's servers that hold no process
+// have none to read.
+func (h *listedSession) ResourceFeed(server, uri string) poo.FeedRunner {
+	if h.group == nil {
+		return func(context.Context, poo.FeedIO) error { return nil }
+	}
+	return mcp.ResourceFeed(h.group, server, uri)
 }
 
 // listedLauncher returns a launcher whose servers list the tools the test
@@ -859,6 +883,16 @@ type bareSession struct {
 
 // bareSession is a handle of the interface alone.
 var _ config.MCPRunning = (*bareSession)(nil)
+
+// Subscribes reports nothing: the bare handle holds no capability the
+// views do not name, so a declared feed on it fails the attach.
+func (h *bareSession) Subscribes(server string) bool { return false }
+
+// ResourceFeed returns a runner of nothing: the bare handle holds no
+// resource a feed could read.
+func (h *bareSession) ResourceFeed(server, uri string) poo.FeedRunner {
+	return func(context.Context, poo.FeedIO) error { return nil }
+}
 
 // Close stops the servers the launch started.
 func (h *bareSession) Close() error {

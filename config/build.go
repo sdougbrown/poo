@@ -294,6 +294,14 @@ type MCPRunning interface {
 	// snapshot and the dispatch read the same views, so a tool the handle
 	// lists is one the call reaches.
 	Servers() []MCPServer
+	// Subscribes reports whether the named server advertised resource
+	// subscriptions at startup: a feed over one of the server's declared
+	// resources needs the capability to subscribe to it.
+	Subscribes(server string) bool
+	// ResourceFeed returns the runner of one resource the named server
+	// holds: the feed drains the resource's reads through the filters the
+	// feed's manifest declares.
+	ResourceFeed(server, uri string) poo.FeedRunner
 	// Offered returns the tools the servers listed at startup, as the
 	// entries the model reaches through the MCP call: one per tool,
 	// qualified with the server's name, naming the call that runs it and
@@ -1323,6 +1331,23 @@ func (r *Runtime) mcpAttach(ctx context.Context, a *poo.Attach) (func() error, e
 			Err:     err,
 		}
 	}
+	// A declared feed is a feed the session runs: its spec joins the
+	// session's own, with the started server's subscription behind it
+	// and the manifest's filter screening what it emits. A server that
+	// declared a feed but advertised no resource subscriptions cannot
+	// run it, and the session is not built: whatever started stops
+	// first, the way a launch that failed does.
+	feeds, err := r.resourceFeedSpecs(servers, running)
+	if err != nil {
+		_ = running.Close()
+		return nil, err
+	}
+	if len(feeds) > 0 {
+		// The options are the session's own copy, but the slice they hold
+		// is the build's: the appended feeds go into a clone, so one
+		// session's feeds never reach the next.
+		a.Options.Feeds = append(slices.Clone(a.Options.Feeds), feeds...)
+	}
 	// The tools over the servers read what this session started, so they are
 	// built again now: the build's instances describe the offering, and these
 	// describe what this session can reach. The entries are the session's
@@ -1389,6 +1414,95 @@ func (r *Runtime) MCPAttachOption() poo.Option {
 			}, nil
 		}
 	}
+}
+
+// resourceFeedSpecs builds the feed specs the selected servers'
+// declared resource feeds become.
+//
+// The runner is the started server's own, and the wrapper around its
+// emits is the filter stage every feed's records pass: the declared
+// filter shapes and fans what the resource read returned, and it runs
+// the way a command feed's filter does — the same executor and
+// directory — with the environment a command feed that declares no env
+// gets, for the synthesized spec carries none. A server that declared
+// a feed but advertised no resource subscriptions can never grant the
+// subscription the feed runs on, and the failure names the server and
+// the feed the way a server that did not start does.
+func (r *Runtime) resourceFeedSpecs(servers []manifest.Server, running MCPRunning) ([]poo.FeedSpec, error) {
+	var specs []poo.FeedSpec
+	if r.mcpSet == nil {
+		return nil, nil
+	}
+	for _, server := range servers {
+		name := server.Name
+		for _, decl := range r.mcpSet.Feeds(name) {
+			if !running.Subscribes(name) {
+				return nil, &Error{
+					Code:    CodeInvalid,
+					Field:   "mcp.paths",
+					Message: fmt.Sprintf("the mcp server %q advertises no resource subscriptions, and the resource feed %q needs one", name, decl.Name),
+				}
+			}
+			onIdle, err := feedOnIdle(decl.OnIdle, "mcp.paths", fmt.Sprintf("the resource feed %q of the mcp server %q does not say when it may wake a run", decl.Name, name))
+			if err != nil {
+				return nil, err
+			}
+			run := running.ResourceFeed(name, decl.Resource)
+			specs = append(specs, poo.FeedSpec{
+				Name:        decl.Name,
+				Description: decl.Description,
+				// A resource feed's source is the session's own server: an
+				// attempt that ends — a failed read, a refused emit — is
+				// one the session brings back, and the restart policy is
+				// how it does.
+				Restart: true,
+				OnIdle:  onIdle,
+				// A feed's filter is one of the two kinds, and the core
+				// refuses a filter prompt on a feed whose manifest runs the
+				// script kind. The question is carried beside it, so a
+				// subscription that replaces the operator's question is
+				// reported as one.
+				ScriptFilter:   decl.Filter.Script(),
+				FilterQuestion: feedFilterQuestion(decl.Filter),
+				Run: func(ctx context.Context, io poo.FeedIO) error {
+					// The spec the stage reads is synthesized: the feed's
+					// name and the declared filter alone, with no env of its
+					// own, so the filter runs with the environment a command
+					// feed with none declared gets.
+					_, emit := r.feedFilterStage(ctx, io, feed.Spec{Name: decl.Name, Filter: decl.Filter})
+					filtered := io
+					filtered.Emit = emit
+					return run(ctx, filtered)
+				},
+			})
+		}
+	}
+	return specs, nil
+}
+
+func feedOnIdle(value, field, message string) (poo.OnIdle, error) {
+	onIdle, err := onIdleOf(value)
+	if err != nil {
+		return "", &Error{
+			Code:    CodeInvalid,
+			Field:   field,
+			Message: message,
+			Err:     err,
+		}
+	}
+	return onIdle, nil
+}
+
+func feedFilterQuestion(filter *feed.Filter) string {
+	if filter == nil {
+		return ""
+	}
+	return filter.Question
+}
+
+func (r *Runtime) feedFilterStage(ctx context.Context, io poo.FeedIO, spec feed.Spec) (func(scope, name string) (string, error), func(string, string, *poo.FeedImage, json.RawMessage) error) {
+	session := exec.ScopedResolver(io.SessionID, io.Scope)
+	return session, filterEmitter(ctx, io, spec, r.executor, exec.Lookup(r.Env), session)
 }
 
 // missingMCPServerWarning is what the build says when a profile selects a
