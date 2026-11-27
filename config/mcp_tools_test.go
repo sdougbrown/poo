@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"slices"
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/cli"
 	"github.com/sdougbrown/poo/config"
@@ -22,6 +21,7 @@ import (
 	"github.com/sdougbrown/poo/prompt"
 	"github.com/sdougbrown/poo/tool/callmcp"
 	"github.com/sdougbrown/poo/tool/cliregistry"
+	"slices"
 )
 
 // testMCPServer is the test binary's own view of one started server: the
@@ -210,6 +210,7 @@ func TestADisabledUnlinkedSearchIsRefusedByTheSettings(t *testing.T) {
 		}
 	}
 }
+
 // TestADisabledMCPCallOffersTheServersToNobody covers the operator's word: a
 // session that turns call_mcp off lists no MCP tool, and its search returns
 // none either — a hit the model cannot call is worse than no hit.
