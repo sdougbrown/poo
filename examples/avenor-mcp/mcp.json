@@ -1,0 +1,34 @@
+{
+  "mcpServers": {
+    "avenor": {
+      "command": "avenor",
+      "args": [
+        "mcp",
+        "--bind-host",
+        "poo",
+        "--bind-session",
+        "${session:id}"
+      ]
+    }
+  },
+  "poo": {
+    "servers": {
+      "avenor": {
+        "feeds": {
+          "avenor-inbox": {
+            "resource": "avenor://inbox",
+            "on_idle": "wake",
+            "description": "Messages from Avenor children and other agents. Each ask carries the call_mcp call that answers it.",
+            "filter": {
+              "command": [
+                "jq",
+                "-c",
+                ".text | fromjson | .messages[] | {from, text: (.text + (if .expects_reply then (if .answerable then \"\\n\\nThis message is an ask from \\(.from | tojson). To answer, call call_mcp with {\\\"name\\\": \\\"avenor/message\\\", \\\"args\\\": {\\\"action\\\": \\\"reply\\\", \\\"reply_to\\\": \\(.id | tojson), \\\"message\\\": \\\"...\\\"}}.\" else \"\\n\\nThis message is an ask from \\(.from | tojson), but it cannot be answered here.\" end) else \"\" end))}"
+              ]
+            }
+          }
+        }
+      }
+    }
+  }
+}

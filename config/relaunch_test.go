@@ -2,6 +2,7 @@ package config_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/cli"
 	"github.com/sdougbrown/poo/config"
 	"github.com/sdougbrown/poo/exec"
 	"github.com/sdougbrown/poo/mcp"
@@ -48,24 +50,37 @@ func relaunchLauncher(group **mcp.Group, backoff time.Duration) config.MCPLaunch
 // with the backoff it names. The fixture writes its pid to the path
 // the manifest names, so the test can tell a relaunched process from
 // the one it killed, and it fails the startups the counter path says.
+// The manifest names the session's own id as an argument, so a test
+// reads back what every generation was launched with, and the settings
+// name a decider role so the session is offered the search over the
+// tools its server lists.
 func relaunchSession(t *testing.T, backoff time.Duration, failStarts bool, turns ...pootest.Turn) (*poo.Session, *pootest.Transport, *mcp.Group, string, string) {
 	t.Helper()
 	binary := fixtureServer(t)
 	dir := t.TempDir()
 	pidfile := filepath.Join(dir, "fixture.pid")
-	env := map[string]any{"POO_FIXTURE_PIDFILE": pidfile}
+	env := map[string]any{
+		"POO_FIXTURE_PIDFILE": pidfile,
+		// The fixture counts its own starts, so the tool it lists says
+		// which generation a listing came from.
+		"POO_FIXTURE_GENERATION": filepath.Join(dir, "generation"),
+	}
 	counts := ""
 	if failStarts {
 		counts = filepath.Join(dir, "fail-starts")
 		env["POO_FIXTURE_FAIL_STARTS"] = counts
 	}
 	manifestPath := mcpManifest(t,
-		map[string]any{"fixture": map[string]any{"command": binary, "env": env}},
+		map[string]any{"fixture": map[string]any{
+			"command": binary,
+			"args":    []string{"--session", "${session:id}"},
+			"env":     env,
+		}},
 		map[string]any{"servers": map[string]any{"fixture": map[string]any{"feeds": map[string]any{
 			"inbox": resourceFeedDecl(theInboxURI, "The fixture's queued messages.", "wake", nil),
 		}}}},
 	)
-	settings, err := config.Parse([]byte(theFeedSettings(t, manifestPath)), config.FormatYAML)
+	settings, err := config.Parse([]byte(withDecider+theSessionDir(t)+theMCPPaths(manifestPath)+theMCPProfile("picky", "fixture")), config.FormatYAML)
 	if err != nil {
 		t.Fatalf("decoding the settings: %v", err)
 	}
@@ -77,6 +92,9 @@ func relaunchSession(t *testing.T, backoff time.Duration, failStarts bool, turns
 		WorkingDir:  t.TempDir(),
 	})
 	t.Cleanup(func() { _ = runtime.Store.Close() })
+	// The search answers through the session's decider, and a test names
+	// the answer rather than running a decision endpoint.
+	runtime.Options.Decider = yesDecider{}
 	transport := pootest.NewTransport(turns...)
 	runtime.Options.Transport = transport
 
@@ -133,19 +151,61 @@ func waitFixtureDown(t *testing.T, group *mcp.Group) {
 	}
 }
 
+// theFixtureSessionArg reads the session id the fixture's process was
+// launched with: the manifest names `--session ${session:id}`, and the
+// fixture's echo tool answers with its own arguments, so the value is
+// the one this generation's launch resolved.
+func theFixtureSessionArg(t *testing.T, group *mcp.Group) string {
+	t.Helper()
+	res, err := group.CallTool(context.Background(), "fixture/echo", []byte(`{"text":"hi"}`))
+	if err != nil {
+		t.Fatalf("asking the fixture what it runs with: %v", err)
+	}
+	if len(res.Text) == 0 {
+		t.Fatal("the fixture's echo tool answered with no text")
+	}
+	var report struct {
+		Args []string `json:"args"`
+	}
+	if err := json.Unmarshal([]byte(res.Text[0]), &report); err != nil {
+		t.Fatalf("the fixture's answer is not a report: %v\n%s", err, res.Text[0])
+	}
+	for i, arg := range report.Args {
+		if arg == "--session" && i+1 < len(report.Args) {
+			return report.Args[i+1]
+		}
+	}
+	t.Fatalf("the fixture started with the arguments %q, and none names the session", report.Args)
+	return ""
+}
+
 // TestRelaunchDeliversAFeedUpdateMadeAfterTheRelaunch covers the whole
 // cycle a session survives: the fixture's process ends mid-session, the
 // client brings it back on a new generation — the old process reaped,
 // so nothing the session started survives it — the feed's own restart
 // policy subscribes again on the new generation, and a message pushed
-// after the relaunch reaches the model.
+// after the relaunch reaches the model. The relaunched generation is
+// launched the way the first was, its templates resolved from the
+// session's own values, and the search reads the listing it installed.
 func TestRelaunchDeliversAFeedUpdateMadeAfterTheRelaunch(t *testing.T) {
 	sess, transport, group, pidfile, _ := relaunchSession(t, 20*time.Millisecond, false,
-		pootest.Turn{Text: "ack"}, pootest.Turn{Text: "ack"}, pootest.Turn{Text: "ack"})
-	_ = sess
+		pootest.Turn{Text: "ack"}, pootest.Turn{Text: "ack"},
+		pootest.Turn{Calls: []pootest.Call{{
+			Name:      cli.FindToolName,
+			ID:        "find",
+			Arguments: []byte(`{"intent":"the fixture's own name"}`),
+		}}},
+		pootest.Turn{Text: "done"})
 
 	push(t, group, "before the crash")
 	waitUntilFeedRead(t, transport, theFeedMessage("inbox", "before the crash"))
+
+	// The first launch resolved the manifest's argument from the
+	// session's own values: the process runs with the session's id.
+	before := theFixtureSessionArg(t, group)
+	if before != sess.ID() {
+		t.Fatalf("the fixture started with the session id %q, want %q", before, sess.ID())
+	}
 
 	old := pootest.FixturePid(t, pidfile)
 	killTheFixture(t, group)
@@ -155,11 +215,37 @@ func TestRelaunchDeliversAFeedUpdateMadeAfterTheRelaunch(t *testing.T) {
 		t.Error("the relaunch kept the killed process's pid")
 	}
 	waitFixtureBack(t, group)
+	// Every launch resolves the manifest's templates from the session's
+	// own values, so the generation the relaunch started runs with the
+	// same session id the first did.
+	if got := theFixtureSessionArg(t, group); got != before {
+		t.Errorf("the relaunched fixture started with the session id %q, want %q", got, before)
+	}
 
 	// The feed's next attempt subscribes on the generation the session
 	// runs now, and the update made after the relaunch is delivered.
 	push(t, group, "after the crash")
 	waitUntilFeedRead(t, transport, theFeedMessage("inbox", "after the crash"))
+	// The delivery's run is waited out: a prompt that lands while the
+	// session is answering it is refused, and the refusal is the
+	// session's, not the test's.
+	waitUntil(t, "the delivery run to end", func() bool { return !sess.Running() })
+
+	// A search after the relaunch reads the offering the session runs
+	// now, so the hit names the tools this process listed and carries
+	// the description the new generation gave them.
+	if _, err := sess.Prompt(context.Background(), "find the fixture's stamp tool"); err != nil {
+		t.Fatalf("prompting the session: %v", err)
+	}
+	if _, err := sess.Wait(context.Background()); err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	text := requestText(transport)
+	for _, want := range []string{"fixture/stamp", "generation 2 of this fixture server"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the search's answer does not carry %q, so it names another generation:\n%s", want, text)
+		}
+	}
 }
 
 // TestRelaunchStopsAfterFiveFailuresAndLeavesTheSessionUsable covers

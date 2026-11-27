@@ -193,8 +193,20 @@ type ToolOptions struct {
 	Search         bool
 	Inputs         []poo.Modality
 	CodemodeEngine string
+	ToolNames      []string
+	Offered        cli.Offerings
+	MCP            []MCPRunning
 }
 ```
+
+`ToolNames` is the names the session offers, for a tool whose refusal points
+at another tool: a tool the session does not offer is not named. `Offered`
+reads the entries the session's calls dispatch, as they are when the tool asks
+— the registry's commands and the MCP tools the session's servers listed — so
+one snapshot serves a search, a refusal and the prompt. `MCP` is the servers a
+session started, in selection order, as the binary's own launcher returned
+them; a build holds none, because a build starts no server, and the config
+layer replaces the tools over them once a session has started its own.
 
 The map's key is the name the profile, the permission rules and the wire
 use. It must be the name the tool's `Spec` reports. A profile or a
@@ -608,9 +620,213 @@ lists them.
 as its origin, `feed:<name>[<field>=<value>]`. `cancel_job` takes either
 id and stops that feed until the session closes, and it stops a feed a
 filter suspended as it stops any other. A suspended feed is listed as
-`suspended`, and `subscribe_feed` starts it again. A session that loads
-again starts every configured feed that is not optional; a subscription is
-not resumed, and the model starts one again with `subscribe_feed`.
+`suspended`, and `subscribe_feed` starts an optional one again. A feed the
+session starts itself — a configured manifest feed, or a resource feed an
+`mcp.json` declares — stays suspended until the session closes, for no call
+starts it. A session that loads again starts every configured feed that is
+not optional; a subscription is not resumed, and the model starts one again
+with `subscribe_feed`.
+
+## MCP servers
+
+An MCP server is a process the session starts beside itself, speaking the
+Model Context Protocol on stdio. The model reaches the server's tools
+through `call_mcp`, and a server may also serve a resource the session reads
+as a feed.
+
+Loading a manifest declares the servers a session *may* start. A profile's
+`mcp_servers` selects the ones its sessions *do* start, and no selection
+starts nothing:
+
+```json
+{
+  "mcpServers": {
+    "avenor": {
+      "command": "avenor",
+      "args": ["mcp", "--bind-host", "poo", "--bind-session", "${session:id}"]
+    }
+  },
+  "poo": {
+    "servers": {
+      "avenor": {
+        "feeds": {
+          "avenor-inbox": {
+            "resource": "avenor://inbox",
+            "on_idle": "wake",
+            "description": "Messages from Avenor children.",
+            "filter": {"command": ["jq", "-c", "<program>"]}
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+`mcp.paths` lists the manifest files and directories the session reads,
+beside `feeds.paths` and `cli_registry.paths`, and `mcp.defaults` says
+whether poo's own mcp directory loads beside them. That directory is
+`$XDG_CONFIG_HOME/poo/mcp/`, it loads when the key is absent or true, and a
+profile's `mcp_defaults` speaks after the settings'. `POO_MCP_PATH` and the
+repeatable `--mcp-path` flag add paths the way the two other manifest kinds'
+overrides do. An `mcp.json` file is JSON: a directory contributes the
+`.json` files it holds and skips the rest, while a path that names a file
+fails the load when it is not `.json`.
+
+### The file
+
+A file that names no top-level `mcpServers` is not a manifest poo can use,
+and it fails the load. Each `mcpServers` entry is keyed by the server's
+name — letters, digits, `-` and `_` — and poo reads `command` (required),
+`args`, `env`, `type` and `url` from it. A field poo does not read is
+ignored, because other harnesses keep their own inside an entry, so one
+file serves poo and them alike. A top-level key poo does not name is
+ignored for the same reason: poo's own additions live under `poo`, and a
+harness ignores the key it does not know the way poo ignores the harness's.
+
+A `type` of `http`, `sse` or `streamable-http`, or a `url` on an entry with
+no type, names a transport poo does not start: the entry is left out with a
+warning naming the server. A `type` that is neither absent nor `stdio`
+fails the load, and so does an entry with no `command`.
+
+Two files may not define one server name: the load fails naming both files,
+because a selected name has to mean one server. A duplicate object key
+anywhere in a file fails the load too.
+
+### The `poo` block
+
+The top-level `poo` key is poo's alone, so it is strict: a field poo does
+not know fails the load, unlike the top level and an entry's fields.
+`poo.servers.<server>.feeds.<feed>` declares one resource feed:
+
+- `resource` is the URI the feed subscribes to, and is required.
+- `description` is what the jobs prompt says about the feed.
+- `on_idle` is `wake` or `hold`, and an absent one inherits `jobs.on_idle`.
+- `filter` takes a feed manifest's filter shape, and the feed package
+  validates it. Both kinds work: the `command` filter that fans a read out
+  into records, and the `question` filter that puts each record's text to
+  the decision model.
+
+A feed's name is lowercase letters, digits, `-` and `_`. Two servers may not
+declare one name, two feeds may not subscribe one server's resource — a
+drained read has one reader — and a resource feed may not take the name of
+a feed the settings' own feed manifests load. A `poo.servers` key that names
+no `mcpServers` entry, or one whose transport poo does not start, fails the
+load.
+
+### Values a launch resolves
+
+`command`, each argument and each `env` value are templates, resolved when
+the server launches and never when the settings load: the values are the
+session's, and a session that does not exist yet has none of them.
+
+- `${NAME}` is the host environment's value.
+- `${NAME:-default}` is that value, or `default` when the environment does
+  not hold the name.
+- `${session:id}` is the session's own ID, the same one after a resume.
+- `$$` is one literal `$`.
+
+A `${NAME}` the environment does not hold, with no default, is an error
+naming the server and the variable: a command that runs with an empty
+argument is worse than a server that does not launch. An unterminated `${`,
+a reference with no name, a default on a `session:` reference, and any
+`session:` name but `id` fail the load.
+
+### What a session starts
+
+A selected server is a session-owned process: it starts when the session
+starts, with the session's ID and working directory, and it stops when the
+session closes. It starts with the host environment minus the names
+`tools.env.scrub` removes, plus the manifest's resolved `env` — so an
+explicit `${NAME}` in the manifest can put a scrubbed variable back, which
+is the manifest author's choice.
+
+Servers are trusted host processes the operator selected. They start
+directly, not through the session's executor or sandbox, and they run as the
+user runs poo. Select one the way you would install a program.
+
+Startup is bounded at 30 seconds per server, handshake and tool listing
+included. A server that fails to start fails session creation and resume
+with an error naming it. A name the profile selects that the manifests do
+not load is a warning, not an error: `mcp.paths` still decides what loads.
+
+A binary that links no `call_mcp` cannot honour a selection and fails the
+build, naming the tool.
+
+### `call_mcp` and `find_tool`
+
+The model reaches a server's tools through one call. `call_mcp` takes
+`{"name": "<server>/<tool>", "args": {...}}`: the qualified name is the
+server's name, a slash, and the tool's own. The call is side-effecting — a
+tool server can change anything — and its primary argument is `name`, so a
+permission rule can allow one server's tools by prefix (`avenor/`) without
+naming each one. It may run in the background like any side-effecting call.
+
+The prompt carries a catalog of the names the running servers list, each
+with its argument hint and, when the server claims them, `(read-only)` and
+`(destructive)`. Those are the server's own claims, shown so the model can
+choose; they are never the permission class of a call. A binary whose
+session has a decision model offers `find_tool` beside the call, and the
+search covers the MCP tools and the registered commands together: each hit
+names the dispatcher that calls it and the argument that names it. The
+search reads the session's live offering, so a server that is not ready
+contributes no hit — the model is never pointed at a tool it cannot call.
+
+An unknown qualified name is refused before anything runs, with the reason
+and where to look: the search when the session offers one, the prompt's
+catalog when it does not. A server that stopped answers `server <name> is
+down` as an error result, and the session keeps running. A transport failure
+mid-call is reported and never retried, because the call may have had
+effects. A tool that reports its own failure answers with that failure, as
+the server wrote it.
+
+The text a tool returns is capped at the observation cap, the way a
+command's output is. `structuredContent` rides along when it is valid JSON
+under the same cap, and is left out whole with a line saying so when it is
+not. An image becomes an attachment only when the run's model reads images;
+otherwise a line says what was dropped.
+
+### Resource feeds
+
+A server that declares a feed must advertise `resources/subscribe` in its
+handshake; a server that does not fails the session, naming the server and
+the feed. The feed then:
+
+- subscribes to the URI and waits for the grant,
+- reads the resource once, which is what carries what was queued before the
+  subscription, and reads it again on every update the server sends,
+- emits one record per text content of each read, with the server's name as
+  the sender and the content verbatim as the text. Empty text is skipped, and
+  a binary content is skipped with a line in the feed's log.
+
+A read is a drain, so a resource feed is at-most-once: a read that fails, or
+an emit the session refuses, ends the attempt with the records already
+emitted standing, and the rest of that read is gone. The feed's restart
+policy brings the next attempt.
+
+The declared filter runs the way a command feed's does, on the same
+executor and in the same directory, with the environment a feed that declares
+no `env` gets. A read whose resource carries a whole batch is therefore one
+source record that the filter fans out into one input per message — and the
+fan-out caps apply: a record is at most 1 MiB, and one filter run writes at
+most 4 MiB and 256 records. An empty result is no input at all.
+
+### Relaunch
+
+A server process that exits while the session runs is relaunched. The first
+attempt waits 1s, each further failure doubles the wait up to 30s, and a
+generation that ran a minute or more clears the count: a server that worked
+for a while gets the whole budget again.
+
+Five consecutive failures fail the server for the session. A call then
+answers `server <name> is down`, and the resource feeds that need it report
+a fault that suspends them: the code is `filter_exited`, which is the fault a
+filter's nonzero exit reports, reused here with the message `server <name>
+stopped after 5 relaunches`. A suspended resource feed stays suspended until
+the session closes; a resume starts over. A relaunch re-lists the server's
+tools and the feeds subscribe again, so a search and a call see the new
+generation; the prompt's MCP catalog is rendered once, when the session
+starts, and is not re-rendered.
 
 ## The conformance recipe
 
