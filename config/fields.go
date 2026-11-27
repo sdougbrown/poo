@@ -17,6 +17,7 @@ func fieldsOf(s *Settings) SettingsFields {
 	f.ModelsFile = text(s.ModelsFile)
 	f.AuthFile = text(s.AuthFile)
 	f.PiAuthFile = text(s.PiAuthFile)
+	f.AuthReadonly = flag(s.AuthReadonly)
 	f.Profile = text(s.Profile)
 	f.ProfilesFiles = list(s.ProfilesFiles)
 	f.ReplProfile = pointer(s.ReplProfile)

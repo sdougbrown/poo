@@ -1103,3 +1103,48 @@ func TestAKeyLoginCountsTheModelTheRecordDeclares(t *testing.T) {
 		t.Errorf("the sign-in says nothing about what the endpoint serves:\n%s", stdout)
 	}
 }
+
+// TestAReadOnlyLoginIsRefusedBeforeTheSignIn covers the setting that shares a
+// credential file with the tool that owns it: the refusal comes before the
+// sign-in runs, so no grant is spent on a credential the file cannot hold.
+// The endpoint is never asked, and no file is written.
+func TestAReadOnlyLoginIsRefusedBeforeTheSignIn(t *testing.T) {
+	dir := t.TempDir()
+	settingsPath := filepath.Join(dir, "settings.yaml")
+	settings := `version: 1
+auth_file: ` + filepath.Join(dir, "auth.json") + `
+auth_readonly: true
+session:
+  mode: ephemeral
+`
+	if err := os.WriteFile(settingsPath, []byte(settings), 0o644); err != nil {
+		t.Fatalf("writing the settings: %v", err)
+	}
+
+	var requests int
+	endpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		fmt.Fprint(w, `{"access_token":"new-access","refresh_token":"new-refresh","expires_in":3600}`)
+	}))
+	defer endpoint.Close()
+
+	old := auth.CodexLogin
+	defer func() { auth.CodexLogin = old }()
+	flow := codexFlowForTest(t)
+	flow.TokenURL = endpoint.URL
+	auth.CodexLogin = flow
+
+	code, stderr, stdout := runCLIWithStdout(t, "login", "codex", "--settings", settingsPath, "--no-browser")
+	if code == 0 {
+		t.Fatalf("poo login exited 0; stdout %q, stderr %q", stdout, stderr)
+	}
+	if !strings.Contains(stderr, "read-only") {
+		t.Errorf("the failure is %q, want it to name the read-only file", stderr)
+	}
+	if requests != 0 {
+		t.Errorf("the token endpoint was asked %d times, want a refusal that spends no grant", requests)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "auth.json")); err == nil {
+		t.Error("the refused sign-in wrote a credential file")
+	}
+}

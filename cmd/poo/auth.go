@@ -10,6 +10,7 @@ import (
 
 	clicontract "github.com/sdougbrown/cli-contract"
 
+	"github.com/sdougbrown/poo/config"
 	"github.com/sdougbrown/poo/provider/auth"
 )
 
@@ -31,7 +32,7 @@ func (o *authOptions) bind(inv clicontract.Invocation) {
 type authStatus struct {
 	// File is the credential file the settings resolved.
 	File string `json:"file"`
-	// Format is the shape the file is written with: pi's or poo's.
+	// Format is the shape the file is written with: pi's, poo's, or the Codex CLI's.
 	Format string `json:"format"`
 	// Provider is the provider id the credential is stored under.
 	Provider string `json:"provider"`
@@ -41,7 +42,8 @@ type authStatus struct {
 	AccountID string `json:"account_id"`
 	// Expires is when the access token stops working.
 	Expires string `json:"expires"`
-	// State is live, or refresh needed.
+	// State is live, refresh needed, no readable expiry, or expired under a
+	// read-only file.
 	State string `json:"state"`
 }
 
@@ -57,7 +59,12 @@ type authStatus struct {
 func handleAuthStatus(inv clicontract.Invocation, stdout, stderr io.Writer) exit {
 	var o authOptions
 	o.bind(inv)
-	credentials, err := authCredentials(o.sharedFlags)
+	settings, err := o.sharedFlags.settings("")
+	if err != nil {
+		fmt.Fprintf(stderr, "poo auth status: %v\n", err)
+		return exit{usageExitCode}
+	}
+	credentials, err := authCredentials(settings)
 	if err != nil {
 		fmt.Fprintf(stderr, "poo auth status: %v\n", err)
 		return exit{usageExitCode}
@@ -82,7 +89,7 @@ func handleAuthStatus(inv clicontract.Invocation, stdout, stderr io.Writer) exit
 		Provider:  status.Provider,
 		ClientID:  status.ClientID,
 		AccountID: status.AccountID,
-		State:     credentialState(status),
+		State:     credentialState(status, credentials.ReadOnly),
 	}
 	// A credential with no expiry has no time to report: a key is sent as it is, and a time
 	// rendered for it would be a time nothing enforces.
@@ -110,7 +117,12 @@ func handleAuthRefresh(ctx context.Context, inv clicontract.Invocation, stderr i
 	}
 	var flags sharedFlags
 	flags.bind(inv)
-	credentials, err := authCredentials(flags)
+	settings, err := flags.settings("")
+	if err != nil {
+		fmt.Fprintf(stderr, "poo auth refresh: %v\n", err)
+		return exit{usageExitCode}
+	}
+	credentials, err := authCredentials(settings)
 	if err != nil {
 		fmt.Fprintf(stderr, "poo auth refresh: %v\n", err)
 		return exit{usageExitCode}
@@ -128,16 +140,12 @@ func handleAuthRefresh(ctx context.Context, inv clicontract.Invocation, stderr i
 	return exit{}
 }
 
-func authCredentials(flags sharedFlags) (auth.Credentials, error) {
-	settings, err := flags.settings("")
-	if err != nil {
-		return auth.Credentials{}, err
-	}
+func authCredentials(settings *config.Settings) (auth.Credentials, error) {
 	path := settings.CredentialFile()
 	if path == "" {
 		return auth.Credentials{}, fmt.Errorf("the credential file cannot be resolved: set auth_file")
 	}
-	return auth.Credentials{Path: path}, nil
+	return auth.Credentials{Path: path, ReadOnly: settings.AuthReadonlyEnabled()}, nil
 }
 
 // printAuthStatus prints the report as the fields an operator reads.
@@ -149,7 +157,14 @@ func printAuthStatus(report authStatus, status auth.Status, stdout io.Writer) {
 	fmt.Fprintf(w, "CLIENT\t%s\n", report.ClientID)
 	fmt.Fprintf(w, "ACCOUNT\t%s\n", report.AccountID)
 	if status.Expires.IsZero() {
-		fmt.Fprintf(w, "EXPIRES\t%s (%s)\n", "none", "it does not expire")
+		// A key does not expire. An oauth token whose expiry cannot be read may
+		// well have: the word says what poo cannot know, the same one the state
+		// and the store's own refusal carry.
+		none := "it does not expire"
+		if status.Kind == auth.KindOAuth {
+			none = "no readable expiry"
+		}
+		fmt.Fprintf(w, "EXPIRES\t%s (%s)\n", "none", none)
 	} else {
 		fmt.Fprintf(w, "EXPIRES\t%s (%s)\n", report.Expires, life(status.Expires))
 	}
@@ -178,12 +193,22 @@ func keyStatus(credentials auth.Credentials, earlier error) (auth.Status, error)
 }
 
 // credentialState is the word a report gives a credential's state: a credential poo
-// would use as it is, or one it trades before using it.
-func credentialState(status auth.Status) string {
+// would use as it is, or one it trades before using it. The read-only word is the
+// store's own mode, not the settings re-read: the state and the trade refusal
+// cannot disagree, because they are keyed to the one bit. A credential whose
+// expiry cannot be read is not called expired — nothing knows that it did — and
+// the state says what the store's own refusal says.
+func credentialState(status auth.Status, readonly bool) string {
 	// A key is sent as it is: nothing trades it, so there is nothing to refresh and nothing
 	// that can be stale.
 	if status.Kind == auth.KindAPIKey || status.Live {
 		return "live"
+	}
+	if status.Expires.IsZero() {
+		return "no readable expiry"
+	}
+	if readonly {
+		return "expired (read-only: refresh with the tool that owns the file)"
 	}
 	return "refresh needed"
 }

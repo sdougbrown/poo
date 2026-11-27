@@ -23,6 +23,7 @@ func TestAuthRefresh(t *testing.T) {
 		due      bool
 		pi       bool
 		refusal  bool
+		readonly bool
 		wantCode int
 		wantErr  string
 	}{
@@ -31,6 +32,7 @@ func TestAuthRefresh(t *testing.T) {
 		{name: "custom leeway in Pi file", left: 20 * time.Minute, flags: []string{"--leeway", "30m"}, due: true, pi: true},
 		{name: "forced", left: time.Hour, flags: []string{"--force"}, due: true},
 		{name: "refused", left: -time.Minute, due: true, refusal: true, wantCode: operationalExitCode, wantErr: "invalid_grant"},
+		{name: "read-only", left: -time.Minute, readonly: true, wantCode: operationalExitCode, wantErr: "read-only"},
 		{name: "zero leeway", left: time.Minute, flags: []string{"--leeway=0s"}, wantCode: usageExitCode, wantErr: "--leeway must be positive"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -61,6 +63,15 @@ func TestAuthRefresh(t *testing.T) {
 			settings := authSettings(t, dir, "auth.json")
 			if tc.pi {
 				if err := os.WriteFile(settings, []byte("version: 1\npi_auth_file: auth.json\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.readonly {
+				body, err := os.ReadFile(settings)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(settings, append(body, []byte("auth_readonly: true\n")...), 0o600); err != nil {
 					t.Fatal(err)
 				}
 			}

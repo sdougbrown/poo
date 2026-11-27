@@ -115,6 +115,13 @@ type Settings struct {
 	// A relative path resolves against the settings file's own directory, like
 	// models_file.
 	PiAuthFile string `json:"pi_auth_file,omitempty"`
+	// AuthReadonly makes the credential file one poo reads and never writes:
+	// no refresh is traded, and no sign-in, import or logout goes through. It
+	// is the mode for a file another tool owns — the Codex CLI's auth.json,
+	// shared with poo, the CLI keeping the credential alive — and it is the
+	// operator's word that the other tool does. An access token past its
+	// expiry is an error naming the tool that owns the file, not a trade.
+	AuthReadonly *bool `json:"auth_readonly,omitempty"`
 	// credentialPath is the resolved path of the file the Codex credential is
 	// read from, empty when a Settings built by hand named none.
 	credentialPath string
@@ -128,6 +135,13 @@ type Settings struct {
 	// models file names folded over it, in either shape. It is empty when neither
 	// contributed, so it says what the file added and not whether a file was read.
 	modelsFileLayer catalog.FileSettings
+}
+
+// AuthReadonlyEnabled reports whether the settings turn the read-only mode
+// on. The flag is a pointer, so an absent key is not a false one: the mode is
+// the operator's word, and only their true sets it.
+func (s *Settings) AuthReadonlyEnabled() bool {
+	return s.AuthReadonly != nil && *s.AuthReadonly
 }
 
 // Endpoint is one endpoint in the settings.

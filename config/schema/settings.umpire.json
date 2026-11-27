@@ -6,6 +6,7 @@
     "models_file": { "isEmpty": "string" },
     "auth_file": { "isEmpty": "string" },
     "pi_auth_file": { "isEmpty": "string" },
+    "auth_readonly": { "isEmpty": "boolean" },
     "profile": { "isEmpty": "string" },
     "profiles_files": { "isEmpty": "array" },
     "repl_profile": { "isEmpty": "string" },
