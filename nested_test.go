@@ -886,15 +886,15 @@ func TestACallerCancelledNestedCallIsNotToldTheRunSettled(t *testing.T) {
 		SystemPrompt: "the system prompt",
 		WorkingDir:   t.TempDir(),
 	}
+	// The batch runs under a context of the tool's own, so the run's
+	// activity context is not what ends the call. The context is set
+	// before the run starts: the tool reads it on the run's goroutine.
+	seamCtx, stopSeam := context.WithCancel(context.Background())
+	nest.seamCtx = seamCtx
 	s := newTestSession(t, opts)
 	if _, err := s.Prompt(context.Background(), "start"); err != nil {
 		t.Fatalf("starting the run: %v", err)
 	}
-	// The nested call is in flight when its caller's context ends: the
-	// batch runs under a context of the tool's own, which the test
-	// cancels directly once the nested call has been issued.
-	seamCtx, stopSeam := context.WithCancel(context.Background())
-	nest.seamCtx = seamCtx
 	waitFor(t, "the nested call to start", func() bool {
 		for _, ev := range s.Events() {
 			if ev.Name != poo.EventToolCall || ev.Payload["parent"] != "r1" {
@@ -922,11 +922,17 @@ func TestACallerCancelledNestedCallIsNotToldTheRunSettled(t *testing.T) {
 	if !strings.Contains(res.Text, "partial output") {
 		t.Errorf("the nested call's text is %q, want the partial output", res.Text)
 	}
+	if !strings.Contains(res.Text, poo.CancelledCallerText) {
+		t.Errorf("the nested call's text is %q, want the caller-cancelled note", res.Text)
+	}
 	if strings.Contains(res.Text, poo.CancelledSettlingText) {
 		t.Errorf("the nested call's text is %q, want no settling note", res.Text)
 	}
 	if strings.Contains(res.Text, poo.CancelledInterruptedText) {
 		t.Errorf("the nested call's text is %q, want no user-interrupt note", res.Text)
+	}
+	if !res.IsError {
+		t.Errorf("the nested call's result is not an error, want IsError")
 	}
 }
 
