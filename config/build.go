@@ -2955,6 +2955,8 @@ func (r *Runtime) Transport(model poo.ModelInfo) (poo.ChatTransport, error) {
 	switch model.Provider {
 	case auth.ProviderCodex:
 		return r.codexTransport(model)
+	case auth.ProviderGoogleAIPlan:
+		return r.googlePlanTransport(model)
 	}
 	// The header a session travels by is the endpoint's own declaration:
 	// a gateway that requires one names it where the endpoint is declared,

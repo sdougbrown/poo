@@ -33,6 +33,13 @@ type fileEntry struct {
 	// TokenURL is where that client trades its tokens. The client that granted a credential
 	// decides where the credential is refreshed.
 	TokenURL string `json:"tokenUrl,omitempty"`
+	// DPoP is the key pair the grant is bound to, for a provider that binds one: the
+	// endpoint checks a signature from it on every token request, so the credential is
+	// useless on another machine, and the key is not a secret to be shared.
+	DPoP *DPoPKey `json:"dpopKey,omitempty"`
+	// DPoPNonce is the latest nonce the endpoint sent, so a refresh does not spend a round
+	// trip being told a newer one.
+	DPoPNonce string `json:"dpopNonce,omitempty"`
 }
 
 // stripBOM drops a leading UTF-8 byte order mark, the character pi strips
@@ -68,7 +75,7 @@ func decodeEntry(path string, p Provider, entries map[string]json.RawMessage) (c
 
 // modelledFields are the entry's fields this package writes and reads. A field outside them
 // is one pi's credential type may hold and poo does not model: it is kept as it was.
-var modelledFields = []string{"access", "refresh", "expires", "accountId", "key", "clientId", "tokenUrl"}
+var modelledFields = []string{"access", "refresh", "expires", "accountId", "key", "clientId", "tokenUrl", "dpopKey", "dpopNonce"}
 
 // encodeEntry stores a credential in the entry a provider's credentials map
 // holds it under, and leaves every other entry as it was.
@@ -220,6 +227,8 @@ func (c credential) export() Credential {
 		out.AccountID = c.AccountID
 		out.ClientID = c.ClientID
 		out.TokenURL = c.TokenURL
+		out.DPoP = c.DPoP
+		out.DPoPNonce = c.DPoPNonce
 	}
 	return out
 }
@@ -237,5 +246,7 @@ func (c Credential) internal(p Provider) credential {
 		AccountID: p.account(c.Access, c.AccountID),
 		ClientID:  c.ClientID,
 		TokenURL:  c.TokenURL,
+		DPoP:      c.DPoP,
+		DPoPNonce: c.DPoPNonce,
 	}
 }

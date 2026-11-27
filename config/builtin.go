@@ -61,17 +61,14 @@ func (s *Settings) applyBuiltinProviders(override string) error {
 // names, the credential file's entry for the provider that reads it, and
 // the literal the settings carry for an endpoint of the same name. A read
 // of the file that fails is a file that holds nothing: the variable and
-// the literal are the other ways in. The one endpoint that names no
-// variable is the Codex one, and its credential is the oauth pair the file
-// holds under its own name: a file without it leaves the endpoint
-// unoffered.
+// the literal are the other ways in. An endpoint that names no variable is
+// an OAuth one — the Codex endpoint and the Google AI plan's — and its
+// credential is the grant the file holds under its own name: a file without
+// it leaves the endpoint unoffered.
 func (s *Settings) gateKeyEndpoints(layer catalog.FileSettings) catalog.FileSettings {
 	for name, endpoint := range layer.Endpoints {
 		drop := false
 		if endpoint.APIKeyEnv == "" {
-			if name != auth.ProviderCodex {
-				continue
-			}
 			held, err := (auth.Credentials{Path: s.CredentialFile()}).Holds(name)
 			drop = !(err == nil && held)
 		} else {
