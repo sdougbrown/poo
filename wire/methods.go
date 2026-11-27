@@ -43,6 +43,8 @@ func (s *server) dispatch(req protocol.Request) (any, *protocol.Error) {
 		return s.agentInspect(req.Params)
 	case protocol.MethodRunCancel:
 		return s.agentCancel(req.Params)
+	case protocol.MethodRunBackground:
+		return s.agentBackground(req.Params)
 	case protocol.MethodJobCancel:
 		return s.jobCancel(req.Params)
 	case protocol.MethodSettingsGet:
@@ -498,6 +500,25 @@ func (s *server) agentCancel(raw json.RawMessage) (any, *protocol.Error) {
 	}
 	return nil, protocol.Errorf(protocol.CodeServerError, protocol.DataRunNotFound,
 		"the session %q has no run %q", entry.id, params.RunID)
+}
+
+func (s *server) agentBackground(raw json.RawMessage) (any, *protocol.Error) {
+	var params protocol.BackgroundParams
+	if err := protocol.DecodeParams(raw, &params); err != nil {
+		return nil, paramsFailure(err)
+	}
+	entry, rerr := s.lookup(params.SessionID)
+	if rerr != nil {
+		return nil, rerr
+	}
+	if params.RunID == "" || params.Handle == "" {
+		return nil, invalidParams("the run id and call handle are required")
+	}
+	id, err := entry.sess.BackgroundCall(params.RunID, params.Handle)
+	if err != nil {
+		return nil, failure(err)
+	}
+	return protocol.BackgroundResult{JobID: id}, nil
 }
 
 // jobCancel stops one background job.

@@ -525,6 +525,9 @@ func (s *Session) executeOne(owner *callOwner, turn int, plan callPlan) {
 		// The parent's presence is what says the call is nested.
 		payload["parent"] = plan.parent
 	}
+	if s.backgroundableCall(call.Name, plan.parent) {
+		payload["backgroundable"] = true
+	}
 	s.events.emit(EventToolCall, payload)
 
 	// An incomplete call in a truncated response is skipped: the model
@@ -710,7 +713,17 @@ func (s *Session) executeOne(owner *callOwner, turn int, plan callPlan) {
 	if plan.callCtx != nil {
 		callCtx = plan.callCtx
 	}
-	result, err := tool.Call(callCtx, prepared, s.toolEnv(owner, turn, handle, plan))
+	env := s.toolEnv(owner, turn, handle, plan)
+	var result ToolResult
+	if owner.run != nil && s.backgroundableCall(call.Name, plan.parent) {
+		var moved bool
+		result, err, moved = s.runLiveCall(owner, turn, plan, tool, env, callCtx)
+		if moved {
+			return
+		}
+	} else {
+		result, err = tool.Call(callCtx, prepared, env)
+	}
 	// The outcome is decided by the core, not by the tool.
 	outcome := OutcomeOK
 	var fatalCandidate *candidate
@@ -804,7 +817,7 @@ func (s *Session) executeOne(owner *callOwner, turn int, plan callPlan) {
 // starts. The call's own result is the "started" one, and the batch
 // carries on.
 func (s *Session) startJobCall(owner *callOwner, turn int, handle string, call ToolCall, plan callPlan) {
-	jobID, ok, winding, refusal := s.startJob(owner.run, turn, handle, call.Name, plan.prepared, plan.summary, call.Arguments, plan.stripped, plan.shorthand)
+	jobID, ok, winding, refusal := s.startJob(owner.run, turn, handle, call.Name, plan.prepared, plan.summary, call.Arguments, plan.stripped, plan.shorthand, nil)
 	if winding {
 		// The run settled while the job was being accepted; nothing
 		// else starts, and the finalization owns the run.
@@ -825,8 +838,12 @@ func (s *Session) startJobCall(owner *callOwner, turn int, handle string, call T
 		return
 	}
 
+	s.recordJobReceipt(owner, turn, handle, call, jobID, plan.shorthand)
+}
+
+func (s *Session) recordJobReceipt(owner *callOwner, turn int, handle string, call ToolCall, jobID string, shorthand json.RawMessage) {
 	text := fmt.Sprintf(StartedText, jobID, call.Name)
-	if plan.shorthand != nil {
+	if shorthand != nil {
 		text += " The trailing & requested this job."
 	}
 	s.recordResult(owner, turn, handle, call.Name, call.CallID, ToolResult{Text: text}, OutcomeStarted)
@@ -836,6 +853,20 @@ func (s *Session) startJobCall(owner *callOwner, turn int, handle string, call T
 		"tool":   call.Name,
 		"run_id": owner.id,
 	})
+}
+
+// backgroundableCall reports that a call may move to a job while it
+// runs: the tool can finish under a job without restarting, the call is
+// top-level, and the tool's background mode allows jobs. The tool.call
+// event carries the rule's answer as "backgroundable", so a client keys
+// on the core's rule instead of a tool name.
+func (s *Session) backgroundableCall(tool, parent string) bool {
+	t, ok := s.opts.Tools[tool]
+	if !ok {
+		return false
+	}
+	eligible, ok := t.(BackgroundableCaller)
+	return ok && eligible.CanBackgroundRunningCall() && parent == "" && s.backgroundModeOf(tool) == BackgroundAllowed
 }
 
 // prepareEnv builds the environment a tool validates its arguments in.

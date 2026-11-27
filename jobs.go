@@ -463,10 +463,11 @@ func WithJobs(o JobOptions) Option {
 //
 // The raw and stripped arguments both ride in: the job keeps the raw
 // call for its records and its completion hooks, the duplicate key
-// keys the stripped form — the same data prepare saw — and the
+// keys the stripped form — the same data prepare saw — the
 // shorthand rides in so the completion hook composes the shape the
-// admission hooks saw.
-func (s *Session) startJob(run *runState, turn int, handle, tool string, prepared Prepared, summary string, raw, stripped, shorthand json.RawMessage) (jobID string, ok bool, winding bool, refusal string) {
+// admission hooks saw, and a live call rides in when the job moves a
+// running Bash call into the session's jobs.
+func (s *Session) startJob(run *runState, turn int, handle, tool string, prepared Prepared, summary string, raw, stripped, shorthand json.RawMessage, live *liveCall) (jobID string, ok bool, winding bool, refusal string) {
 	// The slot is reserved under the lock, and the job is registered
 	// there too, so a job that is admitted is a job the session knows
 	// about. A run that is winding down admits nothing: no new effect
@@ -479,6 +480,10 @@ func (s *Session) startJob(run *runState, turn int, handle, tool string, prepare
 	if s.closed || s.broken {
 		s.mu.Unlock()
 		return "", false, false, ""
+	}
+	if live != nil && !live.canMove() {
+		s.mu.Unlock()
+		return "", false, false, ErrCallNotBackgroundable.Error()
 	}
 	if s.runningJobCountLocked() >= s.jobLimit() {
 		s.mu.Unlock()
@@ -495,7 +500,23 @@ func (s *Session) startJob(run *runState, turn int, handle, tool string, prepare
 	}
 	s.jobSeq++
 	jobID = fmt.Sprintf("j%d", s.jobSeq)
-	ctx, cancel := context.WithCancelCause(s.jobCtx)
+	var ctx context.Context
+	var cancel context.CancelCauseFunc
+	var acceptanceCtx context.Context
+	var releaseAcceptance func()
+	if live == nil {
+		ctx, cancel = context.WithCancelCause(s.jobCtx)
+	} else {
+		var claimed bool
+		acceptanceCtx, releaseAcceptance, claimed = s.beginRunWriteLocked(run, s.recordWriteBudget)
+		if !claimed {
+			s.mu.Unlock()
+			return "", false, true, ""
+		}
+		ctx, cancel = live.ctx, live.cancel
+		live.moving = true
+		live.stopRun()
+	}
 	// The owner carries the run's id, because its records belong to that
 	// run, and the job's own context, because a settle of the run must
 	// not stop the calls the job's tool makes.
@@ -537,7 +558,7 @@ func (s *Session) startJob(run *runState, turn int, handle, tool string, prepare
 	// The acceptance record is written before the goroutine starts. A
 	// write the run's finalization abandons is not a store failure: the
 	// run settled while the record was in flight.
-	err := s.writeDelivery(run.ctx, run, &JobStartedRecord{
+	started := &JobStartedRecord{
 		RecordMeta: NewRecordMeta("job.started"),
 		SessionID:  s.opts.SessionID,
 		JobID:      jobID,
@@ -545,7 +566,16 @@ func (s *Session) startJob(run *runState, turn int, handle, tool string, prepare
 		Tool:       tool,
 		RunID:      run.id,
 		StartedAt:  nowRFC3339(),
-	})
+	}
+	var err error
+	if live == nil {
+		err = s.writeDelivery(run.ctx, run, started)
+	} else {
+		// The run owns the transfer until its receipt; its cancellation
+		// after reservation does not revoke the job's acceptance.
+		err = s.appendRecord(acceptanceCtx, started, run, nil)
+		releaseAcceptance()
+	}
 	s.mu.Lock()
 	winding = run.committed || run.finalizing
 	s.mu.Unlock()
@@ -556,13 +586,17 @@ func (s *Session) startJob(run *runState, turn int, handle, tool string, prepare
 		s.mu.Unlock()
 		s.removeJob(jobID)
 		cancel(errFinalizing)
-		if errors.Is(err, errDeliveryAbandoned) || winding {
+		if live != nil {
+			close(job.done)
+			live.transfer <- nil
+		}
+		if errors.Is(err, errDeliveryAbandoned) || errors.Is(err, errCallRecordSealed) || winding {
 			return "", false, true, ""
 		}
 		s.noteStoreError(&run.callOwner, err)
 		return "", false, false, ""
 	}
-	if winding {
+	if winding && live == nil {
 		// The run went down while the acceptance was being recorded, so
 		// the job never launches. It was accepted, so it still completes
 		// through the job queue: a cancelled job.ended with the input id
@@ -586,7 +620,10 @@ func (s *Session) startJob(run *runState, turn int, handle, tool string, prepare
 	s.mu.Unlock()
 	s.signalWorkLocked(&run.callOwner)
 
-	go s.runJob(job, prepared)
+	go s.runJob(job, prepared, live)
+	if live != nil {
+		live.transfer <- job
+	}
 	return jobID, true, false, ""
 }
 
@@ -666,7 +703,7 @@ func (s *Session) onIdle() OnIdle {
 // The job runs under the session's context, so it survives the turn, the
 // interrupt and the settle. It stops when the job's timeout fires, when
 // it is cancelled, or when the session closes.
-func (s *Session) runJob(job *jobState, prepared Prepared) {
+func (s *Session) runJob(job *jobState, prepared Prepared, live *liveCall) {
 	defer close(job.done)
 	// A panic in a tool must not bring the process down: the foreground
 	// path settles a panicking tool as tool_fatal, and a job gets the
@@ -678,24 +715,34 @@ func (s *Session) runJob(job *jobState, prepared Prepared) {
 		}
 	}()
 
+	if live != nil {
+		s.finishLiveJob(job, live)
+		return
+	}
+
 	tool, ok := s.opts.Tools[job.tool]
 	if !ok {
 		s.completeJob(job, ToolResult{Text: "the tool is gone", IsError: true}, OutcomeError, false, false, "")
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(job.ctx, s.jobTimeout())
-	defer cancel()
+	ctx, cancel := context.WithCancelCause(job.ctx)
+	defer cancel(nil)
+	defer s.armJobTimeout(cancel)()
 
 	env := s.jobToolEnv(job)
 	result, err := tool.Call(ctx, prepared, env)
+	s.completeJobCall(job, ctx, result, err)
+}
+
+func (s *Session) completeJobCall(job *jobState, ctx context.Context, result ToolResult, err error) {
 	// The partial output is kept even when the close writes the record:
 	// the close stopped the job, but what it produced is still its
 	// result.
 	s.mu.Lock()
 	job.partialText = result.Text
 	s.mu.Unlock()
-	timedOut := errors.Is(ctx.Err(), context.DeadlineExceeded)
+	timedOut := errors.Is(context.Cause(ctx), context.DeadlineExceeded)
 	// A fatal error means the environment is unusable. The failure
 	// belongs to the job, and the receiving run settles tool_fatal. A
 	// fatal error a nested call reported is the job's too: the tool

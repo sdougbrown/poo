@@ -297,6 +297,9 @@ func resolveTimeout(requested time.Duration, settings int, tool time.Duration) t
 	return DefaultTimeout
 }
 
+// CanBackgroundRunningCall reports that Bash can finish under a job without restarting.
+func (*Tool) CanBackgroundRunningCall() bool { return true }
+
 // Call runs the command.
 func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.ToolResult, error) {
 	p, ok := in.(*prepared)

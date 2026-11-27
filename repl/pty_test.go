@@ -230,9 +230,15 @@ func endReplCleanup(t *testing.T, term *terminal, exited <-chan struct{}) {
 // on the returned channel once the repl leaves.
 func startTerminalRepl(t *testing.T, server *fakeServer) (*terminal, <-chan int) {
 	t.Helper()
-	term := openTerminal(t)
 	stdin, stdout := pipeUp(t, server)
+	return startTerminalClient(t, func([]string) (io.WriteCloser, io.ReadCloser, func() error, error) {
+		return stdin, stdout, func() error { return nil }, nil
+	})
+}
 
+func startTerminalClient(t *testing.T, start func([]string) (io.WriteCloser, io.ReadCloser, func() error, error)) (*terminal, <-chan int) {
+	t.Helper()
+	term := openTerminal(t)
 	// The editor is hardwired to the process's own stdio: it reads keys
 	// from fd 0 and renders to fd 1, and it captured the stream objects
 	// when the editor's package initialized. The terminal's slave
@@ -252,10 +258,8 @@ func startTerminalRepl(t *testing.T, server *fakeServer) (*terminal, <-chan int)
 	dir := filepath.Join(t.TempDir(), "poo")
 	os.MkdirAll(dir, 0o700)
 	opts := Options{
-		WorkingDir: dir,
-		StartServer: func(args []string) (io.WriteCloser, io.ReadCloser, func() error, error) {
-			return stdin, stdout, func() error { return nil }, nil
-		},
+		WorkingDir:  dir,
+		StartServer: start,
 	}
 	go func() { code <- Run(opts); close(exited) }()
 	// endReplCleanup owns the teardown contract: interrupts until the

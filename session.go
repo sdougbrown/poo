@@ -505,6 +505,7 @@ type issuedCall struct {
 	recordCancel context.CancelCauseFunc
 	// started reports that the tool is running.
 	started bool
+	live    *liveCall
 }
 
 // Options configure a session.

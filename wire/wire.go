@@ -607,6 +607,7 @@ func knownMethod(method string) bool {
 		protocol.MethodRunMessage,
 		protocol.MethodRunInspect,
 		protocol.MethodRunCancel,
+		protocol.MethodRunBackground,
 		protocol.MethodJobCancel,
 		protocol.MethodSettingsGet:
 		return true

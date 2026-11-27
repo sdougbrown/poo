@@ -22,6 +22,8 @@ func codeOf(err error) string {
 		return protocol.DataBusy
 	case errors.Is(err, poo.ErrNotRunning):
 		return protocol.DataNotRunning
+	case errors.Is(err, poo.ErrCallNotBackgroundable):
+		return protocol.DataCallNotBackgroundable
 	case errors.Is(err, poo.ErrSessionClosed):
 		return protocol.DataSessionClosed
 	case errors.Is(err, poo.ErrSessionBroken):
