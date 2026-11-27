@@ -19,6 +19,7 @@ func TestCodeOf(t *testing.T) {
 	}{
 		{"busy", poo.ErrBusy, protocol.DataBusy},
 		{"not running", poo.ErrNotRunning, protocol.DataNotRunning},
+		{"call not backgroundable", poo.ErrCallNotBackgroundable, protocol.DataCallNotBackgroundable},
 		{"closed", poo.ErrSessionClosed, protocol.DataSessionClosed},
 		{"broken", poo.ErrSessionBroken, protocol.DataSessionBroken},
 		{"invalid input", &poo.ErrInvalidInput{Message: "no such message"}, protocol.DataInvalidParams},
