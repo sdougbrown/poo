@@ -55,7 +55,7 @@ func (s *Session) BackgroundCall(runID, handle string) (string, error) {
 	live := issued.live
 	s.mu.Unlock()
 	p := live.plan
-	id, ok, winding, refusal := s.startJob(run, live.turn, handle, p.call.Name, p.prepared, p.summary, p.call.Arguments, p.stripped, live)
+	id, ok, winding, refusal := s.startJob(run, live.turn, handle, p.call.Name, p.prepared, p.summary, p.call.Arguments, p.stripped, p.shorthand, live)
 	if winding {
 		return "", ErrNotRunning
 	}
@@ -127,7 +127,7 @@ func (s *Session) runLiveCall(owner *callOwner, turn int, plan callPlan, tool To
 		}
 	}
 	if job != nil {
-		s.recordJobReceipt(owner, turn, plan.handle, plan.call, job.id)
+		s.recordJobReceipt(owner, turn, plan.handle, plan.call, job.id, plan.shorthand)
 		close(c.receipt)
 		return ToolResult{}, nil, true
 	}

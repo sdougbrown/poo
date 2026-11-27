@@ -835,12 +835,12 @@ func (s *Session) startJobCall(owner *callOwner, turn int, handle string, call T
 		return
 	}
 
-	s.recordJobReceipt(owner, turn, handle, call, jobID)
+	s.recordJobReceipt(owner, turn, handle, call, jobID, plan.shorthand)
 }
 
-func (s *Session) recordJobReceipt(owner *callOwner, turn int, handle string, call ToolCall, jobID string) {
+func (s *Session) recordJobReceipt(owner *callOwner, turn int, handle string, call ToolCall, jobID string, shorthand json.RawMessage) {
 	text := fmt.Sprintf(StartedText, jobID, call.Name)
-	if plan.shorthand != nil {
+	if shorthand != nil {
 		text += " The trailing & requested this job."
 	}
 	s.recordResult(owner, turn, handle, call.Name, call.CallID, ToolResult{Text: text}, OutcomeStarted)
