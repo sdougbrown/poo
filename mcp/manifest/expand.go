@@ -132,6 +132,30 @@ func referencePart(body string) (templatePart, error) {
 	return templatePart{kind: templateHost, text: name, defaultValue: value, hasDefault: hasDefault}, nil
 }
 
+// Source returns the value as the manifest wrote it: the literal text,
+// the references in the shape the manifest spells them, and the dollars
+// a literal carries doubled where the parse un-doubled them. A listing
+// of the manifest's servers reads this, so what it shows is what the
+// file says and not one session's resolution of it.
+func (t Template) Source() string {
+	var out strings.Builder
+	for _, part := range t.parts {
+		switch part.kind {
+		case templateLiteral:
+			out.WriteString(strings.ReplaceAll(part.text, "$", "$$"))
+		case templateHost:
+			if part.hasDefault {
+				out.WriteString("${" + part.text + ":-" + part.defaultValue + "}")
+			} else {
+				out.WriteString("${" + part.text + "}")
+			}
+		case templateSession:
+			out.WriteString("${session:id}")
+		}
+	}
+	return out.String()
+}
+
 // Resolve returns the value the template stands for.
 //
 // host looks a variable name up, and a nil host resolves no variable.

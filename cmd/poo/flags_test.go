@@ -638,6 +638,70 @@ func TestEveryOtherCommandBindsItsFlags(t *testing.T) {
 			t.Errorf("the list bound the prune's flags: %+v", o)
 		}
 	})
+
+	t.Run("mcp list", func(t *testing.T) {
+		inv, err := clicontract.Parse(pooApp(io.Discard), []string{
+			"mcp", "list",
+			"--json",
+			"--settings", "s.yaml",
+			"--mcp-path", "extra.json",
+		})
+		if err != nil {
+			t.Fatalf("parsing the mcp list's flags: %v", err)
+		}
+		var o mcpOptions
+		o.bind(inv)
+		if !o.json {
+			t.Error("the mcp list did not bind --json")
+		}
+		if o.settingsFile != "s.yaml" || len(o.mcpPaths) != 1 || o.mcpPaths[0] != "extra.json" {
+			t.Errorf("the mcp list bound the shared flags wrong: %+v", o.sharedFlags)
+		}
+		if o.global || o.project || len(o.env) != 0 {
+			t.Errorf("the mcp list bound the add's flags: %+v", o)
+		}
+	})
+
+	t.Run("mcp add", func(t *testing.T) {
+		inv, err := clicontract.Parse(pooApp(io.Discard), []string{
+			"mcp", "add", "fixture",
+			"--global",
+			"--env", "K=V",
+			"--", "echo", "hi",
+		})
+		if err != nil {
+			t.Fatalf("parsing the mcp add's flags: %v", err)
+		}
+		var o mcpOptions
+		o.bind(inv)
+		if !o.global || o.project {
+			t.Errorf("the mcp add bound the scope wrong: global=%t project=%t", o.global, o.project)
+		}
+		if len(o.env) != 1 || o.env[0] != "K=V" {
+			t.Errorf("the mcp add bound --env wrong: %+v", o.env)
+		}
+		if len(inv.Args) != 3 || inv.Args[0] != "fixture" || inv.Args[1] != "echo" || inv.Args[2] != "hi" {
+			t.Errorf("the mcp add bound the positionals wrong: %+v", inv.Args)
+		}
+	})
+
+	t.Run("mcp remove", func(t *testing.T) {
+		inv, err := clicontract.Parse(pooApp(io.Discard), []string{
+			"mcp", "remove", "fixture",
+			"--project",
+		})
+		if err != nil {
+			t.Fatalf("parsing the mcp remove's flags: %v", err)
+		}
+		var o mcpOptions
+		o.bind(inv)
+		if !o.project || o.global {
+			t.Errorf("the mcp remove bound the scope wrong: global=%t project=%t", o.global, o.project)
+		}
+		if len(inv.Args) != 1 || inv.Args[0] != "fixture" {
+			t.Errorf("the mcp remove bound the positionals wrong: %+v", inv.Args)
+		}
+	})
 }
 
 // TestTheWaitFlagKnowsWhetherItWasTyped covers the flag's presence, not its value: a key
@@ -685,6 +749,9 @@ func TestEveryCommandWithItsOwnFlagsHasABindingTest(t *testing.T) {
 		"login":          "TestEveryOtherCommandBindsItsFlags/login",
 		"sessions list":  "TestEveryOtherCommandBindsItsFlags/sessions_list",
 		"sessions prune": "TestEveryOtherCommandBindsItsFlags/sessions_prune",
+		"mcp list":       "TestEveryOtherCommandBindsItsFlags/mcp_list",
+		"mcp add":        "TestEveryOtherCommandBindsItsFlags/mcp_add",
+		"mcp remove":     "TestEveryOtherCommandBindsItsFlags/mcp_remove",
 		"version":        "TestTheVersionCommandAnswersInBothForms",
 		// The repl binds serveOptions, so the serve subtest covers its
 		// binding; this test covers the second spelling it hands the child.

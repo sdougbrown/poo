@@ -94,6 +94,9 @@ type ResourceFeedDecl struct {
 type Set struct {
 	// servers are the servers poo starts, in name order.
 	servers []Server
+	// sources are the file each server's entry was read from, by name.
+	// Load is the map's single writer, and the accessors read it.
+	sources map[string]string
 	// feeds are the resource feeds, by server name, each list in name
 	// order.
 	feeds map[string][]ResourceFeedDecl
@@ -121,7 +124,7 @@ func Load(paths ...string) (*Set, error) {
 	if err != nil {
 		return nil, fmt.Errorf("mcp manifests: %w", err)
 	}
-	set := &Set{feeds: map[string][]ResourceFeedDecl{}}
+	set := &Set{feeds: map[string][]ResourceFeedDecl{}, sources: map[string]string{}}
 	defined := make(map[string]string, len(files))
 	feeds := make(map[string]string, len(files))
 	for _, file := range files {
@@ -134,6 +137,7 @@ func Load(paths ...string) (*Set, error) {
 				return nil, fmt.Errorf("the mcp server %q is defined in both %s and %s", server.Name, first, file)
 			}
 			defined[server.Name] = file
+			set.sources[server.Name] = file
 			set.servers = append(set.servers, server)
 		}
 		set.warnings = append(set.warnings, content.warnings...)
@@ -165,6 +169,17 @@ func (s *Set) Names() []string {
 		names[i] = server.Name
 	}
 	return names
+}
+
+// Source returns the file the named server's entry was read from, and
+// whether the set holds the name. A command that edits a manifest finds
+// the file here, so the edit lands in the file the load read.
+func (s *Set) Source(name string) (string, bool) {
+	if s == nil {
+		return "", false
+	}
+	file, ok := s.sources[name]
+	return file, ok
 }
 
 // Lookup returns the named server, and whether the set holds it.
