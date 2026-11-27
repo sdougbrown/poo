@@ -525,6 +525,9 @@ func (s *Session) executeOne(owner *callOwner, turn int, plan callPlan) {
 		// The parent's presence is what says the call is nested.
 		payload["parent"] = plan.parent
 	}
+	if s.backgroundableCall(call.Name, plan.parent) {
+		payload["backgroundable"] = true
+	}
 	s.events.emit(EventToolCall, payload)
 
 	// An incomplete call in a truncated response is skipped: the model
@@ -712,7 +715,7 @@ func (s *Session) executeOne(owner *callOwner, turn int, plan callPlan) {
 	}
 	env := s.toolEnv(owner, turn, handle, plan)
 	var result ToolResult
-	if eligible, ok := tool.(interface{ CanBackgroundRunningCall() bool }); ok && eligible.CanBackgroundRunningCall() && plan.parent == "" && owner.run != nil && s.backgroundModeOf(call.Name) == BackgroundAllowed {
+	if owner.run != nil && s.backgroundableCall(call.Name, plan.parent) {
 		var moved bool
 		result, err, moved = s.runLiveCall(owner, turn, plan, tool, env, callCtx)
 		if moved {
@@ -850,6 +853,20 @@ func (s *Session) recordJobReceipt(owner *callOwner, turn int, handle string, ca
 		"tool":   call.Name,
 		"run_id": owner.id,
 	})
+}
+
+// backgroundableCall reports that a call may move to a job while it
+// runs: the tool can finish under a job without restarting, the call is
+// top-level, and the tool's background mode allows jobs. The tool.call
+// event carries the rule's answer as "backgroundable", so a client keys
+// on the core's rule instead of a tool name.
+func (s *Session) backgroundableCall(tool, parent string) bool {
+	t, ok := s.opts.Tools[tool]
+	if !ok {
+		return false
+	}
+	eligible, ok := t.(interface{ CanBackgroundRunningCall() bool })
+	return ok && eligible.CanBackgroundRunningCall() && parent == "" && s.backgroundModeOf(tool) == BackgroundAllowed
 }
 
 // prepareEnv builds the environment a tool validates its arguments in.

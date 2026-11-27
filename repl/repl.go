@@ -1258,7 +1258,7 @@ func (m *machine) event(evt protocol.Event, runID string, state *runState) bool 
 		// interrupted; the call's own write settles that message first.
 		tool, _ := evt.Payload["tool"].(string)
 		summary, _ := evt.Payload["summary"].(string)
-		if id, _ := evt.Payload["run_id"].(string); id == runID && tool == "bash" && evt.Payload["parent"] == nil {
+		if id, _ := evt.Payload["run_id"].(string); id == runID && evt.Payload["backgroundable"] == true {
 			if handle, _ := evt.Payload["handle"].(string); handle != "" {
 				if state.bashCalls == nil {
 					state.bashCalls = make(map[string]struct{})
