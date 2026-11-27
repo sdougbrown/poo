@@ -1768,15 +1768,9 @@ func (r *Runtime) addMCPTools(opts BuildOptions) error {
 		}
 	}
 	// The offering is what the session reaches: the attach starts the
-	// servers the manifests load, judged by the same lookup, so a
+	// servers the manifests load, judged the way the listing judges, so a
 	// selection that loads none offers no tools over one.
-	selected := 0
-	for _, server := range r.MCPServers {
-		if _, ok := r.mcpSet.Lookup(server); ok {
-			selected++
-		}
-	}
-	if selected == 0 {
+	if !mcpSelectionOffers(r.mcpSet, r.MCPServers) {
 		return nil
 	}
 	for _, name := range names {
@@ -1807,6 +1801,22 @@ func (r *Runtime) mcpToolNames(disabled []string) []string {
 		names = append(names, cli.FindToolName)
 	}
 	return names
+}
+
+// mcpSelectionOffers reports whether a selection starts a server the set
+// loaded under the profile's own defaults word holds.
+//
+// A selected name the set does not hold is a server the build warns about
+// and the session runs without, so a selection that holds none of the set
+// starts nothing. The listing judges the word and the set the way the
+// session does, so a profile the defaults would have loaded a server for —
+// one that turns them off and names that server — is offered no call over
+// servers it never starts.
+func mcpSelectionOffers(set *manifest.Set, selection []string) bool {
+	return slices.ContainsFunc(selection, func(name string) bool {
+		_, ok := set.Lookup(name)
+		return ok
+	})
 }
 
 // offersSideEffects reports whether a tool set can change anything.
@@ -1966,8 +1976,8 @@ func (r *Runtime) resolveProfiles(opts BuildOptions, definitions []profile.Profi
 	type manifestKey struct{ feeds, registry, mcp bool }
 	type manifestPair struct {
 		feeds    *feed.Set
-		registry *cli.Catalog
 		mcp      *manifest.Set
+		registry *cli.Catalog
 	}
 	// The listing judges a profile's tools by the feeds it resolves — the
 	// feed manifests', and the resource feeds the selected servers
@@ -1984,19 +1994,25 @@ func (r *Runtime) resolveProfiles(opts BuildOptions, definitions []profile.Profi
 		if pair, ok := sets[key]; ok {
 			return pair, nil
 		}
+		// A load that fails leaves what loaded earlier in the pair: the
+		// listing offers a variant whose one manifest fails without
+		// losing the feeds and tools its other manifests earned.
+		var pair manifestPair
 		feeds, _, err := r.loadFeeds(opts, workingDir, key.feeds)
 		if err != nil {
-			return manifestPair{}, err
+			return pair, err
 		}
+		pair.feeds = feeds
+		mcpSet, _, err := r.loadMCP(opts, workingDir, key.mcp)
+		if err != nil {
+			return pair, err
+		}
+		pair.mcp = mcpSet
 		registry, _, err := r.loadRegistry(opts, workingDir, key.registry)
 		if err != nil {
-			return manifestPair{}, err
+			return pair, err
 		}
-		mcp, _, err := r.loadMCP(opts, workingDir, key.mcp)
-		if err != nil {
-			return manifestPair{}, err
-		}
-		pair := manifestPair{feeds: feeds, registry: registry, mcp: mcp}
+		pair.registry = registry
 		sets[key] = pair
 		return pair, nil
 	}
@@ -2007,17 +2023,16 @@ func (r *Runtime) resolveProfiles(opts BuildOptions, definitions []profile.Profi
 		variant := r.resolvedProfiles[definition.Name]
 		pair, err := pairFor(manifestKey{
 			feeds:    defaultsOn(r.Settings.Feeds.Defaults, variant.FeedsDefaults),
-			registry: defaultsOn(r.Settings.CLIRegistry.Defaults, variant.RegistryDefaults),
 			mcp:      defaultsOn(r.Settings.MCP.Defaults, variant.mcpDefaults),
+			registry: defaultsOn(r.Settings.CLIRegistry.Defaults, variant.RegistryDefaults),
 		})
 		if err != nil {
-			// A variant whose manifests fail the load is offered
-			// without them: the build does not fail for manifests
+			// A variant whose manifests fail the load is offered with
+			// whatever loaded: the build does not fail for manifests
 			// sessions under other profiles never run. The session's
 			// own pair is in the cache already, so the failure is
 			// always a variant's.
 			r.warn(fmt.Sprintf("profiles.%s: the manifests its defaults word selects do not load: %v", definition.Name, err))
-			pair = manifestPair{}
 		}
 		feeds := pair.feeds.Len() > 0
 		optionalFeed := false
@@ -2036,11 +2051,7 @@ func (r *Runtime) resolveProfiles(opts BuildOptions, definitions []profile.Profi
 		// manifest-load failure's. The servers a selection the manifests
 		// do not load starts nothing, so it earns neither the feeds'
 		// tools nor the call over them.
-		selected := 0
 		for _, server := range variant.mcpServers {
-			if _, ok := pair.mcp.Lookup(server); ok {
-				selected++
-			}
 			decls := pair.mcp.Feeds(server)
 			if len(decls) == 0 {
 				continue
@@ -2087,7 +2098,7 @@ func (r *Runtime) resolveProfiles(opts BuildOptions, definitions []profile.Profi
 				}
 			}
 		}
-		if selected > 0 && linksTool(opts, ToolCallMCP) {
+		if mcpSelectionOffers(pair.mcp, variant.mcpServers) && linksTool(opts, ToolCallMCP) {
 			// A session of this profile reaches its servers through these
 			// tools, so the listing names them the way that session does.
 			for _, name := range r.mcpToolNames(disabled) {

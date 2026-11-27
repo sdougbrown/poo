@@ -1235,3 +1235,34 @@ func TestTheListingOffersTheMCPCallASessionDoes(t *testing.T) {
 		t.Errorf("the session offers %q, and the listing %q — the two must name the same tools", session, listed)
 	}
 }
+
+// TestTheListingJudgesTheServersTheProfileLoads covers the defaults word the
+// listing answers per profile: a profile that turns the default mcp directory
+// off and names a server only that directory holds starts nothing, so its
+// listing offers no call over servers it never launches, and the profile that
+// keeps the defaults is offered the call.
+func TestTheListingJudgesTheServersTheProfileLoads(t *testing.T) {
+	pooDir := theDefaultsPooDir(t)
+	theDefaultMCPServer(t, pooDir)
+	settings, err := config.Parse([]byte(theMCPSettings()+theSessionDir(t)+
+		"profiles:\n  slim:\n    base: code\n    mcp_defaults: false\n    mcp_servers: [avenor]\n"+
+		"  eager:\n    base: code\n    mcp_servers: [avenor]\nprofile: slim\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+	defer runtime.Store.Close()
+
+	offered := map[string][]string{}
+	for _, listed := range runtime.Profiles {
+		for _, tool := range listed.Tools {
+			offered[listed.Name] = append(offered[listed.Name], tool.Name)
+		}
+	}
+	if hasTool(offered["slim"], config.ToolCallMCP) {
+		t.Errorf("the listing offers %q to a profile whose session starts no server: %q", config.ToolCallMCP, offered["slim"])
+	}
+	if !hasTool(offered["eager"], config.ToolCallMCP) {
+		t.Errorf("the listing offers the profile that keeps the defaults %q, and not the call over its server", offered["eager"])
+	}
+}

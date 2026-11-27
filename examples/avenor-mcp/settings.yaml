@@ -1,0 +1,71 @@
+# Avenor over MCP: poo starts Avenor's MCP server beside the session, the
+# model reaches the server's tools through call_mcp, and the session reads
+# the server's inbox as a resource feed.
+#
+#     cd ~/Code/poo
+#     poo run --settings examples/avenor-mcp/settings.yaml \
+#       "spawn a child to run the test suite, then answer its questions"
+#
+# The settings name one manifest directory and turn off the ambient ones, so
+# the session is this example and nothing else. The profile is what starts
+# the server: a manifest declares servers, and only `mcp_servers` selects
+# one.
+#
+# The path is relative to the directory poo runs in, so the command above
+# runs from the checkout. Give an absolute path (or one starting with ~/)
+# to run the file from anywhere.
+version: 1
+
+mcp:
+  # Only this directory: nothing from poo's own mcp directory joins the
+  # session unless this file says so. (A --mcp-path flag or POO_MCP_PATH
+  # still adds its paths on top — the defaults flag turns off poo's own
+  # directory, not a path you name.)
+  paths: [examples/avenor-mcp]
+  defaults: false
+# The other Avenor example declares a feed and four CLI tools over the same
+# inbox. Leave those manifests out too: one session reads its inbox one way,
+# never both.
+feeds:
+  defaults: false
+cli_registry:
+  defaults: false
+
+# The model the session talks to. Point this at your own endpoint; the shape
+# is examples/code.settings.yaml's.
+endpoints:
+  home:
+    endpoint: "http://localhost:4000/v1"
+    api_key_env: "HOME_MODELS_KEY"
+models:
+  gemma4:
+    endpoint: home
+    model_id: "gemma4"
+    api: chat_completions
+    tools_mode: native
+    ops: [chat]
+    context_limit: 131072
+roles:
+  chat: gemma4
+
+profiles:
+  avenor:
+    base: code
+    # The servers this profile's sessions start, by the name the manifest
+    # gives them. No selection starts no server.
+    mcp_servers: [avenor]
+profile: avenor
+
+# A supervisor per session, or one you share. The default is private: the
+# server the manifest starts runs `avenor mcp --bind-host poo
+# --bind-session ${session:id}`, which starts a supervisor for this session
+# and stops it when the session ends.
+#
+# To share a supervisor another process already owns, append its socket and
+# the flag that forbids a second one, in mcp.json's args:
+#
+#     "args": ["mcp", "--bind-host", "poo", "--bind-session", "${session:id}",
+#              "--supervisor-socket", "/path/to/supervisor.sock", "--no-autostart"]
+#
+# Every session bound to that supervisor shares its children; each still has
+# its own inbox.
