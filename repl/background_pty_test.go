@@ -48,7 +48,7 @@ func TestBackgroundMovesTheSameProcessAcrossRunCancellation(t *testing.T) {
 	sink := pootest.NewSink()
 	transport := pootest.NewTransportFromScript(pootest.Script{Turns: []pootest.Turn{
 		{Calls: []pootest.Call{{Name: "bash", Arguments: []byte(`{"description":"background probe","command":"echo $$ > started; while [[ ! -f release ]]; do /bin/sleep 0.02; done; echo process-$$"}`)}}},
-		{Text: "waiting for the result"},
+		{Calls: []pootest.Call{{Name: "bash", Arguments: []byte(`{"description":"hold","command":"echo $$ > holding; while [[ ! -f release-hold ]]; do /bin/sleep 0.02; done"}`)}}},
 		{Text: "job output received"},
 	}})
 	term, code := startTerminalClient(t, func([]string) (io.WriteCloser, io.ReadCloser, func() error, error) {
@@ -88,6 +88,9 @@ func TestBackgroundMovesTheSameProcessAcrossRunCancellation(t *testing.T) {
 	term.press("\x1b")
 	waitFor(t, term, "✓ cancelled")
 	if err := os.WriteFile(filepath.Join(dir, "release"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "release-hold"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	// Check delivery to the model even when the REPL does not render the wake.
