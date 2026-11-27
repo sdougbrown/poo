@@ -88,7 +88,7 @@ func handleAuthStatus(inv clicontract.Invocation, stdout, stderr io.Writer) exit
 		Provider:  status.Provider,
 		ClientID:  status.ClientID,
 		AccountID: status.AccountID,
-		State:     credentialState(status, settings.AuthReadonly),
+		State:     credentialState(status, credentials.ReadOnly),
 	}
 	// A credential with no expiry has no time to report: a key is sent as it is, and a time
 	// rendered for it would be a time nothing enforces.
@@ -185,13 +185,19 @@ func keyStatus(credentials auth.Credentials, earlier error) (auth.Status, error)
 }
 
 // credentialState is the word a report gives a credential's state: a credential poo
-// would use as it is, or one it trades before using it. A read-only file has no
-// trade, so an expired one names the tool that owns the refresh instead.
+// would use as it is, or one it trades before using it. The read-only word is the
+// store's own mode, not the settings re-read: the state and the trade refusal
+// cannot disagree, because they are keyed to the one bit. A credential whose
+// expiry cannot be read is not called expired — nothing knows that it did — and
+// the state says what the store's own refusal says.
 func credentialState(status auth.Status, readonly bool) string {
 	// A key is sent as it is: nothing trades it, so there is nothing to refresh and nothing
 	// that can be stale.
 	if status.Kind == auth.KindAPIKey || status.Live {
 		return "live"
+	}
+	if status.Expires.IsZero() {
+		return "no readable expiry"
 	}
 	if readonly {
 		return "expired (read-only: refresh with the tool that owns the file)"

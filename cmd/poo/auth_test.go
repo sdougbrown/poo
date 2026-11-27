@@ -674,6 +674,9 @@ func TestTheAuthStatusLeavesAnUnreadableExpiryEmpty(t *testing.T) {
 	if strings.Contains(out, "1970") {
 		t.Errorf("the report is %q, want no expiry rendered from a zero time", out)
 	}
+	if !strings.Contains(out, "STATE     no readable expiry") {
+		t.Errorf("the report is %q, want the state that says the expiry cannot be read", out)
+	}
 	expires := ""
 	for _, line := range strings.Split(out, "\n") {
 		if strings.HasPrefix(line, "EXPIRES") {
