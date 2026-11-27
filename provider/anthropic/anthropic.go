@@ -48,9 +48,10 @@ type Options struct {
 	// ModelInfo is the model's info. It names the reasoning control, the
 	// temperature control and the modalities.
 	ModelInfo poo.ModelInfo
-	// Reasoning is the reasoning setting: a named level, or a number of
-	// thinking tokens. A model info that names a reasoning control wins
-	// over this one.
+	// Reasoning is the reasoning setting: "default", a named level,
+	// "off", or a number of thinking tokens. The default sends no
+	// reasoning field, and the endpoint's own thinking applies. A model
+	// info that names a reasoning control wins over this one.
 	Reasoning string
 	// Sampling holds the sampling overrides. They win over the model
 	// info's own defaults, field by field.
