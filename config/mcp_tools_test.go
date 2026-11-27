@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"slices"
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/cli"
 	"github.com/sdougbrown/poo/config"
@@ -1153,8 +1154,16 @@ func TestTheListingOffersTheMCPCallASessionDoes(t *testing.T) {
 	if hasTool(offered["plain"], config.ToolCallMCP) {
 		t.Errorf("the listing offers a profile that selects no server %q", offered["plain"])
 	}
-	// The running session's own offering is the listing's.
-	if got, want := len(runtime.Profile.Tools), len(offered["picky"]); got != want {
-		t.Errorf("the session offers %d tools, and the listing %d", got, want)
+	// The running session's own offering is the listing's: the same set
+	// of tool names, so a swap of equal count cannot pass.
+	session := make([]string, 0, len(runtime.Profile.Tools))
+	for _, tool := range runtime.Profile.Tools {
+		session = append(session, tool.Name)
+	}
+	slices.Sort(session)
+	listed := slices.Clone(offered["picky"])
+	slices.Sort(listed)
+	if !slices.Equal(session, listed) {
+		t.Errorf("the session offers %q, and the listing %q — the two must name the same tools", session, listed)
 	}
 }
