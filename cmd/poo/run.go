@@ -30,7 +30,9 @@ type runOptions struct {
 	// permissionFallback is the decision when the asker chain is
 	// exhausted.
 	permissionFallback string
-	// reasoningEffort is the reasoning_effort the run sends.
+	// ReasoningEffort is the reasoning_effort the run sends. "default"
+	// sends no reasoning field at all, and "off" asks the model not to
+	// think, in the words the model's own control takes.
 	reasoningEffort string
 	// maxTurns is the turn limit.
 	maxTurns int
@@ -70,7 +72,7 @@ type runOptions struct {
 func runFlagSpecs() []clicontract.Flag {
 	specs := append(endpointFlagSpecs(),
 		clicontract.Flag{Name: "permission-fallback", Kind: clicontract.String, Usage: "The decision when the asker chain is exhausted: allow or deny"},
-		clicontract.Flag{Name: "reasoning-effort", Kind: clicontract.String, Usage: "The reasoning_effort to send, for models that think only when asked"},
+		clicontract.Flag{Name: "reasoning-effort", Kind: clicontract.String, Usage: "The reasoning level to send: default (no field), off, minimal, low, medium, high, xhigh"},
 		clicontract.Flag{Name: "max-turns", Kind: clicontract.Int, Usage: "The turn limit"},
 		clicontract.Flag{Name: "max-output", Kind: clicontract.Int, Usage: "The model's output-token limit"},
 		clicontract.Flag{Name: "truncation-retries", Kind: clicontract.Int, Usage: "How many consecutive output-limit truncations the run retries, more concisely, before settling"},
@@ -377,12 +379,16 @@ func watchInterrupts(interrupts <-chan os.Signal, cancel context.CancelFunc, clo
 // The catalog resolves the model the settings name, and the flags
 // change what it resolved: the limit and the reasoning control are
 // the operator's.
+//
+// The reasoning flag names a level for a model that takes one, so a
+// named effort level forces the effort control on. See
+// ForcesEffortControl for the rule and what stays beside it.
 func modelWithFlags(runtime *config.Runtime, o *runOptions) poo.ModelInfo {
 	model := runtime.Options.Model
 	if o.maxOutput > 0 {
 		model.MaxOutput = o.maxOutput
 	}
-	if o.reasoningEffort != "" {
+	if poo.ForcesEffortControl(o.reasoningEffort) {
 		model.Reasoning = poo.ReasoningControl{Mode: poo.ReasoningEffort, Param: poo.ReasoningPathEffort}
 	}
 	return model

@@ -2,6 +2,7 @@ package codex
 
 import (
 	"encoding/json"
+	"slices"
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/provider/internal/responses"
@@ -160,6 +161,10 @@ func (t *Transport) tools(info poo.ModelInfo, specs []poo.ToolSpec) ([]responses
 // has no field for a token budget and none for a chat-template switch. A model
 // that controls its reasoning another way is therefore a configuration error.
 // Such a request would silently reason as much as it likes.
+//
+// The default names the request that carries no reasoning, and it sends
+// none. Off is spelled "none" here whatever word the model's catalog
+// uses: the endpoint takes none, and a model told off is asked for none.
 func (t *Transport) shapeReasoning(req poo.ChatRequest, info poo.ModelInfo, out *responses.Request) error {
 	setting := t.reasoningSetting(req)
 	fields, err := info.ReasoningFields(setting)
@@ -167,6 +172,7 @@ func (t *Transport) shapeReasoning(req poo.ChatRequest, info poo.ModelInfo, out 
 		return support.ConfigErrorf("%s", support.ReasonError(err))
 	}
 	effort := ""
+	off := false
 	for _, field := range fields {
 		if field.Path != poo.ReasoningPathEffort {
 			return support.ConfigErrorf("the Codex endpoint takes an effort level, not %s", field.Path)
@@ -176,15 +182,16 @@ func (t *Transport) shapeReasoning(req poo.ChatRequest, info poo.ModelInfo, out 
 			return support.ConfigErrorf("the reasoning effort %v is not a level", field.Value)
 		}
 		effort = value
-	}
-	if effort == "" && info.Reasoning.Mode != poo.ReasoningEffort {
-		// The model controls no reasoning, or it was told off and its
-		// control says so by sending nothing.
-		return nil
+		off = slices.Contains(poo.ReasoningOffWords, effort)
 	}
 	if effort == "" {
-		// A reasoning model that is told off still asks the endpoint for
-		// no reasoning: the level's own spelling of off is "none".
+		// No control was asked for: the default leaves the endpoint's own
+		// effort in charge, and the request names no reasoning.
+		return nil
+	}
+	if off {
+		// The endpoint spells off "none" whatever word the model's
+		// catalog uses, and there is no reasoning to summarize.
 		out.Reasoning = &responses.Reasoning{Effort: "none"}
 		return nil
 	}

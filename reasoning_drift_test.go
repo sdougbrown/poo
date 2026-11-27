@@ -5,6 +5,7 @@ import (
 	"os"
 	"regexp"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/sdougbrown/poo/wire/protocol"
@@ -77,5 +78,25 @@ func TestTheSettingsSchemaTakesTheCoreLevels(t *testing.T) {
 	}
 	if re.MatchString("0") {
 		t.Errorf("the schema's pattern takes a zero budget: %s", re.String())
+	}
+}
+
+// TestForcesEffortControlTakesTheLevelsBesideTheSettings pins the
+// forcing predicate to the canonical list: every level the core knows
+// but "default" and "off" forces the effort control, the two settings
+// beside the list never do, and normalization means a word typed in any
+// case reads as itself. A level added to ReasoningLevelNames lands here
+// for free, and a copy that drifts from the list fails this test.
+func TestForcesEffortControlTakesTheLevelsBesideTheSettings(t *testing.T) {
+	for _, level := range ReasoningLevelNames {
+		want := level != "default" && level != "off"
+		if got := ForcesEffortControl(strings.ToUpper(level)); got != want {
+			t.Errorf("ForcesEffortControl(%q) is %v, want %v", level, got, want)
+		}
+	}
+	for _, beside := range []string{"", "  ", "4096", "gibberish"} {
+		if ForcesEffortControl(beside) {
+			t.Errorf("ForcesEffortControl(%q) is true, want false", beside)
+		}
 	}
 }

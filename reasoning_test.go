@@ -122,8 +122,9 @@ func TestAModelThatCannotThinkTakesNoLevel(t *testing.T) {
 }
 
 // TestASwitchTakesTheLevelBack covers the switch: a level the new model
-// does not take leaves the session at one the new model does, and a model
-// that cannot be told off takes it to the lowest level it declares.
+// does not take leaves the session at off, which every model takes —
+// asked for in the words the model's control has, or left as no field
+// when the wire cannot say it.
 func TestASwitchTakesTheLevelBack(t *testing.T) {
 	narrow := chatModel("narrow", 32768)
 	narrow.Reasoning = poo.ReasoningControl{Mode: poo.ReasoningEffort, Param: poo.ReasoningPathEffort}
@@ -149,8 +150,8 @@ func TestASwitchTakesTheLevelBack(t *testing.T) {
 		level string
 	}{
 		{name: "a model that takes off", to: shallow, level: "high", want: "off"},
-		{name: "a model that cannot be told off", to: narrow, level: "low", want: "medium"},
-		{name: "a model that controls no reasoning", to: plain, level: "high", want: ""},
+		{name: "a model that cannot be told off", to: narrow, level: "low", want: "off"},
+		{name: "a model that controls no reasoning", to: plain, level: "high", want: "off"},
 		// A model with a control but no declared levels refuses the
 		// name the session carried: every request after the switch would
 		// be a configuration error if the level were left behind.

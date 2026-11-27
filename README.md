@@ -493,7 +493,9 @@ switches the chat model between runs. `/models` asks the endpoints what
 they serve now and lists that, so a model a provider added since the
 session opened is one it can switch to without leaving the repl.
 `/thinking` or Shift+Tab cycles
-reasoning levels; `/thinking <level>` selects one. The repl is a wire
+reasoning levels — default, minimal, low, medium, high, xhigh, off —
+where default sends no reasoning field at all and off asks the model not
+to think; `/thinking <level>` selects one. The repl is a wire
 client, and the
 server runs the session.
 

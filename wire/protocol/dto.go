@@ -300,8 +300,9 @@ type GetResult struct {
 	Jobs []JobInfo `json:"jobs"`
 	// Prompt is the session's system prompt.
 	Prompt PromptStateInfo `json:"prompt"`
-	// Reasoning is the reasoning level the session's requests send,
-	// empty when it sends none.
+	// Reasoning is the reasoning level the session's requests send. It
+	// is empty, or "default", when it sends none: both mean the
+	// endpoint's own default applies.
 	Reasoning string `json:"reasoning,omitempty"`
 	// Broken says the session's store failed and the session cannot be
 	// used any more.
@@ -316,9 +317,9 @@ type ConfigureParams struct {
 	PromptOverrides *PromptOverrides `json:"prompt_overrides,omitempty"`
 	// Models changes the models the session talks to.
 	Models *ModelRoles `json:"models,omitempty"`
-	// Reasoning is the chat model's reasoning level: off, minimal, low,
-	// medium, high, xhigh, or a token budget such as "4096". Empty leaves
-	// the level the session runs at unchanged.
+	// Reasoning is the chat model's reasoning level: default, minimal, low,
+	// medium, high, xhigh, off, or a token budget such as "4096". Empty
+	// leaves the level the session runs at unchanged.
 	//
 	// The level takes effect at the next run. A level the chat model does
 	// not take is refused, and the refusal names the levels it does.
@@ -329,8 +330,9 @@ type ConfigureParams struct {
 type ConfigureResult struct {
 	// Models are the models the session talks to now.
 	Models ModelRoles `json:"models"`
-	// Reasoning is the level the session runs at now. It is empty when the
-	// session sends no reasoning setting.
+	// Reasoning is the level the session runs at now. It is empty, or
+	// "default", when the session sends no reasoning field: both mean
+	// the endpoint's own default applies.
 	Reasoning string `json:"reasoning,omitempty"`
 }
 
@@ -764,7 +766,8 @@ const (
 // ReasoningLevelNames are the named reasoning levels the session's
 // reasoning control takes, lowest first. A level is one of these, or a
 // token budget: a positive number of tokens the model may think
-// within. The order is the order a model's own levels climb, so a
-// client that cycles through them goes from the least thinking to the
-// most.
-var ReasoningLevelNames = []string{"off", "minimal", "low", "medium", "high", "xhigh"}
+// within. "default" is the request that carries no reasoning field, and
+// "off" asks the model not to think; the order runs from leaving the
+// model alone to forcing it quiet, and a client that cycles through them
+// wraps from off back to default.
+var ReasoningLevelNames = []string{"default", "minimal", "low", "medium", "high", "xhigh", "off"}

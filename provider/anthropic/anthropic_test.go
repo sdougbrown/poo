@@ -204,6 +204,60 @@ func TestAnEffortLevelRidesTheOutputConfig(t *testing.T) {
 	}
 }
 
+// TestAnEffortModelToldOffRidesTheOutputConfig covers off on the effort
+// path: the word the model's catalog declares is sent verbatim, and a
+// model that declares no off word is sent its quietest declared level.
+// The adaptive companion rides beside either, because the field is what
+// turns the thinking on and the endpoint reads the word it is given.
+func TestAnEffortModelToldOffRidesTheOutputConfig(t *testing.T) {
+	cases := []struct {
+		name    string
+		levels  []string
+		setting string
+		want    any
+	}{
+		{name: "a declared off word is sent as the model spells it", levels: []string{"none", "low", "high"}, setting: "off", want: "none"},
+		{name: "a model with no off word takes its quietest level", levels: []string{"low", "medium", "high"}, setting: "off", want: "low"},
+		{name: "the default sends no effort at all", levels: []string{"none", "low", "high"}, setting: "default", want: nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			srv := newSSEServer(t, frame(`{"type":"message_stop"}`))
+			info := thinkingModel()
+			info.ReasoningLevels = c.levels
+			tr := anthropic.New(anthropic.Options{Endpoint: srv.URL, Model: "claude-haiku-5-5", ModelInfo: info})
+
+			req := request("")
+			req.Reasoning = c.setting
+			reader, _, err := tr.Stream(context.Background(), req)
+			if err != nil {
+				t.Fatalf("starting the request: %v", err)
+			}
+			read(t, reader)
+			_ = reader.Close()
+
+			sent := srv.requests[0]
+			config, _ := sent["output_config"].(map[string]any)
+			if c.want == nil {
+				if _, sentAny := sent["output_config"]; sentAny {
+					t.Errorf("the request carries an output config: %v", sent["output_config"])
+				}
+				if _, adaptive := sent["thinking"]; adaptive {
+					t.Errorf("the default request turns the thinking on: %v", sent["thinking"])
+				}
+				return
+			}
+			if config["effort"] != c.want {
+				t.Errorf("the output config is %v, want effort %v", sent["output_config"], c.want)
+			}
+			thinking, _ := sent["thinking"].(map[string]any)
+			if thinking["type"] != "adaptive" {
+				t.Errorf("the thinking field is %v, want adaptive", sent["thinking"])
+			}
+		})
+	}
+}
+
 func TestAToolUseStreamAccumulatesItsArguments(t *testing.T) {
 	body := frame(`{"type":"message_start","message":{"usage":{"input_tokens":15}}}`) +
 		frame(`{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_1","name":"get_weather","input":{}}}`) +

@@ -166,6 +166,8 @@ func TestTheReasoningSettingFollowsTheModelControl(t *testing.T) {
 	}{
 		{name: "a level", setting: "medium", want: `{"effort":"medium","summary":"auto"}`},
 		{name: "off", setting: "off", want: `{"effort":"none"}`},
+		{name: "an empty setting sends no reasoning", setting: "", want: ""},
+		{name: "the default sends no reasoning", setting: "default", want: ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -188,6 +190,12 @@ func TestTheReasoningSettingFollowsTheModelControl(t *testing.T) {
 			defer reader.Close()
 			read(t, reader)
 			req := srv.request(t, 0)
+			if c.want == "" {
+				if _, sent := req.fields["reasoning"]; sent {
+					t.Errorf("the request carries a reasoning field: %v", req.fields)
+				}
+				return
+			}
 			expectJSON(t, json.RawMessage(req.fields["reasoning"]), c.want)
 		})
 	}

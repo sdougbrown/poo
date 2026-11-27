@@ -107,8 +107,10 @@ type Options struct {
 	// The endpoint makes native calls only, so "text" is a
 	// configuration error.
 	ToolsMode string
-	// Reasoning is the reasoning setting: "off", a named level or a
-	// number of thinking tokens. A request that carries its own wins.
+	// Reasoning is the reasoning setting: "default", a named level,
+	// "off", or a number of thinking tokens. The default sends no
+	// reasoning field, and the endpoint's own effort applies. A request
+	// that carries its own level wins.
 	Reasoning string
 	// ReasoningSummary is the summary the endpoint returns with the
 	// reasoning: "auto", "concise" or "detailed". Empty means "auto"

@@ -227,10 +227,11 @@ jobs:
   on_idle: wake
   max_unattended_wakes: 0
 
-# The reasoning level the chat model runs at: off, low, medium, high
-# or a budget in tokens.
+# The reasoning level the chat model runs at: default, minimal, low,
+# medium, high, off or a budget in tokens. "default" sends no reasoning
+# field at all; "off" asks the model not to think.
 reasoning:
-  chat: off
+  chat: default
 
 # The per-model sampling overrides. A field left out is not sent.
 sampling:

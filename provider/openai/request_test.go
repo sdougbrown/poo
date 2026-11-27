@@ -352,6 +352,57 @@ func TestAToggleModelIsSwitchedOff(t *testing.T) {
 	}
 }
 
+// TestAnEffortModelToldOffIsSentTheOffWord covers the rule: an effort
+// model that is asked not to think is sent a word, not silence — the
+// model's own off word when it declares one, and "none" when it
+// declares none, because the effort API's off is spelled that way.
+func TestAnEffortModelToldOffIsSentTheOffWord(t *testing.T) {
+	cases := []struct {
+		name    string
+		levels  []string
+		setting string
+		want    any
+	}{
+		{name: "a model that declares none is sent none", levels: nil, setting: "off", want: "none"},
+		{name: "a model that declares off is sent off", levels: []string{"off", "low", "high"}, setting: "off", want: "off"},
+		{name: "a model that declares none as its off word is sent none", levels: []string{"none", "low", "high"}, setting: "off", want: "none"},
+		{name: "a model with no off word takes its quietest level", levels: []string{"medium", "high"}, setting: "off", want: "medium"},
+		{name: "the default sends no field at all", levels: []string{"off", "low", "high"}, setting: "default", want: nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			srv := newSSEServer(t, chunk(`{"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`)+done)
+			tr := openai.New(openai.Options{
+				Endpoint: srv.URL,
+				Model:    "m",
+				ModelInfo: poo.ModelInfo{
+					Reasoning:       poo.ReasoningControl{Mode: poo.ReasoningEffort},
+					ReasoningLevels: c.levels,
+				},
+				Reasoning: c.setting,
+			})
+
+			reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
+			if err != nil {
+				t.Fatalf("starting the request: %v", err)
+			}
+			defer reader.Close()
+			read(t, reader)
+
+			got, sent := srv.requests[0]["reasoning_effort"]
+			if c.want == nil {
+				if sent {
+					t.Errorf("the request sent a reasoning_effort: %v", srv.requests[0])
+				}
+				return
+			}
+			if got != c.want {
+				t.Errorf("the request's reasoning_effort is %v, want %v", got, c.want)
+			}
+		})
+	}
+}
+
 // TestAModelWithoutAReasoningControlRefusesTheSetting covers the rule: the descriptor holds the rule, and a model that names no
 // reasoning control is asked for none. A setting that asks it to think
 // is a configuration error, and the request never goes out.
