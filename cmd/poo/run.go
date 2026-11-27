@@ -151,6 +151,7 @@ func handleRun(parent context.Context, inv clicontract.Invocation, stdout, stder
 		DefaultProfile: defaultProfile,
 		UserPromptFile: defaultUserPromptFile(),
 		Tools:          linkedTools(),
+		MCPLauncher:    linkedMCPLauncher(),
 		Profiles:       linkedProfiles(),
 		Executors:      executorRegistry(),
 		// The command has no wire client, so the chain is the decide
@@ -510,7 +511,7 @@ func newSession(runtime *config.Runtime) (*poo.Session, int, error) {
 		return nil, 2, err
 	}
 	runtime.Options.Prompt = append(runtime.Options.Prompt, edits...)
-	sess, err := poo.New(runtime.Options, poo.WithPolicy(runtime.Policy))
+	sess, err := poo.New(runtime.Options, poo.WithPolicy(runtime.Policy), runtime.MCPAttachOption())
 	if err == nil {
 		return sess, 0, nil
 	}

@@ -22,9 +22,18 @@ func TestAReadOnlyBinaryLinksNoToolItDidNotLink(t *testing.T) {
 
 	deps := listDeps(t, root, "./wire/conformance/testdata/readonly")
 
-	for _, excluded := range []string{"tool/bash", "tool/edit", "tool/cliregistry", "tool/codemode", "tool/fetch", "codemode/starlark", "codemode/quickjs", "exec/bwrap"} {
+	for _, excluded := range []string{"tool/bash", "tool/edit", "tool/cliregistry", "tool/codemode", "tool/fetch", "codemode/starlark", "codemode/quickjs", "exec/bwrap", "mcp", "tool/callmcp"} {
 		if slices.Contains(deps, modulePath+"/"+excluded) {
 			t.Errorf("the read-only binary links %s", modulePath+"/"+excluded)
+		}
+	}
+	// The MCP client is what links the SDK, and the read-only binary
+	// links no launcher for it: nothing of the client's — its own
+	// package, its tool, or the SDK itself — may reach a binary that
+	// never asked for one.
+	for _, dep := range deps {
+		if strings.HasPrefix(dep, "github.com/modelcontextprotocol/go-sdk") {
+			t.Errorf("the read-only binary links %s", dep)
 		}
 	}
 	// The closure the gate is about: a subject that stopped importing

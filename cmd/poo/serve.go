@@ -84,6 +84,7 @@ func handleServe(inv clicontract.Invocation, stdout, stderr io.Writer) exit {
 		DefaultProfile: defaultProfile,
 		UserPromptFile: defaultUserPromptFile(),
 		Tools:          linkedTools(),
+		MCPLauncher:    linkedMCPLauncher(),
 		Executors:      executorRegistry(),
 		Profiles:       linkedProfiles(),
 		Build:          poo.BuildInfo{Name: "poo", Version: buildVersion().String()},

@@ -186,6 +186,14 @@ type BuildOptions struct {
 	DefaultProfile string
 	// Tools are the tools the binary links, by name.
 	Tools map[string]ToolFactory
+	// MCPLauncher starts the MCP servers a session's profile selected.
+	//
+	// The settings and the profiles stay free of the client: the
+	// launcher is the binary's one seam to it, so a binary that links
+	// no launcher never links the client at all. A profile that selects
+	// a server on a build with no launcher fails the build, because a
+	// session of that build could not start what its profile selected.
+	MCPLauncher MCPLauncher
 	// Profiles are the profiles the binary links.
 	Profiles []profile.Profile
 	// Executors are the executors the binary links.
@@ -218,6 +226,48 @@ type BuildOptions struct {
 	// `system_prompt` settings keep the last word. A nil FS keeps the
 	// embedded defaults alone.
 	PromptFS fs.FS
+}
+
+// MCPLauncher starts the selected MCP servers for a live session.
+//
+// The launcher is the binary's link to the client: the settings hold
+// the declarations and the selection, and this is what turns the
+// selection into the processes the session owns. It runs once per
+// session, under the session's own lifetime context, and returns what
+// that session closes when it ends. The launch is the launcher's
+// transaction: a launcher that fails has started nothing of its own —
+// whatever it started before the failure stops — and the failure names
+// the server that did not start.
+type MCPLauncher func(ctx context.Context, launch MCPLaunchSelection) (MCPRunning, error)
+
+// MCPLaunchSelection is what one session's launch needs from the
+// session that asked for it.
+type MCPLaunchSelection struct {
+	// SessionID is the session's own identifier: the value a
+	// manifest's ${session:id} resolves to.
+	SessionID string
+	// WorkingDir is the directory the session works in, and the
+	// directory the servers run in.
+	WorkingDir string
+	// Scrub is the rule the host environment is scrubbed with. The
+	// servers run with the scrubbed environment plus the manifests'
+	// own entries, and a manifest's explicit ${NAME} still resolves
+	// through the environment lookup the scrub leaves alone.
+	Scrub exec.Scrub
+	// Servers are the selected servers' declarations, with their
+	// templates unresolved: the launch resolves them from the values
+	// here.
+	Servers []manifest.Server
+}
+
+// MCPRunning is what a launcher started for a session.
+//
+// The session closes it when it ends. Close is idempotent, and the
+// processes it owns are stopped by it — nothing else reaps the
+// servers.
+type MCPRunning interface {
+	// Close stops the server and waits for its process to end.
+	Close() error
 }
 
 // Runtime is what a build produced.
@@ -275,6 +325,15 @@ type Runtime struct {
 	// settings name no manifest. The selection reads it, and a session
 	// starts the servers its profile selects from it.
 	mcpSet *manifest.Set
+	// mcpLauncher starts one selected server for a live session. It is
+	// the binary's link to the client, and nil when the binary links
+	// none: a profile that selects a server on such a binary fails the
+	// build rather than a session that cannot start what it selected.
+	mcpLauncher MCPLauncher
+	// envScrub is the rule the MCP servers a session starts are launched
+	// with: the tools' scrub, and the names a launcher declared, which a
+	// server reaches only through an explicit manifest reference.
+	envScrub exec.Scrub
 	// executor is the executor the commands run through: the tools
 	// that run one, and the feeds. It is nil when nothing runs a
 	// command.
@@ -452,6 +511,7 @@ func Build(opts BuildOptions) (*Runtime, error) {
 	// and the catalog is the first thing built: the probes it carries name
 	// the client from the first one, not from the transports alone.
 	runtime.Build = opts.Build
+	runtime.mcpLauncher = opts.MCPLauncher
 
 	definitions, resolvedProfiles, err := runtime.resolveProfileDefinitions(opts)
 	if err != nil {
@@ -480,6 +540,9 @@ func Build(opts BuildOptions) (*Runtime, error) {
 		return nil, err
 	}
 	if err := runtime.resolveTools(opts, workingDir); err != nil {
+		return nil, err
+	}
+	if err := runtime.resolveMCPLauncher(opts); err != nil {
 		return nil, err
 	}
 	if err := runtime.resolveFeedRuns(opts); err != nil {
@@ -1112,7 +1175,134 @@ func (r *Runtime) resolveMCP(opts BuildOptions, workingDir string) error {
 		}
 		r.warn(missingMCPServerWarning(profile, server))
 	}
-	return r.checkMCPFeedNames()
+	// The feed names are the settings' own authoring, and their
+	// failure is settled before the binary's capability is asked
+	// about: a manifest that cannot run says so whatever the binary
+	// links.
+	if err := r.checkMCPFeedNames(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// resolveMCPLauncher holds the launcher requirement a selection
+// carries: starting the servers a live session starts is the
+// launcher's job, and the requirement is the build's, not the
+// session's — every entry point of the poo binary links the launcher,
+// so a profile that selects a server builds everywhere the binary
+// runs, and an inspection command that never builds a session still
+// passes because it builds the same runtime.
+//
+// It runs after the tools resolve, so a binary that fails on both
+// counts names the executor it lacks before the launcher: the
+// executor is what the session's own commands need, and the feed a
+// selected server declares reaches it first.
+func (r *Runtime) resolveMCPLauncher(opts BuildOptions) error {
+	if len(r.MCPServers) == 0 {
+		return nil
+	}
+	if opts.MCPLauncher == nil {
+		return &Error{
+			Code:  CodeUnsupported,
+			Field: "mcp.paths",
+			Message: fmt.Sprintf("the profile %q selects the mcp servers [%s], and this binary links no launcher to start them",
+				r.profileName(opts), strings.Join(r.MCPServers, ", ")),
+		}
+	}
+	// The attach is not set on the runtime's own options: the caller's
+	// options apply after the base, so a caller's WithSessionAttach
+	// would silently replace the attach there and the profile's
+	// selected servers would never start. The session-building entry
+	// points append MCPAttachOption after the caller's options — the
+	// way the policy is appended — so the build's attach composes with
+	// the caller's instead of losing to it.
+	return nil
+}
+
+// mcpAttach starts the servers the chosen profile selected for one
+// live session, and returns what that session runs when it ends.
+//
+// The attach runs inside the session's construction, under the
+// session's own lifetime context, after the id and the working
+// directory are final. A selected name the settings could not load is
+// a warning the build already said, so the session runs without it.
+// The loadable selection goes to the launcher as one launch — the
+// launcher's transaction, whose rollback is the client's own: a server
+// that fails to launch fails the session, and nothing the launch
+// started survives it. The failure names the server that did not
+// start.
+func (r *Runtime) mcpAttach(ctx context.Context, a *poo.Attach) (func() error, error) {
+	var servers []manifest.Server
+	for _, name := range r.MCPServers {
+		server, ok := r.mcpSet.Lookup(name)
+		if !ok {
+			continue
+		}
+		servers = append(servers, server)
+	}
+	if len(servers) == 0 {
+		return nil, nil
+	}
+	running, err := r.mcpLauncher(ctx, MCPLaunchSelection{
+		SessionID:  a.SessionID,
+		WorkingDir: a.WorkingDir,
+		Scrub:      r.envScrub,
+		Servers:    servers,
+	})
+	if err != nil {
+		// The launcher's failure names the server that did not start;
+		// the field is the build's.
+		return nil, &Error{
+			Code:    CodeInvalid,
+			Field:   "mcp.paths",
+			Message: err.Error(),
+			Err:     err,
+		}
+	}
+	return running.Close, nil
+}
+
+// MCPAttachOption returns the option that starts the servers the
+// chosen profile selected for a live session.
+//
+// The option is appended after the caller's options, so it composes
+// with any attach the caller named: the build's attach runs first, the
+// caller's second, and the returned close stops them in the reverse
+// order with their errors joined. When the caller's attach fails after
+// the build's started, the failure is the caller's own and the close
+// the build's attach handed back runs, so nothing it started survives
+// the failed construction.
+func (r *Runtime) MCPAttachOption() poo.Option {
+	mcp := r.mcpAttach
+	return func(o *poo.Options) {
+		caller := o.SessionAttach
+		if caller == nil {
+			o.SessionAttach = mcp
+			return
+		}
+		o.SessionAttach = func(ctx context.Context, a *poo.Attach) (func() error, error) {
+			mcpClose, err := mcp(ctx, a)
+			if err != nil {
+				return nil, err
+			}
+			callerClose, err := caller(ctx, a)
+			if err != nil {
+				if mcpClose != nil {
+					_ = mcpClose()
+				}
+				return nil, err
+			}
+			switch {
+			case mcpClose == nil:
+				return callerClose, nil
+			case callerClose == nil:
+				return mcpClose, nil
+			}
+			return func() error {
+				return errors.Join(callerClose(), mcpClose())
+			}, nil
+		}
+	}
 }
 
 // missingMCPServerWarning is what the build says when a profile selects a
@@ -1856,9 +2046,19 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 	}
 	// The settings scrub and the endpoint credentials are gone from Env as
 	// well; these are not, so the names are recorded under a name that says so
-	// and scrubbed only from the tools' children.
+	// and scrubbed from the tools' children and the session's MCP servers.
 	r.DeclaredCredentialEnvNames = append([]string(nil), opts.Overrides.CredentialEnvNames...)
 	credentialScrub.Names = append(credentialScrub.Names, r.DeclaredCredentialEnvNames...)
+	// The rule itself is kept, not just the environment it produced: an MCP
+	// server a session starts is launched with the host environment scrubbed
+	// by the tools' rule, and the launch happens per session, long after the
+	// build. This is that rule, assembled once — the tools' children get the
+	// same value below, so the session's servers and the session's tools
+	// never scrub by different rules. A declared credential is scrubbed here
+	// too — a server inherits nothing, and reaches the name only through an
+	// explicit reference, which resolves through the host lookup rather than
+	// this rule.
+	r.envScrub = credentialScrub
 
 	executorName := DefaultExecutor
 	if settings.Tools.Bash.Executor != nil {
@@ -2979,7 +3179,7 @@ func (r *Runtime) CreateSession(ctx context.Context, store session.Store, create
 	}
 	opts.Sink = store
 	opts.SessionID = created.SessionID
-	sess, err := poo.New(opts, append(fns, poo.WithPolicy(r.Policy))...)
+	sess, err := poo.New(opts, append(fns, poo.WithPolicy(r.Policy), r.MCPAttachOption())...)
 	if err != nil {
 		if errors.Is(err, poo.ErrPromptRender) {
 			return nil, PromptRenderError(err)
@@ -3016,7 +3216,7 @@ func (r *Runtime) ResumeSession(ctx context.Context, store session.Store, id str
 	// in: the core takes the recorded directory when the options name
 	// none.
 	opts.WorkingDir = ""
-	return session.Resume(ctx, store, id, opts, append(fns, poo.WithPolicy(r.Policy), poo.WithPromptLoader(r.SessionPrompt))...)
+	return session.Resume(ctx, store, id, opts, append(fns, poo.WithPolicy(r.Policy), r.MCPAttachOption(), poo.WithPromptLoader(r.SessionPrompt))...)
 }
 
 // PromptOverrides are the prompt changes a client asks for.

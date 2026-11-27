@@ -1,6 +1,7 @@
 package poo
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -145,6 +146,58 @@ func WithPrompt(edit func(*prompt.Builder)) Option {
 // Restore skips the loader when the session already has a recorded prompt.
 func WithPromptLoader(load func(dir string) ([]func(*prompt.Builder), error)) Option {
 	return func(opts *Options) { opts.loadPrompt = load }
+}
+
+// WithSessionAttach sets the function a live session's attached
+// subsystems are started by.
+//
+// The attach runs once per live session — a created one, a resumed
+// one, a headless run — after the session's id and working directory
+// are final and before the feeds start or the first run runs. A
+// restore runs it too, even when the records hold a prompt: the
+// attach is not the prompt loader, and a resumed session owns what a
+// new one does.
+//
+// A build that owns an attach of its own — the MCP servers a profile
+// selected, say — appends it after the caller's options, so the
+// option composes with the build's attach instead of replacing it:
+// the build's attach runs first, the caller's second.
+func WithSessionAttach(fn AttachFunc) Option {
+	return func(opts *Options) { opts.SessionAttach = fn }
+}
+
+// AttachFunc attaches a session's own subsystems: the MCP servers its
+// profile selected, say, with the processes, tools and feeds they
+// bring.
+//
+// It runs once, inside the session's construction, under the
+// session's own lifetime context — never a request's — so a slow
+// startup is bounded by the attached subsystem's own bound and not by
+// whoever asked for the session. The attach may replace entries in
+// the options' tool map (the map is the session's own copy by then)
+// and append feeds and prompt edits to the options, but it owns
+// nothing the build also owns: a slice the options hold is shared
+// with the build, so an attach that appends to one clones it first.
+//
+// The returned close runs when the session ends, after the feeds and
+// the jobs have stopped, and its error joins the close's own result.
+// An attach that fails returns no session: whatever it already
+// started is closed before the failure is returned, so a failed
+// construction owns nothing.
+type AttachFunc func(ctx context.Context, a *Attach) (close func() error, err error)
+
+// Attach is what a session hands its attach function.
+type Attach struct {
+	// SessionID is the session's own identifier: the value a
+	// manifest's ${session:id} resolves to.
+	SessionID string
+	// WorkingDir is the directory the session works in, and the
+	// directory its attached processes run in.
+	WorkingDir string
+	// Options are the options the session is being built from. They
+	// are the session's own copy: the tool map may be changed in
+	// place, and a shared slice is cloned before it is appended to.
+	Options *Options
 }
 
 // WithDecider gives the session a decision model.
