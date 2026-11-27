@@ -160,6 +160,15 @@ func (h *mcpSession) Offered() []cli.Offered {
 // Close stops the servers and waits for their processes to end.
 func (h *mcpSession) Close() error { return h.group.Close() }
 
+// Subscribes reports whether the named server advertised resource
+// subscriptions, which a declared resource feed needs.
+func (h *mcpSession) Subscribes(server string) bool { return h.group.Subscribes(server) }
+
+// ResourceFeed returns the runner of one resource the named server holds.
+func (h *mcpSession) ResourceFeed(server, uri string) poo.FeedRunner {
+	return mcp.ResourceFeed(h.group, server, uri)
+}
+
 // mcpServer is one MCP server the launcher started, as the tools over it see
 // it: the server's own name, the tools it listed, and a call that qualifies the
 // tool with that name.

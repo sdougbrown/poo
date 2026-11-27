@@ -369,6 +369,14 @@ func convertTool(tool *sdkmcp.Tool) (Tool, error) {
 	return out, nil
 }
 
+// state returns the named server's state, or nil when the group holds
+// no server by that name.
+func (g *Group) state(server string) *serverState {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.byName[server]
+}
+
 // Tools returns the tools the named server listed at startup, and
 // whether the group holds that server.
 func (g *Group) Tools(server string) ([]Tool, bool) {
@@ -379,6 +387,19 @@ func (g *Group) Tools(server string) ([]Tool, bool) {
 		return nil, false
 	}
 	return append([]Tool(nil), s.tools...), true
+}
+
+// Subscribes reports whether the named server advertised resource
+// subscriptions in the initialize result it answered with.
+//
+// A declared resource feed needs the capability: a server without it
+// could never grant the subscription the feed runs on, so the attach
+// refuses the feed before the session is built. A server the group
+// does not hold advertises nothing.
+func (g *Group) Subscribes(server string) bool {
+	s := g.state(server)
+	return s != nil && s.result != nil && s.result.Capabilities != nil &&
+		s.result.Capabilities.Resources != nil && s.result.Capabilities.Resources.Subscribe
 }
 
 // CallTool calls one tool on one server.
@@ -396,9 +417,7 @@ func (g *Group) CallTool(ctx context.Context, qualified string, args json.RawMes
 	if !ok {
 		return CallResult{}, fmt.Errorf("%w: %q", ErrUnknownTool, qualified)
 	}
-	g.mu.Lock()
-	s := g.byName[server]
-	g.mu.Unlock()
+	s := g.state(server)
 	if s == nil || !s.holds(tool) {
 		return CallResult{}, fmt.Errorf("%w: %q", ErrUnknownTool, qualified)
 	}

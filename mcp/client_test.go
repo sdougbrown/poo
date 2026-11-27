@@ -495,9 +495,9 @@ func TestTheSubscriptionsAcknowledgementReachesItsWaiter(t *testing.T) {
 }
 
 // TestTheWaitersAnswerOnceAndStop covers the waiters' own rules: a
-// waiter is answered once and then gone, an acknowledgement answers
-// every waiter with whether its URI was granted, and a stopped waiter
-// hears nothing.
+// waiter is answered once and then gone, an acknowledgement answers the
+// waiters whose URI it grants and no others, and a stopped waiter hears
+// nothing.
 func TestTheWaitersAnswerOnceAndStop(t *testing.T) {
 	var waiters resourceWaiters
 
@@ -520,6 +520,9 @@ func TestTheWaitersAnswerOnceAndStop(t *testing.T) {
 	}
 	stopFirst()
 
+	// An acknowledgement answers the waiters whose URI it grants, and
+	// only those: each subscription is its own listen stream, so another
+	// stream's grant is not this waiter's answer.
 	acked, _ := waiters.waitAck("fixture://granted")
 	refused, _ := waiters.waitAck("fixture://refused")
 	waiters.acknowledged([]string{"fixture://granted"})
@@ -531,6 +534,15 @@ func TestTheWaitersAnswerOnceAndStop(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("the acknowledged waiter never answered")
 	}
+	select {
+	case granted := <-refused:
+		t.Errorf("the waiter of another URI answered a grant with %v", granted)
+	default:
+	}
+
+	// An acknowledgement that grants no URI is its own stream's
+	// refusal, and the one waiter still waiting for an answer hears it.
+	waiters.acknowledged(nil)
 	select {
 	case granted := <-refused:
 		if granted {

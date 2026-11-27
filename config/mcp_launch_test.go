@@ -84,6 +84,17 @@ func (g *stubGroup) Offered() []cli.Offered { return nil }
 // Servers returns the per-server views: the tests' stubs hold none.
 func (g *stubGroup) Servers() []config.MCPServer { return nil }
 
+// Subscribes reports that the stub's servers advertise nothing: the
+// stubs hold no client, so a declared feed on one fails the attach
+// naming the server.
+func (g *stubGroup) Subscribes(server string) bool { return false }
+
+// ResourceFeed is never called: the stub's servers hold no resource a
+// feed could read.
+func (g *stubGroup) ResourceFeed(server, uri string) poo.FeedRunner {
+	return func(context.Context, poo.FeedIO) error { return nil }
+}
+
 // recorded returns the launches the launcher saw.
 func (l *recordingLauncher) recorded() []string {
 	l.mu.Lock()
@@ -309,7 +320,7 @@ func clientLauncher(group **mcp.Group) config.MCPLauncher {
 		for _, server := range values.Servers {
 			servers = append(servers, &testMCPServer{group: g, name: server.Name})
 		}
-		return &listedSession{views: servers, stop: g.Close}, nil
+		return &listedSession{views: servers, group: g, stop: g.Close}, nil
 	}
 }
 
@@ -433,6 +444,15 @@ func (childCloser) Offered() []cli.Offered { return nil }
 // Servers returns no view: the handle stands for a child process, and the
 // test reads no server of it.
 func (childCloser) Servers() []config.MCPServer { return nil }
+
+// Subscribes reports that the child advertises nothing: no feed is
+// declared for one.
+func (childCloser) Subscribes(server string) bool { return false }
+
+// ResourceFeed is never called: no feed is declared for the child.
+func (childCloser) ResourceFeed(server, uri string) poo.FeedRunner {
+	return func(context.Context, poo.FeedIO) error { return nil }
+}
 
 // failingSessionStart is a session-start hook that always fails.
 type failingSessionStart struct{}
