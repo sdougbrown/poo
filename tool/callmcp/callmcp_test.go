@@ -511,3 +511,16 @@ func TestALongOfferingIsLeftToTheSearch(t *testing.T) {
 		t.Errorf("the section does not list the offering it cannot search:\n%s", listed)
 	}
 }
+
+// TestTheToolDeclaresTheMoveCapability covers the rule: call_mcp is a
+// tool whose running call may move to a session job, so the repl's /bg
+// keys on the core's backgroundable rule for it.
+func TestTheToolDeclaresTheMoveCapability(t *testing.T) {
+	mover, ok := any(newTool(&fakeServer{name: "files", tools: []mcp.Tool{tool("grep", "a find", true)}})).(poo.BackgroundableCaller)
+	if !ok {
+		t.Fatal("call_mcp does not implement BackgroundableCaller")
+	}
+	if !mover.CanBackgroundRunningCall() {
+		t.Error("CanBackgroundRunningCall is false, want true")
+	}
+}

@@ -858,7 +858,7 @@ func (m *machine) command(line string, input input) (int, bool) {
 /thinking <lvl>  set the reasoning level: off, minimal, low, medium, high,
                  xhigh or a token budget
 Esc              stop the running turn
-/bg              move the running Bash call to a job
+/bg              move the running call to a job
 /help            this list
 anything else    a prompt for the session`)
 		return 0, false
@@ -1221,16 +1221,16 @@ func (m *machine) cancelRun(runID string) {
 }
 
 func (m *machine) backgroundCall() {
-	if m.state == nil || len(m.state.bashCalls) == 0 {
-		m.r.notice("no running Bash call to background")
+	if m.state == nil || len(m.state.liveCalls) == 0 {
+		m.r.notice("no running call to background")
 		return
 	}
-	if len(m.state.bashCalls) != 1 {
-		m.r.notice("more than one Bash call is pending; none moved")
+	if len(m.state.liveCalls) != 1 {
+		m.r.notice("more than one call is pending; none moved")
 		return
 	}
 	var handle string
-	for handle = range m.state.bashCalls {
+	for handle = range m.state.liveCalls {
 	}
 	var result protocol.BackgroundResult
 	if err := m.conn.call(protocol.MethodRunBackground, protocol.BackgroundParams{
@@ -1239,7 +1239,7 @@ func (m *machine) backgroundCall() {
 		m.r.failure(err.Error())
 		return
 	}
-	delete(m.state.bashCalls, handle)
+	delete(m.state.liveCalls, handle)
 }
 
 // event renders one event. The bool says the run settled.
@@ -1260,10 +1260,10 @@ func (m *machine) event(evt protocol.Event, runID string, state *runState) bool 
 		summary, _ := evt.Payload["summary"].(string)
 		if id, _ := evt.Payload["run_id"].(string); id == runID && evt.Payload["backgroundable"] == true {
 			if handle, _ := evt.Payload["handle"].(string); handle != "" {
-				if state.bashCalls == nil {
-					state.bashCalls = make(map[string]struct{})
+				if state.liveCalls == nil {
+					state.liveCalls = make(map[string]struct{})
 				}
-				state.bashCalls[handle] = struct{}{}
+				state.liveCalls[handle] = struct{}{}
 			}
 		}
 		m.r.toolCall(tool, summary)
@@ -1271,7 +1271,7 @@ func (m *machine) event(evt protocol.Event, runID string, state *runState) bool 
 	case "tool.result":
 		if id, _ := evt.Payload["run_id"].(string); id == runID {
 			handle, _ := evt.Payload["handle"].(string)
-			delete(state.bashCalls, handle)
+			delete(state.liveCalls, handle)
 		}
 		tool, _ := evt.Payload["tool"].(string)
 		outcome, _ := evt.Payload["outcome"].(string)
@@ -1469,8 +1469,11 @@ func (m *machine) shutdown() {
 type runState struct {
 	// turns is how many turns the run took: the wire's settle event
 	// does not carry the count, the turn events do.
-	turns     int
-	bashCalls map[string]struct{}
+	turns int
+	// liveCalls are the handles of the run's calls the core called
+	// backgroundable: a tool whose running call may move to a job,
+	// whatever tool it is. /bg moves one of them.
+	liveCalls map[string]struct{}
 }
 
 // The errors the run loop reports to the caller.
