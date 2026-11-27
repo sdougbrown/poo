@@ -96,11 +96,13 @@ type Tool struct {
 
 // New returns the tool over the servers a session started.
 //
-// The offered entries are the session's snapshot, the one value the search
-// over the same offering reads: this call lists the entries it dispatches, and
-// find_tool searches all of them. A build hands it an empty snapshot, because
-// a build starts no server; the attach replaces the tool with the session's
-// own.
+// The offered entries are the session's snapshot, read once here: this
+// call's catalog lists the entries it dispatches as they were at
+// construction. The search over the same offering reads it live —
+// cli.Offerings is a func the search calls per search — so a relaunch's
+// listing reaches find_tool's questions but not this catalog's. A build
+// hands it an empty snapshot, because a build starts no server; the
+// attach replaces the tool with the session's own.
 func New(servers []Server, offered []cli.Offered) *Tool {
 	t := &Tool{servers: servers, offered: dispatched(offered)}
 	t.catalog = prompt.MustCompile("call_mcp_catalog", catalogText, func(prompt.Env) any {
@@ -372,7 +374,7 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 			CallToolName, p.name, p.server, t.namesHint())
 	case errors.Is(err, mcp.ErrServerDown):
 		return poo.ToolResult{
-			Text:    fmt.Sprintf("server %s is not running", p.server),
+			Text:    fmt.Sprintf("server %s is down", p.server),
 			IsError: true,
 		}, nil
 	case err != nil:

@@ -39,8 +39,11 @@ const FindInstructions = "Each question names one tool and asks whether that too
 // The search is a decision-model question per entry, so it needs a
 // decision model: a session without one shows the whole catalog instead.
 type FindTool struct {
-	// offered are the entries the search narrows, in name order.
-	offered []cli.Offered
+	// offered reads the session's offering as it is now: one read is
+	// one snapshot, so a search never names a call the session cannot
+	// make — not after a server relaunched, and not from a build that
+	// started no server.
+	offered cli.Offerings
 	// topK is how many entries a search returns. Zero means
 	// DefaultTopK.
 	topK int
@@ -48,12 +51,23 @@ type FindTool struct {
 
 // NewFind returns the tool that searches the entries the model can reach.
 //
-// The entries are the session's snapshot: the catalog's registered commands,
-// which call_cli runs, and the MCP tools its servers listed, which call_mcp
-// runs. Each hit names the tool that calls it, so the search never points the
-// model at a call the session does not offer.
-func NewFind(offered []cli.Offered) *FindTool {
-	return &FindTool{offered: sortOffered(offered)}
+// The offering is the session's, read as it is now: the catalog's
+// registered commands, which call_cli runs, and the MCP tools its
+// servers listed, which call_mcp runs. Each hit names the tool that
+// calls it, so the search never points the model at a call the
+// session does not offer. A nil offering searches nothing.
+func NewFind(offered cli.Offerings) *FindTool {
+	return &FindTool{offered: offered}
+}
+
+// entries returns one snapshot of the offering, in name order, so two
+// searches over the same offering return the same list. The list is a
+// copy: a search never writes into the offering it read.
+func (t *FindTool) entries() []cli.Offered {
+	if t.offered == nil {
+		return nil
+	}
+	return sortOffered(t.offered())
 }
 
 // sortOffered orders the entries by name, so two searches over the same
@@ -163,7 +177,7 @@ func (t *FindTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (
 	if env.Decider == nil {
 		return t.unavailable(), nil
 	}
-	entries := t.offered
+	entries := t.entries()
 	// Two entries of different dispatchers may share a name, and a question
 	// is identified by its entry: the identifier is the name unless another
 	// entry already holds it.
@@ -260,7 +274,7 @@ func (t *FindTool) unavailable() poo.ToolResult {
 // catalog is all that is left.
 func (t *FindTool) unavailableText() string {
 	var parts []string
-	for _, entry := range t.offered {
+	for _, entry := range t.entries() {
 		part := entry.Dispatcher + " takes " + strconv.Quote(entry.Argument)
 		if slices.Contains(parts, part) {
 			continue

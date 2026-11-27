@@ -173,7 +173,7 @@ func TestAnUnknownToolPointsAtWhereTheNamesAre(t *testing.T) {
 					t.Errorf("the refusal %q does not name %q", invalid.Message, want)
 				}
 			}
-			if strings.Contains(invalid.Message, "is not running") {
+			if strings.Contains(invalid.Message, "is down") {
 				t.Errorf("an unknown tool reads as a stopped server: %q", invalid.Message)
 			}
 		})
@@ -191,16 +191,16 @@ func TestAnUnknownServerNamesTheServer(t *testing.T) {
 }
 
 // TestAStoppedServerIsAResult covers the server that ended: the session keeps
-// running, so the model reads that the server is not running instead of a
-// failed call, and a later call may succeed.
+// running, so the model reads that the server is down instead of a failed
+// call, and a later call may succeed.
 func TestAStoppedServerIsAResult(t *testing.T) {
 	server := &fakeServer{name: "fixture", tools: []mcp.Tool{tool("echo", "answers", true)}, err: fmt.Errorf("%w: fixture/echo", mcp.ErrServerDown)}
 	res, err := call(t, newTool(server), `{"name":"fixture/echo"}`, poo.ToolEnv{})
 	if err != nil {
 		t.Fatalf("the stopped server came back as an error: %v", err)
 	}
-	if !res.IsError || res.Text != "server fixture is not running" {
-		t.Errorf("the model reads %q (an error: %v), want the server named as not running", res.Text, res.IsError)
+	if !res.IsError || res.Text != "server fixture is down" {
+		t.Errorf("the model reads %q (an error: %v), want the server named as down", res.Text, res.IsError)
 	}
 }
 

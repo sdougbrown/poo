@@ -111,6 +111,25 @@ func (o Offered) Hint() string {
 	return ""
 }
 
+// Offerings reads the entries the model can reach through a tool that
+// calls them, as they are now. One call is one snapshot, taken under
+// the lock of whatever holds the entries, so a search over it never
+// names a call the session cannot make: a session whose servers
+// relaunch serves the generation it runs, and a session whose
+// entries cannot change under it serves the one it was built with.
+//
+// The offering is the session's, built once at attach from the
+// catalog and the servers it started; a build's offering holds no
+// server's entry, because a build starts no server.
+type Offerings func() []Offered
+
+// FixedOfferings returns the offering that always reads the entries
+// it was given: the offering of a session whose entries cannot change
+// under it, and of a test.
+func FixedOfferings(entries []Offered) Offerings {
+	return func() []Offered { return entries }
+}
+
 // Catalog is the set of registered tools a session offers.
 //
 // The catalog is immutable after Load, so every tool over it may be

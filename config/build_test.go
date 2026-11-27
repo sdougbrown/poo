@@ -68,7 +68,15 @@ func theTools() map[string]config.ToolFactory {
 			return cliregistry.NewFind(opts.Offered)
 		},
 		"call_mcp": func(opts config.ToolOptions) poo.Tool {
-			return callmcp.New(mcpServers(opts.MCP), opts.Offered).
+			// The call's own catalog reads the offering once, when the
+			// tool is built: the prompt is rendered at the session's
+			// start and not again. A construction without an offering
+			// — a build's spec probe — lists nothing.
+			var offered []cli.Offered
+			if opts.Offered != nil {
+				offered = opts.Offered()
+			}
+			return callmcp.New(mcpServers(opts.MCP), offered).
 				WithInputs(opts.Inputs...).
 				WithSearch(offersTool(opts.ToolNames, cliregistry.FindToolName))
 		},

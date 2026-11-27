@@ -50,6 +50,18 @@ const unsubscribeWait = 5 * time.Second
 // read is gone, for the server has drained it. The feed's restart
 // policy is what brings another attempt.
 //
+// An attempt belongs to the generation the server runs when it starts.
+// A server that exits ends the attempt with its generation — the feed's
+// restart policy brings the next one, and that attempt subscribes on
+// the generation the group runs then, so a relaunch is a feed's own
+// first-wake contract running again. A server that reads failed — its
+// relaunch budget spent, a Connect'ed one whose transport the group
+// cannot bring back, or a generation that advertises no resource
+// subscriptions — fails the attempt with the fault that suspends
+// the feed, so a server that will not or cannot serve the feed does
+// not restart one forever; a server that is down ends the attempt
+// naming it, and the restart policy tries again.
+//
 // The runner answers the first-wake contract the servers poo runs
 // against document: the waiter and the listener are registered before
 // the subscribe round trip, the grant is waited for before the first
@@ -62,23 +74,73 @@ func ResourceFeed(g *Group, server, uri string) poo.FeedRunner {
 		if s == nil {
 			return fmt.Errorf("the mcp group holds no server %q", server)
 		}
-		return runResourceFeed(ctx, io, s, uri)
+		snap := s.snapshot()
+		if snap.gen == nil {
+			return fmt.Errorf("the mcp group holds no server %q", server)
+		}
+		switch snap.phase {
+		case phaseFailed:
+			// The server is gone for good, and the fault suspends the
+			// feed with the diagnosis that fits: a relaunchable server
+			// spent its budget of relaunches, and one the group holds
+			// no relaunch for was simply lost.
+			if snap.failNoRelaunch {
+				return &poo.FeedFault{
+					Code:    poo.FeedFaultServer,
+					Message: fmt.Sprintf("server %q is gone and cannot be relaunched", server),
+				}
+			}
+			return &poo.FeedFault{
+				Code:    poo.FeedFaultServer,
+				Message: fmt.Sprintf("server %s stopped after %d relaunches", server, relaunchBudget),
+			}
+		case phaseClosed:
+			// The group is closing and the feed with it: the error is
+			// the context's when the session ended the attempt, and a
+			// plain refusal otherwise.
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			return fmt.Errorf("the mcp server %q is closed", server)
+		case phaseDown:
+			// The process ended and the relaunch has not brought it
+			// back: the attempt ends here, and the feed's restart
+			// policy is what tries again, on the generation the group
+			// runs then.
+			return fmt.Errorf("%w: %s", ErrServerDown, server)
+		}
+		return runResourceFeed(ctx, io, server, snap, uri)
 	}
 }
 
 // runResourceFeed runs one attempt of one resource feed: the
 // subscription, the wait for its grant, the first read and the reads
-// the updates ask for.
-func runResourceFeed(ctx context.Context, io poo.FeedIO, s *serverState, uri string) error {
+// the updates ask for. The attempt is bound to the snapshot's
+// generation — its session, its waiters, its capabilities — so a
+// relaunch under it cannot mix one generation's subscription with
+// another's reads.
+func runResourceFeed(ctx context.Context, io poo.FeedIO, server string, snap serverSnapshot, uri string) error {
+	gen := snap.gen
+	// The attempt ends with its generation: the context is merged with
+	// the generation's own, so a server that exits takes the attempt
+	// with it — the feed's restart policy brings the next attempt, on
+	// the generation the group runs then — and the session's
+	// cancellation ends it the way it ends every feed.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	if stop := context.AfterFunc(gen.ctx, cancel); stop != nil {
+		defer stop()
+	}
 	// The attempt's own registrations go in before the subscribe round
 	// trip, so a notification that races it still reaches the attempt
 	// it belongs to. Both come off when the attempt ends: a late
 	// notification never reaches a later attempt, which registers
-	// waiter and listener of its own.
-	ack, stopAck := s.waiters.waitAck(uri)
+	// waiter and listener of its own — on the generation the attempt
+	// subscribes, for a retired generation's waiters answer no one.
+	ack, stopAck := gen.waiters.waitAck(uri)
 	defer stopAck()
 	pending := make(chan struct{}, 1)
-	stopUpdates := s.waiters.listenUpdates(uri, func() {
+	stopUpdates := gen.waiters.listenUpdates(uri, func() {
 		// One read answers every update that arrived while it ran, so
 		// the listener only has to say there is a read to do: a second
 		// signal while one is pending coalesces into it.
@@ -89,41 +151,61 @@ func runResourceFeed(ctx context.Context, io poo.FeedIO, s *serverState, uri str
 	})
 	defer stopUpdates()
 	// The subscription ends whatever end the attempt comes to, with a
-	// context of its own so the session's cancellation cannot take the
-	// unsubscribe with it — and only when the subscribe returned, for an
-	// attempt whose subscribe failed holds no subscription to end. Its
-	// failure is logged, not returned: the attempt is ending either way,
-	// and the feed's own error is the one the session reports.
+	// context of its own so the cancellation cannot take the
+	// unsubscribe with it — and only when the subscribe returned, for
+	// an attempt whose subscribe failed holds no subscription to end.
+	// Its failure is logged, not returned: the attempt is ending
+	// either way, and the feed's own error is the one the session
+	// reports.
 	subscribed := false
 	defer func() {
 		if !subscribed {
 			return
 		}
-		uctx, cancel := context.WithTimeout(context.Background(), unsubscribeWait)
-		defer cancel()
-		if err := s.session.Unsubscribe(uctx, &sdkmcp.UnsubscribeParams{URI: uri}); err != nil {
+		if gen.ctx.Err() != nil {
+			// The generation the subscription lived on is gone, and its
+			// session with it: there is no subscription left to end,
+			// and an unsubscribe on a closed connection is only noise.
+			return
+		}
+		uctx, ucancel := context.WithTimeout(context.Background(), unsubscribeWait)
+		defer ucancel()
+		if err := gen.session.Unsubscribe(uctx, &sdkmcp.UnsubscribeParams{URI: uri}); err != nil {
 			io.Log.Warn("the resource feed's subscription did not end cleanly",
-				"server", s.name, "uri", uri, "error", err.Error())
+				"server", server, "uri", uri, "error", err.Error())
 		}
 	}()
 
-	if err := s.session.Subscribe(ctx, &sdkmcp.SubscribeParams{URI: uri}); err != nil {
-		return fmt.Errorf("the mcp server %q: subscribing to %q: %w", s.name, uri, err)
+	// The subscription needs the generation's own grant: a relaunch may
+	// install a generation whose initialize result advertises no
+	// resource subscriptions, and a Subscribe against it fails the
+	// plain refusal every attempt — the restart policy would bring
+	// another one forever. The generation's own capability ends the
+	// attempt with the fault that suspends the feed, the way a server
+	// that cannot come back does.
+	if !subscribes(gen.result) {
+		return &poo.FeedFault{
+			Code:    poo.FeedFaultServer,
+			Message: fmt.Sprintf("server %q advertises no resource subscriptions", server),
+		}
+	}
+	if err := gen.session.Subscribe(ctx, &sdkmcp.SubscribeParams{URI: uri}); err != nil {
+		return fmt.Errorf("the mcp server %q: subscribing to %q: %w", server, uri, err)
 	}
 	subscribed = true
-	if newRevision(s) {
+	if newRevision(gen.result) {
 		select {
 		case granted := <-ack:
 			if !granted {
-				return fmt.Errorf("the mcp server %q acknowledged the subscription to %q without granting it", s.name, uri)
+				return fmt.Errorf("the mcp server %q acknowledged the subscription to %q without granting it", server, uri)
 			}
 		case <-time.After(resourceAckWait):
-			return fmt.Errorf("the mcp server %q never acknowledged the subscription to %q", s.name, uri)
+			return fmt.Errorf("the mcp server %q never acknowledged the subscription to %q", server, uri)
 		case <-ctx.Done():
 			return ctx.Err()
 		}
 	}
-	if err := drainResource(ctx, io, s, uri); err != nil {
+	if err := drainResource(ctx, io, server, gen, uri); err != nil {
 		return err
 	}
 	for {
@@ -131,17 +213,17 @@ func runResourceFeed(ctx context.Context, io poo.FeedIO, s *serverState, uri str
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-pending:
-			if err := drainResource(ctx, io, s, uri); err != nil {
+			if err := drainResource(ctx, io, server, gen, uri); err != nil {
 				return err
 			}
 		}
 	}
 }
 
-// newRevision reports whether the session negotiated the revision that
-// grants a subscription by acknowledged notification.
-func newRevision(s *serverState) bool {
-	return s.result != nil && s.result.ProtocolVersion >= newProtocolRevision
+// newRevision reports whether the generation negotiated the revision
+// that grants a subscription by acknowledged notification.
+func newRevision(result *sdkmcp.InitializeResult) bool {
+	return result != nil && result.ProtocolVersion >= newProtocolRevision
 }
 
 // drainResource reads the URI once and emits what came back: one record
@@ -156,14 +238,14 @@ func newRevision(s *serverState) bool {
 // something that is not a message. So does a read that fails or an
 // emit the session refuses: the records already emitted stand, and the
 // rest of the read is lost, the server having drained it.
-func drainResource(ctx context.Context, io poo.FeedIO, s *serverState, uri string) error {
-	res, err := s.session.ReadResource(ctx, &sdkmcp.ReadResourceParams{URI: uri})
+func drainResource(ctx context.Context, io poo.FeedIO, server string, gen *generation, uri string) error {
+	res, err := gen.session.ReadResource(ctx, &sdkmcp.ReadResourceParams{URI: uri})
 	if err != nil {
-		return fmt.Errorf("the mcp server %q: reading %q: %w", s.name, uri, err)
+		return fmt.Errorf("the mcp server %q: reading %q: %w", server, uri, err)
 	}
 	for _, contents := range res.Contents {
 		if contents.Blob != nil {
-			io.Log.Warn("the resource returned a blob the feed does not read", "server", s.name, "uri", uri)
+			io.Log.Warn("the resource returned a blob the feed does not read", "server", server, "uri", uri)
 			continue
 		}
 		if contents.Text == "" {
@@ -171,9 +253,9 @@ func drainResource(ctx context.Context, io poo.FeedIO, s *serverState, uri strin
 		}
 		if len(contents.Text) > feed.MaxLineBytes {
 			return fmt.Errorf("the mcp server %q: the record read from %q is %d bytes, and a record is at most %d",
-				s.name, uri, len(contents.Text), feed.MaxLineBytes)
+				server, uri, len(contents.Text), feed.MaxLineBytes)
 		}
-		if err := io.Emit(s.name, contents.Text, nil, nil); err != nil {
+		if err := io.Emit(server, contents.Text, nil, nil); err != nil {
 			return err
 		}
 	}
