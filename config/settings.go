@@ -115,6 +115,13 @@ type Settings struct {
 	// A relative path resolves against the settings file's own directory, like
 	// models_file.
 	PiAuthFile string `json:"pi_auth_file,omitempty"`
+	// AuthReadonly makes the credential file one poo reads and never writes:
+	// no refresh is traded, and no sign-in, import or logout goes through. It
+	// is the mode for a file another tool owns — the Codex CLI's auth.json,
+	// shared with poo, the CLI keeping the credential alive — and it is the
+	// operator's word that the other tool does. An access token past its
+	// expiry is an error naming the tool that owns the file, not a trade.
+	AuthReadonly bool `json:"auth_readonly,omitempty"`
 	// credentialPath is the resolved path of the file the Codex credential is
 	// read from, empty when a Settings built by hand named none.
 	credentialPath string

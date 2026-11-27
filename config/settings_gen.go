@@ -11,6 +11,7 @@ import (
 // SettingsFields holds the fields for Settings availability checks.
 type SettingsFields struct {
 	AuthFile                        *string  "json:\"auth_file,omitempty\""
+	AuthReadonly                    *bool    "json:\"auth_readonly,omitempty\""
 	CliRegistryDefaults             *bool    "json:\"cli_registry.defaults,omitempty\""
 	CliRegistryPaths                []string "json:\"cli_registry.paths,omitempty\""
 	ContextHandoffMaxTokens         *float64 "json:\"context.handoff.max_tokens,omitempty\""
@@ -115,6 +116,7 @@ type SettingsConditions struct {
 // SettingsAvailability holds the availability status for each field.
 type SettingsAvailability struct {
 	AuthFile                        FieldStatus
+	AuthReadonly                    FieldStatus
 	CliRegistryDefaults             FieldStatus
 	CliRegistryPaths                FieldStatus
 	ContextHandoffMaxTokens         FieldStatus
@@ -253,6 +255,8 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 	var _ = prev
 	AuthFileEnabled := true
 	AuthFileSatisfied := func() bool { v := f.AuthFile; return v != nil && *v != "" }()
+	AuthReadonlyEnabled := true
+	AuthReadonlySatisfied := f.AuthReadonly != nil
 	CliRegistryDefaultsEnabled := true
 	CliRegistryDefaultsSatisfied := f.CliRegistryDefaults != nil
 	CliRegistryPathsEnabled := true
@@ -443,6 +447,28 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 			Required:  AuthFileEnabled && false,
 			Enabled:   AuthFileEnabled,
 			Satisfied: AuthFileSatisfied,
+			Fair:      true,
+			Reason: func() *string {
+				var reasons []string
+				if len(reasons) == 0 {
+					return nil
+				}
+				return &reasons[0]
+			}(),
+			Reasons: func() []string {
+				var reasons []string
+				if reasons == nil {
+					reasons = []string{}
+				}
+				return reasons
+			}(),
+			Valid: nil,
+			Error: "",
+		},
+		AuthReadonly: FieldStatus{
+			Required:  AuthReadonlyEnabled && false,
+			Enabled:   AuthReadonlyEnabled,
+			Satisfied: AuthReadonlySatisfied,
 			Fair:      true,
 			Reason: func() *string {
 				var reasons []string
@@ -2800,6 +2826,8 @@ func depSatisfied(f SettingsFields, name string) bool {
 	case "AuthFile":
 		v := f.AuthFile
 		return v != nil && *v != ""
+	case "AuthReadonly":
+		return f.AuthReadonly != nil
 	case "CliRegistryDefaults":
 		return f.CliRegistryDefaults != nil
 	case "CliRegistryPaths":
@@ -3191,6 +3219,12 @@ func Challenge(fieldName string, f SettingsFields, c SettingsConditions, prev Se
 	case "AuthFile", "auth_file":
 		found = true
 		status = avail.AuthFile
+		if status.Reason != nil {
+			explanations = append(explanations, "* "+*status.Reason)
+		}
+	case "AuthReadonly", "auth_readonly":
+		found = true
+		status = avail.AuthReadonly
 		if status.Reason != nil {
 			explanations = append(explanations, "* "+*status.Reason)
 		}

@@ -140,7 +140,13 @@ func (o *loginOptions) signInAndStore(ctx context.Context, flow auth.Flow, setti
 		fmt.Fprintf(stderr, "%s: %v\n", o.command, err)
 		return auth.Status{}, true
 	}
-	credentials := auth.Credentials{Path: target}
+	credentials := auth.Credentials{Path: target, ReadOnly: settings.AuthReadonly}
+	// The refusal comes before the sign-in, not after it: a credential the file cannot
+	// hold is not one to spend a grant on.
+	if credentials.ReadOnly {
+		fmt.Fprintf(stderr, "%s: %v\n", o.command, fmt.Errorf("%w: poo does not write it", auth.ErrReadOnly))
+		return auth.Status{}, true
+	}
 	mayReplace, failed := replace(credentials, flow.Provider, o.force, o.command, in, stderr)
 	if failed {
 		return auth.Status{}, true

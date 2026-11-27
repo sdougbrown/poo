@@ -3,14 +3,19 @@
 //
 // The file's shape and the store that keeps the credential alive are two things, and
 // they are two things here. The store owns the lock, the read, the refresh and the
-// write; a format owns what one file's bytes look like. There are two shapes: poo's
-// own, which holds a version and the credentials under it, and pi's auth.json, which
-// holds its providers at the top level. The file itself says which one it is, so a
+// write; a format owns what one file's bytes look like. There are three shapes:
+// poo's, which holds a version and the credentials under it, pi's auth.json, which
+// holds its providers at the top level, and the Codex CLI's own auth.json, which is
+// read and never written back. The file itself says which one it is, so a
 // caller hands over a path and nothing else.
 //
 // pi's shape is the compat one: poo reads it and writes it back as it found it, so pi
 // keeps working with the same file, and the day poo's own import path is the only
 // reader of pi's file this codec is what stays behind.
+//
+// The Codex CLI's own auth.json is the third shape, and it is never written
+// back at all: the CLI owns the file and the refresh, and poo only reads it,
+// in the mode a read-only store (ReadOnly) names.
 //
 // poo reads the file the settings name, never a pi installation's own
 // directory, so a caller hands the path over. This package owns both the
@@ -105,6 +110,9 @@ const (
 	// FormatPoo is poo's own auth file: a version, and the credentials under
 	// it.
 	FormatPoo = "poo"
+	// FormatCodex is the Codex CLI's own auth.json: an api key beside the
+	// tokens object the CLI's sign-in wrote.
+	FormatCodex = "codex"
 )
 
 // The failures a caller tells apart.
@@ -138,8 +146,15 @@ var (
 	// write, before anything was traded. Nothing was written either.
 	ErrStorage = errors.New("auth: the auth.json could not be read")
 
-	// ErrForeignFile means the file is another tool's: pi's, in pi's shape. poo writes
-	// its own, and a command that rewrote pi's file would be changing a file pi reads.
+	// ErrReadOnly means the credential file is one poo reads and never writes,
+	// and the access poo was asked for is one a refresh would have to make.
+	// Nothing was traded and nothing was written: the file is what it was.
+	// Refreshing the credential is the tool that owns the file's job.
+	ErrReadOnly = errors.New("auth: the credential file is read-only")
+
+	// ErrForeignFile means the file is another tool's: pi's, or the Codex CLI's, in the
+	// shape it was read as. poo writes its own, and a command that rewrote another tool's
+	// file would be changing a file that tool reads.
 	ErrForeignFile = errors.New("auth: the auth file belongs to another tool")
 
 	// ErrExists means the file already holds a credential for the provider, and
@@ -298,6 +313,9 @@ func (c Credentials) Delete(ctx context.Context, provider string) error {
 // owns. A refresh is not one of them — it writes back the shape it read, which is how pi keeps
 // working with a credential poo refreshed — so it passes false.
 func (c Credentials) writeLocked(ctx context.Context, own bool, mutate func(document) (Status, bool, error)) (Status, error) {
+	if own && c.ReadOnly {
+		return Status{}, fmt.Errorf("%w: poo does not write its credential file", ErrReadOnly)
+	}
 	if err := os.MkdirAll(filepath.Dir(c.Path), 0o700); err != nil {
 		// Nothing was traded: the file could not be made ready to write.
 		return Status{}, fmt.Errorf("%w: %s: %w", ErrStorage, filepath.Dir(c.Path), err)
@@ -313,7 +331,7 @@ func (c Credentials) writeLocked(ctx context.Context, own bool, mutate func(docu
 	}
 	if own {
 		if _, ok := doc.format.(pooFormat); !ok {
-			return Status{}, fmt.Errorf("%w: %s is pi's file, and poo writes its own", ErrForeignFile, doc.path)
+			return Status{}, fmt.Errorf("%w: %s is the %s file, and poo writes its own", ErrForeignFile, doc.path, doc.format.name())
 		}
 	}
 	status, changed, err := mutate(doc)
@@ -347,7 +365,7 @@ func (c Credentials) status(doc document, p Provider, stored credential) Status 
 	if status.Kind == KindOAuth {
 		status.ClientID = stored.ClientID
 		status.Expires = time.UnixMilli(stored.Expires)
-		status.Live = stored.live(c.now(), c.leeway())
+		status.Live = stored.live(c.now(), c.readiness())
 	}
 	return status
 }
@@ -449,6 +467,12 @@ type Credentials struct {
 	// Wait overrides how long a refresh waits for another writer's lock.
 	// Zero means DefaultWait.
 	Wait time.Duration
+	// ReadOnly makes the file a store poo reads and never writes: no refresh
+	// is traded, and no sign-in, import or logout goes through. An access
+	// token past its expiry is an error, not a trade — keeping the credential
+	// alive is the tool that owns the file's job. It is the mode for a file
+	// another tool owns, the Codex CLI's auth.json shared with poo.
+	ReadOnly bool
 }
 
 // Access returns the credential's access token, refreshing one that has expired or is close
@@ -479,7 +503,54 @@ func (c Credentials) Access(ctx context.Context, p Provider) (Token, error) {
 // Concurrent calls each refresh in turn. The second uses the refresh token
 // stored by the first.
 func (c Credentials) Refresh(ctx context.Context, p Provider) (Token, error) {
+	if c.ReadOnly {
+		return Token{}, fmt.Errorf("%w: poo does not trade its credential", ErrReadOnly)
+	}
 	return c.token(ctx, p, true)
+}
+
+// readiness is how much life a credential must have left to be used or
+// reported as live.
+//
+// A file poo refreshes uses pi's leeway: a token pi would refresh is one poo
+// refreshes too. A read-only file has no refresh to front-run, so a token is
+// live until it has expired.
+func (c Credentials) readiness() time.Duration {
+	if c.ReadOnly {
+		return 0
+	}
+	return c.leeway()
+}
+
+// readOnlyToken returns the credential the file holds, as it is.
+//
+// A read-only file is read without the lock: nothing is traded, so there is
+// nothing two writers could do to each other. The credential is used until
+// its access token has expired, with no leeway — there is no refresh to
+// front-run, and a token the file holds is one to send. An expired one is the
+// failure a caller cannot get past on its own, reported as ErrReadOnly with
+// the moment the token stopped working.
+func (c Credentials) readOnlyToken(p Provider) (Token, error) {
+	stored, _, err := c.read(p)
+	if err != nil {
+		return Token{}, err
+	}
+	if stored.Kind() != KindOAuth {
+		return Token{}, fmt.Errorf("%w: %s holds a %s credential, and a token is not what it has",
+			ErrNoCredential, p.ID, stored.Kind())
+	}
+	if !stored.live(c.now(), 0) {
+		if stored.Expires == 0 {
+			return Token{}, fmt.Errorf("%w: the %s credential's access token names no expiry", ErrReadOnly, p.ID)
+		}
+		return Token{}, fmt.Errorf("%w: the %s credential's access token expired at %s; refresh it with the tool that owns the file",
+			ErrReadOnly, p.ID, time.UnixMilli(stored.Expires).UTC().Format(time.RFC3339))
+	}
+	return Token{
+		Access:    stored.Access,
+		Expires:   time.UnixMilli(stored.Expires),
+		AccountID: p.account(stored.Access, stored.AccountID),
+	}, nil
 }
 
 // token reads the credential, trades it when force says so or when it is not
@@ -488,6 +559,9 @@ func (c Credentials) Refresh(ctx context.Context, p Provider) (Token, error) {
 func (c Credentials) token(ctx context.Context, p Provider, force bool) (Token, error) {
 	if c.Path == "" {
 		return Token{}, errors.New("auth: no auth.json path")
+	}
+	if c.ReadOnly {
+		return c.readOnlyToken(p)
 	}
 	var token Token
 	_, err := c.writeLocked(ctx, false, func(doc document) (Status, bool, error) {
@@ -620,6 +694,11 @@ func documentOf(path string, data []byte) (document, error) {
 func shapeOf(top map[string]json.RawMessage) format {
 	if _, ok := top[versionField]; ok {
 		return pooFormat{}
+	}
+	_, tokens := top[codexTokensField]
+	_, key := top[codexKeyField]
+	if tokens || key {
+		return codexFormat{}
 	}
 	return piFormat{}
 }

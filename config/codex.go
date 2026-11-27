@@ -54,7 +54,7 @@ func (r *Runtime) codexTransport(model poo.ModelInfo) (poo.ChatTransport, error)
 	return codex.New(codex.Options{
 		Endpoint:    endpoint,
 		Model:       model.ModelID,
-		Credentials: codexCredentials(auth.Credentials{Path: path, HTTP: r.httpClient}),
+		Credentials: codexCredentials(auth.Credentials{Path: path, HTTP: r.httpClient, ReadOnly: r.Settings.AuthReadonly}),
 		ModelInfo:   model,
 		ToolsMode:   string(model.Tools.Mode),
 		Reasoning:   r.codexReasoning(model),
@@ -105,14 +105,16 @@ func codexCredentials(credentials auth.Credentials) func(context.Context) (codex
 // already be spent. ErrPersist therefore wins over any lock in its chain — the
 // lock is what stopped the write, not what makes the failure free to retry. A
 // lock that stopped the refresh before anything was traded is the transient
-// one, and a cancelled wait is the caller's cancellation.
+// one, and a cancelled wait is the caller's cancellation. A read-only file's
+// expired credential is terminal the same way: poo does not trade it, so
+// another attempt fails the same way.
 func codexCredentialError(ctx context.Context, err error) error {
 	// A resolution that ended with the caller's context did not fail on its
 	// own: the transport reports the cancellation.
 	if ctx.Err() != nil {
 		return err
 	}
-	if errors.Is(err, auth.ErrPersist) || errors.Is(err, auth.ErrRefresh) {
+	if errors.Is(err, auth.ErrPersist) || errors.Is(err, auth.ErrRefresh) || errors.Is(err, auth.ErrReadOnly) {
 		return &poo.ProviderError{Kind: poo.ProviderKindAuthFailed, Message: err.Error()}
 	}
 	if errors.Is(err, auth.ErrLocked) {

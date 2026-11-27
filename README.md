@@ -218,6 +218,21 @@ the same document, and the first write leaves it YAML.
 `pi_auth_file` names pi's `auth.json` instead, which poo reads and writes in pi's
 shape and encoding so pi keeps working.
 
+The Codex CLI's own `auth.json` is a third shape, and it is read only. The CLI
+owns the file and the refresh, so sharing it means naming it with `auth_file`
+and setting `auth_readonly: true`:
+
+```yaml
+auth_file: ~/.codex/auth.json
+auth_readonly: true
+```
+
+poo reads the credential the CLI's sign-in wrote — the expiry comes from the
+access token's own `exp` claim — and never trades or writes it: no refresh, no
+sign-in, no logout. A token past its expiry is an error naming the tool that
+owns the file, so run the CLI to refresh. One refresher per credential is the
+rule here too, and the flag is how you name the tool that has the job.
+
 `poo auth status` reports the credential the file holds: the file, the
 shape it is written with, the provider, the account the token names, and
 whether the credential is one poo would use or would trade first. A key
