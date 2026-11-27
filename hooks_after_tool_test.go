@@ -375,7 +375,11 @@ func TestARedactionSurvivesALaterHookFailure(t *testing.T) {
 			})
 			sink := &recordingSink{}
 			opts := testOptions(t, tr, &echoTool{result: secret}, sink)
-			opts.HookTimeout = 10 * time.Millisecond
+			// The timeout exists for the mode that parks a hook until the
+			// deadline; it must be long enough that a healthy hook's decision
+			// never loses its delivery to the deadline under CI load, or the
+			// chain loses the redaction the test pins.
+			opts.HookTimeout = 2 * time.Second
 			opts.AfterTool = []poo.AfterToolHook{
 				afterToolFunc(func(ctx poo.HookContext, info poo.ToolCallInfo, result poo.ToolResult) (poo.ResultDecision, error) {
 					return poo.Replace(result), nil
