@@ -17,7 +17,7 @@ func fieldsOf(s *Settings) SettingsFields {
 	f.ModelsFile = text(s.ModelsFile)
 	f.AuthFile = text(s.AuthFile)
 	f.PiAuthFile = text(s.PiAuthFile)
-	f.AuthReadonly = boolean(s.AuthReadonly)
+	f.AuthReadonly = flag(s.AuthReadonly)
 	f.Profile = text(s.Profile)
 	f.ProfilesFiles = list(s.ProfilesFiles)
 	f.ReplProfile = pointer(s.ReplProfile)
@@ -198,11 +198,6 @@ func flag(value *bool) *bool {
 	}
 	copied := *value
 	return &copied
-}
-
-// boolean returns a pointer to a value the settings hold outright.
-func boolean(value bool) *bool {
-	return &value
 }
 
 // list returns a copy of a list, or nil when the list is empty.

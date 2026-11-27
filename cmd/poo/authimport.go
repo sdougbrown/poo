@@ -67,7 +67,14 @@ func handleAuthImportPi(ctx context.Context, inv clicontract.Invocation, stdout,
 		fmt.Fprintf(stderr, "poo auth import: %v\n", err)
 		return exit{operationalExitCode}
 	}
-	poo := auth.Credentials{Path: target, ReadOnly: settings.AuthReadonly}
+	poo := auth.Credentials{Path: target, ReadOnly: settings.AuthReadonlyEnabled()}
+	// The refusal comes before the copy, not after it: an operator who answers
+	// the replace prompt for a write that cannot happen is one the mode was
+	// meant to spare.
+	if poo.ReadOnly {
+		fmt.Fprintf(stderr, "poo auth import: %v\n", fmt.Errorf("%w: poo does not write it", auth.ErrReadOnly))
+		return exit{operationalExitCode}
+	}
 	mayReplace, failed := replace(poo, auth.Codex, o.force, "poo auth import", nil, stderr)
 	if failed {
 		return exit{operationalExitCode}

@@ -145,7 +145,7 @@ func authCredentials(settings *config.Settings) (auth.Credentials, error) {
 	if path == "" {
 		return auth.Credentials{}, fmt.Errorf("the credential file cannot be resolved: set auth_file")
 	}
-	return auth.Credentials{Path: path, ReadOnly: settings.AuthReadonly}, nil
+	return auth.Credentials{Path: path, ReadOnly: settings.AuthReadonlyEnabled()}, nil
 }
 
 // printAuthStatus prints the report as the fields an operator reads.

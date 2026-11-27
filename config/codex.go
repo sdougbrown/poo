@@ -54,7 +54,7 @@ func (r *Runtime) codexTransport(model poo.ModelInfo) (poo.ChatTransport, error)
 	return codex.New(codex.Options{
 		Endpoint:    endpoint,
 		Model:       model.ModelID,
-		Credentials: codexCredentials(auth.Credentials{Path: path, HTTP: r.httpClient, ReadOnly: r.Settings.AuthReadonly}),
+		Credentials: codexCredentials(auth.Credentials{Path: path, HTTP: r.httpClient, ReadOnly: r.Settings.AuthReadonlyEnabled()}),
 		ModelInfo:   model,
 		ToolsMode:   string(model.Tools.Mode),
 		Reasoning:   r.codexReasoning(model),
