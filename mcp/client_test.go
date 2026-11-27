@@ -572,3 +572,64 @@ func TestTheWaitersAnswerOnceAndStop(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+// TestCallToolTranslatesTheImageAndStructuredContent covers the
+// translation of the SDK's content boundary beyond text: a tool that
+// answers an image beside a text and a structured payload comes back
+// with the image's media type and data on Images and the payload's
+// JSON on Structured, and the text the same answer carries is not
+// lost to the image branch.
+func TestCallToolTranslatesTheImageAndStructuredContent(t *testing.T) {
+	server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "inline", Version: "test"}, nil)
+	server.AddTool(&sdkmcp.Tool{Name: "picture", InputSchema: json.RawMessage(`{"type":"object"}`)}, func(_ context.Context, req *sdkmcp.CallToolRequest) (*sdkmcp.CallToolResult, error) {
+		return &sdkmcp.CallToolResult{
+			Content: []sdkmcp.Content{
+				&sdkmcp.ImageContent{MIMEType: "image/png", Data: []byte("aGVsbG8=")},
+				&sdkmcp.TextContent{Text: "the caption"},
+			},
+			StructuredContent: map[string]any{"width": 2, "height": 1},
+		}, nil
+	})
+	clientTransport, serverTransport := sdkmcp.NewInMemoryTransports()
+	go func() { _ = server.Run(context.Background(), serverTransport) }()
+
+	g, err := Connect(context.Background(), "inline", clientTransport)
+	if err != nil {
+		t.Fatalf("connecting the inline server: %v", err)
+	}
+	defer func() {
+		if err := g.Close(); err != nil {
+			t.Errorf("closing the inline group: %v", err)
+		}
+	}()
+
+	res, err := g.CallTool(context.Background(), "inline/picture", json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("calling the inline picture: %v", err)
+	}
+	if len(res.Images) != 1 {
+		t.Fatalf("the picture answered %d images, want one", len(res.Images))
+	}
+	if res.Images[0].MediaType != "image/png" || string(res.Images[0].Data) != "aGVsbG8=" {
+		t.Errorf("the picture answered %+v, want the png's media type and data", res.Images[0])
+	}
+	var captioned bool
+	for _, text := range res.Text {
+		if text == "the caption" {
+			captioned = true
+		}
+	}
+	if !captioned {
+		t.Errorf("the picture answered %q, want the caption among the texts", res.Text)
+	}
+	if res.Structured == nil {
+		t.Fatal("the picture answered no structured content, want the payload's JSON")
+	}
+	var structured map[string]any
+	if err := json.Unmarshal(res.Structured, &structured); err != nil {
+		t.Fatalf("decoding the structured content %s: %v", res.Structured, err)
+	}
+	if structured["width"] != float64(2) || structured["height"] != float64(1) {
+		t.Errorf("the structured content is %s, want the width and the height", res.Structured)
+	}
+}
