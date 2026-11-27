@@ -1,10 +1,8 @@
 package auth
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 )
 
@@ -79,23 +77,17 @@ func (codexFormat) marshal(path string, _ map[string]json.RawMessage) ([]byte, e
 
 // jwtExpiry reads a JWT's exp claim, in milliseconds since the epoch.
 //
-// A token that is not a JWT, or names no exp, has no readable expiry: it is
-// stored with none, and a read of it reports an expired credential rather
-// than a live one, because a token whose life is unknown is not one to send.
+// A token that names no exp has no readable expiry: it is stored with none,
+// and a read of it reports an expired credential rather than a live one,
+// because a token whose life is unknown is not one to send.
 func jwtExpiry(token string) int64 {
-	parts := strings.Split(token, ".")
-	if len(parts) != 3 {
+	claims, ok := jwtPayload(token)
+	if !ok {
 		return 0
 	}
-	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
+	var exp float64
+	if err := json.Unmarshal(claims["exp"], &exp); err != nil || exp <= 0 {
 		return 0
 	}
-	var claims struct {
-		Exp float64 `json:"exp"`
-	}
-	if err := json.Unmarshal(payload, &claims); err != nil || claims.Exp <= 0 {
-		return 0
-	}
-	return time.Unix(int64(claims.Exp), 0).UnixMilli()
+	return time.Unix(int64(exp), 0).UnixMilli()
 }

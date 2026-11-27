@@ -522,6 +522,22 @@ func (c Credentials) readiness() time.Duration {
 	return c.leeway()
 }
 
+// oauthToken turns a stored credential into the token a caller sends, and
+// refuses one that is not oauth. Both token paths — the trade and the
+// read-only read — answer through it, so the two cannot drift: a field the
+// Token grows, or a rule the refusal changes, lands once.
+func (c Credentials) oauthToken(p Provider, stored credential) (Token, error) {
+	if stored.Kind() != KindOAuth {
+		return Token{}, fmt.Errorf("%w: %s holds a %s credential, and a token is not what it has",
+			ErrNoCredential, p.ID, stored.Kind())
+	}
+	return Token{
+		Access:    stored.Access,
+		Expires:   time.UnixMilli(stored.Expires),
+		AccountID: p.account(stored.Access, stored.AccountID),
+	}, nil
+}
+
 // readOnlyToken returns the credential the file holds, as it is.
 //
 // A read-only file is read without the lock: nothing is traded, so there is
@@ -535,10 +551,6 @@ func (c Credentials) readOnlyToken(p Provider) (Token, error) {
 	if err != nil {
 		return Token{}, err
 	}
-	if stored.Kind() != KindOAuth {
-		return Token{}, fmt.Errorf("%w: %s holds a %s credential, and a token is not what it has",
-			ErrNoCredential, p.ID, stored.Kind())
-	}
 	if !stored.live(c.now(), 0) {
 		if stored.Expires == 0 {
 			return Token{}, fmt.Errorf("%w: the %s credential's access token names no expiry", ErrReadOnly, p.ID)
@@ -546,11 +558,7 @@ func (c Credentials) readOnlyToken(p Provider) (Token, error) {
 		return Token{}, fmt.Errorf("%w: the %s credential's access token expired at %s; refresh it with the tool that owns the file",
 			ErrReadOnly, p.ID, time.UnixMilli(stored.Expires).UTC().Format(time.RFC3339))
 	}
-	return Token{
-		Access:    stored.Access,
-		Expires:   time.UnixMilli(stored.Expires),
-		AccountID: p.account(stored.Access, stored.AccountID),
-	}, nil
+	return c.oauthToken(p, stored)
 }
 
 // token reads the credential, trades it when force says so or when it is not
@@ -569,9 +577,10 @@ func (c Credentials) token(ctx context.Context, p Provider, force bool) (Token, 
 		if err != nil {
 			return Status{}, false, err
 		}
-		if stored.Kind() != KindOAuth {
-			return Status{}, false, fmt.Errorf("%w: %s holds a %s credential, and a token is not what it has",
-				ErrNoCredential, p.ID, stored.Kind())
+		// The refusal of a credential that is not oauth comes before the trade:
+		// the endpoint is not asked for a token an api key cannot be.
+		if _, err := c.oauthToken(p, stored); err != nil {
+			return Status{}, false, err
 		}
 		changed := false
 		if force || !stored.live(c.now(), c.leeway()) {
@@ -591,10 +600,9 @@ func (c Credentials) token(ctx context.Context, p Provider, force bool) (Token, 
 			stored = refreshed
 			changed = true
 		}
-		token = Token{
-			Access:    stored.Access,
-			Expires:   time.UnixMilli(stored.Expires),
-			AccountID: p.account(stored.Access, stored.AccountID),
+		token, err = c.oauthToken(p, stored)
+		if err != nil {
+			return Status{}, false, err
 		}
 		return c.status(doc, p, stored), changed, nil
 	})
@@ -745,21 +753,31 @@ func (c credential) live(now time.Time, leeway time.Duration) bool {
 	return c.Access != "" && time.UnixMilli(c.Expires).After(now.Add(leeway))
 }
 
-// claimAccountID reads the account out of a Codex access token.
-//
-// The token is a JWT and the account is a claim in its payload. A token
-// that is not a JWT, or does not carry the claim, names no account here.
-func claimAccountID(access string) string {
-	parts := strings.Split(access, ".")
+// jwtPayload reads the claims of a JWT, as the payload spelled them. A token
+// that is not a JWT, or whose payload does not decode, names none.
+func jwtPayload(token string) (map[string]json.RawMessage, bool) {
+	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
-		return ""
+		return nil, false
 	}
 	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
-		return ""
+		return nil, false
 	}
 	var claims map[string]json.RawMessage
 	if err := json.Unmarshal(payload, &claims); err != nil {
+		return nil, false
+	}
+	return claims, true
+}
+
+// claimAccountID reads the account out of a Codex access token.
+//
+// The account is a claim in the payload. A token that names no claim names
+// no account here.
+func claimAccountID(access string) string {
+	claims, ok := jwtPayload(access)
+	if !ok {
 		return ""
 	}
 	auth, ok := claims[accountClaim]
