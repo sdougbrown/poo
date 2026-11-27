@@ -569,7 +569,7 @@ func TestFooterGrowthNeverScrollsPendingRows(t *testing.T) {
 	}
 }
 
-// TestAFrameDuringAResizePaintsNothingAtTheOldWidth covers the frame
+// TestAFrameAnchorsAndAWriteRelaysTheTailDuringAResize covers the frame
 // that lands between the terminal's size change and the resize that
 // rebuilds the screen: readline's own watcher renders one from the
 // geometry the layout still holds. Everything such a frame would paint

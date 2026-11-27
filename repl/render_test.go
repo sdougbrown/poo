@@ -563,9 +563,10 @@ func TestTheResizeBurstKeepsTheWholeStreamOnScreen(t *testing.T) {
 		return cols, rows, true
 	}
 	r := &renderer{out: vt, term: true, layout: l, width: 40, wrap: 38}
-	// The markdown renders word-wrapped at the renderer's width, the
-	// way a real session's palette-armed renderer does: a rebuild at a
-	// new width rewraps, and no word splits across a row.
+	// The renderer here carries no glamour term renderer, so markdown
+	// takes its plain fallback and the rows are word-wrapped by the
+	// layout's own wrapRows (the two-pass ansi.Wordwrap/ansi.Hardwrap
+	// wrap this PR changed): no word splits across a row.
 	r.armPalette(func() string { return styles.DarkStyle })
 
 	// The thought streams while a drag crosses the terminal: the deltas

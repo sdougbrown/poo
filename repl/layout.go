@@ -202,24 +202,17 @@ func (l *layout) write(s string) {
 		// rebuild the debounce would run may never follow — the write's
 		// caller can be the seal of a stream the resize stalled, and no
 		// winch comes after it. The tail repaint recovers the rows a
-		// scroll pushed out of the pane.
+		// scroll pushed out of the pane, and the footer clamps to the
+		// pane the resize left behind.
 		if w, h, ok := l.size(); ok {
 			l.width, l.height = w, h
 		}
+		if l.footer > l.height-1 {
+			l.footer = l.height - 1
+		}
 		preview := l.previewRows
 		l.preview, l.previewRows = 0, nil
-		bottom := l.regionBottom()
-		rows := transcriptTail(l.transcript.Bytes(), l.width, bottom-len(preview))
-		l.last = bottom - min(len(preview), bottom) - len(rows)
-		var b strings.Builder
-		b.WriteString(l.regionSeq())
-		b.WriteString("\x1b[H" + seqEraseBelow)
-		b.WriteString(l.rowsSeq(rows))
-		l.paintPreviewLocked(&b, preview)
-		l.paintChromeLocked(&b)
-		l.chromeStale = false
-		b.WriteString(fmt.Sprintf("\x1b[%d;1H", l.footerTop()))
-		l.emit(b.String())
+		l.rebuildLocked(preview)
 		return
 	}
 	rows := textRows(s, l.width)
@@ -662,12 +655,21 @@ func (l *layout) resize(width, height, footer int, committed string, preview []s
 	}
 	l.footer = l.clampFooter(footer)
 	l.preview, l.previewRows = 0, nil
-	bottom := l.regionBottom()
-	rows := transcriptTail(l.transcript.Bytes(), width, bottom-len(preview))
-	l.last = bottom - min(len(preview), bottom) - len(rows)
 	if !l.active {
 		return
 	}
+	l.rebuildLocked(preview)
+}
+
+// rebuildLocked repaints the region's tail: the transcript's committed
+// rows laid out at the layout's current width, the standing preview over
+// them, and the chrome, ending with the cursor anchored at the footer.
+// The caller holds l.mu, with l.footer already clamped for the live
+// height and the preview cache cleared for the rows it passes.
+func (l *layout) rebuildLocked(preview []string) {
+	bottom := l.regionBottom()
+	rows := transcriptTail(l.transcript.Bytes(), l.width, bottom-len(preview))
+	l.last = bottom - min(len(preview), bottom) - len(rows)
 	var b strings.Builder
 	b.WriteString(l.regionSeq())
 	b.WriteString("\x1b[H" + seqEraseBelow)
