@@ -1241,16 +1241,26 @@ func TestAModelSwitchTakesTheLevelTheWireReports(t *testing.T) {
 
 // TestAModelSwitchFallsBackToOff covers a move to a model whose levels
 // the session's level is not on: the level the session ran at is one
-// the new model does not take, and the session falls back to off, which
-// every model takes.
+// the new model does not take, and the session falls back to off. The
+// pre-switch level is one the target refuses and not off itself, so the
+// fallback is an observable transition — the notice renders only when
+// the switch itself moves the level.
 func TestAModelSwitchFallsBackToOff(t *testing.T) {
-	out, _ := startRepl(t, "/thinking off\n/model mystery\n/quit\n")
+	server := &fakeServer{t: t, models: []fakeModel{
+		{name: "gemma4", modelID: "gemma4", window: 262144, levels: []string{"off", "low", "high"}},
+		{name: "narrow", modelID: "narrow", window: 131072, levels: []string{"medium", "high"}},
+	}}
+	out, _ := startReplServer(t, "/thinking low\n/model narrow\n/quit\n", server)
 
-	if !strings.Contains(out, "model → mystery") {
+	stripped := ansi.Strip(out)
+	if !strings.Contains(stripped, "model → narrow") {
 		t.Errorf("the transcript shows no switch:\n%s", out)
 	}
-	if !strings.Contains(out, "🧠 off") {
-		t.Errorf("the switch did not leave the session at off:\n%s", out)
+	if !strings.Contains(stripped, "thinking → off") {
+		t.Errorf("the switch did not move the level back to off:\n%s", out)
+	}
+	if got := strings.Count(stripped, "thinking → off"); got != 1 {
+		t.Errorf("the transcript shows %d fallback notices, want exactly the switch's one:\n%s", got, out)
 	}
 }
 

@@ -281,7 +281,14 @@ func Restore(opts Options, records []Record, fns ...Option) (*Session, Restored,
 	if created.ToolsMode != "" {
 		opts.Model.Tools.Mode = created.ToolsMode
 	}
-	if created.ReasoningEffort != "" {
+	// A recorded effort level forces the effort control on, the way a
+	// level named at the flag does. "off" and "default" are beside the
+	// forcing: off asks the model's own control for quiet, and default
+	// asks for no field, so neither may overwrite the resolved model's
+	// control with an effort one.
+	switch created.ReasoningEffort {
+	case "", "off", "default":
+	default:
 		opts.Model.Reasoning = ReasoningControl{Mode: ReasoningEffort, Param: ReasoningPathEffort}
 	}
 	// The session-start hooks do not run: the records hold the messages

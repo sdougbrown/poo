@@ -230,8 +230,9 @@ var ReasoningLevelNames = []string{"default", "minimal", "low", "medium", "high"
 
 // ReasoningOffWords are the words an effort control takes as "do not
 // think". A model that declares one of them is sent it verbatim when the
-// session is told off; a model that declares neither is sent the first,
-// which is the word the effort API family uses for off.
+// session is told off. A model that declares neither is sent "none",
+// ReasoningOffWords[1]: the word the effort API family uses for off. The
+// first entry, "off", is sent only when the model declares "off" itself.
 var ReasoningOffWords = []string{"off", "none"}
 
 // ReasoningSetting is the settings' reasoning value.
