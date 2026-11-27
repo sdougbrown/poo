@@ -138,10 +138,13 @@ type FeedFault struct {
 
 // Error implements error.
 func (f *FeedFault) Error() string {
+	if f.Code == FeedFaultServer {
+		return fmt.Sprintf("the feed's server failed (%s): %s", f.Code, f.Message)
+	}
 	return fmt.Sprintf("the feed's filter failed (%s): %s", f.Code, f.Message)
 }
 
-// The codes a feed's filter fault is reported with.
+// The codes a feed's fault is reported with.
 const (
 	// FeedFaultExit means the filter's process exited with a nonzero
 	// status.
@@ -152,6 +155,11 @@ const (
 	// FeedFaultRecord means a record is past the byte cap one may hold:
 	// the record the filter would read, or the one it wrote.
 	FeedFaultRecord = "filter_record"
+	// FeedFaultServer means the feed's server is gone for good: the
+	// server spent its relaunch budget, so no attempt against it can
+	// succeed again. The remedy is the server's, not the filter's — the
+	// session brings the server back or ends the feed.
+	FeedFaultServer = "server_failed"
 )
 
 // feedFaultOf returns the fault an attempt ended with, if it ended with
@@ -1003,10 +1011,14 @@ func (s *Session) reportFeedFault(f *feedState, attempt int, startedAt time.Time
 		code:     fault.Code,
 		message:  fault.Message,
 	}
-	// The report names the diagnostics' file only when the file is there:
-	// a reader that follows the remedy must find what the report says it
-	// will.
-	report.logPath, _ = s.writeFeedFaultLog(f, attempt, startedAt, fault.Stderr)
+	// The report names the diagnostics' file only when there are
+	// diagnostics to write and the file is there: a reader that follows
+	// the remedy must find what the report says it will. A fault with no
+	// stderr — a server's own failure, which ran no filter — names no
+	// file at all.
+	if len(fault.Stderr) > 0 {
+		report.logPath, _ = s.writeFeedFaultLog(f, attempt, startedAt, fault.Stderr)
+	}
 	// The fold check and the report's acceptance are one critical
 	// section: a fault that arrives in the gap folds into the report in
 	// flight rather than queueing one of its own, so one suspension is
@@ -1180,10 +1192,14 @@ func (r *feedFault) render() string {
 // faults that joined it, and the remedy.
 func (r *feedFault) text() string {
 	var b strings.Builder
-	b.WriteString("The feed's filter failed: ")
+	if r.code == FeedFaultServer {
+		b.WriteString("The feed's server failed: ")
+	} else {
+		b.WriteString("The feed's filter failed: ")
+	}
 	b.WriteString(r.message)
 	b.WriteString(". The feed is suspended, and it does not restart.\n")
-	if r.logPath == "" {
+	if r.logPath == "" && r.code != FeedFaultServer {
 		b.WriteString("The filter's own diagnostics could not be written to a file, so this report carries none.\n")
 	}
 	if r.more > 0 {

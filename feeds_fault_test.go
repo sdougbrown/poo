@@ -660,3 +660,49 @@ func TestAFaultReportReservationBelongsToItsAttempt(t *testing.T) {
 		return len(faultReportTexts(gate.recordingSink)) >= 1
 	})
 }
+
+// TestAServerFaultReportSpeaksForTheServer covers a feed fault whose
+// code names the server: the fault carries no filter stderr, so the
+// report is not rendered as a filter failure, names no diagnostics
+// file, and the fault's own error opens with the server's sentence.
+func TestAServerFaultReportSpeaksForTheServer(t *testing.T) {
+	sink := &recordingSink{}
+	opts := testOptions(t, scripted([]fakeResponse{
+		{calls: []poo.ToolCall{subscribeCall("c1", "git-feedback", map[string]string{"url": "https://example.test/repo"})}},
+		{text: "the answer"},
+	}), &echoTool{}, sink)
+	s := newTestSession(t, opts, poo.WithFeeds(theOptionalFeedSpec(
+		func(ctx context.Context, io poo.FeedIO) error {
+			return &poo.FeedFault{
+				Code:    poo.FeedFaultServer,
+				Message: `server "mail" is gone and cannot be relaunched`,
+			}
+		}, poo.OnIdleHold)))
+
+	runSession(t, s, "start the feed")
+	waitForSink(t, sink, "the fault report to reach the chat model", func() bool {
+		_, _, ok := deliveredMessage(sink)
+		return ok
+	})
+	text, _, _ := deliveredMessage(sink)
+	if strings.Contains(text, "The feed's filter failed") {
+		t.Errorf("the server fault's report %q renders as a filter failure", text)
+	}
+	if !strings.Contains(text, `server "mail" is gone and cannot be relaunched`) {
+		t.Errorf("the report %q does not carry the server's diagnosis", text)
+	}
+	if strings.Contains(text, ` log="`) {
+		t.Errorf("the report %q names a diagnostics file the server fault never wrote", text)
+	}
+	if strings.Contains(text, "could not be written") {
+		t.Errorf("the report %q claims missing diagnostics where the server left none by design", text)
+	}
+	if _, err := s.Wait(context.Background()); err != nil {
+		t.Fatalf("waiting for the run the report landed in: %v", err)
+	}
+
+	err := (&poo.FeedFault{Code: poo.FeedFaultServer, Message: "gone"}).Error()
+	if !strings.HasPrefix(err, "the feed's server failed (server_failed): ") {
+		t.Errorf("the server fault's error %q does not open with the server's sentence", err)
+	}
+}

@@ -34,8 +34,8 @@ func (r *Runtime) offeredCatalog() *cli.Catalog {
 	return r.Registry
 }
 
-// offeredEntries returns the session's snapshot: every entry the model reaches
-// through a tool that calls it.
+// offeredView returns the session's offering: the entries the model
+// reaches through a tool that calls them, read as they are now.
 //
 // The catalog's entries come first when the search covers the catalog — the
 // same rule that lists it in the prompt and points call_cli's refusal at the
@@ -47,18 +47,25 @@ func (r *Runtime) offeredCatalog() *cli.Catalog {
 // decision-model round trip over them is what the threshold rule exists to
 // avoid.
 //
+// One read is one snapshot — every handle reads the generation its group
+// runs, under the group's lock — so a search after a relaunch names the
+// tools of the server the session runs, and two searches over an offering
+// that changed between them disagree without either being wrong.
+//
 // An elevated catalog contributes nothing: its entries are tools of their own
 // by now, so a hit for one would name a call the session does not offer, and
 // the model already reads each entry in the tool list.
-func offeredEntries(catalog *cli.Catalog, elevated []poo.ToolInfo, started []MCPRunning, searched bool) []cli.Offered {
-	var entries []cli.Offered
-	if len(elevated) == 0 && searched {
-		entries = catalog.Offered()
+func offeredView(catalog *cli.Catalog, elevated []poo.ToolInfo, started []MCPRunning, searched bool) cli.Offerings {
+	return func() []cli.Offered {
+		var entries []cli.Offered
+		if len(elevated) == 0 && searched {
+			entries = catalog.Offered()
+		}
+		for _, running := range started {
+			entries = append(entries, running.Offered()...)
+		}
+		return entries
 	}
-	for _, running := range started {
-		entries = append(entries, running.Offered()...)
-	}
-	return entries
 }
 
 // offeredRegistry returns the registry entries a profile offering tools may

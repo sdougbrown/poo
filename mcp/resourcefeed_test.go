@@ -55,7 +55,7 @@ func (b *lockedBuffer) String() string {
 
 // recordingFeed is the feed side a test reads: every emit is kept and
 // signalled, so a test waits on the delivery rather than a guess, and
-// the emit may be made to refuse.
+// the emit may be made to refuse from the Nth one onward.
 type recordingFeed struct {
 	mu      sync.Mutex
 	emitted []string
@@ -63,22 +63,26 @@ type recordingFeed struct {
 	// reads the delivery it waited for even when several landed at once.
 	cursor int
 	signal chan struct{}
-	refuse bool
+	// refuseFrom refuses from that 1-based emit onward: the emits before
+	// it record and deliver, the Nth and later are refused. Zero never
+	// refuses.
+	refuseFrom int
 }
 
 // newFeedIO builds the FeedIO one runner is driven with, and the feed
 // that records what it emitted.
-func newFeedIO(refuse bool) (*recordingFeed, poo.FeedIO, *lockedBuffer) {
-	feed := &recordingFeed{signal: make(chan struct{}, 64), refuse: refuse}
+func newFeedIO() (*recordingFeed, poo.FeedIO, *lockedBuffer) {
+	feed := &recordingFeed{signal: make(chan struct{}, 64)}
 	logs := &lockedBuffer{}
 	io := poo.FeedIO{
 		Dir:       os.TempDir(),
 		SessionID: "s-42",
 		Emit: func(_ string, text string, _ *poo.FeedImage, _ json.RawMessage) error {
-			if feed.refuse {
+			feed.mu.Lock()
+			if feed.refuseFrom > 0 && len(feed.emitted)+1 >= feed.refuseFrom {
+				feed.mu.Unlock()
 				return errEmitRefused
 			}
-			feed.mu.Lock()
 			feed.emitted = append(feed.emitted, text)
 			feed.mu.Unlock()
 			select {
@@ -284,7 +288,7 @@ func TestResourceFeedDeliversAQueuedItemAndEveryUpdateOnce(t *testing.T) {
 			// resource before the subscription exists.
 			l.push(t, "queued")
 			run := ResourceFeed(l.group, "fixture", inboxURI)
-			feed, io, _ := newFeedIO(false)
+			feed, io, _ := newFeedIO()
 			cancel, done := runFeed(t, run, io)
 
 			// The racing update is pushed the moment the attempt starts,
@@ -340,8 +344,8 @@ func TestResourceFeedDeliversAQueuedItemAndEveryUpdateOnce(t *testing.T) {
 func TestResourceFeedTwoFeedsOnOneServerBothDrain(t *testing.T) {
 	l := launchFeed(t, "")
 	l.push(t, "the inbox item")
-	inboxFeed, inboxIO, _ := newFeedIO(false)
-	counterFeed, counterIO, _ := newFeedIO(false)
+	inboxFeed, inboxIO, _ := newFeedIO()
+	counterFeed, counterIO, _ := newFeedIO()
 	cancelInbox, inboxDone := runFeed(t, ResourceFeed(l.group, "fixture", inboxURI), inboxIO)
 	defer cancelInbox()
 	cancelCounter, counterDone := runFeed(t, ResourceFeed(l.group, "fixture", counterURI), counterIO)
@@ -389,7 +393,7 @@ func TestResourceFeedEndsWhenTheReadFails(t *testing.T) {
 		t.Run(protocolName(protocol), func(t *testing.T) {
 			l := launchFeed(t, protocol)
 			run := ResourceFeed(l.group, "fixture", "fixture://missing")
-			feed, io, _ := newFeedIO(false)
+			feed, io, _ := newFeedIO()
 			cancel, done := runFeed(t, run, io)
 			defer cancel()
 
@@ -409,21 +413,87 @@ func TestResourceFeedEndsWhenTheReadFails(t *testing.T) {
 	}
 }
 
-// TestResourceFeedEndsWhenAnEmitFails covers the other failure: an emit
-// the session refuses ends the attempt, and the records before it stand.
-func TestResourceFeedEndsWhenAnEmitFails(t *testing.T) {
+// TestResourceFeedTwoFeedsFaultWhenTheirServerGrantsNoSubscriptions
+// covers the capability the attempt subscribes on: a generation whose
+// initialize result advertises no resource subscriptions cannot grant
+// the subscription, so each feed's attempt ends at once with the fault
+// that suspends the feed — the fault is each feed's own, and neither
+// attempt waits for the acknowledgement that only a capable server
+// answers.
+func TestResourceFeedTwoFeedsFaultWhenTheirServerGrantsNoSubscriptions(t *testing.T) {
+	// The inline server holds two resources and no subscribe capability,
+	// so no subscription it is asked for can be granted.
+	server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "inline", Version: "test"}, nil)
+	server.AddResource(&sdkmcp.Resource{URI: "test://inbox", Name: "inbox", MIMEType: "text/plain"},
+		func(context.Context, *sdkmcp.ReadResourceRequest) (*sdkmcp.ReadResourceResult, error) {
+			return &sdkmcp.ReadResourceResult{}, nil
+		})
+	server.AddResource(&sdkmcp.Resource{URI: "test://counter", Name: "counter", MIMEType: "text/plain"},
+		func(context.Context, *sdkmcp.ReadResourceRequest) (*sdkmcp.ReadResourceResult, error) {
+			return &sdkmcp.ReadResourceResult{}, nil
+		})
+	clientTransport, serverTransport := sdkmcp.NewInMemoryTransports()
+	go func() { _ = server.Run(context.Background(), serverTransport) }()
+	g, err := Connect(context.Background(), "inline", clientTransport)
+	if err != nil {
+		t.Fatalf("connecting the inline server: %v", err)
+	}
+	defer g.Close()
+
+	inboxFeed, inboxIO, _ := newFeedIO()
+	counterFeed, counterIO, _ := newFeedIO()
+	cancelInbox, inboxDone := runFeed(t, ResourceFeed(g, "inline", "test://inbox"), inboxIO)
+	defer cancelInbox()
+	cancelCounter, counterDone := runFeed(t, ResourceFeed(g, "inline", "test://counter"), counterIO)
+	defer cancelCounter()
+
+	// Each attempt ends with its own fault, not with the other feed's
+	// answer and not with the wait for an acknowledgement that will
+	// never come.
+	for _, attempt := range []struct {
+		name string
+		done <-chan error
+	}{{"inbox", inboxDone}, {"counter", counterDone}} {
+		err := joinFeed(t, attempt.done)
+		var fault *poo.FeedFault
+		if !errors.As(err, &fault) || fault.Code != poo.FeedFaultServer {
+			t.Errorf("the %s feed's attempt ended with %v, want the capability's fault", attempt.name, err)
+		}
+	}
+	if got := inboxFeed.texts(); len(got) != 0 {
+		t.Errorf("the unsubscribable inbox feed delivered %q, want nothing", got)
+	}
+	if got := counterFeed.texts(); len(got) != 0 {
+		t.Errorf("the unsubscribable counter feed delivered %q, want nothing", got)
+	}
+}
+
+// TestResourceFeedTheRecordsBeforeAFailedEmitStand covers the drain's
+// partial stand: a read that answers several records emits them in
+// order, and an emit the session refuses ends the attempt with the
+// records before it standing — the server has drained them either way.
+func TestResourceFeedTheRecordsBeforeAFailedEmitStand(t *testing.T) {
 	l := launchFeed(t, "")
-	l.push(t, "doomed")
+	// Both messages sit in the resource before the subscription: the
+	// first read answers them together, as two contents.
+	l.push(t, "the first")
+	l.push(t, "the second")
 	run := ResourceFeed(l.group, "fixture", inboxURI)
-	feed, io, _ := newFeedIO(true)
+	feed, io, _ := newFeedIO()
+	// The refusal starts at the second emit: the first record is
+	// delivered, and the second is where the attempt ends.
+	feed.refuseFrom = 2
 	cancel, done := runFeed(t, run, io)
 	defer cancel()
 
+	if got := feed.waitEmit(t, "the first record"); got != "the first" {
+		t.Errorf("the first delivery is %q, want the first record", got)
+	}
 	if err := joinFeed(t, done); !errors.Is(err, errEmitRefused) {
 		t.Errorf("the attempt ended with %v, want the refused emit", err)
 	}
-	if got := feed.texts(); len(got) != 0 {
-		t.Errorf("the refused emit still recorded %q", got)
+	if got := feed.texts(); len(got) != 1 || got[0] != "the first" {
+		t.Errorf("the failed read recorded %q, want the first record alone", got)
 	}
 }
 
@@ -433,7 +503,7 @@ func TestResourceFeedEndsWhenAnEmitFails(t *testing.T) {
 func TestResourceFeedSkipsABlob(t *testing.T) {
 	l := launchFeed(t, "")
 	run := ResourceFeed(l.group, "fixture", blobURI)
-	feed, io, logs := newFeedIO(false)
+	feed, io, logs := newFeedIO()
 	cancel, done := runFeed(t, run, io)
 
 	l.waitStats(t, "the blob's read", func(counted feedStats) bool { return counted.BlobReads >= 1 })
@@ -476,7 +546,7 @@ func TestResourceFeedRefusesAnOversizedRecord(t *testing.T) {
 	defer g.Close()
 
 	run := ResourceFeed(g, "inline", uri)
-	records, io, _ := newFeedIO(false)
+	records, io, _ := newFeedIO()
 	cancel, done := runFeed(t, run, io)
 	defer cancel()
 
@@ -525,7 +595,7 @@ func TestResourceFeedEndsWithoutAnUnsubscribeWhenTheSubscribeFails(t *testing.T)
 	defer g.Close()
 
 	run := ResourceFeed(g, "inline", uri)
-	_, io, _ := newFeedIO(false)
+	_, io, _ := newFeedIO()
 	cancel, done := runFeed(t, run, io)
 	defer cancel()
 
@@ -544,51 +614,13 @@ func TestResourceFeedEndsWithoutAnUnsubscribeWhenTheSubscribeFails(t *testing.T)
 func TestResourceFeedEndsWhenTheServerIsUnknown(t *testing.T) {
 	l := launchFeed(t, "")
 	run := ResourceFeed(l.group, "nope", inboxURI)
-	_, io, _ := newFeedIO(false)
+	_, io, _ := newFeedIO()
 	cancel, done := runFeed(t, run, io)
 	defer cancel()
 
 	err := joinFeed(t, done)
 	if err == nil || !bytes.Contains([]byte(err.Error()), []byte("nope")) {
 		t.Errorf("the attempt ended with %v, want the unknown server named", err)
-	}
-}
-
-// TestResourceFeedRefusesAnAckWithoutTheURI covers the modern revision's
-// refusal: a server that acknowledges the listen without granting the
-// URI ends the attempt naming both, and nothing is delivered.
-func TestResourceFeedRefusesAnAckWithoutTheURI(t *testing.T) {
-	// The inline server holds a resource but no subscribe capability, so
-	// its acknowledgement grants nothing.
-	server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "inline", Version: "test"}, nil)
-	server.AddResource(&sdkmcp.Resource{URI: "test://inbox", Name: "inbox", MIMEType: "text/plain"},
-		func(context.Context, *sdkmcp.ReadResourceRequest) (*sdkmcp.ReadResourceResult, error) {
-			return &sdkmcp.ReadResourceResult{
-				Contents: []*sdkmcp.ResourceContents{{URI: "test://inbox", MIMEType: "text/plain", Text: "the item"}},
-			}, nil
-		})
-	clientTransport, serverTransport := sdkmcp.NewInMemoryTransports()
-	go func() { _ = server.Run(context.Background(), serverTransport) }()
-	g, err := Connect(context.Background(), "inline", clientTransport)
-	if err != nil {
-		t.Fatalf("connecting the inline server: %v", err)
-	}
-	defer g.Close()
-	if g.Subscribes("inline") {
-		t.Fatal("the inline server advertised resource subscriptions it does not hold")
-	}
-
-	run := ResourceFeed(g, "inline", "test://inbox")
-	feed, io, _ := newFeedIO(false)
-	cancel, done := runFeed(t, run, io)
-	defer cancel()
-
-	got := joinFeed(t, done)
-	if got == nil || !bytes.Contains([]byte(got.Error()), []byte("without granting it")) {
-		t.Errorf("the attempt ended with %v, want the acknowledgement's refusal", got)
-	}
-	if texts := feed.texts(); len(texts) != 0 {
-		t.Errorf("the refused subscription delivered %q, want nothing", texts)
 	}
 }
 
@@ -630,7 +662,7 @@ func TestResourceFeedALateAckNeverSatisfiesALaterAttempt(t *testing.T) {
 
 	const uri = "test://inbox"
 	run := ResourceFeed(g, "inline", uri)
-	feed, io, _ := newFeedIO(false)
+	feed, io, _ := newFeedIO()
 
 	// The first attempt subscribes and waits: its acknowledgement is
 	// dropped, and cancelling it retires the attempt with its waiter
@@ -645,7 +677,7 @@ func TestResourceFeedALateAckNeverSatisfiesALaterAttempt(t *testing.T) {
 	// The late acknowledgement arrives now, after the attempt that asked
 	// for it is gone: it is routed exactly the way the middleware routes
 	// one, and it reaches no one.
-	g.state("inline").waiters.acknowledged([]string{uri})
+	g.state("inline").snapshot().gen.waiters.acknowledged("", []string{uri})
 
 	// The next attempt registers a waiter of its own and subscribes
 	// again. A design that latched the late grant would satisfy it, and
@@ -664,6 +696,90 @@ func TestResourceFeedALateAckNeverSatisfiesALaterAttempt(t *testing.T) {
 	}
 }
 
+// TestResourceFeedAnAbandonedStreamNeverAnswersAnother covers the
+// stream record's reach: an attempt that ends without its
+// acknowledgement retires its stream's record with its waiter, so an
+// acknowledgement that arrives late — a refusal or a grant for the
+// abandoned stream — answers no one, and each later attempt is decided
+// by the acknowledgement of its own stream alone.
+func TestResourceFeedAnAbandonedStreamNeverAnswersAnother(t *testing.T) {
+	// The acknowledgement wait is the attempt's own bound, and the test
+	// shortens it: the first attempt ends on it, and the later attempts
+	// must be decided by their own acknowledgements within it.
+	original := resourceAckWait
+	resourceAckWait = 400 * time.Millisecond
+	t.Cleanup(func() { resourceAckWait = original })
+
+	// The server grants everything it is asked to listen for, and the
+	// transport drops every acknowledgement it sends, so the only
+	// acknowledgements an attempt sees are the ones the test routes by
+	// hand — by the IDs the listen requests were written with.
+	server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "inline", Version: "test"}, &sdkmcp.ServerOptions{
+		SubscribeHandler:   func(context.Context, *sdkmcp.SubscribeRequest) error { return nil },
+		UnsubscribeHandler: func(context.Context, *sdkmcp.UnsubscribeRequest) error { return nil },
+	})
+	server.AddResource(&sdkmcp.Resource{URI: "test://inbox", Name: "inbox", MIMEType: "text/plain"},
+		func(context.Context, *sdkmcp.ReadResourceRequest) (*sdkmcp.ReadResourceResult, error) {
+			return &sdkmcp.ReadResourceResult{
+				Contents: []*sdkmcp.ResourceContents{{URI: "test://inbox", MIMEType: "text/plain", Text: "the item"}},
+			}, nil
+		})
+	clientTransport, serverTransport := sdkmcp.NewInMemoryTransports()
+	go func() { _ = server.Run(context.Background(), serverTransport) }()
+	dropped := newDroppedAcks(clientTransport)
+	g, err := Connect(context.Background(), "inline", dropped)
+	if err != nil {
+		t.Fatalf("connecting the inline server: %v", err)
+	}
+	defer g.Close()
+
+	run := ResourceFeed(g, "inline", "test://inbox")
+	feed, io, _ := newFeedIO()
+
+	// The first attempt subscribes and waits: its acknowledgement is
+	// dropped, and the bound ends it — its stream's record retired with
+	// its waiter.
+	_, done1 := runFeed(t, run, io)
+	dropped.waitForListens(t, 1)
+	if err := joinFeed(t, done1); err == nil || !bytes.Contains([]byte(err.Error()), []byte("never acknowledged")) {
+		t.Fatalf("the abandoned attempt ended with %v, want the missing acknowledgement", err)
+	}
+
+	// The second attempt subscribes on its own stream. The abandoned
+	// stream's refusal arrives late — and answers no one: the attempt
+	// is decided by its own acknowledgement, which grants it, and the
+	// read delivers.
+	cancel2, done2 := runFeed(t, run, io)
+	defer cancel2()
+	dropped.waitForListens(t, 2)
+	ids := dropped.listenIDs(t, 2)
+	g.state("inline").snapshot().gen.waiters.acknowledged(ids[0], nil)
+	g.state("inline").snapshot().gen.waiters.acknowledged(ids[1], []string{"test://inbox"})
+	if got := feed.waitEmit(t, "the second attempt's read"); got != "the item" {
+		t.Errorf("the second attempt delivered %q, want its own read", got)
+	}
+	cancel2()
+	if err := joinFeed(t, done2); !errors.Is(err, context.Canceled) {
+		t.Errorf("the second attempt returned %v, want its context's error", err)
+	}
+
+	// The third attempt is refused by its own stream's acknowledgement,
+	// and the abandoned stream's late grant does not satisfy it: a
+	// stream whose attempt has ended answers no one.
+	cancel3, done3 := runFeed(t, run, io)
+	defer cancel3()
+	dropped.waitForListens(t, 3)
+	ids = dropped.listenIDs(t, 3)
+	g.state("inline").snapshot().gen.waiters.acknowledged(ids[0], []string{"test://inbox"})
+	g.state("inline").snapshot().gen.waiters.acknowledged(ids[2], nil)
+	if err := joinFeed(t, done3); err == nil || !bytes.Contains([]byte(err.Error()), []byte("without granting it")) {
+		t.Fatalf("the third attempt ended with %v, want its own refusal", err)
+	}
+	if texts := feed.texts(); len(texts) != 1 {
+		t.Errorf("the attempts delivered %q, want the second attempt's read alone", texts)
+	}
+}
+
 // droppedAcks is a client-side transport that drops every subscription
 // acknowledgement the server sends — the middleware never sees one, so
 // the acknowledgements a test routes by hand are the only ones — and
@@ -679,10 +795,13 @@ type droppedAcks struct {
 	transport sdkmcp.Transport
 
 	// listens receives one signal per subscriptions/listen the client
-	// opens, and seen counts how many have opened in all.
+	// opens, and ids records, in order, the subscription ID each listen
+	// request was written with — the ID the stream's acknowledgement
+	// carries back, and the name a test routes that acknowledgement by.
 	listens chan struct{}
 	mu      sync.Mutex
 	seen    int
+	ids     []string
 }
 
 func newDroppedAcks(transport sdkmcp.Transport) *droppedAcks {
@@ -710,15 +829,23 @@ func (d *droppedAcks) waitForListens(t *testing.T, count int) {
 		if seen >= count {
 			return
 		}
-		select {
-		case <-d.listens:
-			d.mu.Lock()
-			d.seen++
-			d.mu.Unlock()
-		case <-time.After(time.Until(deadline)):
+		if time.Now().After(deadline) {
 			t.Fatalf("the client opened %d listen streams, want %d", seen, count)
 		}
+		time.Sleep(10 * time.Millisecond)
 	}
+}
+
+// listenIDs returns the subscription IDs of the first count listen
+// streams, in the order the client opened them.
+func (d *droppedAcks) listenIDs(t *testing.T, count int) []string {
+	t.Helper()
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if len(d.ids) < count {
+		t.Fatalf("the client opened %d listen streams, want %d", len(d.ids), count)
+	}
+	return append([]string(nil), d.ids[:count]...)
 }
 
 // droppedConnection is the connection side of the dropping transport.
@@ -741,10 +868,7 @@ func (c *droppedConnection) Read(ctx context.Context) (sdkjsonrpc.Message, error
 
 func (c *droppedConnection) Write(ctx context.Context, msg sdkjsonrpc.Message) error {
 	if req, ok := msg.(*sdkjsonrpc.Request); ok && req.Method == "subscriptions/listen" {
-		select {
-		case c.acks.listens <- struct{}{}:
-		default:
-		}
+		c.acks.opened(subscriptionID(req.ID.Raw()))
 	}
 	return c.Connection.Write(ctx, msg)
 }
@@ -754,6 +878,19 @@ func (c *droppedConnection) Write(ctx context.Context, msg sdkjsonrpc.Message) e
 func isAcknowledgement(msg sdkjsonrpc.Message) bool {
 	req, ok := msg.(*sdkjsonrpc.Request)
 	return ok && req.Method == acknowledgedMethod
+}
+
+// opened records one listen stream's opening: its subscription ID, and
+// the count the waits read.
+func (d *droppedAcks) opened(id string) {
+	d.mu.Lock()
+	d.seen++
+	d.ids = append(d.ids, id)
+	d.mu.Unlock()
+	select {
+	case d.listens <- struct{}{}:
+	default:
+	}
 }
 
 // protocolName names one revision the fixture was forced to.

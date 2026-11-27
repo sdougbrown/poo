@@ -152,7 +152,7 @@ func TestFindToolAsksFourRequests(t *testing.T) {
 		Model:    "test-model",
 	})
 
-	res, err := preparedCall(t, cliregistry.NewFind(catalog.Offered()), `{"intent":"print the words I give it"}`, poo.ToolEnv{Decider: model})
+	res, err := preparedCall(t, cliregistry.NewFind(cli.FixedOfferings(catalog.Offered())), `{"intent":"print the words I give it"}`, poo.ToolEnv{Decider: model})
 	if err != nil {
 		t.Fatalf("searching: %v", err)
 	}
@@ -219,7 +219,7 @@ func TestOneSearchWritesOneDecisionRecord(t *testing.T) {
 	sink := &recordingSink{}
 	model := decide.Recorded(&searcher{probability: indexProbability}, sink, "session")
 
-	if _, err := preparedCall(t, cliregistry.NewFind(wideCatalog(t).Offered()), `{"intent":"print the words"}`, poo.ToolEnv{Decider: model}); err != nil {
+	if _, err := preparedCall(t, cliregistry.NewFind(cli.FixedOfferings(wideCatalog(t).Offered())), `{"intent":"print the words"}`, poo.ToolEnv{Decider: model}); err != nil {
 		t.Fatalf("searching: %v", err)
 	}
 
@@ -262,7 +262,7 @@ func malformedDecider(kind string) decide.Decider {
 func TestMalformedAnswersAreRecoverable(t *testing.T) {
 	for _, kind := range []string{"missing", "duplicate", "bad-distribution"} {
 		t.Run(kind, func(t *testing.T) {
-			res, err := preparedCall(t, cliregistry.NewFind(fixtureCatalog(t).Offered()), `{"intent":"say hello"}`, poo.ToolEnv{Decider: malformedDecider(kind)})
+			res, err := preparedCall(t, cliregistry.NewFind(cli.FixedOfferings(fixtureCatalog(t).Offered())), `{"intent":"say hello"}`, poo.ToolEnv{Decider: malformedDecider(kind)})
 			if err != nil || !res.IsError || res.Text != catalogUnavailable || len(res.Structured) != 0 {
 				t.Fatalf("bad answers produced result=%+v err=%v", res, err)
 			}
@@ -283,7 +283,7 @@ func TestMalformedAnswersKeepDiagnostic(t *testing.T) {
 	session, err := poo.New(poo.Options{
 		Transport: transport, Sink: sink, SessionID: "s1",
 		Model:     poo.ModelInfo{ModelID: "test-model", ContextLimit: 32768},
-		Tools:     map[string]poo.Tool{cliregistry.FindToolName: cliregistry.NewFind(fixtureCatalog(t).Offered())},
+		Tools:     map[string]poo.Tool{cliregistry.FindToolName: cliregistry.NewFind(cli.FixedOfferings(fixtureCatalog(t).Offered()))},
 		ToolOrder: []string{cliregistry.FindToolName},
 		Decider:   malformedDecider("bad-distribution"),
 	})
@@ -326,7 +326,7 @@ func TestTheSearchRanksByProbability(t *testing.T) {
 		return 0.1
 	}}
 
-	res, err := preparedCall(t, cliregistry.NewFind(catalog.Offered()).WithTopK(3), `{"intent":"print the words"}`, poo.ToolEnv{Decider: model})
+	res, err := preparedCall(t, cliregistry.NewFind(cli.FixedOfferings(catalog.Offered())).WithTopK(3), `{"intent":"print the words"}`, poo.ToolEnv{Decider: model})
 	if err != nil {
 		t.Fatalf("searching: %v", err)
 	}
@@ -368,13 +368,13 @@ const catalogUnavailable = `tool search unavailable; call_cli takes "command"`
 // argument, so the model can make the call itself, and a view that holds no
 // entry points at the prompt instead of at a tool the session does not offer.
 func TestAFailedSearchPointsAtTheCallsInView(t *testing.T) {
-	catalogOnly := cliregistry.NewFind(fixtureCatalog(t).Offered())
-	both := cliregistry.NewFind(append(fixtureCatalog(t).Offered(), cli.Offered{
+	catalogOnly := cliregistry.NewFind(cli.FixedOfferings(fixtureCatalog(t).Offered()))
+	both := cliregistry.NewFind(cli.FixedOfferings(append(fixtureCatalog(t).Offered(), cli.Offered{
 		Name:        "fixture/echo",
 		Description: "answers with what it is given",
 		Dispatcher:  callmcpName,
 		Argument:    "name",
-	}))
+	})))
 	for _, tc := range []struct {
 		name   string
 		tool   *cliregistry.FindTool
@@ -417,7 +417,7 @@ func TestAFailedSearchPointsAtTheCallsInView(t *testing.T) {
 // not answer: the model is told the search is unavailable and how to go
 // on, in exactly those words, and no list of entries takes its place.
 func TestFindToolFailsRecoverably(t *testing.T) {
-	tool := cliregistry.NewFind(wideCatalog(t).Offered())
+	tool := cliregistry.NewFind(cli.FixedOfferings(wideCatalog(t).Offered()))
 	model := &searcher{err: errors.New("the decision model is down")}
 
 	res, err := preparedCall(t, tool, `{"intent":"print something"}`, poo.ToolEnv{Decider: model})
@@ -439,7 +439,7 @@ func TestFindToolFailsRecoverably(t *testing.T) {
 // without a decision model: the search says so rather than answering
 // with a made-up ranking.
 func TestFindToolNeedsADecider(t *testing.T) {
-	tool := cliregistry.NewFind(fixtureCatalog(t).Offered())
+	tool := cliregistry.NewFind(cli.FixedOfferings(fixtureCatalog(t).Offered()))
 	res, err := preparedCall(t, tool, `{"intent":"say hello"}`, poo.ToolEnv{})
 	if err != nil {
 		t.Fatalf("the failure came back as an error: %v", err)
@@ -463,7 +463,7 @@ func TestAFailedSearchIsNotFatal(t *testing.T) {
 	)
 	session, err := poo.New(poo.Options{
 		Transport: transport,
-		Tools:     map[string]poo.Tool{cliregistry.FindToolName: cliregistry.NewFind(wideCatalog(t).Offered())},
+		Tools:     map[string]poo.Tool{cliregistry.FindToolName: cliregistry.NewFind(cli.FixedOfferings(wideCatalog(t).Offered()))},
 		ToolOrder: []string{cliregistry.FindToolName},
 		Sink:      pootest.NewSink(),
 		SessionID: "s1",
@@ -494,7 +494,7 @@ func TestAFailedSearchIsNotFatal(t *testing.T) {
 
 // TestFindToolRefusesAnEmptyIntent covers the arguments.
 func TestFindToolRefusesAnEmptyIntent(t *testing.T) {
-	tool := cliregistry.NewFind(fixtureCatalog(t).Offered())
+	tool := cliregistry.NewFind(cli.FixedOfferings(fixtureCatalog(t).Offered()))
 	for _, args := range []string{`{"intent":""}`, `{"intent":"  "}`, `{}`, `{"intent":5}`, `{"nope":"x"}`} {
 		if _, err := tool.Prepare(json.RawMessage(args), poo.PrepareEnv{}); err == nil {
 			t.Errorf("%s prepared a search", args)
@@ -507,7 +507,7 @@ func TestFindToolRefusesAnEmptyIntent(t *testing.T) {
 // did not return is still callable.
 func TestCallStillWorksForANameTheSearchMissed(t *testing.T) {
 	catalog := wideCatalog(t)
-	find := cliregistry.NewFind(catalog.Offered())
+	find := cliregistry.NewFind(cli.FixedOfferings(catalog.Offered()))
 	model := &searcher{probability: indexProbability}
 	res, err := preparedCall(t, find, `{"intent":"print the words"}`, poo.ToolEnv{Decider: model})
 	if err != nil {
@@ -556,14 +556,14 @@ func indexProbability(name string) float64 {
 // each hit names the tool that runs it and the argument that names it, because a
 // name alone does not say whether call_cli or call_mcp reaches it.
 func TestAHitNamesTheToolThatCallsIt(t *testing.T) {
-	find := cliregistry.NewFind(append(fixtureCatalog(t).Offered(), cli.Offered{
+	find := cliregistry.NewFind(cli.FixedOfferings(append(fixtureCatalog(t).Offered(), cli.Offered{
 		Name:        "fixture/echo",
 		Description: "answers with what it is given",
 		Schema:      map[string]any{"type": "object", "properties": map[string]any{"text": map[string]any{"type": "string"}}},
 		Dispatcher:  callmcpName,
 		Argument:    "name",
 		ReadOnly:    true,
-	}))
+	})))
 	res, err := preparedCall(t, find, `{"intent":"say something"}`, poo.ToolEnv{Decider: &searcher{probability: indexProbability}})
 	if err != nil {
 		t.Fatalf("searching: %v", err)
@@ -611,13 +611,13 @@ func TestAHitNamesTheToolThatCallsIt(t *testing.T) {
 // returns both, each with the call that runs it.
 func TestTwoEntriesOfOneNameAreBothReachable(t *testing.T) {
 	// The intent fits both, so the ranking cannot hide one of them.
-	find := cliregistry.NewFind(append(fixtureCatalog(t).Offered(), cli.Offered{
+	find := cliregistry.NewFind(cli.FixedOfferings(append(fixtureCatalog(t).Offered(), cli.Offered{
 		Name:        "say",
 		Description: "an MCP tool that answers too",
 		Schema:      map[string]any{"type": "object", "properties": map[string]any{}},
 		Dispatcher:  callmcpName,
 		Argument:    "name",
-	}))
+	})))
 	res, err := preparedCall(t, find, `{"intent":"say something"}`, poo.ToolEnv{Decider: &searcher{probability: func(string) float64 { return 0.9 }}})
 	if err != nil {
 		t.Fatalf("searching: %v", err)
@@ -638,11 +638,11 @@ func TestTwoEntriesOfOneNameAreBothReachable(t *testing.T) {
 // name every entry the search returns.
 func TestOneSearchAsksOneQuestionPerEntry(t *testing.T) {
 	counting := &countingDecider{}
-	find := cliregistry.NewFind(append(fixtureCatalog(t).Offered(), cli.Offered{
+	find := cliregistry.NewFind(cli.FixedOfferings(append(fixtureCatalog(t).Offered(), cli.Offered{
 		Name:       "say",
 		Dispatcher: callmcpName,
 		Argument:   "name",
-	}))
+	})))
 	if _, err := preparedCall(t, find, `{"intent":"say something"}`, poo.ToolEnv{Decider: counting}); err != nil {
 		t.Fatalf("searching: %v", err)
 	}
@@ -702,7 +702,7 @@ func TestARepeatedToolNameKeepsItsOwnQuestion(t *testing.T) {
 		}
 		return answers, nil
 	})
-	res, err := preparedCall(t, cliregistry.NewFind(offered), `{"intent":"echo the words"}`, poo.ToolEnv{Decider: decider})
+	res, err := preparedCall(t, cliregistry.NewFind(cli.FixedOfferings(offered)), `{"intent":"echo the words"}`, poo.ToolEnv{Decider: decider})
 	if err != nil {
 		t.Fatalf("searching: %v", err)
 	}
@@ -717,5 +717,61 @@ func TestARepeatedToolNameKeepsItsOwnQuestion(t *testing.T) {
 	}
 	if body.Total != 3 || len(body.Results) != 3 {
 		t.Errorf("the search returned %d of %d hits, want every repeated entry kept: %+v", len(body.Results), body.Total, body.Results)
+	}
+}
+
+// TestASearchReadsTheOfferingAsItIsNow covers the offering's liveness: the
+// search reads the offering at the moment it runs, so an offering that
+// changed under the session — a server that relaunched and listed its tools
+// again — is searched as it is, and the entries a search already returned
+// stay what they were.
+func TestASearchReadsTheOfferingAsItIsNow(t *testing.T) {
+	// The offering is a generation swap in miniature: the first read
+	// lists one tool, and every read after the swap lists the other.
+	mu := sync.Mutex{}
+	relaunched := false
+	offering := cli.Offerings(func() []cli.Offered {
+		mu.Lock()
+		defer mu.Unlock()
+		if relaunched {
+			return []cli.Offered{{
+				Name:        "fixture/relaunched",
+				Description: "the tool of the server that came back",
+				Dispatcher:  callmcpName,
+				Argument:    "name",
+			}}
+		}
+		return []cli.Offered{{
+			Name:        "fixture/echo",
+			Description: "the tool of the server that started",
+			Dispatcher:  callmcpName,
+			Argument:    "name",
+		}}
+	})
+	find := cliregistry.NewFind(offering)
+	model := &searcher{probability: func(string) float64 { return 0.9 }}
+
+	first, err := preparedCall(t, find, `{"intent":"run the tool"}`, poo.ToolEnv{Decider: model})
+	if err != nil {
+		t.Fatalf("searching the offering: %v", err)
+	}
+	if !strings.Contains(first.Text, "fixture/echo") || strings.Contains(first.Text, "fixture/relaunched") {
+		t.Errorf("the first search read %q, want the tool of the server that started", first.Text)
+	}
+
+	mu.Lock()
+	relaunched = true
+	mu.Unlock()
+	second, err := preparedCall(t, find, `{"intent":"run the tool"}`, poo.ToolEnv{Decider: model})
+	if err != nil {
+		t.Fatalf("searching the relaunched offering: %v", err)
+	}
+	if !strings.Contains(second.Text, "fixture/relaunched") || strings.Contains(second.Text, "fixture/echo") {
+		t.Errorf("the second search read %q, want the tool of the server that came back", second.Text)
+	}
+	// The first answer stands as it was read: a search's result is a
+	// snapshot's own, not a window onto whatever the offering holds now.
+	if !strings.Contains(first.Text, "fixture/echo") {
+		t.Errorf("the first search's answer changed under the session: %q", first.Text)
 	}
 }

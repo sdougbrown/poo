@@ -113,16 +113,22 @@ func linkedTools() map[string]config.ToolFactory {
 			return cliregistry.NewCall(opts.Registry).WithSearch(opts.Search).WithSessionTools(opts.ToolNames).WithExecutor(opts.Executor)
 		},
 		"find_tool": func(opts config.ToolOptions) poo.Tool {
-			// The search narrows the session's snapshot: the catalog's entries,
-			// and the MCP tools behind call_mcp. Those are already the entries
-			// the session can reach, so the search offers nothing the model
-			// cannot call.
+			// The search narrows the session's offering, read as it is
+			// now: the catalog's entries, and the MCP tools behind
+			// call_mcp. Those are already the entries the session can
+			// reach, so the search offers nothing the model cannot call.
 			return cliregistry.NewFind(opts.Offered)
 		},
 		config.ToolCallMCP: func(opts config.ToolOptions) poo.Tool {
-			// The call lists the MCP entries of the same snapshot, and its
-			// refusal points at the search only when the session offers one.
-			return callmcp.New(mcpServers(opts.MCP), opts.Offered).
+			// The call's own catalog reads the offering once, when the
+			// tool is built: the prompt is rendered at the session's
+			// start and not again. A construction without an offering
+			// — a build's spec probe — lists nothing.
+			var offered []cli.Offered
+			if opts.Offered != nil {
+				offered = opts.Offered()
+			}
+			return callmcp.New(mcpServers(opts.MCP), offered).
 				WithInputs(opts.Inputs...).
 				WithSearch(offersTool(opts.ToolNames, cliregistry.FindToolName))
 		},
@@ -185,7 +191,11 @@ var _ callmcp.Server = (*mcpServer)(nil)
 // Name is the server's declared name.
 func (s *mcpServer) Name() string { return s.name }
 
-// Tools returns the tools the server listed at startup.
+// Tools returns the tools the server the group runs now lists — the
+// listing of the generation a relaunch installed — and none at all
+// while that server is down or failed. The search reads it live, so its
+// offering follows the server; the prompt's catalog was rendered at
+// attach and does not.
 func (s *mcpServer) Tools() []mcp.Tool {
 	tools, _ := s.group.Tools(s.name)
 	return tools

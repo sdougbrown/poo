@@ -533,14 +533,18 @@ type ToolOptions struct {
 	// whose refusal points at another tool offers that tool only when
 	// this list holds its name.
 	ToolNames []string
-	// Offered are the entries the session's models reach through a tool that
-	// calls them: the catalog's registered commands, which the call tool runs,
-	// and the MCP tools the session's servers listed, which the MCP call runs.
-	// It is one snapshot, so a search hit, a prompt line and a refusal name the
-	// same dispatcher and the same argument. A build's snapshot holds no MCP
-	// entry, because a build starts no server; the attach the build set
-	// rebuilds the tools over the servers with the session's own.
-	Offered []cli.Offered
+	// Offered reads the entries the session's models reach through a tool
+	// that calls them, as they are now: the catalog's registered commands,
+	// which the call tool runs, and the MCP tools the session's servers
+	// listed, which the MCP call runs. One read is one snapshot, so a
+	// search hit, a refusal's naming and the prompt's catalog line read
+	// the same dispatcher and the same argument — and a server that
+	// relaunches is read on the generation the session runs, for the
+	// handles the offering closes over read the group's current one.
+	// A build's offering holds no MCP entry, because a build starts no
+	// server; the attach the build set rebuilds the tools over the
+	// servers with the session's own.
+	Offered cli.Offerings
 	// MCP are the MCP servers a live session started, in selection order:
 	// the handles the binary's own launcher returned, which the binary's own
 	// tools over them read. The settings pass them through and never read
@@ -1350,15 +1354,17 @@ func (r *Runtime) mcpAttach(ctx context.Context, a *poo.Attach) (func() error, e
 	}
 	// The tools over the servers read what this session started, so they are
 	// built again now: the build's instances describe the offering, and these
-	// describe what this session can reach. The entries are the session's
-	// snapshot, built once for both dispatchers, so a search hit and a catalog
-	// line name the same call. The search is bound with the call, so a session
-	// without the call returns no MCP entry at all — a search that named a
-	// tool the model cannot call would be worse than no hit.
+	// describe what this session can reach. The offering is the session's
+	// own, read as it is now, so a search hit after a relaunch names a tool
+	// of the generation the session runs; the call's own catalog lists the
+	// entries its construction read, for the prompt is rendered once and
+	// not again. The search is bound with the call, so a session without
+	// the call returns no MCP entry at all — a search that named a tool the
+	// model cannot call would be worse than no hit.
 	if _, offered := a.Options.Tools[ToolCallMCP]; offered {
 		sessionOptions := r.toolOptions
 		sessionOptions.MCP = []MCPRunning{running}
-		sessionOptions.Offered = offeredEntries(r.offeredCatalog(), r.elevatedTools, []MCPRunning{running}, r.offersSearch())
+		sessionOptions.Offered = offeredView(r.offeredCatalog(), r.elevatedTools, []MCPRunning{running}, r.offersSearch())
 		for _, name := range []string{ToolCallMCP, cli.FindToolName} {
 			factory := r.toolFactories[name]
 			if factory == nil {
@@ -2439,7 +2445,7 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 		Scrub:          credentialScrub,
 		ProtectedPaths: protected,
 		Registry:       r.offeredCatalog(),
-		Offered:        offeredEntries(r.offeredCatalog(), r.elevatedTools, nil, r.offersSearch()),
+		Offered:        offeredView(r.offeredCatalog(), r.elevatedTools, nil, r.offersSearch()),
 		Search:         r.offersSearch(),
 		Inputs:         r.modelInputs(),
 		// A file that names an engine keeps it; an unset one gets the
