@@ -217,10 +217,16 @@ func TestTheStderrGoesToTheLogAndNotToTheModel(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			log := &logLines{}
 			got, cancel, done := start(t, c, feed.Spec{Name: "noisy", Command: []string{script(t, "noisy")}}, log.logger())
-			waitFor(t, "the message", func() bool { return got.len() == 1 })
+			// The command writes its diagnostic while it runs, so the log
+			// holds it before the attempt ends: waiting for both here
+			// keeps the wait off the teardown, whose pipes close at the
+			// kill grace and can leave a drain's last read behind.
+			waitFor(t, "the message and the diagnostic", func() bool {
+				return got.len() == 1 && strings.Contains(log.text(), "the diagnostic the model must not see")
+			})
 			cancel()
 			_ = result(t, done)
-			waitFor(t, "the diagnostic in the log", func() bool {
+			waitFor(t, "the diagnostic still in the log", func() bool {
 				return strings.Contains(log.text(), "the diagnostic the model must not see")
 			})
 			for _, in := range got.all() {

@@ -46,6 +46,11 @@ const (
 	// KillGrace is how long the sandbox has between SIGTERM and
 	// SIGKILL.
 	KillGrace = 2 * time.Second
+	// pipeFlushGrace is the read deadline the teardown sets on the
+	// capture pipes before it closes them: bytes already in the pipe's
+	// buffer go to the sink, and a drain still blocked ends with the
+	// deadline instead of holding the close.
+	pipeFlushGrace = 250 * time.Millisecond
 )
 
 // The file descriptors the sandbox's helper and bubblewrap report on.
@@ -880,7 +885,7 @@ func (p *process) Wait() (int, error) {
 			select {
 			case <-drained:
 			case <-deadline:
-				p.closePipes()
+				p.flushPipes()
 				<-drained
 			}
 		}
@@ -965,6 +970,18 @@ func (p *process) Kill() {
 	}
 	_ = syscall.Kill(child, syscall.SIGKILL)
 	_ = p.cmd.Process.Signal(syscall.SIGKILL)
+}
+
+// flushPipes gives the drains a last bounded window before the pipes
+// close: the sandbox is dead, so a pipe whose writers are gone reaches
+// EOF, and bytes already in the pipe's buffer go to the sink when the
+// drain is next scheduled. A read deadline ends a drain still blocked,
+// so the close cannot hang behind a descendant that holds the write
+// end.
+func (p *process) flushPipes() {
+	for _, pipe := range p.pipes {
+		_ = pipe.SetReadDeadline(time.Now().Add(pipeFlushGrace))
+	}
 }
 
 // closePipes closes the ends the wait has finished with.
