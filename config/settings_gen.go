@@ -1721,11 +1721,11 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 			Required:  ReasoningChatEnabled && false,
 			Enabled:   ReasoningChatEnabled,
 			Satisfied: ReasoningChatSatisfied,
-			Fair:      f.ReasoningChat != nil && isValidRegexMatch(*f.ReasoningChat, "^(off|minimal|low|medium|high|xhigh|([1-9][0-9]*))$"),
+			Fair:      f.ReasoningChat != nil && isValidRegexMatch(*f.ReasoningChat, "^(default|off|minimal|low|medium|high|xhigh|([1-9][0-9]*))$"),
 			Reason: func() *string {
 				var reasons []string
-				if !(f.ReasoningChat != nil && isValidRegexMatch(*f.ReasoningChat, "^(off|minimal|low|medium|high|xhigh|([1-9][0-9]*))$")) && "reasoning.chat must be off, minimal, low, medium, high, xhigh or a budget in tokens" != "" {
-					reasons = append(reasons, "reasoning.chat must be off, minimal, low, medium, high, xhigh or a budget in tokens")
+				if !(f.ReasoningChat != nil && isValidRegexMatch(*f.ReasoningChat, "^(default|off|minimal|low|medium|high|xhigh|([1-9][0-9]*))$")) && "reasoning.chat must be default, off, minimal, low, medium, high, xhigh or a budget in tokens" != "" {
+					reasons = append(reasons, "reasoning.chat must be default, off, minimal, low, medium, high, xhigh or a budget in tokens")
 				}
 				if len(reasons) == 0 {
 					return nil
@@ -1734,8 +1734,8 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 			}(),
 			Reasons: func() []string {
 				var reasons []string
-				if !(f.ReasoningChat != nil && isValidRegexMatch(*f.ReasoningChat, "^(off|minimal|low|medium|high|xhigh|([1-9][0-9]*))$")) && "reasoning.chat must be off, minimal, low, medium, high, xhigh or a budget in tokens" != "" {
-					reasons = append(reasons, "reasoning.chat must be off, minimal, low, medium, high, xhigh or a budget in tokens")
+				if !(f.ReasoningChat != nil && isValidRegexMatch(*f.ReasoningChat, "^(default|off|minimal|low|medium|high|xhigh|([1-9][0-9]*))$")) && "reasoning.chat must be default, off, minimal, low, medium, high, xhigh or a budget in tokens" != "" {
+					reasons = append(reasons, "reasoning.chat must be default, off, minimal, low, medium, high, xhigh or a budget in tokens")
 				}
 				if reasons == nil {
 					reasons = []string{}
@@ -3190,7 +3190,7 @@ var ruleMeta = []RuleMetaEntry{
 	{Field: "PermissionDoomLoopThreshold", RuleType: "check", Expr: "f.PermissionDoomLoopThreshold != nil && *f.PermissionDoomLoopThreshold >= 1", Reason: "permission.doom_loop.threshold must be at least one repeat"},
 	{Field: "PermissionFallback", RuleType: "check", Expr: "f.PermissionFallback != nil && isValidRegexMatch(*f.PermissionFallback, \"^(allow|deny)$\")", Reason: "permission.fallback must be allow or deny"},
 	{Field: "PermissionUnmatched", RuleType: "check", Expr: "f.PermissionUnmatched != nil && isValidRegexMatch(*f.PermissionUnmatched, \"^(allow|ask|deny)$\")", Reason: "permission.unmatched must be allow, ask or deny"},
-	{Field: "ReasoningChat", RuleType: "check", Expr: "f.ReasoningChat != nil && isValidRegexMatch(*f.ReasoningChat, \"^(off|minimal|low|medium|high|xhigh|([1-9][0-9]*))$\")", Reason: "reasoning.chat must be off, minimal, low, medium, high, xhigh or a budget in tokens"},
+	{Field: "ReasoningChat", RuleType: "check", Expr: "f.ReasoningChat != nil && isValidRegexMatch(*f.ReasoningChat, \"^(default|off|minimal|low|medium|high|xhigh|([1-9][0-9]*))$\")", Reason: "reasoning.chat must be default, off, minimal, low, medium, high, xhigh or a budget in tokens"},
 	{Field: "SessionMode", RuleType: "check", Expr: "f.SessionMode != nil && isValidRegexMatch(*f.SessionMode, \"^(logged|ephemeral)$\")", Reason: "session.mode must be logged or ephemeral"},
 	{Field: "SessionRetentionMaxAgeDays", RuleType: "check", Expr: "f.SessionRetentionMaxAgeDays != nil && *f.SessionRetentionMaxAgeDays >= 0", Reason: "session.retention.max_age_days must not be negative"},
 	{Field: "SessionRetentionMaxSessions", RuleType: "check", Expr: "f.SessionRetentionMaxSessions != nil && *f.SessionRetentionMaxSessions >= 0", Reason: "session.retention.max_sessions must not be negative"},
@@ -3544,7 +3544,7 @@ func Challenge(fieldName string, f SettingsFields, c SettingsConditions, prev Se
 		if status.Reason != nil {
 			explanations = append(explanations, "* "+*status.Reason)
 		}
-		explanations = append(explanations, "* check: reasoning.chat must be off, minimal, low, medium, high, xhigh or a budget in tokens")
+		explanations = append(explanations, "* check: reasoning.chat must be default, off, minimal, low, medium, high, xhigh or a budget in tokens")
 	case "ReplProfile", "repl_profile":
 		found = true
 		status = avail.ReplProfile

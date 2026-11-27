@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"encoding/json"
 	"io"
-	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -283,15 +282,12 @@ func (s *fakeServer) line(line []byte) {
 			}
 			s.chat = params.Models.Chat
 			s.switches = append(s.switches, params.Models.Chat)
-			// The server the repl talks to takes the level back to one the
-			// new model can run: off when the model declares it, its lowest
-			// declared level when it cannot be told off.
-			levels, _ := s.modelLevels(s.chat)
+			// The server the repl talks to takes the level back to off,
+			// which every model takes: asked for in the words the model's
+			// control has, or carried as a level the wire says nothing
+			// about.
 			if !s.acceptsLocked(s.level) {
 				s.level = "off"
-				if len(levels) > 0 && !slices.Contains(levels, "off") {
-					s.level = levels[0]
-				}
 			}
 		}
 		if params.Reasoning != "" {

@@ -30,7 +30,9 @@ type runOptions struct {
 	// permissionFallback is the decision when the asker chain is
 	// exhausted.
 	permissionFallback string
-	// reasoningEffort is the reasoning_effort the run sends.
+	// ReasoningEffort is the reasoning_effort the run sends. "default"
+	// sends no reasoning field at all, and "off" asks the model not to
+	// think, in the words the model's own control takes.
 	reasoningEffort string
 	// maxTurns is the turn limit.
 	maxTurns int
@@ -70,7 +72,7 @@ type runOptions struct {
 func runFlagSpecs() []clicontract.Flag {
 	specs := append(endpointFlagSpecs(),
 		clicontract.Flag{Name: "permission-fallback", Kind: clicontract.String, Usage: "The decision when the asker chain is exhausted: allow or deny"},
-		clicontract.Flag{Name: "reasoning-effort", Kind: clicontract.String, Usage: "The reasoning_effort to send, for models that think only when asked"},
+		clicontract.Flag{Name: "reasoning-effort", Kind: clicontract.String, Usage: "The reasoning level to send: default (no field), off, minimal, low, medium, high, xhigh or a token budget"},
 		clicontract.Flag{Name: "max-turns", Kind: clicontract.Int, Usage: "The turn limit"},
 		clicontract.Flag{Name: "max-output", Kind: clicontract.Int, Usage: "The model's output-token limit"},
 		clicontract.Flag{Name: "truncation-retries", Kind: clicontract.Int, Usage: "How many consecutive output-limit truncations the run retries, more concisely, before settling"},

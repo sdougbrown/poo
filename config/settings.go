@@ -204,7 +204,9 @@ type Model struct {
 	Reasoning *poo.ReasoningControl `json:"reasoning,omitempty"`
 	// ReasoningLevels are the reasoning levels the model accepts, lowest
 	// first, e.g. off, minimal, low, medium, high, xhigh. A model that
-	// names none is set by its reasoning control alone.
+	// names none is set by its reasoning control alone. A word the model
+	// declares is sent as the model spells it, so an endpoint whose off
+	// word is "none" is declared with none in the list.
 	ReasoningLevels []string `json:"reasoning_levels,omitempty"`
 	// Quirks are the transport's named adaptations this model needs, in the
 	// order they apply, e.g. "audio_url" for a server that takes an audio part
@@ -573,8 +575,10 @@ type Jobs struct {
 
 // Reasoning are the reasoning control's settings.
 type Reasoning struct {
-	// Chat is the reasoning level the chat model runs at: off, low,
-	// medium, high or a budget in tokens.
+	// Chat is the reasoning level the chat model runs at: default,
+	// minimal, low, medium, high, off or a budget in tokens. The default
+	// sends no reasoning field at all, and off asks the model not to
+	// think.
 	Chat *string `json:"chat,omitempty"`
 }
 

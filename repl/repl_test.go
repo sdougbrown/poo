@@ -1239,18 +1239,18 @@ func TestAModelSwitchTakesTheLevelTheWireReports(t *testing.T) {
 	}
 }
 
-// TestAModelSwitchFallsBackToTheLevelTheModelTakes covers a move to a
-// model that cannot be told off: the level the session ran at is one
-// the new model does not take, and the session lands at the lowest
-// level the model declares.
-func TestAModelSwitchFallsBackToTheLevelTheModelTakes(t *testing.T) {
+// TestAModelSwitchFallsBackToOff covers a move to a model whose levels
+// the session's level is not on: the level the session ran at is one
+// the new model does not take, and the session falls back to off, which
+// every model takes.
+func TestAModelSwitchFallsBackToOff(t *testing.T) {
 	out, _ := startRepl(t, "/thinking off\n/model mystery\n/quit\n")
 
 	if !strings.Contains(out, "model → mystery") {
 		t.Errorf("the transcript shows no switch:\n%s", out)
 	}
-	if !strings.Contains(out, "thinking → low") {
-		t.Errorf("the switch did not fall back to the lowest declared level:\n%s", out)
+	if !strings.Contains(out, "🧠 off") {
+		t.Errorf("the switch did not leave the session at off:\n%s", out)
 	}
 }
 
@@ -1267,7 +1267,7 @@ func TestTheStatuslineNamesTheLevelTheSessionOpenedAt(t *testing.T) {
 
 // TestTheLevellessModelClimbsTheProtocolLevels covers a model that
 // declares no levels: the cycle falls back to the protocol's canonical
-// order, and wraps from the most thinking back to off.
+// order, and wraps from off back to default.
 func TestTheLevellessModelClimbsTheProtocolLevels(t *testing.T) {
 	m := &machine{
 		r:      newRenderer(io.Discard),
@@ -1278,16 +1278,20 @@ func TestTheLevellessModelClimbsTheProtocolLevels(t *testing.T) {
 	}
 	m.status.model = "plain"
 
-	if got, ok, _ := m.nextThinkingLevel(); !ok || got != "off" {
-		t.Errorf("the first level is %q (ok %v), want off", got, ok)
+	if got, ok, _ := m.nextThinkingLevel(); !ok || got != "default" {
+		t.Errorf("the first level is %q (ok %v), want default", got, ok)
 	}
-	m.status.level = "off"
+	m.status.level = "default"
 	if got, ok, _ := m.nextThinkingLevel(); !ok || got != "minimal" {
-		t.Errorf("the level after off is %q (ok %v), want minimal", got, ok)
+		t.Errorf("the level after default is %q (ok %v), want minimal", got, ok)
 	}
 	m.status.level = "xhigh"
 	if got, ok, _ := m.nextThinkingLevel(); !ok || got != "off" {
 		t.Errorf("the level after xhigh is %q (ok %v), want off", got, ok)
+	}
+	m.status.level = "off"
+	if got, ok, _ := m.nextThinkingLevel(); !ok || got != "default" {
+		t.Errorf("the level after off is %q (ok %v), want default", got, ok)
 	}
 }
 

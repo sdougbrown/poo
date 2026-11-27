@@ -2,6 +2,7 @@ package poo
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -218,19 +219,33 @@ func (m ModelInfo) EffectiveSampling(override Sampling) Sampling {
 // lowest first.
 //
 // A level is one of these, or a token budget: a positive number of tokens
-// the model may think within. The order is the order a model's own levels
-// climb, so a client that cycles through them goes from the least
-// thinking to the most.
-var ReasoningLevelNames = []string{"off", "minimal", "low", "medium", "high", "xhigh"}
+// the model may think within. Two of the names are not levels of thinking
+// but the settings beside them: "default" leaves the reasoning field out
+// of the request entirely, so the endpoint's own default applies, and
+// "off" asks the model not to think at all, which the wire can say only
+// where the model's control has an off word. The order is the order a
+// client cycles through them, from leaving the model alone to forcing it
+// quiet.
+var ReasoningLevelNames = []string{"default", "minimal", "low", "medium", "high", "xhigh", "off"}
+
+// ReasoningOffWords are the words an effort control takes as "do not
+// think". A model that declares one of them is sent it verbatim when the
+// session is told off; a model that declares neither is sent the first,
+// which is the word the effort API family uses for off.
+var ReasoningOffWords = []string{"off", "none"}
 
 // ReasoningSetting is the settings' reasoning value.
 //
-// The setting is off, an effort level or a token budget. The zero value
-// is off, so a model that does not think needs no setting at all.
+// The setting is the default, off, an effort level or a token budget.
+// The zero value is the default one: poo sends no reasoning field until
+// the operator or the session names a level.
 type ReasoningSetting struct {
-	// Off means the model does not think.
+	// Default means poo sends no reasoning field, and the endpoint's
+	// own default applies.
+	Default bool
+	// Off means the model is asked not to think.
 	Off bool
-	// Effort is the effort level: low, medium or high.
+	// Effort is the effort level: minimal, low, medium or high.
 	Effort string
 	// Budget is the token budget the model may think within.
 	Budget int
@@ -238,19 +253,20 @@ type ReasoningSetting struct {
 
 // ParseReasoning parses a reasoning setting.
 //
-// The setting is one of the named levels, or a token budget. An empty value
-// is off, and a value that is none of those is a configuration error.
+// The setting is one of the named levels, or a token budget. An empty
+// value is the default one, and a value that is none of those is a
+// configuration error.
 func ParseReasoning(value string) (ReasoningSetting, error) {
 	setting := strings.ToLower(strings.TrimSpace(value))
-	if setting == "" {
+	if setting == "" || setting == "default" {
+		return ReasoningSetting{Default: true}, nil
+	}
+	if setting == "off" {
 		return ReasoningSetting{Off: true}, nil
 	}
 	for _, level := range ReasoningLevelNames {
 		if setting != level {
 			continue
-		}
-		if level == "off" {
-			return ReasoningSetting{Off: true}, nil
 		}
 		return ReasoningSetting{Effort: level}, nil
 	}
@@ -276,30 +292,72 @@ type ReasoningField struct {
 	Value any
 }
 
+// offWord returns the word the model's own level list holds for "do not
+// think", lowercased, and whether it declares one.
+//
+// The word is the model's, not poo's: an endpoint that names none of the
+// off words takes no off word, and the caller asks its quietest level
+// instead.
+func (m ModelInfo) offWord() (string, bool) {
+	for _, level := range m.ReasoningLevels {
+		word := strings.ToLower(strings.TrimSpace(level))
+		if slices.Contains(ReasoningOffWords, word) {
+			return word, true
+		}
+	}
+	return "", false
+}
+
+// offFields returns the request fields that ask an effort model not to
+// think.
+//
+// A model that declares an off word is sent it verbatim. A model that
+// declares levels but no off word cannot be told off on the wire, so it
+// is sent the quietest level it declares. A model that declares neither
+// is sent "none", the word the effort API family uses for off.
+func (m ModelInfo) offFields() []ReasoningField {
+	path := m.reasoningPath(ReasoningPathEffort)
+	if word, ok := m.offWord(); ok {
+		return []ReasoningField{{Path: path, Value: word}}
+	}
+	if len(m.ReasoningLevels) > 0 {
+		return []ReasoningField{{Path: path, Value: strings.ToLower(strings.TrimSpace(m.ReasoningLevels[0]))}}
+	}
+	return []ReasoningField{{Path: path, Value: ReasoningOffWords[1]}}
+}
+
 // ReasoningFields returns the request fields that carry the reasoning
 // setting.
 //
 // The mapping is:
 //
-//	setting        none            toggle                     effort                    budget
-//	off            no field        enable_thinking=false      no field                  no field
-//	named level    config error    enable_thinking=true       reasoning_effort=<level>  config error
-//	<budget>       config error    enable_thinking=true       config error              budget=<n>
+//	setting        none      toggle                  effort                  budget
+//	default        no field  no field                no field                no field
+//	off            no field  enable_thinking=false   the model's off word    no field
+//	named level    error     enable_thinking=true    reasoning_effort=<lvl>  error
+//	<budget>       error     enable_thinking=true    error                   budget=<n>
 //
 // The named levels are ReasoningLevelNames, and a level the model declares
-// is one the model takes: a model whose endpoint knows a level poo does not
-// name, such as pi's max, is sent that level by name. A model whose reasoning
-// cannot be controlled rejects every setting but off: the setting asks for
-// something the model cannot do. An effort model and a budget model each take
-// their own kind of setting, and a setting of the other kind is a
-// configuration error as well.
+// is one the model takes: a level the model names, an off word included,
+// is sent by name as the model spells it. A model whose reasoning cannot
+// be controlled takes no field but the default: it cannot be asked to be
+// quiet, and a level that asks it to think is a configuration error. An
+// effort model and a budget model each take their own kind of setting,
+// and a setting of the other kind is a configuration error as well.
 func (m ModelInfo) ReasoningFields(setting string) ([]ReasoningField, error) {
-	if level, ok := m.declaredLevel(setting); ok {
+	normalized := strings.ToLower(strings.TrimSpace(setting))
+	// The default is not a level of the model's: it names the request poo
+	// sends, and every model takes a request that carries no field.
+	if normalized == "" || normalized == "default" {
+		return nil, nil
+	}
+	// A level the model declares is the model's own word, sent as the
+	// model spells it. An off word the model declares is one of those,
+	// and the generic off below reaches the same field when the model
+	// declares none.
+	if level, ok := m.declaredLevel(normalized); ok {
 		switch m.Reasoning.Mode {
 		case ReasoningEffort:
-			if level == "off" {
-				return nil, nil
-			}
 			return []ReasoningField{{
 				Path:  m.reasoningPath(ReasoningPathEffort),
 				Value: level,
@@ -307,16 +365,14 @@ func (m ModelInfo) ReasoningFields(setting string) ([]ReasoningField, error) {
 		case ReasoningToggle:
 			return []ReasoningField{{
 				Path:  m.reasoningPath(ReasoningPathToggle),
-				Value: level != "off",
+				Value: !slices.Contains(ReasoningOffWords, level),
 			}}, nil
 		}
 		// A model that controls no reasoning sends nothing, and a budget
-		// model takes no level by name.
-		if m.Reasoning.Mode == "" || m.Reasoning.Mode == ReasoningNone {
-			return nil, nil
-		}
+		// model takes no level by name; both fall through to the generic
+		// mapping, where the off and the budget are the words it takes.
 	}
-	parsed, err := ParseReasoning(setting)
+	parsed, err := ParseReasoning(normalized)
 	if err != nil {
 		return nil, err
 	}
@@ -337,7 +393,7 @@ func (m ModelInfo) ReasoningFields(setting string) ([]ReasoningField, error) {
 		}}, nil
 	case ReasoningEffort:
 		if parsed.Off {
-			return nil, nil
+			return m.offFields(), nil
 		}
 		if parsed.Budget > 0 {
 			return nil, m.reasoningError(setting, "the model takes an effort level, not a token budget")
@@ -348,6 +404,9 @@ func (m ModelInfo) ReasoningFields(setting string) ([]ReasoningField, error) {
 		}}, nil
 	case ReasoningBudget:
 		if parsed.Off {
+			// A token budget cannot say "do not think": the quietest
+			// request the API can carry is one with no field, and the
+			// endpoint's own default applies.
 			return nil, nil
 		}
 		if parsed.Effort != "" {
@@ -389,30 +448,50 @@ func (m ModelInfo) reasoningPath(fallback string) string {
 
 // CheckReasoning reports whether the model can run at a reasoning level.
 //
-// The level is one of ReasoningLevelNames or a token budget. A model that
-// declares its own levels takes one of those and no other: a model whose
-// endpoint knows xhigh may not know minimal, and a level outside the list
-// is refused rather than sent and ignored. A model that declares none is
-// checked by its reasoning control, which says what kind of level it
-// takes, and a model that controls no reasoning takes no level but off.
+// The level is one of ReasoningLevelNames or a token budget. "default" is
+// the one setting every model takes: it names the request poo sends, not
+// the model's thinking, and it asks for no field at all. "off" asks the
+// model not to think, and every model takes it — a model that has an off
+// word or a switch is asked explicitly, and one that has neither is left
+// alone, which is as close to off as its wire can say.
 //
-// The refusal is a configuration error, and it names the levels the model
-// does take, so a client can offer them.
+// A model that declares its own levels takes one of those and no other:
+// a level outside the list is refused rather than sent and ignored. A
+// model that declares none is checked by its reasoning control, which
+// says what kind of level it takes.
+//
+// The refusal is a configuration error, and it names the levels the
+// model does take, so a client can offer them.
 func (m ModelInfo) CheckReasoning(level string) error {
-	setting := strings.ToLower(strings.TrimSpace(level))
-	// A declared level is the model's own list, and it still has to be
-	// one the model's control can send: a budget model that declares a
-	// name would pass a check that stopped here and then be refused when
-	// the run builds its fields.
-	if levels := m.ReasoningLevels; len(levels) > 0 {
-		if _, ok := m.declaredLevel(setting); !ok {
+	normalized := strings.ToLower(strings.TrimSpace(level))
+	// The default is the one setting every model takes: it names the
+	// request poo sends, not the model's thinking, and it asks for no
+	// field at all.
+	if normalized == "" || normalized == "default" {
+		return nil
+	}
+	// A declared level is the model's own list, checked against its
+	// control. Off is beside the list: poo can always ask the model to
+	// be quiet, in the words the control takes or by sending no field
+	// at all.
+	if levels := m.ReasoningLevels; len(levels) > 0 && !strings.EqualFold(normalized, "off") {
+		if _, ok := m.declaredLevel(normalized); !ok {
+			if _, err := ParseReasoning(normalized); err != nil {
+				// The word is not a level or a budget at all: the refusal
+				// names the vocabulary, not the model's own list.
+				return &ConfigError{
+					Field: "reasoning.chat",
+					Message: fmt.Sprintf("%q is not a reasoning setting: use %s or a token budget",
+						level, strings.Join(ReasoningLevelNames, ", ")),
+				}
+			}
 			return &ConfigError{
 				Field: "reasoning.chat",
 				Message: fmt.Sprintf("%q is not a reasoning level for %s: it takes %s",
 					level, modelLabel(m), strings.Join(levels, ", ")),
 			}
 		}
-		if _, err := m.ReasoningFields(setting); err != nil {
+		if _, err := m.ReasoningFields(normalized); err != nil {
 			// The control cannot carry this name. The refusal names the
 			// levels the model declares — that is the contract here — and
 			// says why the control cannot send one of them.
@@ -424,25 +503,11 @@ func (m ModelInfo) CheckReasoning(level string) error {
 		}
 		return nil
 	}
-	parsed, err := ParseReasoning(setting)
-	if err != nil {
-		return err
-	}
-	mode := m.Reasoning.Mode
-	if mode == "" {
-		mode = ReasoningNone
-	}
-	if mode == ReasoningNone {
-		if parsed.Off {
-			return nil
-		}
-		return m.reasoningError(setting, "the model does not control its reasoning")
-	}
 	// The check is the run's own rule: the fields the run would send
 	// are built here, so a level the model cannot take — a budget for
 	// an effort model, an effort name for a budget one — is refused
 	// by the same validation that refuses it at run time.
-	_, err = m.ReasoningFields(setting)
+	_, err := m.ReasoningFields(normalized)
 	return err
 }
 

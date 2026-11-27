@@ -66,9 +66,12 @@ func (s *Session) ReasoningLevel() string {
 //
 // A switch that left the level alone would make every request a
 // configuration error, so a level the new model does not take falls back
-// to off: it is the level every reasoning model takes and none pays for.
-// A model that cannot be told off keeps the first level it declares, and a
-// model that controls no reasoning runs at no level at all.
+// to off. Off is the one setting every model takes: a model that declares
+// an off word or a switch is asked for quiet explicitly, a model whose
+// effort control has no off word is sent its quietest declared level, and
+// a model that controls no reasoning, or that thinks by budget, is sent
+// no reasoning field at all. The request that asks for quiet is the same
+// one in every case: the closest to off the model's wire can say.
 //
 // The caller holds the session's lock.
 func (s *Session) resetReasoningLocked() {
@@ -76,23 +79,5 @@ func (s *Session) resetReasoningLocked() {
 	if level == "" || s.opts.Model.CheckReasoning(level) == nil {
 		return
 	}
-	model := s.opts.Model
-	switch levels := model.ReasoningLevels; {
-	case len(levels) > 0:
-		// A model that declares its levels takes one of them: off when it
-		// is on the list, which is the cheapest of them, and its lowest
-		// level when it cannot be told off.
-		for _, candidate := range levels {
-			if strings.EqualFold(candidate, "off") {
-				s.opts.ReasoningEffort = "off"
-				return
-			}
-		}
-		s.opts.ReasoningEffort = strings.ToLower(strings.TrimSpace(levels[0]))
-	case model.Reasoning.Mode == ReasoningNone, model.Reasoning.Mode == "":
-		// A model that controls no reasoning runs at no level.
-		s.opts.ReasoningEffort = ""
-	default:
-		s.opts.ReasoningEffort = "off"
-	}
+	s.opts.ReasoningEffort = "off"
 }

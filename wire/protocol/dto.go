@@ -316,7 +316,7 @@ type ConfigureParams struct {
 	PromptOverrides *PromptOverrides `json:"prompt_overrides,omitempty"`
 	// Models changes the models the session talks to.
 	Models *ModelRoles `json:"models,omitempty"`
-	// Reasoning is the chat model's reasoning level: off, minimal, low,
+	// Reasoning is the chat model's reasoning level: default, minimal, low,
 	// medium, high, xhigh, or a token budget such as "4096". Empty leaves
 	// the level the session runs at unchanged.
 	//
@@ -764,7 +764,8 @@ const (
 // ReasoningLevelNames are the named reasoning levels the session's
 // reasoning control takes, lowest first. A level is one of these, or a
 // token budget: a positive number of tokens the model may think
-// within. The order is the order a model's own levels climb, so a
-// client that cycles through them goes from the least thinking to the
-// most.
-var ReasoningLevelNames = []string{"off", "minimal", "low", "medium", "high", "xhigh"}
+// within. "default" is the request that carries no reasoning field, and
+// "off" asks the model not to think; the order runs from leaving the
+// model alone to forcing it quiet, and a client that cycles through them
+// wraps from off back to default.
+var ReasoningLevelNames = []string{"default", "minimal", "low", "medium", "high", "xhigh", "off"}

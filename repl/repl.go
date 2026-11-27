@@ -855,8 +855,8 @@ func (m *machine) command(line string, input input) (int, bool) {
 /models          ask the endpoints what they serve now, and list it
 /models <text>   switch to a model of that fresh list
 /thinking        cycle the reasoning level (Shift+Tab)
-/thinking <lvl>  set the reasoning level: off, minimal, low, medium, high,
-                 xhigh or a token budget
+/thinking <lvl>  set the reasoning level: default, minimal, low, medium,
+                 high, xhigh, off or a token budget
 Esc              stop the running turn
 /bg              move the running Bash call to a job
 /help            this list
@@ -1075,10 +1075,11 @@ func (m *machine) setThinking(level string) error {
 }
 
 // levelName names a reasoning level the way the transcript says it, where
-// an empty level is a session that sends no reasoning setting.
+// an empty level is a session that sends no reasoning setting: the
+// endpoint's own default applies.
 func levelName(level string) string {
 	if level == "" {
-		return "none"
+		return "default"
 	}
 	return level
 }

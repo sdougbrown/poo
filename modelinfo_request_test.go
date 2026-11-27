@@ -145,16 +145,46 @@ func TestReasoningFieldsMapTheSettingOntoTheRequest(t *testing.T) {
 			want:    []poo.ReasoningField{{Path: poo.ReasoningPathBudget, Value: 2048}},
 		},
 		{
-			name:    "an off setting asks for no field",
+			name:    "an off setting asks for the model's off word",
 			model:   poo.ModelInfo{Name: "gpt-5", Reasoning: poo.ReasoningControl{Mode: poo.ReasoningEffort}},
+			setting: "off",
+			want:    []poo.ReasoningField{{Path: poo.ReasoningPathEffort, Value: "none"}},
+		},
+		{
+			name:    "a model without a control takes the default",
+			model:   poo.ModelInfo{Name: "plain"},
 			setting: "off",
 			want:    nil,
 		},
 		{
-			name:    "a model without a control asks for no field",
-			model:   poo.ModelInfo{Name: "plain"},
-			setting: "off",
+			name:    "the default asks for no field on any model",
+			model:   poo.ModelInfo{Name: "gpt-5", Reasoning: poo.ReasoningControl{Mode: poo.ReasoningEffort}, ReasoningLevels: []string{"off", "low", "high"}},
+			setting: "default",
 			want:    nil,
+		},
+		{
+			name:    "a declared off word is sent as the model spells it",
+			model:   poo.ModelInfo{Name: "glm", Reasoning: poo.ReasoningControl{Mode: poo.ReasoningEffort}, ReasoningLevels: []string{"none", "low", "high"}},
+			setting: "off",
+			want:    []poo.ReasoningField{{Path: poo.ReasoningPathEffort, Value: "none"}},
+		},
+		{
+			name:    "a declared off is sent as the model spells it",
+			model:   poo.ModelInfo{Name: "glm", Reasoning: poo.ReasoningControl{Mode: poo.ReasoningEffort}, ReasoningLevels: []string{"off", "low", "high"}},
+			setting: "off",
+			want:    []poo.ReasoningField{{Path: poo.ReasoningPathEffort, Value: "off"}},
+		},
+		{
+			name:    "an effort model with no off word takes its quietest level",
+			model:   poo.ModelInfo{Name: "narrow", Reasoning: poo.ReasoningControl{Mode: poo.ReasoningEffort}, ReasoningLevels: []string{"medium", "high"}},
+			setting: "off",
+			want:    []poo.ReasoningField{{Path: poo.ReasoningPathEffort, Value: "medium"}},
+		},
+		{
+			name:    "a declared level the model spells its own way is sent verbatim",
+			model:   poo.ModelInfo{Name: "glm", Reasoning: poo.ReasoningControl{Mode: poo.ReasoningEffort}, ReasoningLevels: []string{"off", "low", "high", "max"}},
+			setting: "max",
+			want:    []poo.ReasoningField{{Path: poo.ReasoningPathEffort, Value: "max"}},
 		},
 		{
 			name:    "the model spells the field itself",
@@ -227,14 +257,14 @@ func TestReasoningFieldsRejectAnImpossibleSetting(t *testing.T) {
 
 func TestParseReasoning(t *testing.T) {
 	for _, name := range poo.ReasoningLevelNames {
-		if name == "off" {
+		if name == "off" || name == "default" {
 			continue
 		}
 		setting, err := poo.ParseReasoning(strings.ToUpper(name))
 		if err != nil {
 			t.Fatalf("the setting %q: %v", name, err)
 		}
-		if setting.Effort != name || setting.Off {
+		if setting.Effort != name || setting.Off || setting.Default {
 			t.Errorf("the setting is %+v, want the %q effort", setting, name)
 		}
 	}
@@ -242,18 +272,35 @@ func TestParseReasoning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the setting: %v", err)
 	}
-	if setting.Effort != "medium" || setting.Off {
+	if setting.Effort != "medium" || setting.Off || setting.Default {
 		t.Errorf("the setting is %+v, want the medium effort", setting)
 	}
 	setting, err = poo.ParseReasoning("")
 	if err != nil {
 		t.Fatalf("the setting: %v", err)
 	}
-	if !setting.Off {
+	if !setting.Default || setting.Off {
+		t.Errorf("the setting is %+v, want the default", setting)
+	}
+	setting, err = poo.ParseReasoning("Default")
+	if err != nil {
+		t.Fatalf("the setting: %v", err)
+	}
+	if !setting.Default || setting.Off {
+		t.Errorf("the setting is %+v, want the default", setting)
+	}
+	setting, err = poo.ParseReasoning("off")
+	if err != nil {
+		t.Fatalf("the setting: %v", err)
+	}
+	if !setting.Off || setting.Default {
 		t.Errorf("the setting is %+v, want off", setting)
 	}
 	if _, err := poo.ParseReasoning("-5"); err == nil {
 		t.Error("a negative budget was accepted")
+	}
+	if _, err := poo.ParseReasoning("none"); err == nil {
+		t.Error("an undeclared off word was accepted as a level")
 	}
 }
 
@@ -302,9 +349,15 @@ func TestCheckReasoningRefusesWhatTheModelCannotTake(t *testing.T) {
 	if err := declaredBudget.CheckReasoning("2048"); err == nil {
 		t.Error("a budget model that declares levels took a raw budget")
 	}
-	// off is the one level every control can send.
+	// Off is the one setting every control can send: on a budget model
+	// it is the request that carries no field.
 	if err := declaredBudget.CheckReasoning("off"); err != nil {
 		t.Errorf("a budget model refused off: %v", err)
+	}
+	// The default is beside the list too: it names the request poo
+	// sends, not the model's thinking.
+	if err := declaredBudget.CheckReasoning("default"); err != nil {
+		t.Errorf("a budget model refused the default: %v", err)
 	}
 
 	levels := poo.ModelInfo{Name: "gemma4", Reasoning: poo.ReasoningControl{Mode: poo.ReasoningEffort}, ReasoningLevels: []string{"off", "low"}}
@@ -322,5 +375,23 @@ func TestCheckReasoningRefusesWhatTheModelCannotTake(t *testing.T) {
 	}
 	if err := plain.CheckReasoning("off"); err != nil {
 		t.Errorf("a model without reasoning refused off: %v", err)
+	}
+	if err := plain.CheckReasoning("default"); err != nil {
+		t.Errorf("a model without reasoning refused the default: %v", err)
+	}
+	if err := plain.CheckReasoning("high"); err == nil {
+		t.Error("a model without reasoning took a level")
+	}
+	// A model that declares none as its off word takes the word it
+	// declares, not poo's.
+	glmr := poo.ModelInfo{Name: "glm", Reasoning: poo.ReasoningControl{Mode: poo.ReasoningEffort}, ReasoningLevels: []string{"none", "low", "high"}}
+	if err := glmr.CheckReasoning("off"); err != nil {
+		t.Errorf("an effort model refused off: %v", err)
+	}
+	if err := glmr.CheckReasoning("none"); err != nil {
+		t.Errorf("an effort model refused its own off word: %v", err)
+	}
+	if err := glmr.CheckReasoning("minimal"); err == nil {
+		t.Error("a model that declares levels took a level outside them")
 	}
 }
