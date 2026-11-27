@@ -344,6 +344,7 @@ func TestTheMCPAddMakesTheUserChooseAScope(t *testing.T) {
 
 func TestTheMCPAddWritesTheGlobalManifest(t *testing.T) {
 	globalDir := theIsolatedHome(t)
+	target := filepath.Join(globalDir, "mcp.json")
 
 	out := captureStdout(t, func() {
 		if code := run([]string{"mcp", "add", "fixture", "--global", "--env", "API_KEY=${API_KEY}", "--", "echo", "hi"}); code != 0 {
@@ -376,9 +377,15 @@ func TestTheMCPAddWritesTheGlobalManifest(t *testing.T) {
 	if argument != "hi" {
 		t.Errorf("the argument is %q, want hi", argument)
 	}
-	envValue, err := server.Env["API_KEY"].Resolve(func(string) (string, bool) { return "k", true }, "")
-	if err != nil || envValue != "k" {
-		t.Errorf("the environment entry is %q (error %v), want the host's value", envValue, err)
+	// The template is stored as the words gave it: resolving it against
+	// a host whose value is distinct from the reference names proves the
+	// file holds the reference and not the host's answer.
+	envValue, err := server.Env["API_KEY"].Resolve(func(string) (string, bool) { return "resolved", true }, "")
+	if err != nil || envValue != "resolved" {
+		t.Errorf("the environment entry is %q (error %v), want the host's value once resolved", envValue, err)
+	}
+	if !strings.Contains(readFile(t, target), "${API_KEY}") {
+		t.Errorf("the manifest is %s, want the reference stored unresolved", readFile(t, target))
 	}
 }
 
