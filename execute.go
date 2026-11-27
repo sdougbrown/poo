@@ -765,17 +765,14 @@ func (s *Session) executeOne(owner *callOwner, turn int, plan callPlan) {
 			// The call was cut short. The outcome says which: a call
 			// that never started is skipped, and one that was running
 			// is cancelled. The partial output the tool returned stays
-			// in the result, with the note.
+			// in the result, with the note naming what ended it — the
+			// same discrimination the carried-result branch applies.
 			if s.interruptPending(owner) {
 				result = ToolResult{Text: interruptNote(result.Text), IsError: true}
+			} else if s.runWindingDown(owner) {
+				result = ToolResult{Text: cancelledSettlingNote(result.Text), IsError: true}
 			} else {
-				text := result.Text
-				if text == "" {
-					text = err.Error()
-				} else {
-					text = text + "\n" + err.Error()
-				}
-				result = ToolResult{Text: text, IsError: true}
+				result = ToolResult{Text: cancelledCallerNote(result.Text), IsError: true}
 			}
 			outcome = OutcomeCancelled
 		case errors.Is(err, ErrFatal):
