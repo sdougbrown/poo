@@ -107,19 +107,25 @@ A point refuses a matcher field or a decision it does not own. `before_run` and 
 - `command_prefix` and `command_contains` need a `tool`, and never appear together.
 - `command_contains` is any-of: one substring holding is the matcher holding.
 - The command is the tool's primary argument, compared as text with leading whitespace trimmed. A compound command matches its first part only, so `cd repo && git push` does not hold `command_prefix: git`.
+- Matcher text is lexical, unlike [permission rules](/operations/permissions-and-safety): a `fetch` URL in a matcher is compared as written, never canonicalized.
+- A command matcher on a tool with no primary argument fails the build: every call would be unmatched, and the hook would never fire.
 
-An unmatched call costs nothing: no probe, no decision-model call, and no firing. A call the hook has already fired its fill on is unmatched too.
+An unmatched call costs nothing: no probe and no decision-model call. A matching call after the firing cap is reached costs no decision-model call either, and takes the point's neutral decision (see [Caps and budgets](#caps-and-budgets)).
 
 ## Evidence and probes
 
-`context.turns` adds the last N conversation turns. `include_tool_call` adds the call the hook judges, and `include_working_dir` adds the directory the session works in. Probes add facts kept apart from the conversation, keyed by name in the evidence.
+`context.turns` adds the last N conversation turns, and `include_working_dir` adds the directory the session works in. Probes add facts kept apart from the conversation, keyed by name in the evidence.
+
+`include_tool_call` adds the call the hook judges: its tool, class, summary, and arguments. The summary and arguments are the ones a permission ask shows, the same view the permission decider gets. They are not the model's own description of the call. The summary is clipped to 512 characters. An argument object past 8192 bytes keeps both ends of each long string value, with the middle elided. At `after_tool` the result is in the evidence whatever `include_tool_call` says, and its text is clipped to `poo.EvidenceOutputCap` (512).
 
 | Probe | Reports |
 |---|---|
 | `command: [...]` | The exit status, plus the head of the command's combined output. |
 | `tool: {name, args}` | The read-only tool's text, capped at 8192 characters. |
 
-A probe runs a command or a tool, never both, and a hook runs at most four probes sequentially. A tool probe names `read`, `grep` or `history`, and the built session must offer that tool: a disabled tool fails the build. A command probe runs on the executor `tools.bash.executor` names, in the session's working directory, with the session's scrubbed environment.
+A probe runs a command or a tool, never both, and a hook runs at most four probes sequentially. A probe that names no `timeout_ms` gets 3000 milliseconds. A tool probe names `read`, `grep` or `history`, and the built session must offer that tool: a disabled tool fails the build. A command probe runs on the executor `tools.bash.executor` names, in the session's working directory, with the session's scrubbed environment.
+
+A probe should exit promptly on SIGTERM. The executor sends SIGTERM first and waits a kill grace before SIGKILL, 2 seconds for `local` and `bwrap`. A probe that ignores the signal can push its stop into the hook's deadline.
 
 ### Probe trust model
 
@@ -133,7 +139,7 @@ Evidence is bounded. The probe output cap is 8192 bytes per probe, and the whole
 
 A step asks one `bool`, `choice`, or `score` question, and its `branches` map answer keys to a next step or a terminal action. A `bool` answers `yes` and `no`, a `choice` answers its option names, and a `score` answers `"0"` through `"N-1"`. A step may name its own `timeout_ms`; otherwise its ask runs under the hook's firing timeout.
 
-YAML reads an unquoted `true:` or `false:` as a boolean key, and the loader keeps it as the word it is spelled with. Unquoted `true:` and `false:` in a bool question's descriptions are therefore accepted, in inline settings and in `hooks_files`.
+YAML reads an unquoted `true:` or `false:` as a boolean key, and an unquoted integer key such as `0:` as a number. The loader keeps each as the text it is spelled with. Bool question descriptions (`true:` and `false:`) and score branch keys (`0:` through `N-1:`) are accepted unquoted, in inline settings and in `hooks_files`. Two keys that spell the same text, such as `True:` and `"true":`, are refused. The normalization applies to every settings YAML file, not only hooks.
 
 The runner scores each answer key as `P(key) * label_mass` and takes the best one. A tie, a best key no branch covers, or a score under the branch's `min_probability` is *uncertain*, and `on_uncertain` answers it. A label mass outside `[0, 1]`, a missing answer, or an invalid distribution is an *error*, and `on_error` answers it. `min_probability` sits above zero and at most one.
 
@@ -151,14 +157,16 @@ A policy the spec leaves out is `fail_open`, so a hook that cannot answer change
 
 ## Caps and budgets
 
-`max_fires_per_run` caps how many times a hook may change something in one run. The count lives in memory in the session's runner, and only a decision that changes something is charged: a neutral answer costs nothing. A late background completion counts against its job, because the run that started the job may already have settled. A new session gets fresh runners, so a resumed session starts its counts again.
+`max_fires_per_run` caps how many decisions take effect in one run, and the count lives in memory in the session's runner. Every matching call is judged until the cap is reached. Once it is reached, a further matching call gets the point's neutral decision with no decision-model call. A deny hook therefore stops denying after N calls, and the model can retry the call. Only a decision that changes something is charged: a neutral answer costs nothing, and a `fail_closed` block counts. Concurrent calls are all judged, and a call whose decision loses the race for the last slot gets the neutral decision. A late background completion counts against its job, because the run that started the job may already have settled. A new session gets fresh runners, so a resumed session starts its counts again.
 
 | Bound | Value |
 |---|---|
 | Steps per hook | 8 |
 | Probes per hook | 4 |
 | Probe output | 8192 bytes |
+| Call arguments | 8192 bytes |
 | Evidence | 32768 bytes |
+| Probe `timeout_ms` | 3000 by default |
 | `firing_timeout_ms` | 10000 by default |
 
 The runner clamps a hook's budget under the session's hook timeout (`HookTimeout`, 30 seconds by default). It keeps the hook's own answer 2 seconds ahead of that deadline, and floors the budget at 500 milliseconds.

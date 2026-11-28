@@ -211,33 +211,33 @@ See [Decision Hooks](/capabilities/decision-hooks). A profile that runs a hook r
 
 ### `hooks`
 
-Map of `<name>` to hook spec. Every spec is checked at load time; a hook that could not run is a load failure.
+Map of `<name>` to hook spec. Every spec is checked at load time; a hook that could not run is a load failure. YAML keys are read as their text (see [Settings Discovery](/configuration/settings-discovery)): an unquoted `true:` description or `0:` branch key is the word it spells. Two keys spelling the same text are refused.
 
 | Key | Type | Default / Behavior | Description |
 |---|---|---|---|
 | `hooks.<name>.point` | `string` | Required | Where the hook runs: `before_run`, `before_tool`, `after_tool`, `after_turn`, or `before_settle`. |
-| `hooks.<name>.match` | `object` | Empty (fires on everything at the point) | Narrows the activity the hook fires on; each point accepts its own fields. |
-| `hooks.<name>.max_fires_per_run` | `int` | `0` (no cap) | Firings per run that may change something, counted in memory in the session's runner. A late background completion counts against its job. |
+| `hooks.<name>.match` | `object` | Empty (fires on everything at the point) | Narrows the activity the hook fires on; each point accepts its own fields. Matching is lexical, so a URL is never canonicalized. A `command_prefix` or `command_contains` match on a tool with no primary argument fails the build. |
+| `hooks.<name>.max_fires_per_run` | `int` | `0` (no cap) | Decisions per run that take effect, counted in memory in the session's runner. Every matching call is judged until the cap is reached. After the cap, a matching call gets the point's neutral decision with no decider call. A deny hook stops denying after N calls. A neutral answer, or a decision that loses the race for the last slot, costs nothing. A `fail_closed` block counts. A late background completion counts against its job. |
 | `hooks.<name>.firing_timeout_ms` | `int` | `10000` | Time the hook has to answer, clamped under the session's hook timeout minus 2 seconds (floor 500 ms). |
 | `hooks.<name>.on_error` | `string` | `fail_open` | What a failed firing does: `fail_open`, `fail_closed`, or `fail_run`. `fail_closed` is refused at `before_run` and `after_tool`. |
 | `hooks.<name>.on_uncertain` | `string` | `fail_open` | What an answer no branch accepts does: the same policies. |
 | `hooks.<name>.fail_closed_message` | `string` | Empty | Text a `fail_closed` policy hands the model. Required when either policy is `fail_closed`, refused otherwise. |
 | `hooks.<name>.context.turns` | `int` | `0` | Recent conversation turns the evidence holds (`≥ 0`). |
-| `hooks.<name>.context.include_tool_call` | `bool` | `false` | Adds the call or result the hook judges to the evidence. |
+| `hooks.<name>.context.include_tool_call` | `bool` | `false` | Adds the call the hook judges to the evidence: the tool's ask summary and evidence arguments, not the model's description. The `after_tool` result is always included, clipped to `poo.EvidenceOutputCap` (512). |
 | `hooks.<name>.context.include_working_dir` | `bool` | `false` | Adds the session's working directory to the evidence. |
 | `hooks.<name>.context.probes[].name` | `string` | Required | Name the probe's evidence is keyed by. Unique within the hook. |
 | `hooks.<name>.context.probes[].command` | `string[]` | Empty | argv a command probe runs, on the session's executor. Excludes `tool`. |
 | `hooks.<name>.context.probes[].tool` | `object` | Empty | Read-only tool probe: `name` (`read`, `grep`, or `history`) and `args`. Excludes `command`. |
-| `hooks.<name>.context.probes[].timeout_ms` | `int` | `3000` | Time the probe has (`≥ 0`). A probe never outlives its hook. |
+| `hooks.<name>.context.probes[].timeout_ms` | `int` | `3000` | Time the probe has (`≥ 0`). A probe never outlives its hook. The executor sends SIGTERM first and waits a kill grace, so a probe should exit promptly on SIGTERM. |
 | `hooks.<name>.entry` | `string` | Required | Step the graph starts at. |
 | `hooks.<name>.steps` | `object` | Required (1–8) | Steps by name; every step must be reachable from `entry` and no path may loop. |
 | `hooks.<name>.steps.<step>.timeout_ms` | `int` | `0` (the hook's firing timeout) | Time this step's ask may take. |
 | `hooks.<name>.steps.<step>.question.kind` | `string` | Required | `bool`, `choice`, or `score`. |
 | `hooks.<name>.steps.<step>.question.instructions` | `string` | Required | What the model decides, in prose. |
-| `hooks.<name>.steps.<step>.question.true` / `.false` | `string` | Empty | What `yes` and `no` mean. `bool` only; the unquoted YAML keys are accepted. |
+| `hooks.<name>.steps.<step>.question.true` / `.false` | `string` | Empty | What `yes` and `no` mean. `bool` only; unquoted YAML keys are accepted. |
 | `hooks.<name>.steps.<step>.question.options` | `object[]` | Empty | `name` and `desc` pairs. `choice` only. |
 | `hooks.<name>.steps.<step>.question.levels` | `string[]` | Empty | Scale levels. `score` only. |
-| `hooks.<name>.steps.<step>.branches.<answer>` | `object` | Required | One branch per answer key the question offers. |
+| `hooks.<name>.steps.<step>.branches.<answer>` | `object` | Required | One branch per answer key the question offers. An unquoted score key (`0:`, `1:`) is read as its text. |
 | `hooks.<name>.steps.<step>.branches.<answer>.min_probability` | `float` | Required | Confidence the answer needs, above `0` and at most `1`. Below it the firing is uncertain. |
 | `hooks.<name>.steps.<step>.branches.<answer>.next` | `string` | Empty | Step the answer moves to. Excludes `action`. |
 | `hooks.<name>.steps.<step>.branches.<answer>.action.kind` | `string` | Empty | Terminal decision the point allows. Excludes `next`. |
