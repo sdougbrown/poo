@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -240,7 +241,130 @@ hooks:
 	}
 }
 
-// TestProfileHooksInheritAppendAndOptOut checks the chain a profile
+// theScoreHook is a before_tool hook whose step asks a score question.
+// Its branch keys are the question's answers, "0" to "2".
+const theScoreHook = `
+hooks:
+  unformatted:
+    point: before_tool
+    match: { tool: bash }
+    entry: how_much
+    steps:
+      how_much:
+        question:
+          kind: score
+          instructions: "How much of the tree is unformatted?"
+          levels: [none, some, all]
+        branches:
+          0: { min_probability: 0.9, action: { kind: allow } }
+          1: { min_probability: 0.6, action: { kind: deny, message: "run gofmt first" } }
+          2: { min_probability: 0.5, action: { kind: deny, message: "run gofmt first" } }
+`
+
+// TestAScoreQuestionTakesUnquotedBranchKeys loads a score question whose
+// branch keys the operator wrote without quotes: the question's answers
+// are "0" to "N-1", and YAML reads an unquoted 0 as the number it is.
+func TestAScoreQuestionTakesUnquotedBranchKeys(t *testing.T) {
+	settings, err := config.Parse([]byte("version: 1\n"+theScoreHook), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("the settings did not load: %v", err)
+	}
+	branches := settings.Hooks["unformatted"].Steps["how_much"].Branches
+	for _, key := range []string{"0", "1", "2"} {
+		if _, ok := branches[key]; !ok {
+			t.Errorf("the step has no %q branch: %v", key, branches)
+		}
+	}
+	if branch := branches["1"]; branch.Action == nil || branch.Action.Kind != hook.ActionDeny {
+		t.Errorf("the \"1\" branch is %+v; want the denial the document writes there", branch)
+	}
+}
+
+// theCollidingNumberHook is a score hook whose step carries two branch
+// keys that spell "1": YAML reads an unquoted 01 as the number 1, and the
+// quoted "1" is the text.
+const theCollidingNumberHook = `
+hooks:
+  unformatted:
+    point: before_tool
+    match: { tool: bash }
+    entry: how_much
+    steps:
+      how_much:
+        question:
+          kind: score
+          instructions: "How much of the tree is unformatted?"
+          levels: [none, some, all]
+        branches:
+          0: { min_probability: 0.9, action: { kind: allow } }
+          01: { min_probability: 0.6, action: { kind: deny, message: "run gofmt first" } }
+          "1": { min_probability: 0.5, action: { kind: allow } }
+`
+
+// theCollidingBoolHook is a bool hook whose question carries two keys that
+// spell "true": YAML reads an unquoted True as the boolean, and the quoted
+// "true" is the text.
+const theCollidingBoolHook = `
+hooks:
+  unformatted:
+    point: before_tool
+    match: { tool: bash }
+    entry: is_pushing
+    steps:
+      is_pushing:
+        question:
+          kind: bool
+          instructions: "Is the call the one the hook stops?"
+          True: "the call is the one"
+          "true": "the call is one of them"
+          false: "the call is another"
+        branches:
+          "yes": { min_probability: 0.9, action: { kind: allow } }
+          "no": { min_probability: 0.5, action: { kind: allow } }
+`
+
+// TestTwoKeysThatSpellTheSameTextAreRefused refuses a mapping whose keys
+// are distinct YAML nodes that spell the same text: the load would
+// otherwise keep one of them at random.
+//
+// YAML refuses a repeated key of its own, so the pairs here spell
+// differently and resolve to the same text: 01 and "1", True and "true".
+func TestTwoKeysThatSpellTheSameTextAreRefused(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		text  string
+		hooks string
+	}{
+		{"a number and its text", "1", theCollidingNumberHook},
+		{"a boolean and its text", "true", theCollidingBoolHook},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			named := strconv.Quote(tt.text)
+			var first string
+			for i := 0; i < 20; i++ {
+				_, err := config.Parse([]byte("version: 1\n"+tt.hooks), config.FormatYAML)
+				if err == nil {
+					t.Fatalf("the settings loaded; want the two keys that spell %s refused", named)
+				}
+				if code, _ := config.CodeOf(err); code != config.CodeDecode {
+					t.Fatalf("the failure's code is %q; want %q", code, config.CodeDecode)
+				}
+				if !strings.Contains(err.Error(), named) {
+					t.Fatalf("the failure is %q; want it to name the key text %s", err, named)
+				}
+				if first == "" {
+					first = err.Error()
+					continue
+				}
+				if err.Error() != first {
+					t.Fatalf("the failure reads %q; want the same failure every time, %q", err, first)
+				}
+			}
+		})
+	}
+}
+
+// TestTheHooksFixtureLoadsAndResolvesItsProfiles checks the chain a profile
 // resolves to: its base's hooks, then its own, kept once each, with the
 // names it turns off removed.
 func TestTheHooksFixtureLoadsAndResolvesItsProfiles(t *testing.T) {
