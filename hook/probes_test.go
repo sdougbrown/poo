@@ -430,12 +430,12 @@ func TestTheEvidenceNamesTheRunTrigger(t *testing.T) {
 		t.Fatalf("validating the run spec: %v", err)
 	}
 
-	state, err := gatherState(context.Background(), compiled, poo.HookContext{}, PointData{Trigger: TriggerJob}, ProbeEnv{})
+	state, err := gatherState(context.Background(), compiled, poo.HookContext{}, PointData{Trigger: string(TriggerJob)}, ProbeEnv{})
 	if err != nil {
 		t.Fatalf("gathering the evidence: %v", err)
 	}
 	payload := state.(statePayload)
-	if payload.Trigger != TriggerJob || payload.Point != PointBeforeRun {
+	if payload.Trigger != string(TriggerJob) || payload.Point != PointBeforeRun {
 		t.Errorf("the evidence names the trigger %q at %q", payload.Trigger, payload.Point)
 	}
 }
