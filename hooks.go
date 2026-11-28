@@ -250,6 +250,40 @@ type HookContext struct {
 	// publishes the permission events. It is nil for the consumer's own
 	// hooks, which do not decide permissions.
 	Permissions PermissionReporter
+	// WorkingDir is the directory the session's tools work in.
+	//
+	// A hook that judges a path reads it here: a session may name its
+	// own directory, so the setting a hook was built with is not the
+	// one the run works in.
+	WorkingDir string
+	// ReadOnlyTools runs a read-only tool over the session's own tools,
+	// for a hook that needs evidence about the tree.
+	//
+	// A probe is bounded and leaves no trace: it starts no tracked call,
+	// claims no handle, writes no record and raises no permission ask.
+	// Only the read-only tools a hook may probe are offered.
+	ReadOnlyTools ReadOnlyToolCaller
+}
+
+// HookToolObservation is what a read-only probe saw.
+type HookToolObservation struct {
+	// Text is the tool's output, capped at HookToolMaxOutputChars.
+	Text string
+	// IsError reports that the tool failed the way the model sees a
+	// failed call: the text is the explanation.
+	IsError bool
+	// Truncated reports that the tool's output was longer than the cap
+	// and Text holds only its head.
+	Truncated bool
+}
+
+// ReadOnlyToolCaller runs the session's read-only tools for a hook.
+//
+// It is a probe, not a call: the hook sees the tool's output and nothing
+// else changes. See HookContext.ReadOnlyTools.
+type ReadOnlyToolCaller interface {
+	// CallReadOnly runs one read-only tool and returns what it saw.
+	CallReadOnly(ctx context.Context, tool string, args json.RawMessage) (HookToolObservation, error)
 }
 
 // SystemPromptEdit changes the system prompt.

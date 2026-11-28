@@ -1542,15 +1542,17 @@ func (s *Session) hookContextFor(ctx context.Context, runID, job string, turn in
 	}
 	s.mu.Unlock()
 	return HookContext{
-		Context:     ctx,
-		SessionID:   s.opts.SessionID,
-		RunID:       runID,
-		JobID:       job,
-		Turn:        turn,
-		Interrupted: interrupted,
-		HistoryView: s.view(),
-		Budget:      s.budget(),
-		Decider:     s.Decider(),
+		Context:       ctx,
+		SessionID:     s.opts.SessionID,
+		RunID:         runID,
+		JobID:         job,
+		Turn:          turn,
+		Interrupted:   interrupted,
+		HistoryView:   s.view(),
+		Budget:        s.budget(),
+		Decider:       s.Decider(),
+		WorkingDir:    s.opts.WorkingDir,
+		ReadOnlyTools: &readOnlyToolCaller{session: s, runID: runID, parentCtx: ctx},
 	}
 }
 
