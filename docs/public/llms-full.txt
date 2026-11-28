@@ -10,9 +10,14 @@ Source: https://poo.douggo.com
 
 Many JS-written harnesses like [pi](https://pi.dev) promote a *self-improving* agent. `poo` promotes an **engineered agent**.
 
-Those two designs excel at different things. A self-improving harness shines when you want an agent that fluidly writes and loads its own extensions at runtime. `poo` targets the complementary space: predictable capability boundaries, headless automation, and custom Go binaries.
+Each approach fits different work. A self-improving harness fits when you want an agent that writes and loads its own extensions at runtime. `poo` fits when you want fixed capability boundaries, headless automation, or a custom Go binary.
 
-From one Go codebase, `poo` ships two deliverables. The first is a **headless CLI** (with an interactive [REPL](/getting-started/repl)) that runs sessions without a TUI. The second is an **embeddable Go library** that a wrapping application links into its own binary. What you leave out of a build cannot be reached at runtime — a read-only proving binary simply does not link `bash`.
+From one Go codebase, `poo` ships two deliverables:
+
+- A **headless CLI** (with an interactive [REPL](/getting-started/repl)) that runs sessions without a full terminal UI.
+- An **embeddable Go library** that a wrapping application links into its own binary.
+
+Unlinked packages cannot be reached at runtime. A read-only proving binary that omits `bash` cannot run shell commands.
 
 ## The Extensibility Ladder
 
