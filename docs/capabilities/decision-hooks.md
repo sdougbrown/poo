@@ -5,9 +5,9 @@ description: Declare hook policies that match tool calls, gather probe evidence,
 
 # Decision Hooks
 
-A **decision hook** is a policy file, not code. It names one of `poo`'s [hook points](/extending/architecture#hook-points), the calls it matches, the evidence it gathers, and a small graph of typed questions. The [decision model](/capabilities/decision-model) answers those questions, and each answer picks a terminal decision the core carries out.
+A **decision hook** is a policy file, not code. It names one of `poo`'s [hook points](/extending/architecture#hook-points), the calls it matches, the evidence it gathers, and a small graph of typed questions. The [decision model](/capabilities/decision-model) answers those questions. Each answer then picks a terminal decision the core carries out.
 
-Hooks never become a second lifecycle owner. A hook returns a typed decision or an error, and the existing owners do the rest: `execute.go` records the paired tool result, the finalizer settles the run, and the job owner closes a background job's completion signal.
+Hooks never become a second lifecycle owner. A hook returns a typed decision or an error, and the existing owners do the rest. `execute.go` records the paired tool result, the finalizer settles the run, and the job owner closes a background job's completion signal.
 
 ## A complete `settings.yaml`
 
@@ -98,7 +98,7 @@ Hooks declare inline under `hooks`, or in separate files named by `hooks_files`.
 
 A point refuses a matcher field or a decision it does not own. `before_run` and `after_tool` have no blocking decision, so `fail_closed` there is a spec error, not a silent `fail_open`.
 
-`deny` hands the model a message beside the call's error result. `short_circuit` answers the call without running it, and its message is the result text. `redact` replaces the result text with the session's redaction notice. `append` at `after_turn` and `before_settle` writes a user message and sends the run back to the model.
+`deny` hands the model a message beside the call's error result. `short_circuit` answers the call without running it, and its message is the result text. `redact` replaces the result text with the session's redaction notice. `append` at `after_turn`, and `continue` at `before_settle`, write a user message and send the run back to the model.
 
 ## Matching a call
 
@@ -131,7 +131,7 @@ Evidence is bounded. The probe output cap is 8192 bytes per probe, and the whole
 
 ## Questions and confidence
 
-A step asks one `bool`, `choice`, or `score` question, and its `branches` map answer keys to a next step or a terminal action. A `bool` answers `yes` and `no`, a `choice` answers its option names, and a `score` answers `"0"` through `"N-1"`.
+A step asks one `bool`, `choice`, or `score` question, and its `branches` map answer keys to a next step or a terminal action. A `bool` answers `yes` and `no`, a `choice` answers its option names, and a `score` answers `"0"` through `"N-1"`. A step may name its own `timeout_ms`; otherwise its ask runs under the hook's firing timeout.
 
 YAML reads an unquoted `true:` or `false:` as a boolean key, and the loader keeps it as the word it is spelled with. Unquoted `true:` and `false:` in a bool question's descriptions are therefore accepted, in inline settings and in `hooks_files`.
 
@@ -201,6 +201,6 @@ A `continue` spends the run's continuation budget (`limits.max_continuations`), 
 
 ## Where a hook is visible
 
-Every question carries the ID `hook:<name>:<step>`, and a decision record names its origin. A message a hook writes carries the origin `hook:<name>` in the [session log](/reference/session-log-v0), so a reader can tell the hook's word from the model's.
+Every question carries the ID `hook:<name>:<step>`, and a decision record's questions name the hook that asked. A message a hook writes carries the origin `hook:<name>` in the [session log](/reference/session-log-v0), so a reader can tell the hook's word from the model's.
 
 A hook that gathers no command probe reports itself idempotent, so a durable session may run it again after a crash. A hook with a command probe is never re-executed on recovery, because the operator's command may not be safe to repeat.

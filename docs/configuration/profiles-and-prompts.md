@@ -51,6 +51,7 @@ profiles:
     cli_registry_defaults: false
     mcp_defaults: false
     mcp_servers: [github]
+    hooks: [pre-push-gofmt]
     tools:
       disabled: [edit, write, bash, codemode]
 ```
@@ -69,7 +70,11 @@ profiles:
 | `cli_registry_defaults` | bool | Overrides `cli_registry.defaults` for sessions under this profile. Omitting it keeps the top-level setting. |
 | `mcp_defaults` | bool | Overrides `mcp.defaults` for sessions under this profile. Omitting it keeps the top-level setting. |
 | `mcp_servers` | list of strings | [MCP servers](/capabilities/mcp-servers) this profile's sessions start, by server name; adds to the base's selection (deduplicated, first-appearance order). `mcp.paths` still controls which manifests load; a selected server that is not loaded is skipped with a warning, and no server starts without a selection. |
+| `hooks` | list of strings | [Decision hooks](/capabilities/decision-hooks) this profile runs, by name; adds to the base's chain (deduplicated, first-appearance order). A name the settings do not declare fails the build. |
+| `hooks_disabled` | list of strings | Hook names dropped from this profile's chain, including ones the base runs. A name the profile both runs and turns off fails the build. |
 | `tools.disabled` | list of strings | Tool exclusions added on top of global `tools.disabled`. Exclusions do not alter [permission rules](/operations/permissions-and-safety) or sandbox the remaining tools. |
+
+The hooks chain grows down the inheritance line: a profile runs its base's hooks, then its own, and `hooks_disabled` removes names at any depth. A profile that ends up with hooks needs `roles.decider` set, because every hook asks the decision model.
 
 An explicit `system_prompt.replace`, or a `system_prompt` rule that sets or removes the `profile` section, takes precedence over `prompt_file`, `prompt_append`, and `prompt_append_file`. A resumed session keeps the prompt recorded in its log once it has run.
 

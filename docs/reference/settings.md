@@ -53,6 +53,8 @@ Map of `<name>` to profile definition object. Each entry defines a named variant
 | `profiles.<name>.prompt_file` | `string` | Empty | File whose text replaces the profile's prompt section. Relative paths resolve against the declaring file's directory. |
 | `profiles.<name>.prompt_append_file` | `string` | Empty | File whose text appends to the profile's prompt section. Mutually exclusive with `prompt_append`. Relative paths resolve against the declaring file's directory. |
 | `profiles.<name>.prompt_append` | `string` | Empty | Inline text appended to the profile's prompt section. Mutually exclusive with `prompt_append_file`. |
+| `profiles.<name>.hooks` | `string[]` | Inherits base | [Decision hook](/capabilities/decision-hooks) names this profile runs. Adds to the base's chain (deduplicated, first-appearance order); a name the settings do not declare fails the build. |
+| `profiles.<name>.hooks_disabled` | `string[]` | Empty | Hook names dropped from this profile's chain, including ones the base runs. A name the profile both runs and turns off fails the build. |
 | `profiles.<name>.model_family` | `bool` | `false` | When `true`, includes model-family guidance keyed by the active model's `prompt_variant`. |
 | `profiles.<name>.tools.disabled` | `string[]` | Empty | Tool names disabled for sessions running under this profile. |
 
@@ -196,6 +198,77 @@ See [Decision Model](/capabilities/decision-model).
 | Key | Type | Default / Behavior | Description |
 |---|---|---|---|
 | `decider.timeout_ms` | `int` | Decider default | Per-call latency budget for the decider model, in milliseconds. Minimum `1`. |
+
+## Decision Hooks
+
+See [Decision Hooks](/capabilities/decision-hooks). A profile that runs a hook requires `roles.decider`, and a command probe requires a linked executor matching `tools.bash.executor`.
+
+### `hooks_files`
+
+| Key | Type | Default / Behavior | Description |
+|---|---|---|---|
+| `hooks_files` | `string[]` | Empty | External YAML or JSON files declaring hooks under a top-level `hooks` key. Loaded as layers below inline `hooks` (inline wins, then earlier files). Relative paths resolve against the settings file's directory. |
+
+### `hooks`
+
+Map of `<name>` to hook spec. Every spec is checked at load time; a hook that could not run is a load failure.
+
+| Key | Type | Default / Behavior | Description |
+|---|---|---|---|
+| `hooks.<name>.point` | `string` | Required | Where the hook runs: `before_run`, `before_tool`, `after_tool`, `after_turn`, or `before_settle`. |
+| `hooks.<name>.match` | `object` | Empty (fires on everything at the point) | Narrows the activity the hook fires on; each point accepts its own fields. |
+| `hooks.<name>.max_fires_per_run` | `int` | `0` (no cap) | Firings per run that may change something, counted in memory in the session's runner. A late background completion counts against its job. |
+| `hooks.<name>.firing_timeout_ms` | `int` | `10000` | Time the hook has to answer, clamped under the session's hook timeout minus 2 seconds (floor 500 ms). |
+| `hooks.<name>.on_error` | `string` | `fail_open` | What a failed firing does: `fail_open`, `fail_closed`, or `fail_run`. `fail_closed` is refused at `before_run` and `after_tool`. |
+| `hooks.<name>.on_uncertain` | `string` | `fail_open` | What an answer no branch accepts does: the same policies. |
+| `hooks.<name>.fail_closed_message` | `string` | Empty | Text a `fail_closed` policy hands the model. Required when either policy is `fail_closed`, refused otherwise. |
+| `hooks.<name>.context.turns` | `int` | `0` | Recent conversation turns the evidence holds (`≥ 0`). |
+| `hooks.<name>.context.include_tool_call` | `bool` | `false` | Adds the call or result the hook judges to the evidence. |
+| `hooks.<name>.context.include_working_dir` | `bool` | `false` | Adds the session's working directory to the evidence. |
+| `hooks.<name>.context.probes[].name` | `string` | Required | Name the probe's evidence is keyed by. Unique within the hook. |
+| `hooks.<name>.context.probes[].command` | `string[]` | Empty | argv a command probe runs, on the session's executor. Excludes `tool`. |
+| `hooks.<name>.context.probes[].tool` | `object` | Empty | Read-only tool probe: `name` (`read`, `grep`, or `history`) and `args`. Excludes `command`. |
+| `hooks.<name>.context.probes[].timeout_ms` | `int` | `3000` | Time the probe has (`≥ 0`). A probe never outlives its hook. |
+| `hooks.<name>.entry` | `string` | Required | Step the graph starts at. |
+| `hooks.<name>.steps` | `object` | Required (1–8) | Steps by name; every step must be reachable from `entry` and no path may loop. |
+| `hooks.<name>.steps.<step>.timeout_ms` | `int` | `0` (the hook's firing timeout) | Time this step's ask may take. |
+| `hooks.<name>.steps.<step>.question.kind` | `string` | Required | `bool`, `choice`, or `score`. |
+| `hooks.<name>.steps.<step>.question.instructions` | `string` | Required | What the model decides, in prose. |
+| `hooks.<name>.steps.<step>.question.true` / `.false` | `string` | Empty | What `yes` and `no` mean. `bool` only; the unquoted YAML keys are accepted. |
+| `hooks.<name>.steps.<step>.question.options` | `object[]` | Empty | `name` and `desc` pairs. `choice` only. |
+| `hooks.<name>.steps.<step>.question.levels` | `string[]` | Empty | Scale levels. `score` only. |
+| `hooks.<name>.steps.<step>.branches.<answer>` | `object` | Required | One branch per answer key the question offers. |
+| `hooks.<name>.steps.<step>.branches.<answer>.min_probability` | `float` | Required | Confidence the answer needs, above `0` and at most `1`. Below it the firing is uncertain. |
+| `hooks.<name>.steps.<step>.branches.<answer>.next` | `string` | Empty | Step the answer moves to. Excludes `action`. |
+| `hooks.<name>.steps.<step>.branches.<answer>.action.kind` | `string` | Empty | Terminal decision the point allows. Excludes `next`. |
+| `hooks.<name>.steps.<step>.branches.<answer>.action.message` | `string` | Empty | Text the decision carries; required for `append`, `deny`, `short_circuit`, `annotate`, `replace`, `stop`, and `continue`. |
+
+```yaml
+hooks_files: [hooks/go-checks.yaml]
+
+hooks:
+  no-force-push:
+    point: before_tool
+    match:
+      tool: bash
+      command_contains: ["git push --force", "git push -f"]
+    max_fires_per_run: 1
+    entry: classify
+    steps:
+      classify:
+        question:
+          kind: bool
+          instructions: "Is this the force push to refuse?"
+          true: "the call force-pushes"
+          false: "the call is something else"
+        branches:
+          "yes":
+            min_probability: 0.9
+            action: { kind: deny, message: "Force push refused." }
+          "no":
+            min_probability: 0.5
+            action: { kind: allow }
+```
 
 ## Context & Compaction
 
@@ -362,7 +435,7 @@ A value of `0` disables the limit (except `truncation_retries`, where `0` disabl
 | `limits.max_tokens_per_run` | `int` | `0` (off) | Maximum tokens consumed in a single run (`≥ 0`). |
 | `limits.max_duration_s` | `int` | `0` (off) | Wall-clock time limit for a single run, in seconds (`≥ 0`). |
 | `limits.max_turns` | `int` | `0` (off) | Maximum model turns in a single run (`≥ 0`). |
-| `limits.max_continuations` | `int` | `0` (off) | Maximum continuations allowed in a run (`≥ 0`). |
+| `limits.max_continuations` | `int` | `3` | Maximum `before_settle` continuations allowed in a run (`≥ 0`); `0` keeps the runtime default of `3`. |
 | `limits.truncation_retries` | `int` | `1` | Consecutive truncated turns retried before settling `output_truncated`. Set `0` to disable (`≥ 0`). |
 
 ### `jobs`

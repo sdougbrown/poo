@@ -1,6 +1,6 @@
 ---
 title: Decision Model
-description: Configure roles.decider to power fast yes/no and classifier judgments for permissions, feed filtering, and large tool catalog search.
+description: Configure roles.decider to power fast yes/no and classifier judgments for permissions, feed filtering, large tool catalog search, and declarative hooks.
 ---
 
 # Decision Model
@@ -64,10 +64,10 @@ roles:
 
 ## Where `poo` uses the decision model
 
-Today, three built-in subsystems call `roles.decider` when it is configured.
+Today, four built-in subsystems call `roles.decider` when it is configured.
 
 ::: info Growing surface
-This subsystem set is not the end of the road. `poo` is under active development, and more decision-backed capabilities, integrations, and hooks will be added over time. Custom Go binaries can also call `poo/decide.Decider` directly from their own [hooks](/extending/architecture).
+This subsystem set is not the end of the road. `poo` is under active development, and more decision-backed capabilities and integrations will be added over time. Custom Go binaries can also call `poo/decide.Decider` directly from their own [hooks](/extending/architecture).
 :::
 
 ### 1. Permission asker (`perm/decide`)
@@ -126,3 +126,9 @@ Question filters **fail open** and deliver messages unfiltered when screening ca
 Sessions with [CLI Registry](/capabilities/cli-registry) manifests and [MCP servers](/capabilities/mcp-servers) can accumulate dozens or hundreds of entries. When the catalog exceeds 30 entries (`cli.FindThreshold`) and a decision model is configured, `poo` offers `find_tool` instead of dumping the full catalog into the system prompt.
 
 When the model calls `find_tool` with a natural-language `intent`, `poo` asks the decision model one `Bool` question per offered entry. Requests batch up to 64 questions each, with up to 4 requests in flight. `find_tool` returns the top 8 matching entries ranked best-first with their schemas. If the search fails or the decider is unavailable, `find_tool` returns a short notice instead of dumping the catalog.
+
+### 4. Declarative hooks (`hook/`)
+
+A [decision hook](/capabilities/decision-hooks) is a policy file that declares its own questions and the decision each answer takes. A hook's steps are `Bool`, `Choice`, or `Score` questions with their own instructions, and the answer's confidence is checked against a `min_probability` per branch. No decider means no hook: a profile that activates hooks fails to build without `roles.decider`, rather than failing open at every call.
+
+Each step's question carries the ID `hook:<name>:<step>`, and each ask is recorded like any other decision. Hooks share the decider with the three subsystems above, so `decider.timeout_ms` bounds one hook ask as well.
