@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -331,6 +332,9 @@ func TestAHookThatFailsTakesItsOnErrorPolicy(t *testing.T) {
 				}
 				if !errors.Is(err, decide.ErrDeferred) {
 					t.Errorf("the failure does not carry the deferral: %v", err)
+				}
+				if text := failure.Error(); !strings.Contains(text, testHookName) || !strings.Contains(text, string(PointBeforeTool)) {
+					t.Errorf("the settle detail %q does not name the hook and its point", text)
 				}
 			},
 		},
