@@ -22,6 +22,10 @@ import (
 //
 // A template is immutable, so copies of it share their parsed form.
 type Template struct {
+	// source is the value as the manifest wrote it. ParseTemplate is
+	// the field's single writer; Source reads it, so the listing shows
+	// the file's own words and not a reconstruction of them.
+	source string
 	// parts are the value's pieces, in the order they are written.
 	parts []templatePart
 }
@@ -102,7 +106,7 @@ func ParseTemplate(source string) (Template, error) {
 		}
 	}
 	flush()
-	return Template{parts: parts}, nil
+	return Template{source: source, parts: parts}, nil
 }
 
 // referencePart returns the piece a `${...}` reference names.
@@ -130,6 +134,15 @@ func referencePart(body string) (templatePart, error) {
 		return templatePart{kind: templateSession}, nil
 	}
 	return templatePart{kind: templateHost, text: name, defaultValue: value, hasDefault: hasDefault}, nil
+}
+
+// Source returns the value as the manifest wrote it: the literal text,
+// the references in the shape the manifest spells them, and a lone
+// dollar as the file wrote it, not doubled. A listing of the manifest's
+// servers reads this, so what it shows is what the file says and not
+// one session's resolution of it.
+func (t Template) Source() string {
+	return t.source
 }
 
 // Resolve returns the value the template stands for.

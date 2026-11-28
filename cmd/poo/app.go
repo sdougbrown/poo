@@ -151,6 +151,8 @@ Success is silent, including when no refresh is due. A failure exits nonzero.`
 const sessionsLong = `The sessions the store holds. list reads the store, and prune trims it by
 the settings' retention policy or by the flags.`
 
+// mcpLongComment keeps the mcp help body with its command in mcp.go.
+
 // versionLong is the help body of `poo version`.
 const versionLong = `The values come from the binary's own build information: the module
 version for a binary installed with ` + "`go install module@version`" + `, and the
@@ -272,6 +274,12 @@ func pooApp(stdout io.Writer) *clicontract.App {
 				Short:       "List and prune the stored sessions",
 				Long:        sessionsLong,
 				Subcommands: []*clicontract.Command{sessionsListCommand(stdout), sessionsPruneCommand(stdout)},
+			},
+			{
+				Name:        "mcp",
+				Short:       "List, add and remove the mcp.json servers",
+				Long:        mcpLong,
+				Subcommands: []*clicontract.Command{mcpListCommand(stdout), mcpAddCommand(stdout), mcpRemoveCommand(stdout)},
 			},
 			{
 				Name:  "version",
