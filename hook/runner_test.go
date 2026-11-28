@@ -473,7 +473,12 @@ func TestAnInterruptedCallDropsTheHooksSay(t *testing.T) {
 			cancel()
 			return nil, context.Canceled
 		})
-		runner := runnerOf(checkHook(t, oneStep(PointBeforeTool, Action{Kind: ActionDeny, Message: "refused"})), decider)
+		// A failing policy makes the difference visible: an interrupt is
+		// not a hook failure, so the closed decision must not be taken.
+		spec := oneStep(PointBeforeTool, Action{Kind: ActionDeny, Message: "refused"})
+		spec.OnError = FailClosed
+		spec.FailClosedMessage = "the hook could not answer"
+		runner := runnerOf(checkHook(t, spec), decider)
 		hctx := runContext("run1", decider)
 		hctx.Context = ctx
 
@@ -574,12 +579,17 @@ func TestAnAnswerThatArrivesPastTheStepTimeoutIsDropped(t *testing.T) {
 	}
 	runner := runnerOf(checkHook(t, spec), decider)
 
+	started := time.Now()
 	decision, err := runner.BeforeTool(runContext("run1", decider), bashCall("git push"))
+	elapsed := time.Since(started)
 	if err != nil {
 		t.Fatalf("the late answer failed the hook: %v", err)
 	}
 	if decision.Denied {
 		t.Errorf("the hook decided %+v on an answer that arrived past its step's timeout", decision)
+	}
+	if elapsed >= time.Second {
+		t.Errorf("the step waited %v, past the %dms its own timeout allows", elapsed, spec.Steps["ask"].TimeoutMs)
 	}
 }
 
@@ -933,6 +943,50 @@ func TestAMalformedLabelMassFailsTheHook(t *testing.T) {
 			}
 			if !decision.Denied || decision.Detail != "the answer could not be read" {
 				t.Errorf("the answer produced %+v, want the on_error decision", decision)
+			}
+		})
+	}
+}
+
+func TestAHookWithNoDecisionModelTakesItsOnErrorPolicy(t *testing.T) {
+	spec := oneStep(PointBeforeTool, Action{Kind: ActionDeny, Message: "refused"})
+	spec.OnError = FailClosed
+	spec.FailClosedMessage = "the hook has nothing to ask"
+	runner := runnerOf(checkHook(t, spec), nil)
+
+	decision, err := runner.BeforeTool(runContext("run1", nil), bashCall("git push"))
+	if err != nil {
+		t.Fatalf("a hook with no decision model failed with %v", err)
+	}
+	if !decision.Denied || decision.Detail != "the hook has nothing to ask" {
+		t.Errorf("the hook decided %+v, want the on_error decision", decision)
+	}
+}
+
+func TestAMalformedAnswerFailsTheHook(t *testing.T) {
+	cases := []struct {
+		name          string
+		probabilities map[string]float64
+	}{
+		{name: "an answer missing", probabilities: map[string]float64{"yes": 1}},
+		{name: "a distribution that does not sum to one", probabilities: map[string]float64{"yes": 0.9, "no": 0.9}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			spec := oneStep(PointBeforeTool, Action{Kind: ActionDeny, Message: "refused"})
+			spec.OnError = FailClosed
+			spec.FailClosedMessage = "the answer could not be read"
+			decider := decide.DeciderFunc(func(_ context.Context, _ any, _ string, qs []decide.Question) ([]decide.Answer, error) {
+				return []decide.Answer{{ID: qs[0].ID, Probabilities: tc.probabilities}}, nil
+			})
+			runner := runnerOf(checkHook(t, spec), decider)
+
+			decision, err := runner.BeforeTool(runContext("run1", decider), bashCall("git push"))
+			if err != nil {
+				t.Fatalf("a malformed answer failed the hook: %v", err)
+			}
+			if !decision.Denied || decision.Detail != "the answer could not be read" {
+				t.Errorf("the hook decided %+v, want the on_error decision", decision)
 			}
 		})
 	}
