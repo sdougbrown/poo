@@ -1260,6 +1260,9 @@ func (s *Session) resumeStart(ctx context.Context, plan *ContinuationPlan, runID
 		s.mu.Lock()
 		s.reserved = false
 		s.mu.Unlock()
+		// The release acts on a result that queued under the
+		// reservation, the way the prompt's and the wake's do.
+		s.handleIdleJobResults()
 	}()
 	runCtx, cancel := context.WithCancelCause(resumeContextFor(ctx))
 	run := &runState{

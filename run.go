@@ -50,6 +50,11 @@ func (s *Session) Prompt(ctx context.Context, text string, opts ...InputOption) 
 	s.mu.Lock()
 	s.reserved = false
 	s.mu.Unlock()
+	// The reservation held the wake off: a result that queued while it
+	// stood was left on the queue by the idle pump, and the release has
+	// to act on it now. A run the release starts is a run the released
+	// reservation owed.
+	s.handleIdleJobResults()
 	if err != nil {
 		return "", err
 	}

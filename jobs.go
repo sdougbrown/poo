@@ -1594,6 +1594,10 @@ func (s *Session) handleIdleJobResults() {
 	s.debugTracef("idle pump exit: woken run started")
 	s.reserved = false
 	s.mu.Unlock()
+	// The woken run may have settled before the reservation cleared: a
+	// result that queued in that window was skipped by the busy guard,
+	// and the release pumps it the way the prompt's release does.
+	s.handleIdleJobResults()
 }
 
 // debugTracef appends one line to the fault-report trace under the
