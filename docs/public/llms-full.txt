@@ -2028,13 +2028,15 @@ An unmatched call costs nothing: no probe and no decision-model call. A matching
 | `command: [...]` | The exit status, plus the head of the command's combined output. |
 | `tool: {name, args}` | The read-only tool's text, capped at 8192 characters. |
 
-A probe runs a command or a tool, never both, and a hook runs at most four probes sequentially. A probe that names no `timeout_ms` gets 3000 milliseconds. A tool probe names `read`, `grep` or `history`, and the built session must offer that tool: a disabled tool fails the build. A command probe runs on the executor `tools.bash.executor` names, in the session's working directory, with the session's scrubbed environment.
+A probe runs a command or a tool, never both, and a hook runs at most four probes sequentially. A probe that names no `timeout_ms` gets 3000 milliseconds. A tool probe names `read`, `grep` or `history`, and the built session must offer that tool: a disabled tool fails the build, and so does a tool that only runs in the background, because a probe is a call the hook waits on. A command probe runs on the executor `tools.bash.executor` names, in the session's working directory, with the session's scrubbed environment.
 
 A probe should exit promptly on SIGTERM. The executor sends SIGTERM first and waits a kill grace before SIGKILL, 2 seconds for `local` and `bwrap`. A probe that ignores the signal can push its stop into the hook's deadline.
 
 ### Probe trust model
 
 A probe runs in the run's path, so its reach is the session's. With the `local` executor a probe command is **not sandboxed**: it runs in `poo`'s own process space and reaches whatever `poo` reaches. Point `tools.bash.executor` at `bwrap` when a probe must be confined (see [the sandbox](/operations/sandbox)). A probe is operator-written policy, never model output, so a probe's argv is as trusted as the settings file that holds it.
+
+The [permission engine](/operations/permissions-and-safety) does not see a probe. A probe raises no ask, so a `deny` rule and `ask_outside_working_dir` bound the model's calls and not a hook's: what a probe reaches is what the tool's own restrictions allow, such as `restrict_to_working_dir` and `tools.protected_paths`. A hook that must be confined gets that from the executor, not from a permission rule.
 
 A **nonzero exit code is evidence, not an error**. `gofmt -l` reports findings with status 1, and a hook that read that status as a failure could never ask about the finding. A probe fails when it cannot start, times out, is stopped, or calls a tool that reports an error; that failure takes `on_error`.
 
