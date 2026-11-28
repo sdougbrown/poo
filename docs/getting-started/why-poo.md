@@ -5,9 +5,11 @@ description: The design philosophy behind poo — engineered agents, the extensi
 
 # Why poo?
 
-Many JS-written harnesses like pi promote a self-improving agent. `poo` promotes an **engineered agent**.
+Many JS-written harnesses like [pi](https://pi.dev) promote a *self-improving* agent. `poo` promotes an **engineered agent**.
 
-Instead of a runtime plugin ecosystem that mutates itself mid-session, `poo` ships two deliverables from one Go codebase. The first is a **headless CLI** that runs a session to completion without a TUI. The second is an **embeddable Go library** that a wrapping application links into its own binary. What you leave out of a build cannot be reached at runtime — a read-only proving binary simply does not link `bash`.
+Those two designs excel at different things. A self-improving harness shines when you want an agent that fluidly writes and loads its own extensions at runtime. `poo` targets the complementary space: predictable capability boundaries, headless automation, and custom Go binaries.
+
+From one Go codebase, `poo` ships two deliverables. The first is a **headless CLI** (with an interactive [REPL](/getting-started/repl)) that runs sessions without a TUI. The second is an **embeddable Go library** that a wrapping application links into its own binary. What you leave out of a build cannot be reached at runtime — a read-only proving binary simply does not link `bash`.
 
 ## The Extensibility Ladder
 
