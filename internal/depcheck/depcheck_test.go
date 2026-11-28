@@ -16,7 +16,7 @@ import (
 // poo/prompt, poo/prompt/agentsmd, poo/decide and poo/wire/protocol may
 // import the standard library only, and poo/provider/catalog may import the
 // standard library and the core package. perm may add protect, the shared
-// path resolver, and hook may add decide, the model its questions ask.
+// path resolver, and hook may add the core, decide and exec packages.
 func TestRepoImports(t *testing.T) {
 	root := moduleRoot(t)
 	modulePath := modulePathOf(t, root)

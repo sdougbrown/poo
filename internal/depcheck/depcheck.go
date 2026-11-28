@@ -17,9 +17,9 @@
 //     the same resolver the tools use
 //   - the perm/decide package may import the standard library, the core
 //     package, the perm package and the decide package
-//   - the hook package may import the standard library and the decide
-//     package, for a hook's questions are the decision model's and its
-//     spec is checked before any runner exists
+//   - the hook package may import the standard library, the core
+//     package, the decide package and the exec package, for a hook's
+//     questions are the decision model's and its probes run on an executor
 //   - the session package may import the standard library, the core
 //     package and the decide package
 //   - the session/sqlite package may import the standard library, the
@@ -157,7 +157,7 @@ func (c Checker) rules() []rule {
 		{path: m + "/provider/internal/anthropic", allowed: []string{m, m + "/provider/internal/support", m + "/provider/internal/transport"}},
 		{path: m + "/perm", allowed: []string{m, m + "/internal/urlnorm", m + "/protect"}},
 		{path: m + "/perm/decide", allowed: []string{m, m + "/perm", m + "/decide"}},
-		{path: m + "/hook", allowed: []string{m + "/decide"}},
+		{path: m + "/hook", allowed: []string{m, m + "/decide", m + "/exec"}},
 		{path: m + "/session", allowed: []string{m, m + "/decide"}},
 		// The SQLite-backed store: the opt-in alternative to the file
 		// store, a binary links it and registers it by the settings'
