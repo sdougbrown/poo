@@ -1,0 +1,126 @@
+{
+  "version": 1,
+  "fields": {
+    "point": { "required": true, "isEmpty": "string" },
+    "on_error": { "isEmpty": "string" },
+    "on_uncertain": { "isEmpty": "string" },
+    "fail_closed_message": { "isEmpty": "string" },
+    "firing_timeout_ms": { "isEmpty": "number" },
+    "max_fires_per_run": { "isEmpty": "number" }
+  },
+  "rules": [
+    {
+      "type": "check",
+      "field": "point",
+      "op": "matches",
+      "pattern": "^(before_run|before_tool|after_tool|after_turn|before_settle)$",
+      "reason": "point must be before_run, before_tool, after_tool, after_turn or before_settle"
+    },
+    {
+      "type": "check",
+      "field": "on_error",
+      "op": "matches",
+      "pattern": "^(fail_open|fail_closed|fail_run)$",
+      "reason": "on_error must be fail_open, fail_closed or fail_run"
+    },
+    {
+      "type": "check",
+      "field": "on_uncertain",
+      "op": "matches",
+      "pattern": "^(fail_open|fail_closed|fail_run)$",
+      "reason": "on_uncertain must be fail_open, fail_closed or fail_run"
+    },
+    {
+      "type": "check",
+      "field": "firing_timeout_ms",
+      "op": "min",
+      "value": 1,
+      "reason": "firing_timeout_ms must be at least a millisecond"
+    },
+    {
+      "type": "check",
+      "field": "max_fires_per_run",
+      "op": "min",
+      "value": 1,
+      "reason": "max_fires_per_run must be at least one firing"
+    },
+    {
+      "type": "fairWhen",
+      "field": "on_error",
+      "when": {
+        "op": "not",
+        "expr": {
+          "op": "and",
+          "exprs": [
+            {
+              "op": "in",
+              "field": "point",
+              "values": ["before_run", "after_tool"]
+            },
+            { "op": "eq", "field": "on_error", "value": "fail_closed" }
+          ]
+        }
+      },
+      "reason": "a before_run or after_tool hook has no denial to fail closed with, so on_error cannot be fail_closed"
+    },
+    {
+      "type": "fairWhen",
+      "field": "on_uncertain",
+      "when": {
+        "op": "not",
+        "expr": {
+          "op": "and",
+          "exprs": [
+            {
+              "op": "in",
+              "field": "point",
+              "values": ["before_run", "after_tool"]
+            },
+            { "op": "eq", "field": "on_uncertain", "value": "fail_closed" }
+          ]
+        }
+      },
+      "reason": "a before_run or after_tool hook has no denial to fail closed with, so on_uncertain cannot be fail_closed"
+    },
+    {
+      "type": "requires",
+      "field": "on_error",
+      "dependencies": [
+        {
+          "op": "or",
+          "exprs": [
+            { "op": "present", "field": "fail_closed_message" },
+            { "op": "neq", "field": "on_error", "value": "fail_closed" }
+          ]
+        }
+      ],
+      "reason": "a fail_closed on_error needs fail_closed_message, the text the denial carries"
+    },
+    {
+      "type": "requires",
+      "field": "on_uncertain",
+      "dependencies": [
+        {
+          "op": "or",
+          "exprs": [
+            { "op": "present", "field": "fail_closed_message" },
+            { "op": "neq", "field": "on_uncertain", "value": "fail_closed" }
+          ]
+        }
+      ],
+      "reason": "a fail_closed on_uncertain needs fail_closed_message, the text the denial carries"
+    },
+    {
+      "type": "requires",
+      "field": "fail_closed_message",
+      "when": {
+        "op": "or",
+        "exprs": [
+          { "op": "eq", "field": "on_error", "value": "fail_closed" },
+          { "op": "eq", "field": "on_uncertain", "value": "fail_closed" }
+        ]
+      },
+      "reason": "fail_closed_message is the text a fail_closed policy gives: it needs on_error or on_uncertain to be fail_closed"
+    }
+  ]
+}
