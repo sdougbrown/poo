@@ -1,14 +1,20 @@
 package poo_test
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"unicode/utf8"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/tool/grep"
+	"github.com/sdougbrown/poo/tool/read"
 )
 
 // The read-only probe seam is the one way a hook reaches the tree. The
@@ -409,5 +415,110 @@ func TestAProbeTruncatesItsOutput(t *testing.T) {
 				t.Error("the probe's text is not the head of the tool's output")
 			}
 		})
+	}
+}
+
+// TestAProbeSurvivesAToolThatPanics covers the crash: a probed tool runs
+// on the hook's own goroutine, where nothing else recovers it, so a tool
+// that panics comes back to the hook as an error and the run finishes.
+func TestAProbeSurvivesAToolThatPanics(t *testing.T) {
+	read := &namedTool{name: "read", echoTool: echoTool{call: func(context.Context) (poo.ToolResult, error) {
+		panic("the tool came apart")
+	}}}
+	hook := newProbeHook("read", `{"path":"go.mod"}`)
+	opts := probeOptions(t, scripted([]fakeResponse{{text: "done"}}), &recordingSink{}, &echoTool{result: "the effect"}, read)
+	opts.SessionStart = []poo.SessionStartHook{hook}
+	s := newTestSession(t, opts)
+
+	res := runSession(t, s, "start")
+
+	p := hook.Points()["session_start"]
+	if p.err == nil {
+		t.Fatalf("the probe of a panicking tool returned %q with no error, want the panic reported", p.observation.Text)
+	}
+	if got := p.err.Error(); !strings.Contains(got, "the tool came apart") {
+		t.Errorf("the probe failed with %q, want the panic's own text", got)
+	}
+	if p.observation.Text != "" {
+		t.Errorf("the probe saw %q, want nothing: the tool never returned", p.observation.Text)
+	}
+	if res.Reason != poo.ReasonEndTurn {
+		t.Errorf("the run settled %s, want %s: a panic in a probe is the probe's", res.Reason, poo.ReasonEndTurn)
+	}
+}
+
+// TestAProbeObeysTheSessionsReadRestrictions covers the environment: a
+// probe runs the real read and grep tools with the session's own
+// restrictions, so a protected path and a path outside the working
+// directory are refused before anything is read, and the search skips
+// the protected file.
+func TestAProbeObeysTheSessionsReadRestrictions(t *testing.T) {
+	dir := t.TempDir()
+	outside := t.TempDir()
+	secret := filepath.Join(dir, "secret.txt")
+	if err := os.WriteFile(secret, []byte("the guarded line\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	notes := filepath.Join(dir, "notes.md")
+	if err := os.WriteFile(notes, []byte("the public line\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	outsideFile := filepath.Join(outside, "outside.txt")
+	if err := os.WriteFile(outsideFile, []byte("the outside line\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Each hook probes one path, and names what it expects to see.
+	tests := []struct {
+		name     string
+		tool     string
+		args     string
+		wantErr  bool
+		wantText string
+	}{
+		{name: "a protected path", tool: "read", args: `{"path":"secret.txt"}`, wantErr: true},
+		{name: "a path outside the working directory", tool: "read", args: fmt.Sprintf(`{"path":%q}`, outsideFile), wantErr: true},
+		{name: "a search of the working directory", tool: "grep", args: `{"pattern":"the"}`, wantText: "the public line"},
+		{name: "a search outside the working directory", tool: "grep", args: fmt.Sprintf(`{"path":%q,"pattern":"the"}`, outside), wantErr: true},
+	}
+	opts := testOptions(t, scripted([]fakeResponse{{text: "done"}}), &echoTool{result: "the effect"}, &recordingSink{})
+	opts.WorkingDir = dir
+	opts.ProtectedPaths = []string{secret}
+	opts.RestrictRead = true
+	opts.RestrictGrep = true
+	opts.Tools["read"] = read.New()
+	opts.Tools["grep"] = grep.New()
+	opts.ToolOrder = []string{"echo", "read", "grep"}
+	hooks := map[string]*probeHook{}
+	for _, tt := range tests {
+		hook := newProbeHook(tt.tool, tt.args)
+		hooks[tt.name] = hook
+		opts.SessionStart = append(opts.SessionStart, hook)
+	}
+	newTestSession(t, opts)
+
+	for _, tt := range tests {
+		p, ok := hooks[tt.name].Points()["session_start"]
+		if !ok {
+			t.Fatalf("the probe of %s recorded nothing", tt.name)
+		}
+		if tt.wantErr {
+			if p.err == nil {
+				t.Errorf("the probe of %s returned %q, want it refused", tt.name, p.observation.Text)
+			}
+			if p.observation.Text != "" {
+				t.Errorf("the probe of %s saw %q, want nothing", tt.name, p.observation.Text)
+			}
+			continue
+		}
+		if p.err != nil {
+			t.Fatalf("the probe of %s failed with %v, want the allowed content", tt.name, p.err)
+		}
+		if !strings.Contains(p.observation.Text, tt.wantText) {
+			t.Errorf("the probe of %s saw %q, want it to hold %q", tt.name, p.observation.Text, tt.wantText)
+		}
+		if strings.Contains(p.observation.Text, "the guarded line") {
+			t.Errorf("the probe of %s saw the protected file's content: %q", tt.name, p.observation.Text)
+		}
 	}
 }

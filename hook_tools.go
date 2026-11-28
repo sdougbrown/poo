@@ -74,7 +74,18 @@ type readOnlyToolCaller struct {
 // session's read restrictions. What follows the call is nothing: the
 // probe appends no history, writes no record, emits no event, raises no
 // permission ask and touches no repeat counter.
-func (c *readOnlyToolCaller) CallReadOnly(ctx context.Context, name string, args json.RawMessage) (HookToolObservation, error) {
+func (c *readOnlyToolCaller) CallReadOnly(ctx context.Context, name string, args json.RawMessage) (observation HookToolObservation, err error) {
+	// A tool that panics runs here on the hook's goroutine, where the
+	// hook dispatch recovers nothing: the panic would end the process.
+	// The model's own call path reports a panicking tool as a fatal
+	// tool error, and a probe reports one to the hook the same way.
+	defer func() {
+		if r := recover(); r != nil {
+			observation = HookToolObservation{}
+			err = Fatalf("the %s tool panicked: %v", name, r)
+		}
+	}()
+
 	s := c.session
 	if ctx == nil {
 		ctx = context.Background()
@@ -116,9 +127,9 @@ func (c *readOnlyToolCaller) CallReadOnly(ctx context.Context, name string, args
 	env.Decider = nil
 	env.Settings.ObservationCapChars = HookToolMaxOutputChars
 	env.Settings.ReadOutputCapChars = HookToolMaxOutputChars
-	result, err := tool.Call(ctx, prepared, env)
-	if err != nil {
-		return HookToolObservation{}, err
+	result, callErr := tool.Call(ctx, prepared, env)
+	if callErr != nil {
+		return HookToolObservation{}, callErr
 	}
 	text, elided := cutRuneHead(result.Text, HookToolMaxOutputChars)
 	return HookToolObservation{Text: text, IsError: result.IsError, Truncated: elided > 0}, nil
