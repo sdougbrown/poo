@@ -1,0 +1,58 @@
+# poo
+
+> Modular Go agent harness — headless CLI and embeddable Go library built for engineered agents.
+
+Full concatenated documentation: https://poo.douggo.com/llms-full.txt
+
+## Getting Started
+
+- [Why poo?](https://poo.douggo.com/getting-started/why-poo): The design philosophy behind poo — engineered agents, the extensibility ladder, stdlib-only core, explicit FSM, non-silent history, and Harbor eval results.
+- [Install](https://poo.douggo.com/getting-started/install): Install poo via the release script, go install, or build from source with mise, and verify with poo version.
+- [Quickstart](https://poo.douggo.com/getting-started/quickstart): Run your first poo session in 60 seconds against a local OpenAI-compatible endpoint or a built-in provider, verify roles, and launch the REPL.
+- [Interactive REPL](https://poo.douggo.com/getting-started/repl): Using poo repl — vi input mode, Bash Ctrl chords, slash commands, permission prompts, statusline, and continuing or resuming sessions.
+
+## Configuration & Models
+
+- [Settings Discovery](https://poo.douggo.com/configuration/settings-discovery): How poo locates settings files, selects parsers, validates keys, and resolves relative paths.
+- [Models & Catalog](https://poo.douggo.com/configuration/models-and-catalog): Configure endpoints, models, roles, context limits, and understand how poo layers and inspects its model catalog.
+- [Reasoning & Sampling](https://poo.douggo.com/configuration/reasoning-and-sampling): Configure reasoning controls, effort levels, token budgets, per-model sampling, transport quirks, and tool-calling modes.
+- [Providers & Auth](https://poo.douggo.com/configuration/providers-and-auth): Configure credential files, built-in providers (Codex, Ollama Cloud, OpenCode, TypeSafe), custom OpenAI-compatible and Anthropic Messages endpoints, and auth verification.
+- [Profiles & Prompts](https://poo.douggo.com/configuration/profiles-and-prompts): Configure built-in and named profiles, profile layering, system prompt sections, user and project instructions, and prompt inspection.
+
+## Capabilities
+
+- [Feeds & Daemon](https://poo.douggo.com/capabilities/feeds-and-daemon): Push asynchronous external events into a poo session with long-lived feeds, filter them before delivery, and host always-on agents with poo daemon.
+- [Context Compaction](https://poo.douggo.com/capabilities/compaction): How poo manages long sessions transparently with mine, pointer, summary, handoff, native, and none compaction strategies, the fit rule, and the dedicated compaction role.
+- [Decision Model](https://poo.douggo.com/capabilities/decision-model): Configure roles.decider to power fast yes/no and classifier judgments for permissions, feed filtering, and large tool catalog search.
+- [CLI Registry & Script Tools](https://poo.douggo.com/capabilities/cli-registry): Inject custom CLI commands and non-CLI JSON scripts into poo without building a custom Go binary.
+- [MCP Servers](https://poo.douggo.com/capabilities/mcp-servers): Connect stdio Model Context Protocol servers, call their tools via call_mcp and find_tool, subscribe to resource feeds, and handle bounded auto-relaunch.
+- [Codemode](https://poo.douggo.com/capabilities/codemode): Execute model-written QuickJS or Starlark scripts through poo's nested-call seam with full permission, doom-loop, and session-log enforcement.
+- [Skills](https://poo.douggo.com/capabilities/skills): Offer progressive-disclosure SKILL.md guidance directories without bloating the system prompt.
+- [Built-in Tools & Jobs](https://poo.douggo.com/capabilities/tools-and-jobs): Reference for poo's built-in tools (bash, read, edit, write, grep, fetch, history, finish, jobs, cancel_job) and background job mechanics.
+
+## Safety & Operations
+
+- [Permissions & Safety](https://poo.douggo.com/operations/permissions-and-safety): Configure permission rules, asker chains, doom-loop detection, protected paths, working directory boundaries, and child environment filtering in poo.
+- [The sandbox](https://poo.douggo.com/operations/sandbox): Poo runs the commands a model asks for through an **executor**. The executor decides where the command runs. There are two:
+- [Sessions & Durability](https://poo.douggo.com/operations/sessions-and-durability): Persistence modes, JSONL and SQLite stores, session locking and lease TTLs, crash recovery, auto-resume, and session retention in poo.
+- [Limits & Exit Codes](https://poo.douggo.com/operations/limits-and-exit-codes): Run budgets, truncation retries, settle-reason exit codes for poo run, and daemon exit codes.
+
+## Extending & Embedding
+
+- [Architecture](https://poo.douggo.com/extending/architecture): Package layout, stdlib-only core dependency boundary, session FSM states, hook points, and provider-neutral message model.
+- [Build Your Own Binary](https://poo.douggo.com/extending/custom-binary): Compose a custom poo binary with server.New, wire.Serve, wire.Factory, profiles, executors, and a compile-time closure gate.
+- [Custom Tools & Prompts](https://poo.douggo.com/extending/custom-tools-and-prompts): Inject Go tools via poo.Tool, override embedded prompt sections with PromptFS, and implement custom command executors with poo/exec.
+- [Wire Protocol](https://poo.douggo.com/extending/wire-protocol): JSON-RPC 2.0 control protocol over stdio served by poo serve, including session methods, run methods, server notifications, permission asks, and poo/wire/protocol.
+- [Conformance & Testing](https://poo.douggo.com/extending/conformance-and-testing): Verify custom binaries with poo/wire/conformance, run client integration tests with conformance.NewFakeEndpoint, and unit-test sessions with poo/pootest.
+- [Prior art](https://poo.douggo.com/extending/prior-art): What poo copies from other work, and what it rejects. This is a short list, not an essay. Each source records exactly what was read and when.
+
+## Reference
+
+- [CLI Reference](https://poo.douggo.com/reference/cli): Complete reference for the poo CLI front door, shared flags, and every subcommand.
+- [Settings Reference](https://poo.douggo.com/reference/settings): Complete key-by-key reference for poo settings files across JSON, YAML, and TOML.
+- [Models File Reference](https://poo.douggo.com/reference/models-file): Complete schema for models.yaml, pi models.json import rules, builtin-models.yaml, and POO_BUILTIN_MODELS.
+- [Manifests Reference](https://poo.douggo.com/reference/manifests): Side-by-side schema reference for feeds, cli_registry, and mcp.json manifests, XDG default directories, and profile interaction.
+- [Session log v0](https://poo.douggo.com/reference/session-log-v0): A poo session log is an append-only JSONL file: one JSON object per line, in the order the records were produced. This document is the contract a consumer parses.
+- [Wire API mapping](https://poo.douggo.com/reference/wire-api-mapping): A paper round-trip through poo's internal message model, for the three wire APIs the model has to survive: **Chat Completions**, **OpenAI Responses (stateless)** and **Anthropic Messages**.
+- [Evals & Benchmarks](https://poo.douggo.com/reference/evals): Built-in poo-eval suite, bwrap isolation, baseline management, and the Harbor adapter for Terminal-Bench and SWE-bench.
+- [Observed](https://poo.douggo.com/reference/observed): What the eval harness has seen. This is the Stage 1 deliverable named in the plan: the observed failure modes, written down so that Stage 3's failure table and defaults can be checked against them before Stage 3 starts.
