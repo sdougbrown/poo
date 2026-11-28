@@ -19,6 +19,7 @@ Packages are grouped by subsystem:
 | `poo/prompt` | System prompt vocabulary: named sections, variants, and template environment |
 | `poo/decide` | Decision-model contract: questions, answers, `Decider`, and recording wrapper |
 | `poo/exec` | Executor contract (`Executor`, `Command`, `Process`), registry, and env scrubbing |
+| `poo/hook` | Declarative decision hooks: the spec check, the probe runner, and the runner that adapts a hook to the five points |
 | `poo/protect` | Protected-path matcher shared by tools and permission policy |
 | `poo/pootest` | Exported test helpers: scripted transport, in-memory sink, stub decider, scripted compactor |
 
@@ -127,6 +128,8 @@ Hooks extend the session lifecycle without altering the FSM. Every hook receives
 | `WithSessionAttach` (`AttachFunc`) | Once during live session construction (including resume), before feeds or runs | Attach session-owned subsystems (such as MCP servers) and return a close function |
 
 Hooks that are safe to re-run after a crash mid-hook on durable sessions may implement `poo.IdempotentHook`. Hooks that do not implement it are never re-executed on recovery.
+
+`HookContext.WorkingDir` is the directory the session's tools work in, which a session may choose for itself. `HookContext.ReadOnlyTools` runs a bounded probe over the session's own `read`, `grep` and `history` tools: the probe starts no tracked call, writes no record, and raises no permission ask. A declarative [decision hook](/capabilities/decision-hooks) receives both fields, and the `hook/` package runs it at one of these points.
 
 ## Provider-neutral message model
 

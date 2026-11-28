@@ -23,7 +23,8 @@ Full concatenated documentation: https://poo.douggo.com/llms-full.txt
 
 - [Feeds & Daemon](https://poo.douggo.com/capabilities/feeds-and-daemon): Push asynchronous external events into a poo session with long-lived feeds, filter them before delivery, and host always-on agents with poo daemon.
 - [Context Compaction](https://poo.douggo.com/capabilities/compaction): How poo manages long sessions transparently with mine, pointer, summary, handoff, native, and none compaction strategies, the fit rule, and the dedicated compaction role.
-- [Decision Model](https://poo.douggo.com/capabilities/decision-model): Configure roles.decider to power fast yes/no and classifier judgments for permissions, feed filtering, and large tool catalog search.
+- [Decision Model](https://poo.douggo.com/capabilities/decision-model): Configure roles.decider to power fast yes/no and classifier judgments for permissions, feed filtering, large tool catalog search, and declarative hooks.
+- [Decision Hooks](https://poo.douggo.com/capabilities/decision-hooks): Declare hook policies that match tool calls, gather probe evidence, ask the decision model typed questions, and return a typed decision or a policy fallback.
 - [CLI Registry & Script Tools](https://poo.douggo.com/capabilities/cli-registry): Inject custom CLI commands and non-CLI JSON scripts into poo without building a custom Go binary.
 - [MCP Servers](https://poo.douggo.com/capabilities/mcp-servers): Connect stdio Model Context Protocol servers, call their tools via call_mcp and find_tool, subscribe to resource feeds, and handle bounded auto-relaunch.
 - [Codemode](https://poo.douggo.com/capabilities/codemode): Execute model-written QuickJS or Starlark scripts through poo's nested-call seam with full permission, doom-loop, and session-log enforcement.

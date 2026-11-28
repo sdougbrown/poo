@@ -37,6 +37,7 @@ const sections = [
       'capabilities/feeds-and-daemon.md',
       'capabilities/compaction.md',
       'capabilities/decision-model.md',
+      'capabilities/decision-hooks.md',
       'capabilities/cli-registry.md',
       'capabilities/mcp-servers.md',
       'capabilities/codemode.md',

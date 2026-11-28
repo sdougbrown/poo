@@ -46,6 +46,8 @@ The file extension selects the parser:
 
 All three formats normalize to the same canonical JSON representation before decoding, so keys, types, and validation rules behave identically across JSON, YAML, and TOML.
 
+YAML scalar keys are read as their text. An unquoted `true:` or `false:` and an unquoted integer key such as `0:` become the strings `"true"`, `"false"`, and `"0"`. A key written either way names the same setting. Two keys in one mapping that spell the same text, such as `True:` and `"true":`, are refused. The normalization applies to every settings YAML file, hooks included.
+
 ## Strict Unknown-Key Rejection
 
 Settings are decoded strictly (`DisallowUnknownFields`). Any unrecognized key—or a key with the wrong value type—fails the load and names the offending field.

@@ -398,6 +398,8 @@ The file extension selects the parser:
 
 All three formats normalize to the same canonical JSON representation before decoding, so keys, types, and validation rules behave identically across JSON, YAML, and TOML.
 
+YAML scalar keys are read as their text. An unquoted `true:` or `false:` and an unquoted integer key such as `0:` become the strings `"true"`, `"false"`, and `"0"`. A key written either way names the same setting. Two keys in one mapping that spell the same text, such as `True:` and `"true":`, are refused. The normalization applies to every settings YAML file, hooks included.
+
 ## Strict Unknown-Key Rejection
 
 Settings are decoded strictly (`DisallowUnknownFields`). Any unrecognized key—or a key with the wrong value type—fails the load and names the offending field.
@@ -1099,6 +1101,7 @@ profiles:
     cli_registry_defaults: false
     mcp_defaults: false
     mcp_servers: [github]
+    hooks: [pre-push-gofmt]
     tools:
       disabled: [edit, write, bash, codemode]
 ```
@@ -1117,7 +1120,11 @@ profiles:
 | `cli_registry_defaults` | bool | Overrides `cli_registry.defaults` for sessions under this profile. Omitting it keeps the top-level setting. |
 | `mcp_defaults` | bool | Overrides `mcp.defaults` for sessions under this profile. Omitting it keeps the top-level setting. |
 | `mcp_servers` | list of strings | [MCP servers](/capabilities/mcp-servers) this profile's sessions start, by server name; adds to the base's selection (deduplicated, first-appearance order). `mcp.paths` still controls which manifests load; a selected server that is not loaded is skipped with a warning, and no server starts without a selection. |
+| `hooks` | list of strings | [Decision hooks](/capabilities/decision-hooks) this profile runs, by name; adds to the base's chain (deduplicated, first-appearance order). A name the settings do not declare fails the build. |
+| `hooks_disabled` | list of strings | Hook names dropped from this profile's chain, including ones the base runs. A name the profile both runs and turns off fails the build. |
 | `tools.disabled` | list of strings | Tool exclusions added on top of global `tools.disabled`. Exclusions do not alter [permission rules](/operations/permissions-and-safety) or sandbox the remaining tools. |
+
+The hooks chain grows down the inheritance line: a profile runs its base's hooks, then its own, and `hooks_disabled` removes names at any depth. A profile that ends up with hooks needs `roles.decider` set, because every hook asks the decision model.
 
 An explicit `system_prompt.replace`, or a `system_prompt` rule that sets or removes the `profile` section, takes precedence over `prompt_file`, `prompt_append`, and `prompt_append_file`. A resumed session keeps the prompt recorded in its log once it has run.
 
@@ -1828,10 +1835,10 @@ roles:
 
 ## Where `poo` uses the decision model
 
-Today, three built-in subsystems call `roles.decider` when it is configured.
+Today, four built-in subsystems call `roles.decider` when it is configured.
 
 ::: info Growing surface
-This subsystem set is not the end of the road. `poo` is under active development, and more decision-backed capabilities, integrations, and hooks will be added over time. Custom Go binaries can also call `poo/decide.Decider` directly from their own [hooks](/extending/architecture).
+This subsystem set is not the end of the road. `poo` is under active development, and more decision-backed capabilities and integrations will be added over time. Custom Go binaries can also call `poo/decide.Decider` directly from their own [hooks](/extending/architecture).
 :::
 
 ### 1. Permission asker (`perm/decide`)
@@ -1890,6 +1897,228 @@ Question filters **fail open** and deliver messages unfiltered when screening ca
 Sessions with [CLI Registry](/capabilities/cli-registry) manifests and [MCP servers](/capabilities/mcp-servers) can accumulate dozens or hundreds of entries. When the catalog exceeds 30 entries (`cli.FindThreshold`) and a decision model is configured, `poo` offers `find_tool` instead of dumping the full catalog into the system prompt.
 
 When the model calls `find_tool` with a natural-language `intent`, `poo` asks the decision model one `Bool` question per offered entry. Requests batch up to 64 questions each, with up to 4 requests in flight. `find_tool` returns the top 8 matching entries ranked best-first with their schemas. If the search fails or the decider is unavailable, `find_tool` returns a short notice instead of dumping the catalog.
+
+### 4. Declarative hooks (`hook/`)
+
+A [decision hook](/capabilities/decision-hooks) is a policy file that declares its own questions and the decision each answer takes. A hook's steps are `Bool`, `Choice`, or `Score` questions with their own instructions, and the answer's confidence is checked against a `min_probability` per branch. No decider means no hook: a profile that activates hooks fails to build without `roles.decider`, rather than failing open at every call.
+
+Each step's question carries the ID `hook:<name>:<step>`, and each ask is recorded like any other decision. Hooks share the decider with the three subsystems above, so `decider.timeout_ms` bounds one hook ask as well.
+
+---
+
+<!-- Source: capabilities/decision-hooks.md -->
+
+# Decision Hooks
+
+A **decision hook** is a policy file, not code. It names one of `poo`'s [hook points](/extending/architecture#hook-points), the calls it matches, the evidence it gathers, and a small graph of typed questions. The [decision model](/capabilities/decision-model) answers those questions. Each answer then picks a terminal decision the core carries out.
+
+Hooks never become a second lifecycle owner. A hook returns a typed decision or an error, and the existing owners do the rest. `execute.go` records the paired tool result, the finalizer settles the run, and the job owner closes a background job's completion signal.
+
+## A complete `settings.yaml`
+
+```yaml
+# settings.yaml
+version: 1
+
+roles:
+  chat: opencode-go/glm-5.3
+  decider: typesafe/jev-latest
+
+hooks:
+  pre-push-gofmt:
+    point: before_tool
+    match:
+      tool: bash
+      command_contains: ["git push", "git commit"]
+    max_fires_per_run: 3
+    firing_timeout_ms: 8000
+    on_uncertain: fail_open
+    on_error: fail_open
+    context:
+      turns: 8
+      include_tool_call: true
+      include_working_dir: true
+      probes:
+        - name: unformatted_files
+          command: ["gofmt", "-l", "."]
+          timeout_ms: 3000
+        - name: go_mod
+          tool:
+            name: read
+            args: { path: "go.mod", limit: 30 }
+    entry: is_pushing_go_code
+    steps:
+      is_pushing_go_code:
+        timeout_ms: 1500
+        question:
+          kind: bool
+          instructions: "Is the pending bash command committing or pushing Go changes while unformatted_files is non-empty?"
+          true: "committing or pushing while unformatted Go files exist"
+          false: "safe to proceed"
+        branches:
+          "yes":
+            min_probability: 0.75
+            next: classify_fix
+          "no":
+            min_probability: 0.5
+            action: { kind: allow }
+      classify_fix:
+        timeout_ms: 1500
+        question:
+          kind: choice
+          instructions: "Which instruction should be given to the agent?"
+          options:
+            - { name: run_gofmt, desc: "Tell the agent to run gofmt first" }
+            - { name: allow_anyway, desc: "False positive; allow the command" }
+        branches:
+          run_gofmt:
+            min_probability: 0.70
+            action:
+              kind: deny
+              message: "Unformatted Go files were detected. Run `gofmt -w .` before committing or pushing."
+          allow_anyway:
+            min_probability: 0.5
+            action: { kind: allow }
+
+profiles:
+  strict-go:
+    base: code
+    hooks: [pre-push-gofmt]
+  relaxed-go:
+    base: strict-go
+    hooks_disabled: [pre-push-gofmt]
+```
+
+Hooks declare inline under `hooks`, or in separate files named by `hooks_files`. A [profile](/configuration/profiles-and-prompts) turns hooks on: `hooks` selects names, and `hooks_disabled` drops names the base chain runs. A profile that runs hooks requires `roles.decider`, and the build fails naming `roles.decider` when the role is unset. A command probe also requires a linked executor matching `tools.bash.executor`.
+
+## Points and their decisions
+
+| `point` | Allowed `match` fields | Terminal `action.kind` | `fail_open` (default) | `fail_closed` | `fail_run` |
+|---|---|---|---|---|---|
+| `before_run` | `trigger` (`prompt`, `job`, `feed`) | `pass`, `append` (message) | `StartDecision{}` | refused | run fails |
+| `before_tool` | `tool`, `class`, `command_prefix`, `command_contains` | `allow`, `deny` (message), `short_circuit` (message) | `Allow()` | `Deny(fail_closed_message)` | run fails |
+| `after_tool` | `tool`, `class`, `command_prefix`, `command_contains`, `is_error` | `keep`, `annotate` (message), `replace` (message), `redact` | `Keep()` | refused | run fails, or the job fails |
+| `after_turn` | `min_turn`, `interrupted` | `pass`, `append` (message), `stop` (message) | `TurnDecision{}` | `StopTurn(fail_closed_message)` | run fails |
+| `before_settle` | `reason` (`end_turn`, `output_truncated`), `min_turn` | `accept`, `continue` (message), `stop` (message) | `Accept()` | `StopSettle(fail_closed_message)` | run fails |
+
+A point refuses a matcher field or a decision it does not own. `before_run` and `after_tool` have no blocking decision, so `fail_closed` there is a spec error, not a silent `fail_open`.
+
+`deny` hands the model a message beside the call's error result. `short_circuit` answers the call without running it, and its message is the result text. `redact` replaces the result text with the session's redaction notice. `append` at `after_turn`, and `continue` at `before_settle`, write a user message and send the run back to the model.
+
+## Matching a call
+
+- A matcher that sets nothing fires on every activity at its point.
+- `tool` and `class` name one thing or the other, never both. `class` is `read_only` or `side_effecting`.
+- `command_prefix` and `command_contains` need a `tool`, and never appear together.
+- `command_contains` is any-of: one substring holding is the matcher holding.
+- The command is the tool's primary argument, compared as text with leading whitespace trimmed. A compound command matches its first part only, so `cd repo && git push` does not hold `command_prefix: git`.
+- Matcher text is lexical, unlike [permission rules](/operations/permissions-and-safety): a `fetch` URL in a matcher is compared as written, never canonicalized.
+- A command matcher on a tool with no primary argument fails the build: every call would be unmatched, and the hook would never fire.
+
+An unmatched call costs nothing: no probe and no decision-model call. A matching call after the firing cap is reached costs no decision-model call either, and takes the point's neutral decision (see [Caps and budgets](#caps-and-budgets)).
+
+## Evidence and probes
+
+`context.turns` adds the last N conversation turns, and `include_working_dir` adds the directory the session works in. Probes add facts kept apart from the conversation, keyed by name in the evidence.
+
+`include_tool_call` adds the call the hook judges: its tool, class, summary, and arguments. The summary and arguments are the ones a permission ask shows, the same view the permission decider gets. They are not the model's own description of the call. The summary is clipped to 512 characters. An argument object past 8192 bytes keeps both ends of each long string value, with the middle elided. At `after_tool` the result is in the evidence whatever `include_tool_call` says, and its text is clipped to `poo.EvidenceOutputCap` (512).
+
+| Probe | Reports |
+|---|---|
+| `command: [...]` | The exit status, plus the head of the command's combined output. |
+| `tool: {name, args}` | The read-only tool's text, capped at 8192 characters. |
+
+A probe runs a command or a tool, never both, and a hook runs at most four probes sequentially. A probe that names no `timeout_ms` gets 3000 milliseconds. A tool probe names `read`, `grep` or `history`, and the built session must offer that tool: a disabled tool fails the build, and so does a tool that only runs in the background, because a probe is a call the hook waits on. A command probe runs on the executor `tools.bash.executor` names, in the session's working directory, with the session's scrubbed environment.
+
+A probe should exit promptly on SIGTERM. The executor sends SIGTERM first and waits a kill grace before SIGKILL, 2 seconds for `local` and `bwrap`. A probe that ignores the signal can push its stop into the hook's deadline.
+
+### Probe trust model
+
+A probe runs in the run's path, so its reach is the session's. With the `local` executor a probe command is **not sandboxed**: it runs in `poo`'s own process space and reaches whatever `poo` reaches. Point `tools.bash.executor` at `bwrap` when a probe must be confined (see [the sandbox](/operations/sandbox)). A probe is operator-written policy, never model output, so a probe's argv is as trusted as the settings file that holds it.
+
+The [permission engine](/operations/permissions-and-safety) does not see a probe. A probe raises no ask, so a `deny` rule and `ask_outside_working_dir` bound the model's calls and not a hook's: what a probe reaches is what the tool's own restrictions allow, such as `restrict_to_working_dir` and `tools.protected_paths`. A hook that must be confined gets that from the executor, not from a permission rule.
+
+A **nonzero exit code is evidence, not an error**. `gofmt -l` reports findings with status 1, and a hook that read that status as a failure could never ask about the finding. A probe fails when it cannot start, times out, is stopped, or calls a tool that reports an error; that failure takes `on_error`.
+
+Evidence is bounded. The probe output cap is 8192 bytes per probe, and the whole payload is held to 32768 bytes. The fit drops turns oldest first, then halves the longest probe output. Evidence that still does not fit is a hook error.
+
+## Questions and confidence
+
+A step asks one `bool`, `choice`, or `score` question, and its `branches` map answer keys to a next step or a terminal action. A `bool` answers `yes` and `no`, a `choice` answers its option names, and a `score` answers `"0"` through `"N-1"`. A step may name its own `timeout_ms`; otherwise its ask runs under the hook's firing timeout.
+
+YAML reads an unquoted `true:` or `false:` as a boolean key, and an unquoted integer key such as `0:` as a number. The loader keeps each as the text it is spelled with. Bool question descriptions (`true:` and `false:`) and score branch keys (`0:` through `N-1:`) are accepted unquoted, in inline settings and in `hooks_files`. Two keys that spell the same text, such as `True:` and `"true":`, are refused. The normalization applies to every settings YAML file, not only hooks.
+
+The runner scores each answer key as `P(key) * label_mass` and takes the best one. A tie, a best key no branch covers, or a score under the branch's `min_probability` is *uncertain*, and `on_uncertain` answers it. A label mass outside `[0, 1]`, a missing answer, or an invalid distribution is an *error*, and `on_error` answers it. `min_probability` sits above zero and at most one.
+
+## Fail-open by default
+
+A policy the spec leaves out is `fail_open`, so a hook that cannot answer changes nothing. Silence from the decision model, a probe failure, a malformed answer, and evidence over its cap all take the same default.
+
+| Policy | What the run does |
+|---|---|
+| `fail_open` | Takes the point's neutral decision and carries on. |
+| `fail_closed` | Takes the point's blocking decision, worded by `fail_closed_message`. |
+| `fail_run` | Fails the run with `hook_error` (exit code 22) through the core's finalizer. |
+
+`fail_closed_message` is required when either policy is `fail_closed`, and refused otherwise. A `fail_run` error on a background job's late `after_tool` completion fails the job, not a run, because no run owns that call. An interrupted activity drops the hook's decision and is not a hook error.
+
+## Caps and budgets
+
+`max_fires_per_run` caps how many decisions take effect in one run, and the count lives in memory in the session's runner. Every matching call is judged until the cap is reached. Once it is reached, a further matching call gets the point's neutral decision with no decision-model call. A deny hook therefore stops denying after N calls, and the model can retry the call. Only a decision that changes something is charged: a neutral answer costs nothing, and a `fail_closed` block counts. Concurrent calls are all judged, and a call whose decision loses the race for the last slot gets the neutral decision. A late background completion counts against its job, because the run that started the job may already have settled. A new session gets fresh runners, so a resumed session starts its counts again.
+
+| Bound | Value |
+|---|---|
+| Steps per hook | 8 |
+| Probes per hook | 4 |
+| Probe output | 8192 bytes |
+| Call arguments | 8192 bytes |
+| Evidence | 32768 bytes |
+| Probe `timeout_ms` | 3000 by default |
+| `firing_timeout_ms` | 10000 by default |
+
+The runner clamps a hook's budget under the session's hook timeout (`HookTimeout`, 30 seconds by default). It keeps the hook's own answer 2 seconds ahead of that deadline, and floors the budget at 500 milliseconds.
+
+## A `before_settle` example
+
+```yaml
+# hooks/settle.yaml
+hooks:
+  keep-going:
+    point: before_settle
+    match:
+      reason: end_turn
+      min_turn: 2
+    max_fires_per_run: 1
+    on_uncertain: fail_open
+    on_error: fail_open
+    context:
+      turns: 6
+    entry: is_work_unfinished
+    steps:
+      is_work_unfinished:
+        question:
+          kind: bool
+          instructions: "Did the last turn leave a task the session was asked to finish?"
+          true: "the task is unfinished"
+          false: "the task is done"
+        branches:
+          "yes":
+            min_probability: 0.8
+            action:
+              kind: continue
+              message: "The task is unfinished. Continue with the next step."
+          "no":
+            min_probability: 0.6
+            action: { kind: accept }
+```
+
+A `continue` spends the run's continuation budget (`limits.max_continuations`), and a run that spends it settles `hook_continue_limit` (exit code 12). Keep `max_fires_per_run` small on this point.
+
+## Where a hook is visible
+
+Every question carries the ID `hook:<name>:<step>`, and a decision record's questions name the hook that asked. A message a hook writes carries the origin `hook:<name>` in the [session log](/reference/session-log-v0), so a reader can tell the hook's word from the model's.
+
+A hook that gathers no command probe reports itself idempotent, so a durable session may run it again after a crash. A hook with a command probe is never re-executed on recovery, because the operator's command may not be safe to repeat.
 
 ---
 
@@ -3366,6 +3595,7 @@ Packages are grouped by subsystem:
 | `poo/prompt` | System prompt vocabulary: named sections, variants, and template environment |
 | `poo/decide` | Decision-model contract: questions, answers, `Decider`, and recording wrapper |
 | `poo/exec` | Executor contract (`Executor`, `Command`, `Process`), registry, and env scrubbing |
+| `poo/hook` | Declarative decision hooks: the spec check, the probe runner, and the runner that adapts a hook to the five points |
 | `poo/protect` | Protected-path matcher shared by tools and permission policy |
 | `poo/pootest` | Exported test helpers: scripted transport, in-memory sink, stub decider, scripted compactor |
 
@@ -3474,6 +3704,8 @@ Hooks extend the session lifecycle without altering the FSM. Every hook receives
 | `WithSessionAttach` (`AttachFunc`) | Once during live session construction (including resume), before feeds or runs | Attach session-owned subsystems (such as MCP servers) and return a close function |
 
 Hooks that are safe to re-run after a crash mid-hook on durable sessions may implement `poo.IdempotentHook`. Hooks that do not implement it are never re-executed on recovery.
+
+`HookContext.WorkingDir` is the directory the session's tools work in, which a session may choose for itself. `HookContext.ReadOnlyTools` runs a bounded probe over the session's own `read`, `grep` and `history` tools: the probe starts no tracked call, writes no record, and raises no permission ask. A declarative [decision hook](/capabilities/decision-hooks) receives both fields, and the `hook/` package runs it at one of these points.
 
 ## Provider-neutral message model
 
@@ -4456,6 +4688,8 @@ Map of `<name>` to profile definition object. Each entry defines a named variant
 | `profiles.<name>.prompt_file` | `string` | Empty | File whose text replaces the profile's prompt section. Relative paths resolve against the declaring file's directory. |
 | `profiles.<name>.prompt_append_file` | `string` | Empty | File whose text appends to the profile's prompt section. Mutually exclusive with `prompt_append`. Relative paths resolve against the declaring file's directory. |
 | `profiles.<name>.prompt_append` | `string` | Empty | Inline text appended to the profile's prompt section. Mutually exclusive with `prompt_append_file`. |
+| `profiles.<name>.hooks` | `string[]` | Inherits base | [Decision hook](/capabilities/decision-hooks) names this profile runs. Adds to the base's chain (deduplicated, first-appearance order); a name the settings do not declare fails the build. |
+| `profiles.<name>.hooks_disabled` | `string[]` | Empty | Hook names dropped from this profile's chain, including ones the base runs. A name the profile both runs and turns off fails the build. |
 | `profiles.<name>.model_family` | `bool` | `false` | When `true`, includes model-family guidance keyed by the active model's `prompt_variant`. |
 | `profiles.<name>.tools.disabled` | `string[]` | Empty | Tool names disabled for sessions running under this profile. |
 
@@ -4599,6 +4833,77 @@ See [Decision Model](/capabilities/decision-model).
 | Key | Type | Default / Behavior | Description |
 |---|---|---|---|
 | `decider.timeout_ms` | `int` | Decider default | Per-call latency budget for the decider model, in milliseconds. Minimum `1`. |
+
+## Decision Hooks
+
+See [Decision Hooks](/capabilities/decision-hooks). A profile that runs a hook requires `roles.decider`, and a command probe requires a linked executor matching `tools.bash.executor`.
+
+### `hooks_files`
+
+| Key | Type | Default / Behavior | Description |
+|---|---|---|---|
+| `hooks_files` | `string[]` | Empty | External YAML or JSON files declaring hooks under a top-level `hooks` key. Loaded as layers below inline `hooks` (inline wins, then earlier files). Relative paths resolve against the settings file's directory. |
+
+### `hooks`
+
+Map of `<name>` to hook spec. Every spec is checked at load time; a hook that could not run is a load failure. YAML keys are read as their text (see [Settings Discovery](/configuration/settings-discovery)): an unquoted `true:` description or `0:` branch key is the word it spells. Two keys spelling the same text are refused.
+
+| Key | Type | Default / Behavior | Description |
+|---|---|---|---|
+| `hooks.<name>.point` | `string` | Required | Where the hook runs: `before_run`, `before_tool`, `after_tool`, `after_turn`, or `before_settle`. |
+| `hooks.<name>.match` | `object` | Empty (fires on everything at the point) | Narrows the activity the hook fires on; each point accepts its own fields. Matching is lexical, so a URL is never canonicalized. A `command_prefix` or `command_contains` match on a tool with no primary argument fails the build. |
+| `hooks.<name>.max_fires_per_run` | `int` | `0` (no cap) | Decisions per run that take effect, counted in memory in the session's runner. Every matching call is judged until the cap is reached. After the cap, a matching call gets the point's neutral decision with no decider call. A deny hook stops denying after N calls. A neutral answer, or a decision that loses the race for the last slot, costs nothing. A `fail_closed` block counts. A late background completion counts against its job. |
+| `hooks.<name>.firing_timeout_ms` | `int` | `10000` | Time the hook has to answer, clamped under the session's hook timeout minus 2 seconds (floor 500 ms). |
+| `hooks.<name>.on_error` | `string` | `fail_open` | What a failed firing does: `fail_open`, `fail_closed`, or `fail_run`. `fail_closed` is refused at `before_run` and `after_tool`. |
+| `hooks.<name>.on_uncertain` | `string` | `fail_open` | What an answer no branch accepts does: the same policies. |
+| `hooks.<name>.fail_closed_message` | `string` | Empty | Text a `fail_closed` policy hands the model. Required when either policy is `fail_closed`, refused otherwise. |
+| `hooks.<name>.context.turns` | `int` | `0` | Recent conversation turns the evidence holds (`≥ 0`). |
+| `hooks.<name>.context.include_tool_call` | `bool` | `false` | Adds the call the hook judges to the evidence: the tool's ask summary and evidence arguments, not the model's description. The `after_tool` result is always included, clipped to `poo.EvidenceOutputCap` (512). |
+| `hooks.<name>.context.include_working_dir` | `bool` | `false` | Adds the session's working directory to the evidence. |
+| `hooks.<name>.context.probes[].name` | `string` | Required | Name the probe's evidence is keyed by. Unique within the hook. |
+| `hooks.<name>.context.probes[].command` | `string[]` | Empty | argv a command probe runs, on the session's executor. Excludes `tool`. |
+| `hooks.<name>.context.probes[].tool` | `object` | Empty | Read-only tool probe: `name` (`read`, `grep`, or `history`) and `args`. Excludes `command`. |
+| `hooks.<name>.context.probes[].timeout_ms` | `int` | `3000` | Time the probe has (`≥ 0`). A probe never outlives its hook. The executor sends SIGTERM first and waits a kill grace, so a probe should exit promptly on SIGTERM. |
+| `hooks.<name>.entry` | `string` | Required | Step the graph starts at. |
+| `hooks.<name>.steps` | `object` | Required (1–8) | Steps by name; every step must be reachable from `entry` and no path may loop. |
+| `hooks.<name>.steps.<step>.timeout_ms` | `int` | `0` (the hook's firing timeout) | Time this step's ask may take. |
+| `hooks.<name>.steps.<step>.question.kind` | `string` | Required | `bool`, `choice`, or `score`. |
+| `hooks.<name>.steps.<step>.question.instructions` | `string` | Required | What the model decides, in prose. |
+| `hooks.<name>.steps.<step>.question.true` / `.false` | `string` | Empty | What `yes` and `no` mean. `bool` only; unquoted YAML keys are accepted. |
+| `hooks.<name>.steps.<step>.question.options` | `object[]` | Empty | `name` and `desc` pairs. `choice` only. |
+| `hooks.<name>.steps.<step>.question.levels` | `string[]` | Empty | Scale levels. `score` only. |
+| `hooks.<name>.steps.<step>.branches.<answer>` | `object` | Required | One branch per answer key the question offers. An unquoted score key (`0:`, `1:`) is read as its text. |
+| `hooks.<name>.steps.<step>.branches.<answer>.min_probability` | `float` | Required | Confidence the answer needs, above `0` and at most `1`. Below it the firing is uncertain. |
+| `hooks.<name>.steps.<step>.branches.<answer>.next` | `string` | Empty | Step the answer moves to. Excludes `action`. |
+| `hooks.<name>.steps.<step>.branches.<answer>.action.kind` | `string` | Empty | Terminal decision the point allows. Excludes `next`. |
+| `hooks.<name>.steps.<step>.branches.<answer>.action.message` | `string` | Empty | Text the decision carries; required for `append`, `deny`, `short_circuit`, `annotate`, `replace`, `stop`, and `continue`. |
+
+```yaml
+hooks_files: [hooks/go-checks.yaml]
+
+hooks:
+  no-force-push:
+    point: before_tool
+    match:
+      tool: bash
+      command_contains: ["git push --force", "git push -f"]
+    max_fires_per_run: 1
+    entry: classify
+    steps:
+      classify:
+        question:
+          kind: bool
+          instructions: "Is this the force push to refuse?"
+          true: "the call force-pushes"
+          false: "the call is something else"
+        branches:
+          "yes":
+            min_probability: 0.9
+            action: { kind: deny, message: "Force push refused." }
+          "no":
+            min_probability: 0.5
+            action: { kind: allow }
+```
 
 ## Context & Compaction
 
@@ -4765,7 +5070,7 @@ A value of `0` disables the limit (except `truncation_retries`, where `0` disabl
 | `limits.max_tokens_per_run` | `int` | `0` (off) | Maximum tokens consumed in a single run (`≥ 0`). |
 | `limits.max_duration_s` | `int` | `0` (off) | Wall-clock time limit for a single run, in seconds (`≥ 0`). |
 | `limits.max_turns` | `int` | `0` (off) | Maximum model turns in a single run (`≥ 0`). |
-| `limits.max_continuations` | `int` | `0` (off) | Maximum continuations allowed in a run (`≥ 0`). |
+| `limits.max_continuations` | `int` | `3` | Maximum `before_settle` continuations allowed in a run (`≥ 0`); `0` keeps the runtime default of `3`. |
 | `limits.truncation_retries` | `int` | `1` | Consecutive truncated turns retried before settling `output_truncated`. Set `0` to disable (`≥ 0`). |
 
 ### `jobs`

@@ -9,7 +9,7 @@
 The repository root holds `package poo` (~60 `.go` files). Before grepping source files, read:
 
 - `docs/public/llms.txt` — one-line map of every documentation page.
-- `docs/reference/settings.md` — all 147 `settings.yaml` keys, types, and defaults.
+- `docs/reference/settings.md` — every `settings.yaml` key, its type, and its default.
 - `docs/reference/cli.md` — every CLI command, subcommand, and flag.
 - `docs/configuration/reasoning-and-sampling.md` — custom model reasoning (`mode`, `param`, `reasoning_levels`), sampling, and transport quirks.
 

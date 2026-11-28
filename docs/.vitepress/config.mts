@@ -73,6 +73,7 @@ export default defineConfig({
           { text: 'Feeds & Daemon', link: '/capabilities/feeds-and-daemon' },
           { text: 'Context Compaction', link: '/capabilities/compaction' },
           { text: 'Decision Model', link: '/capabilities/decision-model' },
+          { text: 'Decision Hooks', link: '/capabilities/decision-hooks' },
           { text: 'CLI Registry & Script Tools', link: '/capabilities/cli-registry' },
           { text: 'MCP Servers', link: '/capabilities/mcp-servers' },
           { text: 'Codemode', link: '/capabilities/codemode' },
