@@ -89,21 +89,6 @@ func (c *fakeCaller) CallReadOnly(ctx context.Context, tool string, args json.Ra
 	return c.call(ctx, tool, args)
 }
 
-// fakeView is the history a test hook reads.
-type fakeView struct {
-	// messages is the history the view holds.
-	messages []poo.Message
-}
-
-// Messages returns the model's history.
-func (v fakeView) Messages() []poo.Message { return v.messages }
-
-// Turns returns no turn summaries.
-func (v fakeView) Turns() []poo.TurnSummary { return nil }
-
-// Result returns no tool result.
-func (v fakeView) Result(string) (poo.ToolResult, bool) { return poo.ToolResult{}, false }
-
 // probeSpec is a checked before_tool hook whose context a test names.
 func probeSpec(t *testing.T, context ContextSpec) *Compiled {
 	t.Helper()
