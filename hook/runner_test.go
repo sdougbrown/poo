@@ -6,6 +6,8 @@ import (
 	"errors"
 	"math"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -244,6 +246,120 @@ func TestASureDecisionChargesOneFiring(t *testing.T) {
 	other, err := runner.BeforeTool(runContext("run2", decider), bashCall("git push"))
 	if err != nil || !other.Denied {
 		t.Fatalf("a later run produced %+v with error %v, want its own count", other, err)
+	}
+}
+
+// countingDecider counts the calls a decider served.
+type countingDecider struct {
+	decide.Decider
+	calls atomic.Int32
+}
+
+// Decide serves the call and counts it.
+func (d *countingDecider) Decide(ctx context.Context, state any, instructions string, qs []decide.Question) ([]decide.Answer, error) {
+	d.calls.Add(1)
+	return d.Decider.Decide(ctx, state, instructions, qs)
+}
+
+// Calls returns how many calls the decider served.
+func (d *countingDecider) Calls() int { return int(d.calls.Load()) }
+
+func TestTheFiringCapHoldsUnderConcurrentCalls(t *testing.T) {
+	// A turn's read-only calls run at once, so the calls a cap of one
+	// covers arrive together. The decider holds the call that took the
+	// slot until every call has been turned away, so only one denial can
+	// come out of the batch.
+	const calls = 8
+	spec := oneStep(PointBeforeTool, Action{Kind: ActionDeny, Message: "refused"})
+	spec.MaxFiresPerRun = 1
+
+	var (
+		entered    = make(chan struct{}, calls)
+		allEntered = make(chan struct{})
+		stopped    = make(chan struct{})
+		release    = make(chan struct{})
+	)
+	defer close(stopped)
+	go func() {
+		for range calls {
+			select {
+			case <-entered:
+			case <-stopped:
+				return
+			}
+		}
+		// Every call passed the cap check and is inside the decider:
+		// the reservation did not hold.
+		close(allEntered)
+	}()
+	decider := &countingDecider{Decider: decide.DeciderFunc(func(context.Context, any, string, []decide.Question) ([]decide.Answer, error) {
+		entered <- struct{}{}
+		select {
+		case <-release:
+		case <-allEntered:
+		}
+		return []decide.Answer{{ID: "hook:" + testHookName + ":ask", Probabilities: map[string]float64{"yes": 0.99, "no": 0.01}}}, nil
+	})}
+	runner := runnerOf(checkHook(t, spec), decider)
+
+	var (
+		denials  atomic.Int32
+		allows   atomic.Int32
+		failed   atomic.Int32
+		returned = make(chan struct{}, calls)
+		start    = make(chan struct{})
+		wg       sync.WaitGroup
+	)
+	for range calls {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			decision, err := runner.BeforeTool(runContext("run1", decider), bashCall("git push"))
+			if err != nil {
+				t.Errorf("the call failed: %v", err)
+				failed.Add(1)
+			}
+			if decision.Denied {
+				denials.Add(1)
+			} else {
+				allows.Add(1)
+			}
+			returned <- struct{}{}
+		}()
+	}
+	close(start)
+
+	// Every call but the one that took the slot returns without asking.
+	// A batch in which they all reach the decider is the failure the
+	// reservation exists to prevent, so it is let go and counted.
+	finished := 0
+	for finished < calls-1 {
+		select {
+		case <-returned:
+			finished++
+		case <-allEntered:
+			finished = calls - 1
+		}
+	}
+	close(release)
+	for finished < calls {
+		<-returned
+		finished++
+	}
+	wg.Wait()
+
+	if got := failed.Load(); got != 0 {
+		t.Fatalf("%d calls failed", got)
+	}
+	if got := denials.Load(); got != 1 {
+		t.Errorf("%d calls were denied under a cap of one", got)
+	}
+	if got := allows.Load(); got != calls-1 {
+		t.Errorf("%d calls were allowed, want %d", got, calls-1)
+	}
+	if got := decider.Calls(); got != 1 {
+		t.Errorf("the decider was asked %d times, want once", got)
 	}
 }
 

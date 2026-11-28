@@ -38,7 +38,8 @@ const (
 //
 // One runner serves one session, and its firing counts are that
 // session's: the map is in memory, so a recovered session starts each
-// run's count again.
+// run's count again. A firing takes its slot before it asks anything, so
+// concurrent calls for one run cannot all pass the cap.
 type Runner struct {
 	// compiled is the checked policy the runner executes.
 	compiled *Compiled
@@ -236,10 +237,6 @@ func (r *Runner) evaluate(hctx poo.HookContext, in matchInput) (*Action, error) 
 	if !evalMatch(r.compiled.Match, in) {
 		return nil, nil
 	}
-	key := fireKey(hctx)
-	if r.exhausted(key) {
-		return nil, nil
-	}
 	parent := hctx.Context
 	if parent == nil {
 		parent = context.Background()
@@ -247,6 +244,19 @@ func (r *Runner) evaluate(hctx poo.HookContext, in matchInput) (*Action, error) 
 	if parent.Err() != nil {
 		return nil, nil
 	}
+	key := fireKey(hctx)
+	if !r.reserve(key) {
+		return nil, nil
+	}
+	// A firing keeps its slot only by returning a decision that changes
+	// something. Every other end gives the slot back, so a hook that
+	// decides nothing leaves the cap where it was.
+	kept := false
+	defer func() {
+		if !kept {
+			r.release(key)
+		}
+	}()
 	ctx, cancel := context.WithTimeout(parent, r.firingBudget())
 	defer cancel()
 
@@ -276,10 +286,7 @@ func (r *Runner) evaluate(hctx poo.HookContext, in matchInput) (*Action, error) 
 		}
 	}
 	if action != nil && !neutralAction(r.compiled.Point, action.Kind) {
-		// A firing is charged for a decision that changes something. A
-		// neutral decision leaves the run as it was, so it is not the
-		// hook's say either.
-		r.charge(key)
+		kept = true
 	}
 	return action, nil
 }
@@ -455,22 +462,36 @@ func fireKey(hctx poo.HookContext) string {
 	return "run:" + hctx.RunID
 }
 
-// exhausted reports that the call's key has taken every firing the hook
-// allows.
-func (r *Runner) exhausted(key string) bool {
+// reserve takes a firing slot for the call's key.
+//
+// The check and the count are one critical section, so concurrent calls
+// for one run cannot all pass the cap: the slot a call takes here is the
+// slot every later call sees. A hook with no cap of its own reserves
+// nothing, and the count stays out of its way.
+func (r *Runner) reserve(key string) bool {
 	if r.compiled.MaxFiresPerRun <= 0 {
-		return false
+		return true
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.fires[key] >= r.compiled.MaxFiresPerRun
+	if r.fires[key] >= r.compiled.MaxFiresPerRun {
+		return false
+	}
+	r.fires[key]++
+	return true
 }
 
-// charge counts one firing of the call's key.
-func (r *Runner) charge(key string) {
+// release gives back a slot a firing took and did not keep.
+func (r *Runner) release(key string) {
+	if r.compiled.MaxFiresPerRun <= 0 {
+		return
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.fires[key]++
+	r.fires[key]--
+	if r.fires[key] <= 0 {
+		delete(r.fires, key)
+	}
 }
 
 // neutralAction reports whether a decision leaves its point as it was.
