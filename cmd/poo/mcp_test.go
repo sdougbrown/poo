@@ -599,6 +599,41 @@ func TestTheMCPRemoveNamesTheScopeWhenTheNameIsNowhere(t *testing.T) {
 	}
 }
 
+func TestTheMCPRemoveDoesNotCreateTheScopeDirectory(t *testing.T) {
+	projectDir := t.TempDir()
+	pootest.IsolateUserConfigDirT(t, t.TempDir())
+	t.Setenv(config.EnvMCPPath, "")
+	configDir, err := config.UserConfigDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings := filepath.Join(projectDir, "settings.yaml")
+	if err := os.WriteFile(settings, []byte("version: 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, scope := range []struct{ flag, dir string }{
+		{"--global", filepath.Join(configDir, "mcp")},
+		{"--project", filepath.Join(projectDir, ".poo")},
+	} {
+		t.Run(scope.flag, func(t *testing.T) {
+			inDir(t, projectDir, func() {
+				_, errOut := captureBoth(t, func() {
+					if code := run([]string{"mcp", "remove", "fixture", scope.flag, "--settings", settings}); code != usageExitCode {
+						t.Errorf("poo mcp remove exited with %d, want %d", code, usageExitCode)
+					}
+				})
+				if !strings.Contains(errOut, "is in none of the manifests") {
+					t.Errorf("the diagnostics are %q, want a missing server message", errOut)
+				}
+				if _, err := os.Stat(scope.dir); !os.IsNotExist(err) {
+					t.Errorf("stat %s after remove: %v, want directory to remain absent", scope.dir, err)
+				}
+			})
+		})
+	}
+}
+
 func TestTheMCPListHonorsTheSettingsProfileWithoutAFlag(t *testing.T) {
 	dir := t.TempDir()
 	theMCPManifest(t, filepath.Join(dir, "mcp.json"), map[string]any{

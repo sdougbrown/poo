@@ -250,6 +250,9 @@ func handleMCPAdd(inv clicontract.Invocation, stdout, stderr io.Writer) exit {
 		return exit{usageExitCode}
 	}
 	scope, target, err := theScope(o)
+	if err == nil {
+		err = os.MkdirAll(scope.dir, 0o755)
+	}
 	if err != nil {
 		fmt.Fprintf(stderr, "poo mcp add: %v\n", err)
 		return exit{usageExitCode}
@@ -368,8 +371,7 @@ type mcpScope struct {
 
 // theScope resolves the caller's choice of scope: exactly one of
 // --global and --project, so a write lands where the caller chose and
-// nowhere else. The scope's directory is created: a scope with no
-// manifest directory yet is where the first write goes.
+// nowhere else.
 func theScope(o mcpOptions) (mcpScope, string, error) {
 	switch {
 	case o.global && o.project:
@@ -377,9 +379,6 @@ func theScope(o mcpOptions) (mcpScope, string, error) {
 	case o.global:
 		dir, err := config.MCPManifestDir()
 		if err != nil {
-			return mcpScope{}, "", err
-		}
-		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return mcpScope{}, "", err
 		}
 		return mcpScope{dir: dir}, filepath.Join(dir, "mcp.json"), nil
@@ -390,9 +389,6 @@ func theScope(o mcpOptions) (mcpScope, string, error) {
 		}
 		dir, err := config.ProjectDir(workingDir)
 		if err != nil {
-			return mcpScope{}, "", err
-		}
-		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return mcpScope{}, "", err
 		}
 		return mcpScope{dir: dir, project: true}, filepath.Join(dir, "mcp.json"), nil
@@ -417,16 +413,17 @@ func definedIn(paths []string, target, name string) (string, bool, error) {
 	return file, true, nil
 }
 
-// unionPaths joins the session's manifest resolution with a file's own
-// directory when the resolution does not hold it: an add that targets a
-// directory no settings path names still refuses a name that file
-// already holds.
+// unionPaths adds the scope directory to the session's manifest paths
+// if it exists and is not already covered by those paths.
 func unionPaths(paths []string, target string) []string {
 	dir := filepath.Dir(target)
 	for _, path := range paths {
 		if path == dir || path == target {
 			return paths
 		}
+	}
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		return paths
 	}
 	return append(append([]string{}, paths...), dir)
 }
