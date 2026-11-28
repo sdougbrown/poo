@@ -13,9 +13,9 @@
 // answer no branch covers is not a failure: the runner reads it as the
 // hook being unsure, and takes the spec's on_uncertain policy.
 //
-// The package imports the standard library, the core and poo/decide
-// only, so a build that links no tool, no provider and no code mode still
-// checks its hooks.
+// The package imports the standard library, the core package, poo/decide
+// and poo/exec only, so a build that links no tool, no provider and no
+// code mode still checks and runs its hooks.
 package hook
 
 import (
