@@ -9,6 +9,7 @@ import (
 	"maps"
 	"slices"
 	"time"
+	"unicode/utf8"
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/decide"
@@ -22,10 +23,21 @@ const defaultProbeTimeoutMs = 3000
 // maxCallArgumentsBytes is the most of a call's arguments the evidence
 // keeps.
 //
-// The arguments are one field of the evidence, and a call whose
-// arguments run longer than a probe's output is not a call a question
-// can be asked about: the evidence is a summary, not a transcript.
+// The arguments are one field of the evidence, so past the cap the
+// middle of a long string value is elided and both ends of a command
+// survive: the evidence is a summary, not a transcript, and a command
+// padded to hide its tail is still the command a question is asked
+// about.
 const maxCallArgumentsBytes = MaxProbeOutputBytes
+
+// minElidedArgumentBytes is the length at or below which the evidence
+// leaves a string value whole: a shorter value is not where a command
+// hides its tail, and the mark would cost more than the cut saves.
+const minElidedArgumentBytes = 64
+
+// elidedMarkRoom is headroom for the mark's own text, kept out of the
+// bytes a cut plans to free.
+const elidedMarkRoom = 40
 
 // ProbeEnv is what a hook's probes run with.
 //
@@ -219,18 +231,158 @@ func callEvidence(call *CallData) *decide.Call {
 	}
 }
 
-// callArguments keeps a call's arguments when they fit the evidence and
-// are a JSON object. The frame promises an object, so anything else is
-// dropped rather than sent as a value the decision model cannot read.
+// callArguments keeps a call's arguments when they are a JSON object.
+//
+// The frame promises an object, so anything else is dropped rather than
+// sent as a value the decision model cannot read. An object past the cap
+// keeps both ends of its long string values, because the tail of a
+// command is as much a part of what it runs as the head.
 func callArguments(raw json.RawMessage) json.RawMessage {
 	trimmed := bytes.TrimSpace(raw)
-	if len(trimmed) == 0 || len(trimmed) > maxCallArgumentsBytes || !json.Valid(trimmed) {
+	if len(trimmed) == 0 || !json.Valid(trimmed) || trimmed[0] != '{' {
 		return nil
 	}
-	if trimmed[0] != '{' {
+	if len(trimmed) <= maxCallArgumentsBytes {
+		return slices.Clone(trimmed)
+	}
+	return elidedArguments(trimmed)
+}
+
+// elidedArguments cuts the middle out of an object's long string values
+// until the object fits the cap. It reports nothing when no cut gets it
+// there, and a caller then reads the call as one with no arguments.
+func elidedArguments(trimmed json.RawMessage) json.RawMessage {
+	value, ok := decodeArguments(trimmed)
+	if !ok {
 		return nil
 	}
-	return slices.Clone(trimmed)
+	for {
+		encoded, ok := encodeArguments(value)
+		if !ok {
+			return nil
+		}
+		if len(encoded) <= maxCallArgumentsBytes {
+			return encoded
+		}
+		if !elideLongestString(value, len(encoded)-maxCallArgumentsBytes) {
+			return nil
+		}
+	}
+}
+
+// decodeArguments decodes a call's arguments into the generic JSON shape,
+// keeping every number as it was written.
+func decodeArguments(trimmed json.RawMessage) (any, bool) {
+	decoder := json.NewDecoder(bytes.NewReader(trimmed))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return nil, false
+	}
+	if _, ok := value.(map[string]any); !ok {
+		return nil, false
+	}
+	return value, true
+}
+
+// encodeArguments renders a value as compact JSON.
+//
+// The escaping is the caller's own, so a command keeps the characters it
+// was written with instead of arriving with every < and & spelled out.
+func encodeArguments(value any) (json.RawMessage, bool) {
+	var buf bytes.Buffer
+	encoder := json.NewEncoder(&buf)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(value); err != nil {
+		return nil, false
+	}
+	return bytes.Clone(bytes.TrimSuffix(buf.Bytes(), []byte("\n"))), true
+}
+
+// elideLongestString cuts the middle out of the longest string value at
+// any depth, enough to drop about excess bytes. It reports whether it
+// found a string long enough to cut.
+func elideLongestString(value any, excess int) bool {
+	longest := ""
+	var replace func(string)
+	var walk func(any)
+	walk = func(node any) {
+		switch node := node.(type) {
+		case map[string]any:
+			for key, child := range node {
+				if text, ok := child.(string); ok {
+					if len(text) > len(longest) {
+						longest = text
+						replace = func(cut string) { node[key] = cut }
+					}
+					continue
+				}
+				walk(child)
+			}
+		case []any:
+			for i, child := range node {
+				if text, ok := child.(string); ok {
+					if len(text) > len(longest) {
+						longest = text
+						replace = func(cut string) { node[i] = cut }
+					}
+					continue
+				}
+				walk(child)
+			}
+		}
+	}
+	walk(value)
+	if len(longest) <= minElidedArgumentBytes {
+		return false
+	}
+	keep := len(longest) - excess - elidedMarkRoom
+	if keep < minElidedArgumentBytes {
+		keep = minElidedArgumentBytes
+	}
+	cut := elideMiddle(longest, keep)
+	if len(cut) >= len(longest) {
+		return false
+	}
+	replace(cut)
+	return true
+}
+
+// elideMiddle keeps the head and tail of a text and marks the bytes it
+// dropped between them. A text the mark would leave no shorter comes
+// back whole, so eliding never grows a value.
+func elideMiddle(text string, keep int) string {
+	head := clipHead(text, keep/2)
+	tail := clipTail(text, keep-keep/2)
+	dropped := len(text) - len(head) - len(tail)
+	mark := fmt.Sprintf(" ...[%d bytes elided]... ", dropped)
+	if len(mark) >= dropped {
+		return text
+	}
+	return head + mark + tail
+}
+
+// clipHead keeps the first n bytes of a text without splitting a rune.
+func clipHead(text string, n int) string {
+	if n >= len(text) {
+		return text
+	}
+	for n > 0 && !utf8.RuneStart(text[n]) {
+		n--
+	}
+	return text[:n]
+}
+
+// clipTail keeps the last n bytes of a text without splitting a rune.
+func clipTail(text string, n int) string {
+	if n >= len(text) {
+		return text
+	}
+	start := len(text) - n
+	for start < len(text) && !utf8.RuneStart(text[start]) {
+		start++
+	}
+	return text[start:]
 }
 
 // resultEvidence builds the evidence of the tool result a hook judges.
