@@ -141,6 +141,12 @@ func (l *layout) enter() {
 	l.active = true
 	l.chromeStale = true
 	l.emit(l.regionSeq() + l.footerSeq())
+	// A committed transcript rebuilds its tail at the live geometry: a
+	// resize while suspended adopted the size without rebuilding, and
+	// the next write would land at the stale row the suspension held.
+	if l.transcript.Len() > 0 {
+		l.rebuildLocked(nil)
+	}
 }
 
 // leave restores the whole screen to the terminal and leaves the

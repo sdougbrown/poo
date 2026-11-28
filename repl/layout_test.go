@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/chubin/vt10x"
 )
 
@@ -647,6 +648,62 @@ func TestAFrameAnchorsAndAWriteRelaysTheTailDuringAResize(t *testing.T) {
 	}
 	if l.preview != 3 || len(l.previewRows) != 3 {
 		t.Errorf("the preview cache is preview=%d rows=%d, want the three rows it stands on", l.preview, len(l.previewRows))
+	}
+}
+
+// TestAWrapSplitsAnOverlongTokenWithinThePane covers a single token as
+// wide as or wider than the pane — a URL or path the stream lands as
+// one word: the word wrap leaves it whole and the hard pass splits it,
+// so every row stays within the pane and every byte shows exactly once.
+func TestAWrapSplitsAnOverlongTokenWithinThePane(t *testing.T) {
+	token := strings.Repeat("x", 48)
+	rows := wrapRows(token, 40)
+	if got := strings.Join(rows, ""); got != token {
+		t.Errorf("the wrap lost bytes: got %q, want %q", got, token)
+	}
+	for _, row := range rows {
+		if width := ansi.StringWidth(row); width > 40 {
+			t.Errorf("the row %q is %d columns wide, want at most 40", row, width)
+		}
+	}
+
+	// A token exactly the pane's width has no split to make: it reads
+	// whole, on one row.
+	rows = wrapRows(strings.Repeat("y", 40), 40)
+	if len(rows) != 1 || rows[0] != strings.Repeat("y", 40) {
+		t.Errorf("the pane-width token split: %q", rows)
+	}
+}
+
+// TestAResizeWhileInactiveAnchorsTheTailOnResume covers a winch while
+// the layout is suspended — a pager's session: the suspended resize
+// adopts the live size without rebuilding, so the resume rebuilds the
+// tail at the new geometry and the first write after it lands at the
+// transcript's tail, not at the stale row the suspension held.
+func TestAResizeWhileInactiveAnchorsTheTailOnResume(t *testing.T) {
+	vt := vt10x.New(vt10x.WithSize(40, 12))
+	l := aLayout(t, vt, 40, 12)
+	showPrompt(l, promptMark)
+	l.write("committed row\n")
+	l.suspend()
+	vt.Resize(40, 24)
+	l.resize(40, 24, 0, "", nil)
+	l.resume()
+	l.write("next row\n")
+
+	// The region's bottom row holds the new write with the transcript's
+	// tail directly above it.
+	if got := lastRow(vt, "next row"); got != 20 {
+		t.Errorf("the first write after the resume landed at row %d, want 20:\n%s", got, vt.String())
+	}
+	if got := lastRow(vt, "committed row"); got != 19 {
+		t.Errorf("the tail rebuilt at row %d, want 19:\n%s", got, vt.String())
+	}
+	drawn := strings.Join(screenRows(vt), "\n")
+	for _, want := range []string{"committed row", "next row"} {
+		if n := strings.Count(drawn, want); n != 1 {
+			t.Errorf("%q reads %d time(s), want 1:\n%s", want, n, vt.String())
+		}
 	}
 }
 
