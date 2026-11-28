@@ -513,6 +513,144 @@ func TestTheHookBudgetSitsUnderTheSessionsTimeout(t *testing.T) {
 	}
 }
 
+// theMatcherHook is a before-tool hook with the matcher the test names.
+func theMatcherHook(match hook.Match) hook.Spec {
+	return hook.Spec{
+		Point: hook.PointBeforeTool,
+		Match: match,
+		Entry: "judge",
+		Steps: theJudgeStep("Is the call one the hook allows?",
+			&hook.Action{Kind: hook.ActionAllow},
+			&hook.Action{Kind: hook.ActionDeny, Message: "refused"}),
+	}
+}
+
+// theBareTool is a linked read-only tool with no primary argument, so a
+// command matcher has nothing to read on it.
+func theBareTool(config.ToolOptions) poo.Tool { return bareTool{} }
+
+type bareTool struct{}
+
+func (bareTool) Spec() poo.ToolSpec {
+	return poo.ToolSpec{Name: "snapshot", Description: "Lists what the session holds.", Class: poo.ClassReadOnly}
+}
+
+func (bareTool) Prepare(json.RawMessage, poo.PrepareEnv) (poo.Prepared, error) { return bareCall{}, nil }
+
+func (bareTool) Call(context.Context, poo.Prepared, poo.ToolEnv) (poo.ToolResult, error) {
+	return poo.ToolResult{}, nil
+}
+
+type bareCall struct{}
+
+func (bareCall) Summary() string { return "snapshot" }
+
+// TestAHookCommandMatcherNeedsAPrimaryArgument covers the matcher a hook
+// shares with a permission rule: a command prefix or substring reads the
+// call's primary argument, and a tool without one would never match.
+func TestAHookCommandMatcherNeedsAPrimaryArgument(t *testing.T) {
+	bare := profile.Profile{Name: "bare", Tools: []string{"snapshot", "bash"}, Unmatched: "allow"}
+	tools := theTools()
+	tools["snapshot"] = theBareTool
+	for _, tt := range []struct {
+		name  string
+		match hook.Match
+		// refused is the tool a refused build names, empty when the
+		// matcher builds.
+		refused string
+	}{
+		{name: "substrings on a tool with the argument", match: hook.Match{Tool: "bash", CommandContains: []string{"git push"}}},
+		{name: "a prefix on a tool with the argument", match: hook.Match{Tool: "bash", CommandPrefix: "git"}},
+		{name: "substrings on a tool without one", match: hook.Match{Tool: "snapshot", CommandContains: []string{"anything"}}, refused: "snapshot"},
+		{name: "a prefix on a tool without one", match: hook.Match{Tool: "snapshot", CommandPrefix: "any"}, refused: "snapshot"},
+		{name: "a tool this session does not offer", match: hook.Match{Tool: "browser", CommandContains: []string{"anything"}}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			settings := hookSettings(t, theHookSettings,
+				map[string]hook.Spec{"matcher": theMatcherHook(tt.match)},
+				config.ProfileSettings{Base: bare.Name, Hooks: []string{"matcher"}})
+			_, err := config.Build(config.BuildOptions{
+				Settings: settings, WorkingDir: t.TempDir(), Tools: tools,
+				Profiles: []profile.Profile{bare}, Executors: theExecutors(),
+			})
+			if tt.refused == "" {
+				if err != nil {
+					t.Fatalf("the matcher did not build: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("the matcher built, and it can never match")
+			}
+			if code, _ := config.CodeOf(err); code != config.CodeInvalid {
+				t.Errorf("the failure is %v, want an invalid value", err)
+			}
+			if field, _ := config.FieldOf(err); field != "hooks.matcher" {
+				t.Errorf("the failure names %q, want hooks.matcher", field)
+			}
+			for _, want := range []string{"matcher", tt.refused, "no primary argument"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("the failure is %q, want it to say %q", err, want)
+				}
+			}
+		})
+	}
+}
+
+// theSettleAudit is a before-settle hook whose own failure fails the run.
+func theSettleAudit(message string) hook.Spec {
+	return hook.Spec{
+		Point:   hook.PointBeforeSettle,
+		Match:   hook.Match{Reason: hook.ReasonEndTurn},
+		OnError: hook.FailRun,
+		Entry:   "judge",
+		Steps: theJudgeStep("Should the run settle?",
+			&hook.Action{Kind: hook.ActionAccept},
+			&hook.Action{Kind: hook.ActionContinue, Message: message}),
+	}
+}
+
+// TestAFailedRunHookLeavesTheSessionUsable covers the recovery contract a
+// fail_run hook answers to: the run settles as a hook error naming the
+// hook, and the next run on the session runs.
+func TestAFailedRunHookLeavesTheSessionUsable(t *testing.T) {
+	settings := hookSettings(t, theHookSettings,
+		map[string]hook.Spec{"audit": theSettleAudit("one more look")},
+		config.ProfileSettings{Base: "code", Hooks: []string{"audit"}})
+	runtime := buildIn(t, settings, config.Overrides{}, t.TempDir(), theExecutors())
+	closeRuntime(t, runtime)
+	transport := pootest.NewTransport(
+		pootest.Turn{Text: "done", Finish: "stop"},
+		pootest.Turn{Text: "done again", Finish: "stop"},
+	)
+	runtime.Options.Transport = transport
+	decider := theStubDecider()
+	decider.SetError(errors.New("the decision model is down"))
+	sess := createHookSession(t, runtime, "s1", t.TempDir(), theStubDeciderOption(decider))
+
+	settled := promptSession(t, sess, "audit the turn")
+	if settled.Reason != poo.ReasonHookError {
+		t.Fatalf("the run settled as %q, want a hook error", settled.Reason)
+	}
+	if settled.Detail.Source != "before_settle:audit" {
+		t.Errorf("the settle detail names %q, want before_settle:audit", settled.Detail.Source)
+	}
+	if !strings.Contains(settled.Detail.Text, `"audit"`) {
+		t.Errorf("the settle detail is %q, want it to name the hook", settled.Detail.Text)
+	}
+
+	// The failed run's finalizer cleared the busy state, so the session
+	// runs again — and the hook's own answer settles this one.
+	decider.SetError(nil)
+	settled = promptSession(t, sess, "audit the turn again")
+	if settled.Reason != poo.ReasonEndTurn {
+		t.Errorf("the second run settled as %q, want the model's end turn", settled.Reason)
+	}
+	if settled.Turns != 1 {
+		t.Errorf("the second run took %d turns, want one", settled.Turns)
+	}
+}
+
 // closeRuntime closes the runtime's store once the test's sessions are
 // closed.
 func closeRuntime(t *testing.T, runtime *config.Runtime) {
@@ -543,10 +681,19 @@ func createHookSession(t *testing.T, runtime *config.Runtime, id, workDir string
 // runSession prompts the session and waits for the run to settle.
 func runSession(t *testing.T, sess *poo.Session, prompt string) {
 	t.Helper()
+	promptSession(t, sess, prompt)
+}
+
+// promptSession prompts the session, waits for the run to settle, and
+// returns how it settled.
+func promptSession(t *testing.T, sess *poo.Session, prompt string) poo.Result {
+	t.Helper()
 	if _, err := sess.Prompt(context.Background(), prompt); err != nil {
 		t.Fatalf("prompting: %v", err)
 	}
-	if _, err := sess.Wait(context.Background()); err != nil {
+	result, err := sess.Wait(context.Background())
+	if err != nil {
 		t.Fatalf("waiting for the run: %v", err)
 	}
+	return result
 }

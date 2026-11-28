@@ -621,6 +621,9 @@ func Build(opts BuildOptions) (*Runtime, error) {
 	if err := runtime.resolveTools(opts, workingDir); err != nil {
 		return nil, err
 	}
+	if err := runtime.checkHookCommandMatches(); err != nil {
+		return nil, err
+	}
 	if err := runtime.checkHookProbes(); err != nil {
 		return nil, err
 	}
@@ -832,6 +835,32 @@ func (r *Runtime) checkHookExecutor(compiled []*hook.Compiled, opts BuildOptions
 				Field:   "hooks." + one.Name,
 				Message: fmt.Sprintf("the profile %q runs the hook %q, whose probe %q runs a command, and this binary links no executor named %q", r.profileName(opts), one.Name, probe, executorName),
 			}
+		}
+	}
+	return nil
+}
+
+// checkHookCommandMatches holds a command matcher to the tool it
+// matches.
+//
+// A command matcher reads the call's primary argument, and a tool that
+// has none has nothing for it to read: every call would be unmatched and
+// the hook would never fire, which is a policy the operator believes is
+// running. perm refuses the same rule for the same reason.
+func (r *Runtime) checkHookCommandMatches() error {
+	for _, one := range r.hooks {
+		match := one.Match
+		if match.Tool == "" || (match.CommandPrefix == "" && len(match.CommandContains) == 0) {
+			continue
+		}
+		tool, offered := r.Options.Tools[match.Tool]
+		if !offered || tool == nil || tool.Spec().PrimaryArg != "" {
+			continue
+		}
+		return &Error{
+			Code:    CodeInvalid,
+			Field:   "hooks." + one.Name,
+			Message: fmt.Sprintf("the profile %q runs the hook %q, which matches the tool %q by its command, and the tool has no primary argument to match", r.Profile.Name, one.Name, match.Tool),
 		}
 	}
 	return nil
