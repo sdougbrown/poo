@@ -535,7 +535,9 @@ func (bareTool) Spec() poo.ToolSpec {
 	return poo.ToolSpec{Name: "snapshot", Description: "Lists what the session holds.", Class: poo.ClassReadOnly}
 }
 
-func (bareTool) Prepare(json.RawMessage, poo.PrepareEnv) (poo.Prepared, error) { return bareCall{}, nil }
+func (bareTool) Prepare(json.RawMessage, poo.PrepareEnv) (poo.Prepared, error) {
+	return bareCall{}, nil
+}
 
 func (bareTool) Call(context.Context, poo.Prepared, poo.ToolEnv) (poo.ToolResult, error) {
 	return poo.ToolResult{}, nil
