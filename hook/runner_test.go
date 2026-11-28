@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"strings"
 	"sync"
@@ -81,6 +82,23 @@ type preparedCall struct{ summary string }
 func (p preparedCall) Summary() string { return p.summary }
 
 // bashCall is a bash call that runs the command line.
+// askPrepared is a prepared call whose transcript summary and raw
+// arguments are not what a decision about the call may rest on.
+type askPrepared struct {
+	// summary is the model-facing description.
+	summary string
+	// ask is the text the tool names for an ask.
+	ask string
+	// args are the arguments the tool names for a decision model.
+	args json.RawMessage
+}
+
+func (p askPrepared) Summary() string { return p.summary }
+
+func (p askPrepared) AskSummary() string { return p.ask }
+
+func (p askPrepared) EvidenceArguments() json.RawMessage { return p.args }
+
 func bashCall(command string) poo.ToolCallInfo {
 	args, err := json.Marshal(map[string]string{"command": command})
 	if err != nil {
@@ -242,11 +260,6 @@ func TestASureDecisionChargesOneFiring(t *testing.T) {
 	if calls := decider.Calls(); calls != 1 {
 		t.Errorf("the decider was asked %d times after the cap, want once", calls)
 	}
-
-	other, err := runner.BeforeTool(runContext("run2", decider), bashCall("git push"))
-	if err != nil || !other.Denied {
-		t.Fatalf("a later run produced %+v with error %v, want its own count", other, err)
-	}
 }
 
 // countingDecider counts the calls a decider served.
@@ -266,9 +279,8 @@ func (d *countingDecider) Calls() int { return int(d.calls.Load()) }
 
 func TestTheFiringCapHoldsUnderConcurrentCalls(t *testing.T) {
 	// A turn's read-only calls run at once, so the calls a cap of one
-	// covers arrive together. The decider holds the call that took the
-	// slot until every call has been turned away, so only one denial can
-	// come out of the batch.
+	// covers arrive together. Every call is judged, and the decisions race
+	// for the cap: exactly one of them takes effect.
 	const calls = 8
 	spec := oneStep(PointBeforeTool, Action{Kind: ActionDeny, Message: "refused"})
 	spec.MaxFiresPerRun = 1
@@ -288,16 +300,11 @@ func TestTheFiringCapHoldsUnderConcurrentCalls(t *testing.T) {
 				return
 			}
 		}
-		// Every call passed the cap check and is inside the decider:
-		// the reservation did not hold.
 		close(allEntered)
 	}()
 	decider := &countingDecider{Decider: decide.DeciderFunc(func(context.Context, any, string, []decide.Question) ([]decide.Answer, error) {
 		entered <- struct{}{}
-		select {
-		case <-release:
-		case <-allEntered:
-		}
+		<-release
 		return []decide.Answer{{ID: "hook:" + testHookName + ":ask", Probabilities: map[string]float64{"yes": 0.99, "no": 0.01}}}, nil
 	})}
 	runner := runnerOf(checkHook(t, spec), decider)
@@ -305,7 +312,7 @@ func TestTheFiringCapHoldsUnderConcurrentCalls(t *testing.T) {
 	var (
 		denials  atomic.Int32
 		allows   atomic.Int32
-		failed   atomic.Int32
+		failures atomic.Int32
 		returned = make(chan struct{}, calls)
 		start    = make(chan struct{})
 		wg       sync.WaitGroup
@@ -318,7 +325,7 @@ func TestTheFiringCapHoldsUnderConcurrentCalls(t *testing.T) {
 			decision, err := runner.BeforeTool(runContext("run1", decider), bashCall("git push"))
 			if err != nil {
 				t.Errorf("the call failed: %v", err)
-				failed.Add(1)
+				failures.Add(1)
 			}
 			if decision.Denied {
 				denials.Add(1)
@@ -330,27 +337,22 @@ func TestTheFiringCapHoldsUnderConcurrentCalls(t *testing.T) {
 	}
 	close(start)
 
-	// Every call but the one that took the slot returns without asking.
-	// A batch in which they all reach the decider is the failure the
-	// reservation exists to prevent, so it is let go and counted.
-	finished := 0
-	for finished < calls-1 {
-		select {
-		case <-returned:
-			finished++
-		case <-allEntered:
-			finished = calls - 1
-		}
+	// The decider holds every call until the whole batch has been asked,
+	// so the decisions race for the cap rather than taking turns. A call
+	// that ends before the batch is in is a firing in flight holding the
+	// cap against the others, which it must not.
+	select {
+	case <-allEntered:
+	case <-returned:
 	}
 	close(release)
-	for finished < calls {
-		<-returned
-		finished++
-	}
 	wg.Wait()
 
-	if got := failed.Load(); got != 0 {
+	if got := failures.Load(); got != 0 {
 		t.Fatalf("%d calls failed", got)
+	}
+	if got := decider.Calls(); got != calls {
+		t.Errorf("the decider was asked %d times, want every call judged", got)
 	}
 	if got := denials.Load(); got != 1 {
 		t.Errorf("%d calls were denied under a cap of one", got)
@@ -358,8 +360,45 @@ func TestTheFiringCapHoldsUnderConcurrentCalls(t *testing.T) {
 	if got := allows.Load(); got != calls-1 {
 		t.Errorf("%d calls were allowed, want %d", got, calls-1)
 	}
-	if got := decider.Calls(); got != 1 {
-		t.Errorf("the decider was asked %d times, want once", got)
+}
+
+func TestEveryCallIsJudgedWhenTheAnswersAreNeutral(t *testing.T) {
+	// The cap bounds the decisions that take effect, not the calls that
+	// are judged: a batch whose answers are all neutral is asked in full
+	// and takes no decision slot between them.
+	const calls = 8
+	spec := oneStep(PointBeforeTool, Action{Kind: ActionDeny, Message: "refused"})
+	spec.MaxFiresPerRun = 1
+	decider := pootest.NewStubDecider(0.1)
+	runner := runnerOf(checkHook(t, spec), decider)
+
+	var (
+		denials atomic.Int32
+		start   = make(chan struct{})
+		wg      sync.WaitGroup
+	)
+	for range calls {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			decision, err := runner.BeforeTool(runContext("run1", decider), bashCall("git push"))
+			if err != nil {
+				t.Errorf("the call failed: %v", err)
+			}
+			if decision.Denied {
+				denials.Add(1)
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	if got := decider.Calls(); got != calls {
+		t.Errorf("the decider was asked %d times, want every call judged", got)
+	}
+	if got := denials.Load(); got != 0 {
+		t.Errorf("%d calls were denied on an answer that allowed them", got)
 	}
 }
 
@@ -407,138 +446,225 @@ func TestALateJobCompletionCountsItsOwnFirings(t *testing.T) {
 	}
 }
 
-func TestAHookThatFailsTakesItsOnErrorPolicy(t *testing.T) {
-	cases := []struct {
-		name   string
-		policy FailurePolicy
-		want   func(t *testing.T, decision poo.ToolDecision, err error)
+// pointVerdict is what one point's decision changed.
+type pointVerdict struct {
+	// neutral reports that the decision leaves the point as it was.
+	neutral bool
+	// blocked reports that the decision is the point's blocking one.
+	blocked bool
+	// detail is the blocking decision's message.
+	detail string
+}
+
+// pointCases is every hook point, the action that changes something
+// there, how a test asks it, and whether Validate allows a fail_closed
+// policy at it.
+var pointCases = []struct {
+	point  Point
+	action Action
+	ask    func(runner *Runner, hctx poo.HookContext) (pointVerdict, error)
+	closed bool
+}{
+	{
+		point:  PointBeforeRun,
+		action: Action{Kind: ActionAppend, Message: "the tree is unformatted"},
+		ask: func(runner *Runner, hctx poo.HookContext) (pointVerdict, error) {
+			decision, err := runner.BeforeRun(hctx, poo.RunTrigger{Kind: poo.TriggerPrompt})
+			return pointVerdict{neutral: len(decision.Append) == 0 && decision.SystemPrompt == nil}, err
+		},
+	},
+	{
+		point:  PointBeforeTool,
+		action: Action{Kind: ActionDeny, Message: "refused"},
+		closed: true,
+		ask: func(runner *Runner, hctx poo.HookContext) (pointVerdict, error) {
+			decision, err := runner.BeforeTool(hctx, bashCall("git push"))
+			return pointVerdict{
+				neutral: decision.Allowed && !decision.Denied && decision.Result == nil,
+				blocked: decision.Denied,
+				detail:  decision.Detail,
+			}, err
+		},
+	},
+	{
+		point:  PointAfterTool,
+		action: Action{Kind: ActionReplace, Message: "the tool failed"},
+		ask: func(runner *Runner, hctx poo.HookContext) (pointVerdict, error) {
+			decision, err := runner.AfterTool(hctx, bashCall("go build ./..."), poo.ToolResult{Text: "the build failed", IsError: true})
+			return pointVerdict{neutral: decision.Kept && decision.Annotated == "" && decision.Replaced == nil && !decision.Redacted}, err
+		},
+	},
+	{
+		point:  PointAfterTurn,
+		action: Action{Kind: ActionStop, Message: "the work is done"},
+		closed: true,
+		ask: func(runner *Runner, hctx poo.HookContext) (pointVerdict, error) {
+			decision, err := runner.AfterTurn(hctx)
+			return pointVerdict{neutral: len(decision.Append) == 0 && !decision.Stop, blocked: decision.Stop, detail: decision.Detail}, err
+		},
+	},
+	{
+		point:  PointBeforeSettle,
+		action: Action{Kind: ActionStop, Message: "the run is over"},
+		closed: true,
+		ask: func(runner *Runner, hctx poo.HookContext) (pointVerdict, error) {
+			decision, err := runner.BeforeSettle(hctx, poo.ReasonEndTurn)
+			return pointVerdict{neutral: decision.Accepted && decision.Continue == nil && !decision.Stop, blocked: decision.Stop, detail: decision.Detail}, err
+		},
+	},
+}
+
+func TestEveryPointTakesItsPolicyDecision(t *testing.T) {
+	const closedMessage = "the hook could not judge this"
+	sources := []struct {
+		name    string
+		decider func() *pootest.StubDecider
 	}{
 		{
-			name:   "fail open",
-			policy: FailOpen,
-			want: func(t *testing.T, decision poo.ToolDecision, err error) {
-				if err != nil {
-					t.Fatalf("the hook failed with %v, want its neutral decision", err)
-				}
-				if !decision.Allowed || decision.Denied {
-					t.Errorf("the hook decided %+v, want the neutral decision", decision)
-				}
+			name: "on_error",
+			decider: func() *pootest.StubDecider {
+				decider := pootest.NewStubDecider(0.9)
+				decider.SetError(decide.ErrDeferred)
+				return decider
 			},
 		},
 		{
-			name:   "fail closed",
-			policy: FailClosed,
-			want: func(t *testing.T, decision poo.ToolDecision, err error) {
-				if err != nil {
-					t.Fatalf("the hook failed with %v, want its blocking decision", err)
-				}
-				if !decision.Denied || decision.Detail != "the hook could not answer" {
-					t.Errorf("the hook decided %+v, want the blocking decision", decision)
-				}
-			},
-		},
-		{
-			name:   "fail the run",
-			policy: FailRun,
-			want: func(t *testing.T, _ poo.ToolDecision, err error) {
-				var failure *RunError
-				if !errors.As(err, &failure) {
-					t.Fatalf("the hook failed with %v, want a *RunError", err)
-				}
-				if failure.Hook != testHookName || failure.Point != PointBeforeTool {
-					t.Errorf("the failure names %q at %q", failure.Hook, failure.Point)
-				}
-				if !errors.Is(err, decide.ErrDeferred) {
-					t.Errorf("the failure does not carry the deferral: %v", err)
-				}
-				if text := failure.Error(); !strings.Contains(text, testHookName) || !strings.Contains(text, string(PointBeforeTool)) {
-					t.Errorf("the settle detail %q does not name the hook and its point", text)
-				}
-			},
+			name: "on_uncertain",
+			// An even split is a tie for the best answer.
+			decider: func() *pootest.StubDecider { return pootest.NewStubDecider(0.5) },
 		},
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			spec := oneStep(PointBeforeTool, Action{Kind: ActionDeny, Message: "refused"})
-			spec.OnError = tc.policy
-			if tc.policy == FailClosed {
-				spec.FailClosedMessage = "the hook could not answer"
+	for _, tc := range pointCases {
+		for _, source := range sources {
+			policies := []FailurePolicy{FailOpen, FailRun}
+			if tc.closed {
+				policies = append(policies, FailClosed)
 			}
-			decider := pootest.NewStubDecider(0.9)
-			decider.SetError(decide.ErrDeferred)
-			runner := runnerOf(checkHook(t, spec), decider)
+			for _, policy := range policies {
+				t.Run(fmt.Sprintf("%s/%s/%s", tc.point, source.name, policy), func(t *testing.T) {
+					spec := oneStep(tc.point, tc.action)
+					if source.name == "on_error" {
+						spec.OnError = policy
+					} else {
+						spec.OnUncertain = policy
+					}
+					if policy == FailClosed {
+						spec.FailClosedMessage = closedMessage
+					}
+					decider := source.decider()
+					runner := runnerOf(checkHook(t, spec), decider)
 
-			decision, err := runner.BeforeTool(runContext("run1", decider), bashCall("git push"))
-			tc.want(t, decision, err)
-		})
+					verdict, err := tc.ask(runner, runContext("run1", decider))
+					if policy == FailRun {
+						var failure *RunError
+						if !errors.As(err, &failure) {
+							t.Fatalf("the hook failed with %v, want a *RunError", err)
+						}
+						if failure.Hook != testHookName || failure.Point != tc.point {
+							t.Errorf("the failure names %q at %q", failure.Hook, failure.Point)
+						}
+						if text := failure.Error(); !strings.Contains(text, string(tc.point)) {
+							t.Errorf("the settle detail %q does not name the point", text)
+						}
+						return
+					}
+					if err != nil {
+						t.Fatalf("the hook failed with %v, want its %s decision", err, policy)
+					}
+					if policy == FailClosed {
+						if verdict.neutral || !verdict.blocked {
+							t.Fatalf("the hook decided %+v, want the blocking decision", verdict)
+						}
+						if verdict.detail != closedMessage {
+							t.Errorf("the blocking decision reads %q, want the fail_closed_message", verdict.detail)
+						}
+						return
+					}
+					if !verdict.neutral || verdict.blocked || verdict.detail != "" {
+						t.Errorf("the hook decided %+v, want the neutral decision", verdict)
+					}
+				})
+			}
+		}
 	}
 }
 
-func TestAnUncertainAnswerTakesItsOnUncertainPolicy(t *testing.T) {
-	cases := []struct {
-		name   string
-		policy FailurePolicy
-		want   func(t *testing.T, decision poo.ToolDecision, err error)
-	}{
-		{
-			name: "fail open",
-			want: func(t *testing.T, decision poo.ToolDecision, err error) {
-				if err != nil || !decision.Allowed {
-					t.Fatalf("the tie produced %+v with error %v, want the neutral decision", decision, err)
-				}
-			},
-		},
-		{
-			name:   "fail closed",
-			policy: FailClosed,
-			want: func(t *testing.T, decision poo.ToolDecision, err error) {
-				if err != nil {
-					t.Fatalf("the tie failed with %v", err)
-				}
-				if !decision.Denied || decision.Detail != "the hook could not tell" {
-					t.Errorf("the tie produced %+v, want the blocking decision", decision)
-				}
-			},
-		},
-		{
-			name:   "fail the run",
-			policy: FailRun,
-			want: func(t *testing.T, _ poo.ToolDecision, err error) {
-				var failure *RunError
-				if !errors.As(err, &failure) {
-					t.Fatalf("the tie failed with %v, want a *RunError", err)
-				}
-			},
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			// An even split is a tie for the best answer, whatever the
-			// branches need to be taken.
-			spec := Spec{
-				Point:       PointBeforeTool,
-				OnUncertain: tc.policy,
-				Entry:       "ask",
-				Steps: map[string]Step{
-					"ask": {
-						Question: QuestionSpec{Kind: QuestionBool, Instructions: "Does the evidence hold?", True: "it holds", False: "it does not"},
-						Branches: map[string]Branch{
-							"yes": {MinProbability: 0.4, Action: &Action{Kind: ActionDeny, Message: "refused"}},
-							"no":  {MinProbability: 0.4, Action: &Action{Kind: ActionAllow}},
-						},
-					},
-				},
-			}
-			if tc.policy == FailClosed {
-				spec.FailClosedMessage = "the hook could not tell"
-			}
-			decider := pootest.NewStubDecider(0.5)
-			runner := runnerOf(checkHook(t, spec), decider)
+func TestOneRunsFiringsDoNotStopAnothers(t *testing.T) {
+	spec := oneStep(PointBeforeTool, Action{Kind: ActionDeny, Message: "refused"})
+	spec.MaxFiresPerRun = 1
+	decider := pootest.NewStubDecider(0.9)
+	runner := runnerOf(checkHook(t, spec), decider)
 
-			decision, err := runner.BeforeTool(runContext("run1", decider), bashCall("git push"))
-			tc.want(t, decision, err)
+	if decision, err := runner.BeforeTool(runContext("run1", decider), bashCall("git push")); err != nil || !decision.Denied {
+		t.Fatalf("run one's first call produced %+v with error %v", decision, err)
+	}
+	if decision, err := runner.BeforeTool(runContext("run1", decider), bashCall("git push")); err != nil || decision.Denied {
+		t.Fatalf("run one's second call produced %+v with error %v, want the neutral decision", decision, err)
+	}
+	if decision, err := runner.BeforeTool(runContext("run2", decider), bashCall("git push")); err != nil || !decision.Denied {
+		t.Fatalf("run two's call produced %+v with error %v, want its own count", decision, err)
+	}
+	if calls := decider.Calls(); calls != 2 {
+		t.Errorf("the decider was asked %d times, want once for each run", calls)
+	}
+}
+
+func TestAHookJudgesTheCallTheToolNamesForAnAsk(t *testing.T) {
+	// The transcript's summary may be the model's own description of a
+	// call it has not run, and a model may describe the arguments it
+	// wrote; the evidence a hook judges carries what the tool names for
+	// an ask instead.
+	capture := func(seen *any) decide.Decider {
+		return decide.DeciderFunc(func(_ context.Context, state any, _ string, qs []decide.Question) ([]decide.Answer, error) {
+			*seen = state
+			return []decide.Answer{{ID: qs[0].ID, Probabilities: map[string]float64{"yes": 0.1, "no": 0.9}}}, nil
 		})
 	}
+	evidence := func(t *testing.T, info poo.ToolCallInfo) *decide.Call {
+		t.Helper()
+		spec := oneStep(PointBeforeTool, Action{Kind: ActionDeny, Message: "refused"})
+		spec.Context.IncludeToolCall = true
+		var state any
+		decider := capture(&state)
+		runner := runnerOf(checkHook(t, spec), decider)
+		if _, err := runner.BeforeTool(runContext("run1", decider), info); err != nil {
+			t.Fatalf("running the hook: %v", err)
+		}
+		payload, ok := state.(statePayload)
+		if !ok {
+			t.Fatalf("the evidence is a %T", state)
+		}
+		if payload.Call == nil {
+			t.Fatal("the evidence carries no call")
+		}
+		return payload.Call
+	}
+
+	t.Run("the tool names its ask", func(t *testing.T) {
+		info := bashCall("ls")
+		info.Prepared = askPrepared{
+			summary: "list files",
+			ask:     "rm -rf ./build",
+			args:    json.RawMessage(`{"command":"rm -rf ./build"}`),
+		}
+		call := evidence(t, info)
+		if call.Summary != "rm -rf ./build" {
+			t.Errorf("the evidence carries %q, want the tool's own ask text", call.Summary)
+		}
+		if string(call.Arguments) != `{"command":"rm -rf ./build"}` {
+			t.Errorf("the evidence carries the arguments %s, want the tool's own", call.Arguments)
+		}
+	})
+
+	t.Run("a tool that names nothing", func(t *testing.T) {
+		call := evidence(t, bashCall("ls"))
+		if call.Summary != "ls" {
+			t.Errorf("the evidence carries %q, want the call's summary", call.Summary)
+		}
+		if string(call.Arguments) != `{"command":"ls"}` {
+			t.Errorf("the evidence carries the arguments %s, want the ones the model wrote", call.Arguments)
+		}
+	})
 }
 
 func TestAnAnswerNoBranchCoversIsUncertain(t *testing.T) {
@@ -905,23 +1031,6 @@ func TestABeforeSettleHookMatchesTheReasonItJudges(t *testing.T) {
 	}
 	if ended.Continue == nil || ended.Continue.Text() != "the tests are not run" {
 		t.Errorf("the hook decided %+v, want its continuation", ended)
-	}
-}
-
-func TestABeforeSettleHookStopsAFailingRunClosed(t *testing.T) {
-	spec := oneStep(PointBeforeSettle, Action{Kind: ActionAccept})
-	spec.OnError = FailClosed
-	spec.FailClosedMessage = "the hook could not judge the settle"
-	decider := pootest.NewStubDecider(0.9)
-	decider.SetError(decide.ErrDeferred)
-	runner := runnerOf(checkHook(t, spec), decider)
-
-	decision, err := runner.BeforeSettle(runContext("run1", decider), poo.ReasonEndTurn)
-	if err != nil {
-		t.Fatalf("the hook failed with %v, want its blocking decision", err)
-	}
-	if !decision.Stop || decision.Detail != "the hook could not judge the settle" {
-		t.Errorf("the hook decided %+v, want the stop", decision)
 	}
 }
 

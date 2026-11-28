@@ -38,8 +38,9 @@ const (
 //
 // One runner serves one session, and its firing counts are that
 // session's: the map is in memory, so a recovered session starts each
-// run's count again. A firing takes its slot before it asks anything, so
-// concurrent calls for one run cannot all pass the cap.
+// run's count again. A firing is counted when it commits a decision that
+// changes something, so concurrent calls for one run are all judged and
+// only the cap's worth of decisions take effect.
 type Runner struct {
 	// compiled is the checked policy the runner executes.
 	compiled *Compiled
@@ -49,7 +50,7 @@ type Runner struct {
 	hookTimeout time.Duration
 	// mu guards fires.
 	mu sync.Mutex
-	// fires counts the firings of each run or job.
+	// fires counts the decisions of each run or job that took effect.
 	fires map[string]int
 }
 
@@ -231,8 +232,13 @@ type matchInput struct {
 // the point's neutral decision.
 //
 // The matcher is read before anything else: an unmatched call costs no
-// probe and no decision-model call, and it charges no firing. A call a
-// hook has already fired its fill on is unmatched too.
+// probe and no decision-model call, and it counts no firing. A call a
+// hook has already taken its fill of decisions on is unmatched too.
+//
+// A firing in flight is not a firing counted: the count bounds the
+// decisions that take effect, so a batch of concurrent calls is judged in
+// full and the ones that find the cap taken commit the point's neutral
+// decision instead.
 func (r *Runner) evaluate(hctx poo.HookContext, in matchInput) (*Action, error) {
 	if !evalMatch(r.compiled.Match, in) {
 		return nil, nil
@@ -245,18 +251,9 @@ func (r *Runner) evaluate(hctx poo.HookContext, in matchInput) (*Action, error) 
 		return nil, nil
 	}
 	key := fireKey(hctx)
-	if !r.reserve(key) {
+	if r.capped(key) {
 		return nil, nil
 	}
-	// A firing keeps its slot only by returning a decision that changes
-	// something. Every other end gives the slot back, so a hook that
-	// decides nothing leaves the cap where it was.
-	kept := false
-	defer func() {
-		if !kept {
-			r.release(key)
-		}
-	}()
 	ctx, cancel := context.WithTimeout(parent, r.firingBudget())
 	defer cancel()
 
@@ -286,7 +283,11 @@ func (r *Runner) evaluate(hctx poo.HookContext, in matchInput) (*Action, error) 
 		}
 	}
 	if action != nil && !neutralAction(r.compiled.Point, action.Kind) {
-		kept = true
+		if !r.commit(key) {
+			// A firing that finished first took the last decision the
+			// cap allows, so this one leaves the point as it was.
+			return nil, nil
+		}
 	}
 	return action, nil
 }
@@ -462,13 +463,24 @@ func fireKey(hctx poo.HookContext) string {
 	return "run:" + hctx.RunID
 }
 
-// reserve takes a firing slot for the call's key.
+// capped reports that the key has taken every decision its hook allows.
+func (r *Runner) capped(key string) bool {
+	if r.compiled.MaxFiresPerRun <= 0 {
+		return false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.fires[key] >= r.compiled.MaxFiresPerRun
+}
+
+// commit counts one decision of the key that changes something.
 //
-// The check and the count are one critical section, so concurrent calls
-// for one run cannot all pass the cap: the slot a call takes here is the
-// slot every later call sees. A hook with no cap of its own reserves
-// nothing, and the count stays out of its way.
-func (r *Runner) reserve(key string) bool {
+// The count and the check are one critical section, so a batch of
+// concurrent calls cannot commit more decisions than the cap allows: the
+// calls that lose the race take the point's neutral decision. A firing
+// still asking commits nothing, so it never holds the cap against a call
+// that has already decided.
+func (r *Runner) commit(key string) bool {
 	if r.compiled.MaxFiresPerRun <= 0 {
 		return true
 	}
@@ -479,19 +491,6 @@ func (r *Runner) reserve(key string) bool {
 	}
 	r.fires[key]++
 	return true
-}
-
-// release gives back a slot a firing took and did not keep.
-func (r *Runner) release(key string) {
-	if r.compiled.MaxFiresPerRun <= 0 {
-		return
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.fires[key]--
-	if r.fires[key] <= 0 {
-		delete(r.fires, key)
-	}
 }
 
 // neutralAction reports whether a decision leaves its point as it was.
@@ -584,16 +583,45 @@ func containsAny(substrings []string, text string) bool {
 }
 
 // callData is the evidence of the call a tool hook judges.
+//
+// The summary and the arguments are the ones the tool names for an ask,
+// never the transcript's alone: the transcript's summary may be the
+// model's own description of a call it has not run, and a hook judges the
+// call itself.
 func callData(info poo.ToolCallInfo) *CallData {
 	data := &CallData{
 		Tool:      info.Spec.Name,
 		Class:     string(info.Spec.Class),
-		Arguments: info.Arguments,
+		Arguments: evidenceArguments(info),
 	}
 	if info.Prepared != nil {
-		data.Summary = info.Prepared.Summary()
+		data.Summary = askSummary(info.Prepared)
 	}
 	return data
+}
+
+// askSummary returns the text a hook's evidence shows for the call.
+//
+// A tool that says what its ask shows names the call itself, the way it
+// does for a permission ask. Any other tool is shown its summary.
+func askSummary(prepared poo.Prepared) string {
+	if asker, ok := prepared.(poo.AskSummaryer); ok {
+		return poo.CapSummary(asker.AskSummary())
+	}
+	return prepared.Summary()
+}
+
+// evidenceArguments returns the arguments a hook's evidence may carry.
+//
+// A tool that names its evidence arguments chooses what a decision model
+// sees; any other tool carries the raw arguments the model wrote.
+func evidenceArguments(info poo.ToolCallInfo) json.RawMessage {
+	if evidence, ok := info.Prepared.(poo.EvidenceArgumenter); ok {
+		if args := evidence.EvidenceArguments(); json.Valid(args) {
+			return args
+		}
+	}
+	return info.Arguments
 }
 
 // commandOf returns the call's primary argument as the command matchers
