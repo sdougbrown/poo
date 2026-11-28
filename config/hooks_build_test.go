@@ -8,9 +8,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/config"
+	"github.com/sdougbrown/poo/decide"
 	"github.com/sdougbrown/poo/hook"
 	"github.com/sdougbrown/poo/pootest"
 	"github.com/sdougbrown/poo/profile"
@@ -471,6 +473,43 @@ func TestTheHookFiringCapIsEverySessionsOwn(t *testing.T) {
 		if !strings.Contains(seen, "the other note") {
 			t.Errorf("the session %q never read the second note: the cap took both reads", id)
 		}
+	}
+}
+
+// TestTheHookBudgetSitsUnderTheSessionsTimeout covers the deadline the
+// runner keeps: it is the session's hook timeout, so a hook that runs out
+// of time answers through its own policy before the core records a missed
+// deadline.
+func TestTheHookBudgetSitsUnderTheSessionsTimeout(t *testing.T) {
+	workDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workDir, "note.txt"), []byte("the note"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	guard := theReadCapHook("the guard refuses the read", 1)
+	guard.OnError = hook.FailClosed
+	guard.FailClosedMessage = "the guard could not decide, and the read is refused"
+	settings := hookSettings(t, theHookSettings,
+		map[string]hook.Spec{"guard": guard},
+		config.ProfileSettings{Base: "code", Hooks: []string{"guard"}})
+	runtime := buildIn(t, settings, config.Overrides{}, workDir, theExecutors())
+	closeRuntime(t, runtime)
+	transport := pootest.NewTransport(
+		pootest.Turn{Calls: []pootest.Call{{Name: "read", ID: "c1", Arguments: json.RawMessage(`{"path":"note.txt"}`)}}},
+		pootest.Turn{Text: "done", Finish: "stop"},
+	)
+	runtime.Options.Transport = transport
+	runtime.Options.HookTimeout = 3 * time.Second
+	// The decision model never answers: the hook's own budget has to run
+	// out under the session's deadline, not past it.
+	hangs := decide.DeciderFunc(func(ctx context.Context, _ any, _ string, _ []decide.Question) ([]decide.Answer, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	})
+	sess := createHookSession(t, runtime, "s1", workDir,
+		poo.WithDecider(poo.ModelInfo{Name: "stub-decider", Ops: []poo.Op{poo.OpSystemOne}}, hangs))
+	runSession(t, sess, "read the note")
+	if seen := requestText(transport); !strings.Contains(seen, guard.FailClosedMessage) {
+		t.Errorf("the model read no failure decision: %s", seen)
 	}
 }
 
