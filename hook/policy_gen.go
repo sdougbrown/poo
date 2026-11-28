@@ -80,9 +80,9 @@ func Check(f HookFields, c HookConditions, prev HookFields) HookAvailability {
 	FiringTimeoutMsSatisfied := f.FiringTimeoutMs != nil
 	MaxFiresPerRunEnabled := true
 	MaxFiresPerRunSatisfied := f.MaxFiresPerRun != nil
-	OnErrorEnabled := !(!(f.FailClosedMessage != nil || f.OnError != nil && *f.OnError != "fail_closed"))
+	OnErrorEnabled := (f.FailClosedMessage != nil || f.OnError != nil && *f.OnError != "fail_closed")
 	OnErrorSatisfied := func() bool { v := f.OnError; return v != nil && *v != "" }()
-	OnUncertainEnabled := !(!(f.FailClosedMessage != nil || f.OnUncertain != nil && *f.OnUncertain != "fail_closed"))
+	OnUncertainEnabled := (f.FailClosedMessage != nil || f.OnUncertain != nil && *f.OnUncertain != "fail_closed")
 	OnUncertainSatisfied := func() bool { v := f.OnUncertain; return v != nil && *v != "" }()
 	PointEnabled := true
 	PointSatisfied := func() bool { v := f.Point; return v != nil && *v != "" }()
@@ -180,7 +180,7 @@ func Check(f HookFields, c HookConditions, prev HookFields) HookAvailability {
 				if !(f.OnError != nil && isValidRegexMatch(*f.OnError, "^(fail_open|fail_closed|fail_run)$")) {
 					return false
 				}
-				if !(!((f.Point != nil && *f.Point == "before_run" || f.Point != nil && *f.Point == "after_tool") && f.OnError != nil && *f.OnError == "fail_closed")) {
+				if !(!(f.OnError != nil && *f.OnError == "fail_closed") || (f.Point == nil || (*f.Point != "before_run" && *f.Point != "after_tool"))) {
 					return false
 				}
 				return true
@@ -190,7 +190,7 @@ func Check(f HookFields, c HookConditions, prev HookFields) HookAvailability {
 				if !(f.FailClosedMessage != nil || f.OnError != nil && *f.OnError != "fail_closed") && "a fail_closed on_error needs fail_closed_message, the text the denial carries" != "" {
 					reasons = append(reasons, "a fail_closed on_error needs fail_closed_message, the text the denial carries")
 				}
-				if !(!((f.Point != nil && *f.Point == "before_run" || f.Point != nil && *f.Point == "after_tool") && f.OnError != nil && *f.OnError == "fail_closed")) && "a before_run or after_tool hook has no denial to fail closed with, so on_error cannot be fail_closed" != "" {
+				if !(!(f.OnError != nil && *f.OnError == "fail_closed") || (f.Point == nil || (*f.Point != "before_run" && *f.Point != "after_tool"))) && "a before_run or after_tool hook has no denial to fail closed with, so on_error cannot be fail_closed" != "" {
 					reasons = append(reasons, "a before_run or after_tool hook has no denial to fail closed with, so on_error cannot be fail_closed")
 				}
 				if !(f.OnError != nil && isValidRegexMatch(*f.OnError, "^(fail_open|fail_closed|fail_run)$")) && "on_error must be fail_open, fail_closed or fail_run" != "" {
@@ -206,7 +206,7 @@ func Check(f HookFields, c HookConditions, prev HookFields) HookAvailability {
 				if !(f.FailClosedMessage != nil || f.OnError != nil && *f.OnError != "fail_closed") && "a fail_closed on_error needs fail_closed_message, the text the denial carries" != "" {
 					reasons = append(reasons, "a fail_closed on_error needs fail_closed_message, the text the denial carries")
 				}
-				if !(!((f.Point != nil && *f.Point == "before_run" || f.Point != nil && *f.Point == "after_tool") && f.OnError != nil && *f.OnError == "fail_closed")) && "a before_run or after_tool hook has no denial to fail closed with, so on_error cannot be fail_closed" != "" {
+				if !(!(f.OnError != nil && *f.OnError == "fail_closed") || (f.Point == nil || (*f.Point != "before_run" && *f.Point != "after_tool"))) && "a before_run or after_tool hook has no denial to fail closed with, so on_error cannot be fail_closed" != "" {
 					reasons = append(reasons, "a before_run or after_tool hook has no denial to fail closed with, so on_error cannot be fail_closed")
 				}
 				if !(f.OnError != nil && isValidRegexMatch(*f.OnError, "^(fail_open|fail_closed|fail_run)$")) && "on_error must be fail_open, fail_closed or fail_run" != "" {
@@ -228,7 +228,7 @@ func Check(f HookFields, c HookConditions, prev HookFields) HookAvailability {
 				if !(f.OnUncertain != nil && isValidRegexMatch(*f.OnUncertain, "^(fail_open|fail_closed|fail_run)$")) {
 					return false
 				}
-				if !(!((f.Point != nil && *f.Point == "before_run" || f.Point != nil && *f.Point == "after_tool") && f.OnUncertain != nil && *f.OnUncertain == "fail_closed")) {
+				if !(!(f.OnUncertain != nil && *f.OnUncertain == "fail_closed") || (f.Point == nil || (*f.Point != "before_run" && *f.Point != "after_tool"))) {
 					return false
 				}
 				return true
@@ -238,7 +238,7 @@ func Check(f HookFields, c HookConditions, prev HookFields) HookAvailability {
 				if !(f.FailClosedMessage != nil || f.OnUncertain != nil && *f.OnUncertain != "fail_closed") && "a fail_closed on_uncertain needs fail_closed_message, the text the denial carries" != "" {
 					reasons = append(reasons, "a fail_closed on_uncertain needs fail_closed_message, the text the denial carries")
 				}
-				if !(!((f.Point != nil && *f.Point == "before_run" || f.Point != nil && *f.Point == "after_tool") && f.OnUncertain != nil && *f.OnUncertain == "fail_closed")) && "a before_run or after_tool hook has no denial to fail closed with, so on_uncertain cannot be fail_closed" != "" {
+				if !(!(f.OnUncertain != nil && *f.OnUncertain == "fail_closed") || (f.Point == nil || (*f.Point != "before_run" && *f.Point != "after_tool"))) && "a before_run or after_tool hook has no denial to fail closed with, so on_uncertain cannot be fail_closed" != "" {
 					reasons = append(reasons, "a before_run or after_tool hook has no denial to fail closed with, so on_uncertain cannot be fail_closed")
 				}
 				if !(f.OnUncertain != nil && isValidRegexMatch(*f.OnUncertain, "^(fail_open|fail_closed|fail_run)$")) && "on_uncertain must be fail_open, fail_closed or fail_run" != "" {
@@ -254,7 +254,7 @@ func Check(f HookFields, c HookConditions, prev HookFields) HookAvailability {
 				if !(f.FailClosedMessage != nil || f.OnUncertain != nil && *f.OnUncertain != "fail_closed") && "a fail_closed on_uncertain needs fail_closed_message, the text the denial carries" != "" {
 					reasons = append(reasons, "a fail_closed on_uncertain needs fail_closed_message, the text the denial carries")
 				}
-				if !(!((f.Point != nil && *f.Point == "before_run" || f.Point != nil && *f.Point == "after_tool") && f.OnUncertain != nil && *f.OnUncertain == "fail_closed")) && "a before_run or after_tool hook has no denial to fail closed with, so on_uncertain cannot be fail_closed" != "" {
+				if !(!(f.OnUncertain != nil && *f.OnUncertain == "fail_closed") || (f.Point == nil || (*f.Point != "before_run" && *f.Point != "after_tool"))) && "a before_run or after_tool hook has no denial to fail closed with, so on_uncertain cannot be fail_closed" != "" {
 					reasons = append(reasons, "a before_run or after_tool hook has no denial to fail closed with, so on_uncertain cannot be fail_closed")
 				}
 				if !(f.OnUncertain != nil && isValidRegexMatch(*f.OnUncertain, "^(fail_open|fail_closed|fail_run)$")) && "on_uncertain must be fail_open, fail_closed or fail_run" != "" {
@@ -434,11 +434,11 @@ var ruleMeta = []RuleMetaEntry{
 	{Field: "", RuleType: "enabledWhen", Expr: "(f.OnError != nil && *f.OnError == \"fail_closed\" || f.OnUncertain != nil && *f.OnUncertain == \"fail_closed\")", Reason: "fail_closed_message is the text a fail_closed policy gives: it needs on_error or on_uncertain to be fail_closed"},
 	{Field: "FiringTimeoutMs", RuleType: "check", Expr: "f.FiringTimeoutMs != nil && *f.FiringTimeoutMs >= 1", Reason: "firing_timeout_ms must be at least a millisecond"},
 	{Field: "MaxFiresPerRun", RuleType: "check", Expr: "f.MaxFiresPerRun != nil && *f.MaxFiresPerRun >= 1", Reason: "max_fires_per_run must be at least one firing"},
-	{Field: "OnError", RuleType: "disables", Expr: "!((f.FailClosedMessage != nil || f.OnError != nil && *f.OnError != \"fail_closed\"))", Reason: "a fail_closed on_error needs fail_closed_message, the text the denial carries"},
-	{Field: "OnError", RuleType: "fairWhen", Expr: "!(((f.Point != nil && *f.Point == \"before_run\" || f.Point != nil && *f.Point == \"after_tool\") && f.OnError != nil && *f.OnError == \"fail_closed\"))", Reason: "a before_run or after_tool hook has no denial to fail closed with, so on_error cannot be fail_closed"},
+	{Field: "", RuleType: "enabledWhen", Expr: "(f.FailClosedMessage != nil || f.OnError != nil && *f.OnError != \"fail_closed\")", Reason: "a fail_closed on_error needs fail_closed_message, the text the denial carries"},
+	{Field: "OnError", RuleType: "fairWhen", Expr: "(!(f.OnError != nil && *f.OnError == \"fail_closed\") || (f.Point == nil || (*f.Point != \"before_run\" && *f.Point != \"after_tool\")))", Reason: "a before_run or after_tool hook has no denial to fail closed with, so on_error cannot be fail_closed"},
 	{Field: "OnError", RuleType: "check", Expr: "f.OnError != nil && isValidRegexMatch(*f.OnError, \"^(fail_open|fail_closed|fail_run)$\")", Reason: "on_error must be fail_open, fail_closed or fail_run"},
-	{Field: "OnUncertain", RuleType: "disables", Expr: "!((f.FailClosedMessage != nil || f.OnUncertain != nil && *f.OnUncertain != \"fail_closed\"))", Reason: "a fail_closed on_uncertain needs fail_closed_message, the text the denial carries"},
-	{Field: "OnUncertain", RuleType: "fairWhen", Expr: "!(((f.Point != nil && *f.Point == \"before_run\" || f.Point != nil && *f.Point == \"after_tool\") && f.OnUncertain != nil && *f.OnUncertain == \"fail_closed\"))", Reason: "a before_run or after_tool hook has no denial to fail closed with, so on_uncertain cannot be fail_closed"},
+	{Field: "", RuleType: "enabledWhen", Expr: "(f.FailClosedMessage != nil || f.OnUncertain != nil && *f.OnUncertain != \"fail_closed\")", Reason: "a fail_closed on_uncertain needs fail_closed_message, the text the denial carries"},
+	{Field: "OnUncertain", RuleType: "fairWhen", Expr: "(!(f.OnUncertain != nil && *f.OnUncertain == \"fail_closed\") || (f.Point == nil || (*f.Point != \"before_run\" && *f.Point != \"after_tool\")))", Reason: "a before_run or after_tool hook has no denial to fail closed with, so on_uncertain cannot be fail_closed"},
 	{Field: "OnUncertain", RuleType: "check", Expr: "f.OnUncertain != nil && isValidRegexMatch(*f.OnUncertain, \"^(fail_open|fail_closed|fail_run)$\")", Reason: "on_uncertain must be fail_open, fail_closed or fail_run"},
 	{Field: "Point", RuleType: "check", Expr: "f.Point != nil && isValidRegexMatch(*f.Point, \"^(before_run|before_tool|after_tool|after_turn|before_settle)$\")", Reason: "point must be before_run, before_tool, after_tool, after_turn or before_settle"},
 }
@@ -483,7 +483,7 @@ func Challenge(fieldName string, f HookFields, c HookConditions, prev HookFields
 		if status.Reason != nil {
 			explanations = append(explanations, "* "+*status.Reason)
 		}
-		explanations = append(explanations, "* disables: a fail_closed on_error needs fail_closed_message, the text the denial carries")
+		explanations = append(explanations, "* enabledWhen: a fail_closed on_error needs fail_closed_message, the text the denial carries")
 		explanations = append(explanations, "* fairWhen: a before_run or after_tool hook has no denial to fail closed with, so on_error cannot be fail_closed")
 		explanations = append(explanations, "* check: on_error must be fail_open, fail_closed or fail_run")
 	case "OnUncertain", "on_uncertain":
@@ -492,7 +492,7 @@ func Challenge(fieldName string, f HookFields, c HookConditions, prev HookFields
 		if status.Reason != nil {
 			explanations = append(explanations, "* "+*status.Reason)
 		}
-		explanations = append(explanations, "* disables: a fail_closed on_uncertain needs fail_closed_message, the text the denial carries")
+		explanations = append(explanations, "* enabledWhen: a fail_closed on_uncertain needs fail_closed_message, the text the denial carries")
 		explanations = append(explanations, "* fairWhen: a before_run or after_tool hook has no denial to fail closed with, so on_uncertain cannot be fail_closed")
 		explanations = append(explanations, "* check: on_uncertain must be fail_open, fail_closed or fail_run")
 	case "Point", "point":

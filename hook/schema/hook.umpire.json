@@ -48,18 +48,11 @@
       "type": "fairWhen",
       "field": "on_error",
       "when": {
-        "op": "not",
-        "expr": {
-          "op": "and",
-          "exprs": [
-            {
-              "op": "in",
-              "field": "point",
-              "values": ["before_run", "after_tool"]
-            },
-            { "op": "eq", "field": "on_error", "value": "fail_closed" }
-          ]
-        }
+        "op": "or",
+        "exprs": [
+          { "op": "not", "expr": { "op": "eq", "field": "on_error", "value": "fail_closed" } },
+          { "op": "notIn", "field": "point", "values": ["before_run", "after_tool"] }
+        ]
       },
       "reason": "a before_run or after_tool hook has no denial to fail closed with, so on_error cannot be fail_closed"
     },
@@ -67,47 +60,36 @@
       "type": "fairWhen",
       "field": "on_uncertain",
       "when": {
-        "op": "not",
-        "expr": {
-          "op": "and",
-          "exprs": [
-            {
-              "op": "in",
-              "field": "point",
-              "values": ["before_run", "after_tool"]
-            },
-            { "op": "eq", "field": "on_uncertain", "value": "fail_closed" }
-          ]
-        }
+        "op": "or",
+        "exprs": [
+          { "op": "not", "expr": { "op": "eq", "field": "on_uncertain", "value": "fail_closed" } },
+          { "op": "notIn", "field": "point", "values": ["before_run", "after_tool"] }
+        ]
       },
       "reason": "a before_run or after_tool hook has no denial to fail closed with, so on_uncertain cannot be fail_closed"
     },
     {
       "type": "requires",
       "field": "on_error",
-      "dependencies": [
-        {
-          "op": "or",
-          "exprs": [
-            { "op": "present", "field": "fail_closed_message" },
-            { "op": "neq", "field": "on_error", "value": "fail_closed" }
-          ]
-        }
-      ],
+      "when": {
+        "op": "or",
+        "exprs": [
+          { "op": "present", "field": "fail_closed_message" },
+          { "op": "neq", "field": "on_error", "value": "fail_closed" }
+        ]
+      },
       "reason": "a fail_closed on_error needs fail_closed_message, the text the denial carries"
     },
     {
       "type": "requires",
       "field": "on_uncertain",
-      "dependencies": [
-        {
-          "op": "or",
-          "exprs": [
-            { "op": "present", "field": "fail_closed_message" },
-            { "op": "neq", "field": "on_uncertain", "value": "fail_closed" }
-          ]
-        }
-      ],
+      "when": {
+        "op": "or",
+        "exprs": [
+          { "op": "present", "field": "fail_closed_message" },
+          { "op": "neq", "field": "on_uncertain", "value": "fail_closed" }
+        ]
+      },
       "reason": "a fail_closed on_uncertain needs fail_closed_message, the text the denial carries"
     },
     {
