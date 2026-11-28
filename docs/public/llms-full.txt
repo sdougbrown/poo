@@ -17,7 +17,7 @@ From one Go codebase, `poo` ships two deliverables:
 - A **headless CLI** (with an interactive [REPL](/getting-started/repl)) that runs sessions without a full terminal UI.
 - An **embeddable Go library** that a wrapping application links into its own binary.
 
-Unlinked packages cannot be reached at runtime. A read-only proving binary that omits `bash` cannot run shell commands.
+Unlinked packages cannot be reached at runtime. A read-only build omits `bash`, so no prompt or config can invoke a shell.
 
 ## The Extensibility Ladder
 
