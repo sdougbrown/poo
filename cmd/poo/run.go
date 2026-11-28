@@ -491,7 +491,7 @@ func newSession(runtime *config.Runtime) (*poo.Session, int, error) {
 		return nil, 2, err
 	}
 	runtime.Options.Prompt = append(runtime.Options.Prompt, edits...)
-	sess, err := poo.New(runtime.Options, poo.WithPolicy(runtime.Policy), runtime.MCPAttachOption())
+	sess, err := poo.New(runtime.Options, poo.WithPolicy(runtime.Policy), runtime.HooksAttachOption(), runtime.MCPAttachOption())
 	if err == nil {
 		return sess, 0, nil
 	}
