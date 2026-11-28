@@ -235,9 +235,9 @@ type Probe struct {
 	Command []string `json:"command,omitempty"`
 	// Tool is the tool a tool probe calls.
 	Tool *ToolProbe `json:"tool,omitempty"`
-	// TimeoutMs is how long the probe may take. Zero runs the probe
-	// under the hook's own firing timeout, and no probe outlives the
-	// hook that asked for it, however long its own bound is.
+	// TimeoutMs is how long the probe may take, in milliseconds. Zero
+	// takes 3000 ms. The hook's firing context bounds it either way, so
+	// a probe never outlives the hook that asked for it.
 	TimeoutMs int `json:"timeout_ms,omitempty"`
 }
 
