@@ -64,7 +64,11 @@ roles:
 
 ## Where `poo` uses the decision model
 
-When `roles.decider` is configured, three subsystems can call it.
+Today, three built-in subsystems call `roles.decider` when it is configured.
+
+::: info Growing surface
+This subsystem set is not the end of the road. `poo` is under active development, and more decision-backed capabilities, integrations, and hooks will be added over time. Custom Go binaries can also call `poo/decide.Decider` directly from their own [hooks](/extending/architecture).
+:::
 
 ### 1. Permission asker (`perm/decide`)
 
