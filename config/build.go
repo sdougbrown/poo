@@ -26,6 +26,7 @@ import (
 	"github.com/sdougbrown/poo/decide"
 	"github.com/sdougbrown/poo/exec"
 	"github.com/sdougbrown/poo/feed"
+	"github.com/sdougbrown/poo/hook"
 	"github.com/sdougbrown/poo/internal/caps"
 	"github.com/sdougbrown/poo/mcp/manifest"
 	"github.com/sdougbrown/poo/mcp/wire"
@@ -385,9 +386,13 @@ type Runtime struct {
 	// server reaches only through an explicit manifest reference.
 	envScrub exec.Scrub
 	// executor is the executor the commands run through: the tools
-	// that run one, and the feeds. It is nil when nothing runs a
-	// command.
+	// that run one, the feeds, and the command a hook's probe runs. It
+	// is nil when nothing runs a command.
 	executor exec.Executor
+	// hooks are the hooks the chosen profile runs, compiled once. Each
+	// session builds its own runners from them, so the policy is
+	// shared read-only and the firing counts are the session's.
+	hooks []*hook.Compiled
 	// deciderModel is the model the session's decider asks, when there
 	// is one.
 	deciderModel poo.ModelInfo
@@ -607,10 +612,19 @@ func Build(opts BuildOptions) (*Runtime, error) {
 		return nil, err
 	}
 	runtime.resolveDecider()
+	if err := runtime.resolveHooks(opts); err != nil {
+		return nil, err
+	}
 	if err := runtime.resolveProfile(opts, workingDir); err != nil {
 		return nil, err
 	}
 	if err := runtime.resolveTools(opts, workingDir); err != nil {
+		return nil, err
+	}
+	if err := runtime.checkHookCommandMatches(); err != nil {
+		return nil, err
+	}
+	if err := runtime.checkHookProbes(); err != nil {
 		return nil, err
 	}
 	if err := runtime.resolveMCPLauncher(opts); err != nil {
@@ -742,6 +756,157 @@ func (r *Runtime) resolveProfile(opts BuildOptions, workingDir string) error {
 	}
 	r.Profiles = profiles
 	return nil
+}
+
+// resolveHooks compiles the hooks the chosen profile runs.
+//
+// The chain is the profile's own, in its order, and each name is
+// compiled here rather than at its firing: a hook a runner could not
+// execute fails the build, before any session exists. The capability
+// the chain needs is asked for in the same place, so a profile that
+// runs hooks on a binary without a decision model or an executor is a
+// build failure and not a hook that fails open at every call.
+func (r *Runtime) resolveHooks(opts BuildOptions) error {
+	profile := r.profileName(opts)
+	chain := r.chosenProfile(opts).hooks
+	if len(chain) == 0 {
+		return nil
+	}
+	compiled := make([]*hook.Compiled, 0, len(chain))
+	for _, name := range chain {
+		spec, declared := r.Settings.Hooks[name]
+		if !declared {
+			return &Error{
+				Code:    CodeInvalid,
+				Field:   "hooks." + name,
+				Message: fmt.Sprintf("the profile %q runs a hook the settings do not declare", profile),
+			}
+		}
+		checked, err := hook.Validate(name, spec)
+		if err != nil {
+			return &Error{
+				Code:    CodeInvalid,
+				Field:   "hooks." + name,
+				Message: fmt.Sprintf("the profile %q runs a hook that does not compile", profile),
+				Err:     err,
+			}
+		}
+		compiled = append(compiled, checked)
+	}
+	if r.decider == nil {
+		return &Error{
+			Code:    CodeUnavailable,
+			Field:   "roles.decider",
+			Message: fmt.Sprintf("the profile %q runs hooks, and a hook asks the decision model the role decides", profile),
+			Err:     r.deciderErr,
+		}
+	}
+	if err := r.checkHookExecutor(compiled, opts); err != nil {
+		return err
+	}
+	r.hooks = compiled
+	return nil
+}
+
+// checkHookExecutor holds a command probe to the executor the session's
+// own commands run through.
+//
+// A probe is a command in the run's path, so it runs on the executor the
+// build resolved for the tools and nothing else: a binary that links no
+// executor, or not the one the settings name, cannot run the probe and
+// says so before the session starts.
+func (r *Runtime) checkHookExecutor(compiled []*hook.Compiled, opts BuildOptions) error {
+	executorName := configuredExecutorName(r.Settings)
+	for _, one := range compiled {
+		probe, runs := commandProbe(one)
+		if !runs {
+			continue
+		}
+		switch {
+		case opts.Executors == nil:
+			return &Error{
+				Code:    CodeUnavailable,
+				Field:   "hooks." + one.Name,
+				Message: fmt.Sprintf("the profile %q runs the hook %q, whose probe %q runs a command, and this binary links no executor", r.profileName(opts), one.Name, probe),
+			}
+		case !opts.Executors.Has(executorName):
+			return &Error{
+				Code:    CodeUnavailable,
+				Field:   "hooks." + one.Name,
+				Message: fmt.Sprintf("the profile %q runs the hook %q, whose probe %q runs a command, and this binary links no executor named %q", r.profileName(opts), one.Name, probe, executorName),
+			}
+		}
+	}
+	return nil
+}
+
+// checkHookCommandMatches holds a command matcher to the tool it
+// matches.
+//
+// A command matcher reads the call's primary argument, and a tool that
+// has none has nothing for it to read: every call would be unmatched and
+// the hook would never fire, which is a policy the operator believes is
+// running. perm refuses the same rule for the same reason.
+func (r *Runtime) checkHookCommandMatches() error {
+	for _, one := range r.hooks {
+		match := one.Match
+		if match.Tool == "" || (match.CommandPrefix == "" && len(match.CommandContains) == 0) {
+			continue
+		}
+		tool, offered := r.Options.Tools[match.Tool]
+		if !offered || tool == nil || tool.Spec().PrimaryArg != "" {
+			continue
+		}
+		return &Error{
+			Code:    CodeInvalid,
+			Field:   "hooks." + one.Name,
+			Message: fmt.Sprintf("the profile %q runs the hook %q, which matches the tool %q by its command, and the tool has no primary argument to match", r.Profile.Name, one.Name, match.Tool),
+		}
+	}
+	return nil
+}
+
+// checkHookProbes holds a tool probe to the tools this session offers.
+//
+// A probe reaches the session's own tool, so the tool has to be one the
+// built session offers — a disabled tool is a tool the probe cannot
+// call — and one a hook may read with. A probe that names anything else
+// is refused by name rather than failing open at every firing.
+func (r *Runtime) checkHookProbes() error {
+	for _, one := range r.hooks {
+		for _, probe := range one.Context.Probes {
+			if probe.Tool == nil {
+				continue
+			}
+			tool, offered := r.Options.Tools[probe.Tool.Name]
+			if !offered || tool == nil {
+				return &Error{
+					Code:    CodeInvalid,
+					Field:   "hooks." + one.Name,
+					Message: fmt.Sprintf("the profile %q runs the hook %q, whose probe %q calls the tool %q, which this session does not offer", r.Profile.Name, one.Name, probe.Name, probe.Tool.Name),
+				}
+			}
+			if spec := tool.Spec(); !poo.HookReadOnlyToolAllowed(probe.Tool.Name, spec) {
+				return &Error{
+					Code:    CodeInvalid,
+					Field:   "hooks." + one.Name,
+					Message: fmt.Sprintf("the profile %q runs the hook %q, whose probe %q calls the tool %q, which cannot run as a read-only probe", r.Profile.Name, one.Name, probe.Name, probe.Tool.Name),
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// commandProbe returns the name of the hook's first command probe, and
+// reports whether it has one.
+func commandProbe(compiled *hook.Compiled) (string, bool) {
+	for _, probe := range compiled.Context.Probes {
+		if probe.Tool == nil && len(probe.Command) > 0 {
+			return probe.Name, true
+		}
+	}
+	return "", false
 }
 
 // sessionFeeds returns the feeds the session runs: the feed manifests'
@@ -1420,6 +1585,79 @@ func (r *Runtime) MCPAttachOption() poo.Option {
 	}
 }
 
+// HooksAttachOption returns the option that gives a live session the
+// hooks its profile runs.
+//
+// The runners are the session's own: the compiled policy is shared
+// read-only, and every session gets fresh runners, so the firing cap a
+// spec sets counts the firings of that session's runs and no other
+// session's. The option composes with any attach already in the options,
+// the way the MCP attach does: this one installs the runners and the
+// attach it wrapped runs after it.
+func (r *Runtime) HooksAttachOption() poo.Option {
+	attach := r.attachHooks
+	return func(o *poo.Options) {
+		if len(r.hooks) == 0 {
+			return
+		}
+		caller := o.SessionAttach
+		o.SessionAttach = func(ctx context.Context, a *poo.Attach) (func() error, error) {
+			attach(a)
+			if caller == nil {
+				return nil, nil
+			}
+			return caller(ctx, a)
+		}
+	}
+}
+
+// attachHooks appends one session's runners to the hook points its
+// profile's hooks name.
+//
+// The slices are the build's own, so each one is cloned before the
+// runner joins it: one session's runners never reach the next. A hook
+// joins the slice of its point after the hooks already there, so the
+// profile's policy runs after what the consumer put in the options and
+// never in place of it.
+func (r *Runtime) attachHooks(a *poo.Attach) {
+	if len(r.hooks) == 0 {
+		return
+	}
+	timeout := a.Options.HookTimeout
+	if timeout <= 0 {
+		timeout = poo.DefaultHookTimeout
+	}
+	// A probe's command runs with what a tool's child gets, never the
+	// launcher's own environment: the credential names the session
+	// scrubs are scrubbed from the probe too.
+	probes := hook.ProbeEnv{Executor: r.executor, Env: exec.ScrubEnv(r.Env, r.toolOptions.Scrub)}
+	beforeRun := slices.Clone(a.Options.BeforeRun)
+	beforeTool := slices.Clone(a.Options.BeforeTool)
+	afterTool := slices.Clone(a.Options.AfterTool)
+	afterTurn := slices.Clone(a.Options.AfterTurn)
+	beforeSettle := slices.Clone(a.Options.BeforeSettle)
+	for _, compiled := range r.hooks {
+		runner := hook.NewRunner(compiled, probes, timeout)
+		switch compiled.Point {
+		case hook.PointBeforeRun:
+			beforeRun = append(beforeRun, runner)
+		case hook.PointBeforeTool:
+			beforeTool = append(beforeTool, runner)
+		case hook.PointAfterTool:
+			afterTool = append(afterTool, runner)
+		case hook.PointAfterTurn:
+			afterTurn = append(afterTurn, runner)
+		case hook.PointBeforeSettle:
+			beforeSettle = append(beforeSettle, runner)
+		}
+	}
+	a.Options.BeforeRun = beforeRun
+	a.Options.BeforeTool = beforeTool
+	a.Options.AfterTool = afterTool
+	a.Options.AfterTurn = afterTurn
+	a.Options.BeforeSettle = beforeSettle
+}
+
 // resourceFeedSpecs builds the feed specs the selected servers'
 // declared resource feeds become.
 //
@@ -1827,14 +2065,16 @@ func offersSideEffects(tools []poo.ToolInfo) bool {
 	return false
 }
 
-// needsExecutor reports whether an offered tool or a configured feed
-// runs a command.
+// needsExecutor reports whether an offered tool, a configured feed or a
+// hook's probe runs a command.
 //
 // bash and call_tool run a command through the executor, and so does every
 // catalog entry the session offers as a tool of its own; a feed is a command
-// of its own, so a session that runs one builds the executor too. A read-only
-// profile with no feeds builds none, and a settings file naming an executor
-// this binary lacks is only an error when something would run in it.
+// of its own, so a session that runs one builds the executor too. A hook's
+// command probe runs on the same executor, so a profile that runs one builds
+// it as well. A read-only profile with no feeds and no such probe builds
+// none, and a settings file naming an executor this binary lacks is only an
+// error when something would run in it.
 func (r *Runtime) needsExecutor() bool {
 	if r.hasFeeds() || len(r.elevatedTools) > 0 {
 		return true
@@ -1844,7 +2084,21 @@ func (r *Runtime) needsExecutor() bool {
 			return true
 		}
 	}
+	for _, compiled := range r.hooks {
+		if _, runs := commandProbe(compiled); runs {
+			return true
+		}
+	}
 	return false
+}
+
+// configuredExecutorName returns the executor the session's commands run
+// through: the settings' own, or the binary's default.
+func configuredExecutorName(settings *Settings) string {
+	if settings.Tools.Bash.Executor != nil {
+		return *settings.Tools.Bash.Executor
+	}
+	return DefaultExecutor
 }
 
 // toolInfo describes a tool the way the profile and the wire name it.
@@ -2378,10 +2632,7 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 	// this rule.
 	r.envScrub = credentialScrub
 
-	executorName := DefaultExecutor
-	if settings.Tools.Bash.Executor != nil {
-		executorName = *settings.Tools.Bash.Executor
-	}
+	executorName := configuredExecutorName(settings)
 	// A settings file cannot set up a tool the binary lacks: every bash
 	// leaf belongs to the bash tool, so a binary without the tool
 	// refuses the leaf by name.
@@ -3688,7 +3939,7 @@ func (r *Runtime) CreateSession(ctx context.Context, store session.Store, create
 	}
 	opts.Sink = store
 	opts.SessionID = created.SessionID
-	sess, err := poo.New(opts, append(fns, poo.WithPolicy(r.Policy), r.MCPAttachOption())...)
+	sess, err := poo.New(opts, append(fns, poo.WithPolicy(r.Policy), r.HooksAttachOption(), r.MCPAttachOption())...)
 	if err != nil {
 		if errors.Is(err, poo.ErrPromptRender) {
 			return nil, PromptRenderError(err)
@@ -3729,7 +3980,7 @@ func (r *Runtime) ResumeSession(ctx context.Context, store session.Store, id str
 	// none.
 	opts.WorkingDir = ""
 	fns = append(append([]poo.Option(nil), fns...), poo.WithAutoResume(r.Settings.DurableSettings().AutoResume))
-	return session.Resume(ctx, store, id, opts, append(fns, poo.WithPolicy(r.Policy), r.MCPAttachOption(), poo.WithPromptLoader(r.SessionPrompt))...)
+	return session.Resume(ctx, store, id, opts, append(fns, poo.WithPolicy(r.Policy), r.HooksAttachOption(), r.MCPAttachOption(), poo.WithPromptLoader(r.SessionPrompt))...)
 }
 
 // PromptOverrides are the prompt changes a client asks for.
