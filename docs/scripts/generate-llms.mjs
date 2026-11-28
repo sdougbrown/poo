@@ -9,6 +9,8 @@ const docsRoot = path.resolve(__dirname, '..')
 const publicDir = path.join(docsRoot, 'public')
 const baseUrl = 'https://poo.douggo.com'
 
+// Every doc page must be registered both here and in docs/.vitepress/config.mts.
+// Missing or unregistered pages fail docs:build instead of being silently omitted.
 const sections = [
   {
     title: 'Getting Started',
@@ -146,12 +148,48 @@ const fullChunks = [
   '',
 ]
 
+function listDocPages(dir, prefix = '') {
+  const found = []
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (entry.name === 'node_modules' || entry.name === '.vitepress' || entry.name === 'public' || entry.name === 'scripts') {
+      continue
+    }
+    const rel = prefix ? `${prefix}/${entry.name}` : entry.name
+    if (entry.isDirectory()) {
+      found.push(...listDocPages(path.join(dir, entry.name), rel))
+    } else if (entry.name.endsWith('.md') && rel !== 'index.md') {
+      found.push(rel)
+    }
+  }
+  return found.sort()
+}
+
+const registered = new Set()
+const missing = []
 for (const section of sections) {
-  const existing = section.pages.filter((p) => fs.existsSync(path.join(docsRoot, p)))
-  if (existing.length === 0) continue
+  for (const relPath of section.pages) {
+    registered.add(relPath)
+    if (!fs.existsSync(path.join(docsRoot, relPath))) {
+      missing.push(relPath)
+    }
+  }
+}
+const unregistered = listDocPages(docsRoot).filter((relPath) => !registered.has(relPath))
+if (missing.length > 0 || unregistered.length > 0) {
+  if (missing.length > 0) {
+    console.error(`generate-llms: registered pages not found on disk: ${missing.join(', ')}`)
+  }
+  if (unregistered.length > 0) {
+    console.error(`generate-llms: doc pages missing from sections list: ${unregistered.join(', ')}`)
+  }
+  process.exit(1)
+}
+
+for (const section of sections) {
+  if (section.pages.length === 0) continue
 
   llmsLines.push(`## ${section.title}`, '')
-  for (const relPath of existing) {
+  for (const relPath of section.pages) {
     const abs = path.join(docsRoot, relPath)
     const raw = fs.readFileSync(abs, 'utf8')
     const { frontmatter, body } = parseFrontmatterAndBody(raw)
