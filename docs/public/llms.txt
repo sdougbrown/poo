@@ -44,7 +44,7 @@ Full concatenated documentation: https://poo.douggo.com/llms-full.txt
 - [Custom Tools & Prompts](https://poo.douggo.com/extending/custom-tools-and-prompts): Inject Go tools via poo.Tool, override embedded prompt sections with PromptFS, and implement custom command executors with poo/exec.
 - [Wire Protocol](https://poo.douggo.com/extending/wire-protocol): JSON-RPC 2.0 control protocol over stdio served by poo serve, including session methods, run methods, server notifications, permission asks, and poo/wire/protocol.
 - [Conformance & Testing](https://poo.douggo.com/extending/conformance-and-testing): Verify custom binaries with poo/wire/conformance, run client integration tests with conformance.NewFakeEndpoint, and unit-test sessions with poo/pootest.
-- [Prior art](https://poo.douggo.com/extending/prior-art): What poo copies from other work, and what it rejects. This is a short list, not an essay. Each source records exactly what was read and when.
+- [Prior Art](https://poo.douggo.com/extending/prior-art): What poo adopts and rejects from mini-swe-agent and pi-durable, and how those choices shaped the harness.
 
 ## Reference
 

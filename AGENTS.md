@@ -55,10 +55,11 @@ Keep `docs/` in sync in the same PR that changes user-facing behavior:
 2. **CLI flags or subcommands (`cmd/poo/app.go`, `flags.go`):** Update `docs/reference/cli.md` and `docs/operations/limits-and-exit-codes.md` (if exit codes or limits changed).
 3. **Manifests (`feed/`, `cli/`, `mcp/manifest/`):** Update `docs/reference/manifests.md` and the matching capability guide.
 4. **New pages:** Add YAML frontmatter (`title`, `description`), register the page in both `docs/.vitepress/config.mts` (sidebar) and `docs/scripts/generate-llms.mjs` (section list), and link it from `README.md` if it is a top-level entry point.
-5. **Keep `README.md` concise:** `README.md` is a ~120-line front door and map, not a feature dump. Put detailed docs in `docs/`.
-6. **Tighten prose with `writetighter`:** Before pushing doc edits, run `writetighter lint` (and `writetighter revise` when configured) on changed markdown files:
+5. **Self-link `poo`-specific terms:** On first mention in a page, link concepts specific to `poo` (such as roles, profiles, feeds, compaction, decider, and settle reasons) to their defining section (for example `/configuration/models-and-catalog#roles-and-required-operations`).
+6. **Keep `README.md` concise:** `README.md` is a ~120-line front door and map, not a feature dump. Put detailed docs in `docs/`.
+7. **Tighten prose with `writetighter`:** Before pushing doc edits, run `writetighter lint` (and `writetighter revise` when configured) on changed markdown files:
    - `--kind reference` for `docs/reference/*`
    - `--kind description` for guides and `README.md`
    - `--kind agent-instruction` for `AGENTS.md`
    Resolve all enforced findings (such as the 25-word sentence limit).
-7. **Rebuild & regenerate `llms.txt`:** Run `npm --prefix docs run docs:build`. This regenerates `docs/public/llms.txt` and `docs/public/llms-full.txt` and fails on dead internal links. Commit the updated `llms.txt` and `llms-full.txt` alongside your doc changes.
+8. **Rebuild & regenerate `llms.txt`:** Run `npm --prefix docs run docs:build`. This regenerates `docs/public/llms.txt` and `docs/public/llms-full.txt` and fails on dead internal links. Commit the updated `llms.txt` and `llms-full.txt` alongside your doc changes.

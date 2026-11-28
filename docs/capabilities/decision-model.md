@@ -5,7 +5,7 @@ description: Configure roles.decider to power fast yes/no and classifier judgmen
 
 # Decision Model
 
-`poo` supports a dedicated **decision model** (`roles.decider`) alongside the chat model. Instead of free-form prose, it takes a state payload and typed questions and returns a probability distribution over the allowed answers. Questions can be `Bool` (yes/no), `Choice` (up to 26 named options), or `Score` (2 to 10 levels).
+`poo` supports a dedicated **decision model** (`roles.decider`) alongside the chat model (see [Roles and Required Operations](/configuration/models-and-catalog#roles-and-required-operations)). Instead of free-form prose, it takes a state payload and typed questions and returns a probability distribution over the allowed answers. Questions can be `Bool` (yes/no), `Choice` (up to 26 named options), or `Score` (2 to 10 levels).
 
 Every call through a session's decider is wrapped by `decide.Recorded` (`poo/decide`), which writes a `decision` record to the [session log](/reference/session-log-v0). Each record includes the caller origin, `state_hash`, questions, answers, outcome (`ok`, `deferred`, or `invalid`), latency, and wire request count.
 

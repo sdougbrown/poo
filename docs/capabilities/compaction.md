@@ -189,7 +189,7 @@ context:
 
 ## The `compaction` role
 
-`roles.compaction` assigns a dedicated model to a strategy's own standalone requests (`Ask`), defaulting to `roles.chat` when unset:
+`roles.compaction` assigns a dedicated model to a strategy's own standalone requests (`Ask`), defaulting to `roles.chat` when unset (see [Roles and Required Operations](/configuration/models-and-catalog#roles-and-required-operations)):
 
 ```yaml
 roles:

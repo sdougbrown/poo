@@ -34,7 +34,7 @@ poo login codex
 poo login ollama-cloud
 ```
 
-Credentials are stored in `poo`'s default credential file (`~/.config/poo/auth.yaml` on Linux, `~/Library/Application Support/poo/auth.yaml` on macOS). Once authenticated, assign a model to `roles.chat` in your settings file:
+Credentials are stored in `poo`'s default credential file (`~/.config/poo/auth.yaml` on Linux, `~/Library/Application Support/poo/auth.yaml` on macOS). Once authenticated, assign a model to the [`roles.chat` role](/configuration/models-and-catalog#roles-and-required-operations) in your settings file:
 
 ```yaml
 # .poo/settings.yaml
@@ -63,7 +63,7 @@ poo run --settings examples/code.settings.yaml "Run go test ./... and summarize 
 
 ## Preflight with `poo roles`
 
-Before starting a session, verify that every role in your settings resolves to a valid model and credential:
+Before starting a session, verify that every [role](/configuration/models-and-catalog#roles-and-required-operations) in your settings resolves to a valid model and credential:
 
 ```bash
 poo roles

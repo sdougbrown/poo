@@ -258,7 +258,7 @@ Pass `--json` for machine-readable output (`file`, `format`, `provider`, `client
 poo roles [--settings /path/to/settings.yaml]
 ```
 
-Builds the catalog the same way a session does and prints each role (`chat`, `compaction`, `decider`) with its resolved `MODEL`, `PROVIDER`, and `CREDENTIAL` source (`env:<VAR>`, `static`, or `none`). Exits non-zero if any assigned role fails to resolve, listing candidate models that would satisfy it.
+Builds the catalog the same way a session does and prints each [role](/configuration/models-and-catalog#roles-and-required-operations) (`chat`, `compaction`, `decider`) with its resolved `MODEL`, `PROVIDER`, and `CREDENTIAL` source (`env:<VAR>`, `static`, or `none`). Exits non-zero if any assigned role fails to resolve, listing candidate models that would satisfy it.
 
 ## Related Pages
 
