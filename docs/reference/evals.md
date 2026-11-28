@@ -64,10 +64,6 @@ Before the first run, each invocation snapshots the fixtures its tasks use into 
 
 If any hash changes, the run is marked invalid (`source_changed`, `success: false`), a warning naming the run is written to `stderr`, and `poo-eval run` exits non-zero without restoring the modified source.
 
-### Failure-mode study
-
-For the recorded 240-run baseline (20 tasks × 4 models × 3 seeds) and cataloged harness and model pathologies, see [Observed Failure Modes](/reference/observed).
-
 ---
 
 ## Harbor adapter (`evals/harbor/`)

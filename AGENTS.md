@@ -34,7 +34,7 @@ The repository root holds `package poo` (~60 `.go` files). Before grepping sourc
 | Permissions, doom loop & bwrap sandbox | `perm/`, `protect/`, `exec/bwrap/` | `docs/operations/permissions-and-safety.md`, `docs/operations/sandbox.md` |
 | Sessions, durability, SQLite & log v0 | `session/`, `session/sqlite/` | `docs/operations/sessions-and-durability.md`, `docs/reference/session-log-v0.md` |
 | Wire protocol, server & conformance | `server/`, `wire/`, `wire/protocol/`, `wire/conformance/`, `pootest/` | `docs/extending/custom-binary.md`, `docs/extending/wire-protocol.md`, `docs/extending/conformance-and-testing.md` |
-| Evals & Harbor Terminal-Bench adapter | `eval/`, `evals/`, `evals/harbor/`, `cmd/poo-eval/` | `docs/reference/evals.md`, `docs/reference/observed.md` |
+| Evals & Harbor Terminal-Bench adapter | `eval/`, `evals/`, `evals/harbor/`, `cmd/poo-eval/` | `docs/reference/evals.md` |
 
 ## Architecture Invariants
 

@@ -98,7 +98,6 @@ export default defineConfig({
           { text: 'Session Log v0', link: '/reference/session-log-v0' },
           { text: 'Wire API Mapping', link: '/reference/wire-api-mapping' },
           { text: 'Evals & Benchmarks', link: '/reference/evals' },
-          { text: 'Observed Failure Modes', link: '/reference/observed' },
         ],
       },
     ],

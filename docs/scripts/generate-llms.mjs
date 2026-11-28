@@ -74,7 +74,6 @@ const sections = [
       'reference/session-log-v0.md',
       'reference/wire-api-mapping.md',
       'reference/evals.md',
-      'reference/observed.md',
     ],
   },
 ]

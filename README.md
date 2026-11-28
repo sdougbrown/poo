@@ -74,7 +74,7 @@ All documentation lives in [`docs/`](docs/) and publishes to [poo.douggo.com](ht
 
 `poo` ships two evaluation tracks documented in [Evals & Benchmarks](docs/reference/evals.md):
 
-- **`poo-eval`** (`evals/`): 20 tasks (coding fixes, find-and-explain, long-context) run inside `bwrap` isolation with fixture integrity hashing and recorded failure modes ([Observed](docs/reference/observed.md)).
+- **`poo-eval`** (`evals/`): 20 tasks (coding fixes, find-and-explain, long-context) run inside `bwrap` isolation with fixture integrity hashing.
 - **Harbor adapter** (`evals/harbor/`): runs a static Linux `poo` binary on Terminal-Bench and SWE-bench for paired harness comparisons. In head-to-head Terminal-Bench runs on locally hosted `glm-5.3-flash`, `poo` beat `pi` and tied `mini-swe-agent` (single-model scope, not an exhaustive benchmark).
 
 ## Repository Layout
