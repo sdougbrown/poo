@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -193,24 +194,43 @@ const sinkWaitCap = 60 * time.Second
 
 // waitRecords waits until the sink holds at least n records named
 // name, on the sink's own signal rather than a poll.
+//
+// Like waitForSink, the cap is the hang guard, and the failure carries
+// every goroutine's stack: a wait the cap ends is a signal that never
+// came, and the strand names the goroutine that holds the record up.
 func waitRecords(t *testing.T, s *recordingSink, name string, n int) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), sinkWaitCap)
 	defer cancel()
-	if err := s.WaitRecords(ctx, name, n); err != nil {
-		t.Fatalf("timed out waiting for %d %s records (the sink holds %d)", n, name, s.count(name))
+	if err := s.WaitRecords(ctx, name, n); err == nil {
+		return
 	}
+	stacks := make([]byte, 1<<20)
+	stacks = stacks[:runtime.Stack(stacks, true)]
+	t.Fatalf("timed out waiting for %d %s records (the sink holds %d)\n%s", n, name, s.count(name), stacks)
 }
 
 // waitForSink waits for the sink's contents to satisfy cond, on the
 // sink's own signal instead of a poll loop.
+//
+// The cap is the hang guard: a healthy settle is fast, so a wait the cap
+// ends is a signal that never came — a strand in the session, not a slow
+// append. The failure carries every goroutine's stack, so the strand
+// names the goroutine that holds the delivery up.
 func waitForSink(t *testing.T, sink *recordingSink, what string, cond func() bool) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), sinkWaitCap)
 	defer cancel()
-	if err := sink.WaitFunc(ctx, cond); err != nil {
-		t.Fatalf("timed out waiting for %s", what)
+	if err := sink.WaitFunc(ctx, cond); err == nil {
+		return
 	}
+	// The strand's evidence: what every goroutine was doing when the
+	// signal the wait waits on never came. The buffer holds the stacks
+	// of a full session — a run, its feeds, the close and the test —
+	// with room for the race detector's own goroutines.
+	stacks := make([]byte, 1<<20)
+	stacks = stacks[:runtime.Stack(stacks, true)]
+	t.Fatalf("timed out waiting for %s (the sink holds %s)\n%s", what, strings.Join(sink.Names(), " "), stacks)
 }
 
 // messages returns the message records, in order.
