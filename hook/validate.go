@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/decide"
 )
 
@@ -142,6 +143,12 @@ func checkPolicy(name string, spec Spec) error {
 	}
 	for _, field := range fields {
 		if !field.present {
+			// A key the spec leaves out takes its default, and the one
+			// key without a default is refused where the operator wrote
+			// it, not at the branch that could not use it.
+			if field.status.Required && !field.status.Satisfied {
+				return &Error{Hook: name, Path: field.path, Message: reasonOf(field.status, "the hook does not state this field")}
+			}
 			continue
 		}
 		switch {
@@ -261,29 +268,43 @@ func checkMatchers(name string, spec Spec) error {
 // checkMatcherValues checks the words a matcher is spelled with.
 func checkMatcherValues(name string, spec Spec) error {
 	match := spec.Match
-	words := []struct {
-		key     string
-		value   string
-		allowed []string
-	}{
-		{"match.trigger", match.Trigger, []string{TriggerPrompt, TriggerJob, TriggerFeed}},
-		{"match.class", match.Class, []string{ClassReadOnly, ClassSideEffecting}},
-		{"match.reason", match.Reason, []string{ReasonEndTurn, ReasonOutputTruncated}},
-	}
-	for _, word := range words {
-		if word.value == "" || slices.Contains(word.allowed, word.value) {
-			continue
-		}
+	triggers := []poo.TriggerKind{TriggerPrompt, TriggerJob, TriggerFeed}
+	if match.Trigger != "" && !slices.Contains(triggers, match.Trigger) {
 		return &Error{
 			Hook:    name,
-			Path:    word.key,
-			Message: fmt.Sprintf("%q is not one of %s", word.value, strings.Join(word.allowed, ", ")),
+			Path:    "match.trigger",
+			Message: fmt.Sprintf("%q is not one of %s", match.Trigger, joinWords(triggers)),
+		}
+	}
+	classes := []poo.ToolKind{ClassReadOnly, ClassSideEffecting}
+	if match.Class != "" && !slices.Contains(classes, match.Class) {
+		return &Error{
+			Hook:    name,
+			Path:    "match.class",
+			Message: fmt.Sprintf("%q is not one of %s", match.Class, joinWords(classes)),
+		}
+	}
+	reasons := []poo.Reason{ReasonEndTurn, ReasonOutputTruncated}
+	if match.Reason != "" && !slices.Contains(reasons, match.Reason) {
+		return &Error{
+			Hook:    name,
+			Path:    "match.reason",
+			Message: fmt.Sprintf("%q is not one of %s", match.Reason, joinWords(reasons)),
 		}
 	}
 	if match.MinTurn != nil && *match.MinTurn < 1 {
 		return &Error{Hook: name, Path: "match.min_turn", Message: "the turns a run counts start at one"}
 	}
 	return nil
+}
+
+// joinWords lists the words a matcher field allows, for the failure.
+func joinWords[T ~string](words []T) string {
+	names := make([]string, len(words))
+	for i, word := range words {
+		names[i] = string(word)
+	}
+	return strings.Join(names, ", ")
 }
 
 // checkContext checks the evidence a hook gathers.
@@ -310,6 +331,8 @@ func checkContext(name string, spec Spec) error {
 			return &Error{Hook: name, Path: path, Message: "a probe runs a command or a tool, never both"}
 		case len(probe.Command) == 0 && probe.Tool == nil:
 			return &Error{Hook: name, Path: path, Message: "a probe needs a command or a tool"}
+		case len(probe.Command) > 0 && probe.Command[0] == "":
+			return &Error{Hook: name, Path: path + ".command", Message: fmt.Sprintf("the probe %q names no program to run", probe.Name)}
 		}
 		if err := checkProbe(name, path, probe); err != nil {
 			return err
@@ -319,6 +342,10 @@ func checkContext(name string, spec Spec) error {
 }
 
 // checkProbe checks one probe's tool and timeout.
+//
+// The tool a probe names is checked against the tools a session offers
+// where those are known: a spec is a file, and the same policy runs on a
+// binary with a different set of tools.
 func checkProbe(name, path string, probe Probe) error {
 	if probe.TimeoutMs < 0 {
 		return &Error{Hook: name, Path: path + ".timeout_ms", Message: fmt.Sprintf("the probe %q has a negative timeout", probe.Name)}
@@ -466,8 +493,9 @@ func checkAction(name string, point Point, path string, action Action) error {
 
 // checkGraph walks the graph from the entry.
 //
-// Every step is reached from the entry, no path loops back to a step it
-// already took, and the longest path is at most MaxSteps.
+// Every step is reached from the entry and no path loops back to a step
+// it already took. The cap on the steps bounds the longest path, so a
+// walk that ends has at most MaxSteps of them.
 func checkGraph(name string, spec Spec) error {
 	const (
 		unvisited = iota
@@ -502,12 +530,8 @@ func checkGraph(name string, spec Spec) error {
 		depth[step] = longest + 1
 		return depth[step], nil
 	}
-	entryDepth, err := walk(spec.Entry)
-	if err != nil {
+	if _, err := walk(spec.Entry); err != nil {
 		return err
-	}
-	if entryDepth > MaxSteps {
-		return &Error{Hook: name, Path: "entry", Message: fmt.Sprintf("a path takes %d steps, the most is %d", entryDepth, MaxSteps)}
 	}
 	for _, step := range slices.Sorted(maps.Keys(spec.Steps)) {
 		if state[step] == unvisited {

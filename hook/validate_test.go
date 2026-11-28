@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -247,6 +248,137 @@ func legalDecision(point hook.Point, kind hook.ActionKind) bool {
 	return false
 }
 
+// TestValidateRejectsAMissingPoint proves the one policy key without a
+// default is refused where it belongs, and not at the branch that could
+// not use it.
+func TestValidateRejectsAMissingPoint(t *testing.T) {
+	spec := validSpec(hook.PointBeforeTool)
+	spec.Point = ""
+	_, err := hook.Validate("h", spec)
+	path, message := refused(t, err)
+	if path != "point" || !strings.Contains(message, "before_run") {
+		t.Fatalf("refused %q with %q, want the point key and its own words", path, message)
+	}
+}
+
+// TestValidateAcceptsEveryMatcher proves each point's fields are the ones
+// a spec may set, and that the compiled policy carries them.
+func TestValidateAcceptsEveryMatcher(t *testing.T) {
+	tests := []struct {
+		name  string
+		point hook.Point
+		match hook.Match
+	}{
+		{"a person's run", hook.PointBeforeRun, hook.Match{Trigger: hook.TriggerPrompt}},
+		{"a job's run", hook.PointBeforeRun, hook.Match{Trigger: hook.TriggerJob}},
+		{"a feed's run", hook.PointBeforeRun, hook.Match{Trigger: hook.TriggerFeed}},
+		{"a tool", hook.PointBeforeTool, hook.Match{Tool: "bash"}},
+		{"a class", hook.PointBeforeTool, hook.Match{Class: hook.ClassReadOnly}},
+		{"a command prefix", hook.PointBeforeTool, hook.Match{Tool: "bash", CommandPrefix: "git push"}},
+		{"command substrings", hook.PointBeforeTool, hook.Match{Tool: "bash", CommandContains: []string{"git push", "git commit"}}},
+		{"an error result", hook.PointAfterTool, hook.Match{IsError: boolOf(true)}},
+		{"a result that was kept", hook.PointAfterTool, hook.Match{IsError: boolOf(false)}},
+		{"a tool and its command", hook.PointAfterTool, hook.Match{Tool: "bash", CommandPrefix: "go test"}},
+		{"the first turn", hook.PointAfterTurn, hook.Match{MinTurn: intOf(1)}},
+		{"every turn", hook.PointAfterTurn, hook.Match{MinTurn: intOf(1), Interrupted: boolOf(true)}},
+		{"an end turn", hook.PointBeforeSettle, hook.Match{Reason: hook.ReasonEndTurn}},
+		{"a truncated settle", hook.PointBeforeSettle, hook.Match{Reason: hook.ReasonOutputTruncated}},
+		{"a later settle", hook.PointBeforeSettle, hook.Match{MinTurn: intOf(3)}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			spec := validSpec(test.point)
+			spec.Match = test.match
+			compiled, err := hook.Validate("h", spec)
+			if err != nil {
+				t.Fatalf("the matcher was refused: %v", err)
+			}
+			if !reflect.DeepEqual(compiled.Match, test.match) {
+				t.Fatalf("the compiled matcher is %+v, want %+v", compiled.Match, test.match)
+			}
+		})
+	}
+}
+
+// TestValidateAcceptsAScoreQuestion proves the third question kind
+// compiles, and that its answers are the level indices a decision model
+// reports.
+func TestValidateAcceptsAScoreQuestion(t *testing.T) {
+	spec := validSpec(hook.PointBeforeTool)
+	step := spec.Steps["ask"]
+	step.Question = hook.QuestionSpec{
+		Kind:         hook.QuestionScore,
+		Instructions: "How close is the change to release?",
+		Levels:       []string{"not close", "nearly", "ready"},
+	}
+	branches := make(map[string]hook.Branch, 3)
+	for _, key := range []string{"0", "1", "2"} {
+		branches[key] = hook.Branch{MinProbability: 0.5, Action: &hook.Action{Kind: hook.ActionAllow}}
+	}
+	step.Branches = branches
+	spec.Steps["ask"] = step
+	compiled, err := hook.Validate("h", spec)
+	if err != nil {
+		t.Fatalf("the score question was refused: %v", err)
+	}
+	if got := compiled.Steps["ask"].Question.Keys(); !reflect.DeepEqual(got, []string{"0", "1", "2"}) {
+		t.Fatalf("the compiled question's answers are %v, want the level indices", got)
+	}
+}
+
+// TestValidateRejectsAMessageTheDecisionCannotCarry proves each point's
+// decisions carry their message exactly when they need one.
+func TestValidateRejectsAMessageTheDecisionCannotCarry(t *testing.T) {
+	for _, point := range points {
+		for _, kind := range []hook.ActionKind{
+			hook.ActionPass, hook.ActionAppend,
+			hook.ActionAllow, hook.ActionDeny, hook.ActionShortCircuit,
+			hook.ActionKeep, hook.ActionAnnotate, hook.ActionReplace, hook.ActionRedact,
+			hook.ActionStop, hook.ActionAccept, hook.ActionContinue,
+		} {
+			if !legalDecision(point, kind) {
+				continue
+			}
+			wrong := hook.Action{Kind: kind}
+			if !needsMessage(kind) {
+				wrong.Message = "the message"
+			}
+			spec := validSpec(point)
+			spec.Steps["ask"] = hook.Step{
+				Question: spec.Steps["ask"].Question,
+				Branches: map[string]hook.Branch{
+					"yes": {MinProbability: 0.75, Action: &wrong},
+					"no":  {MinProbability: 0.5, Action: &hook.Action{Kind: neutral(point)}},
+				},
+			}
+			_, err := hook.Validate("h", spec)
+			path, _ := refused(t, err)
+			if want := "steps.ask.branches.yes.action.message"; path != want {
+				t.Errorf("%s/%s: refused %q, want %q", point, kind, path, want)
+			}
+		}
+	}
+}
+
+// TestValidateAcceptsFailRunEverywhere proves failing the run is allowed
+// at every point and for both policies, and that a fill-in answer may
+// still be refused with a message.
+func TestValidateAcceptsFailRunEverywhere(t *testing.T) {
+	for _, point := range points {
+		for _, key := range []string{"on_error", "on_uncertain"} {
+			spec := validSpec(point)
+			if key == "on_error" {
+				spec.OnError = hook.FailRun
+			} else {
+				spec.OnUncertain = hook.FailRun
+			}
+			if _, err := hook.Validate("h", spec); err != nil {
+				t.Errorf("%s refused %s fail_run: %v", point, key, err)
+			}
+		}
+	}
+}
+
 // TestValidateTakesDefaults proves an absent timeout and policy take the
 // values a runner needs.
 func TestValidateTakesDefaults(t *testing.T) {
@@ -297,11 +429,17 @@ func TestValidateRejectsPolicyForPoint(t *testing.T) {
 		}
 	}
 	for _, point := range []hook.Point{hook.PointBeforeTool, hook.PointAfterTurn, hook.PointBeforeSettle} {
-		spec := validSpec(point)
-		spec.OnError = hook.FailClosed
-		spec.FailClosedMessage = "the run stops here"
-		if _, err := hook.Validate("h", spec); err != nil {
-			t.Errorf("%s refused a fail_closed policy with its message: %v", point, err)
+		for _, key := range []string{"on_error", "on_uncertain"} {
+			spec := validSpec(point)
+			spec.FailClosedMessage = "the run stops here"
+			if key == "on_error" {
+				spec.OnError = hook.FailClosed
+			} else {
+				spec.OnUncertain = hook.FailClosed
+			}
+			if _, err := hook.Validate("h", spec); err != nil {
+				t.Errorf("%s refused a %s fail_closed policy with its message: %v", point, key, err)
+			}
 		}
 	}
 }
@@ -310,17 +448,22 @@ func TestValidateRejectsPolicyForPoint(t *testing.T) {
 // the text it hands the model, and that a text with no fail_closed is
 // refused.
 func TestValidateRejectsFailClosedWithoutMessage(t *testing.T) {
-	spec := validSpec(hook.PointBeforeTool)
-	spec.OnUncertain = hook.FailClosed
-	_, err := hook.Validate("h", spec)
-	path, message := refused(t, err)
-	if path != "on_uncertain" || !strings.Contains(message, "fail_closed_message") {
-		t.Fatalf("refused %q with %q, want the key and its message reason", path, message)
+	for _, key := range []string{"on_error", "on_uncertain"} {
+		spec := validSpec(hook.PointBeforeTool)
+		if key == "on_error" {
+			spec.OnError = hook.FailClosed
+		} else {
+			spec.OnUncertain = hook.FailClosed
+		}
+		_, err := hook.Validate("h", spec)
+		path, message := refused(t, err)
+		if path != key || !strings.Contains(message, "fail_closed_message") {
+			t.Fatalf("%s: refused %q with %q, want the key and its message reason", key, path, message)
+		}
 	}
-	message = "a stray message"
-	spec = validSpec(hook.PointBeforeTool)
-	spec.FailClosedMessage = message
-	_, err = hook.Validate("h", spec)
+	spec := validSpec(hook.PointBeforeTool)
+	spec.FailClosedMessage = "a stray message"
+	_, err := hook.Validate("h", spec)
 	path, text := refused(t, err)
 	if path != "fail_closed_message" || !strings.Contains(text, "fail_closed") {
 		t.Fatalf("refused %q with %q, want the message key and its fail_closed reason", path, text)
@@ -412,6 +555,7 @@ func TestValidateRejectsProbes(t *testing.T) {
 		{"no name", []hook.Probe{{Command: []string{"true"}}}, "context.probes[0]"},
 		{"repeated", []hook.Probe{{Name: "p", Command: []string{"true"}}, {Name: "p", Command: []string{"true"}}}, "context.probes[1]"},
 		{"negative timeout", []hook.Probe{{Name: "p", Command: []string{"true"}, TimeoutMs: -1}}, "context.probes[0].timeout_ms"},
+		{"no program", []hook.Probe{{Name: "p", Command: []string{""}}}, "context.probes[0].command"},
 		{"unnamed tool", []hook.Probe{{Name: "p", Tool: &hook.ToolProbe{}}}, "context.probes[0].tool.name"},
 		{"args are not an object", []hook.Probe{{Name: "p", Tool: &hook.ToolProbe{Name: "read", Args: json.RawMessage(`[1, 2]`)}}}, "context.probes[0].tool.args"},
 		{"too many", []hook.Probe{
@@ -562,6 +706,36 @@ func TestValidateRejectsGraph(t *testing.T) {
 		t.Fatalf("refused %q with %q, want the looping step", path, message)
 	}
 
+	// A cycle two steps below the entry names the step it came back to,
+	// not the entry.
+	twoStep := loop
+	twoStep.Steps["ask"] = hook.Step{
+		Question: twoStep.Steps["ask"].Question,
+		Branches: map[string]hook.Branch{
+			"yes": {MinProbability: 0.5, Next: "middle"},
+			"no":  {MinProbability: 0.5, Action: &hook.Action{Kind: hook.ActionAllow}},
+		},
+	}
+	twoStep.Steps["middle"] = hook.Step{
+		Question: twoStep.Steps["ask"].Question,
+		Branches: map[string]hook.Branch{
+			"yes": {MinProbability: 0.5, Next: "ask"},
+			"no":  {MinProbability: 0.5, Next: "end"},
+		},
+	}
+	twoStep.Steps["end"] = hook.Step{
+		Question: twoStep.Steps["ask"].Question,
+		Branches: map[string]hook.Branch{
+			"yes": {MinProbability: 0.5, Action: &hook.Action{Kind: hook.ActionAllow}},
+			"no":  {MinProbability: 0.5, Action: &hook.Action{Kind: hook.ActionAllow}},
+		},
+	}
+	_, err = hook.Validate("h", twoStep)
+	path, message = refused(t, err)
+	if path != "steps.ask" || !strings.Contains(message, "loops back") {
+		t.Fatalf("refused %q with %q, want the step the cycle comes back to", path, message)
+	}
+
 	stranded := validSpec(hook.PointBeforeTool)
 	stranded.Steps["spare"] = hook.Step{
 		Question: stranded.Steps["ask"].Question,
@@ -590,6 +764,39 @@ func TestValidateRejectsGraph(t *testing.T) {
 	path, _ = refused(t, err)
 	if path != "steps" {
 		t.Fatalf("refused %q, want the steps", path)
+	}
+}
+
+// TestValidateWalksADiamond proves a step two branches reach is one step
+// of the walk, not a loop: the check reads the shared step once.
+func TestValidateWalksADiamond(t *testing.T) {
+	spec := validSpec(hook.PointBeforeTool)
+	question := spec.Steps["ask"].Question
+	leaf := map[string]hook.Branch{
+		"yes": {MinProbability: 0.5, Action: &hook.Action{Kind: hook.ActionAllow}},
+		"no":  {MinProbability: 0.5, Action: &hook.Action{Kind: hook.ActionAllow}},
+	}
+	spec.Steps = map[string]hook.Step{
+		"ask": {Question: question, Branches: map[string]hook.Branch{
+			"yes": {MinProbability: 0.75, Next: "left"},
+			"no":  {MinProbability: 0.5, Next: "right"},
+		}},
+		"left": {Question: question, Branches: map[string]hook.Branch{
+			"yes": {MinProbability: 0.5, Next: "done"},
+			"no":  {MinProbability: 0.5, Next: "done"},
+		}},
+		"right": {Question: question, Branches: leaf},
+		"done": {Question: question, Branches: map[string]hook.Branch{
+			"yes": {MinProbability: 0.5, Action: &hook.Action{Kind: hook.ActionAllow}},
+			"no":  {MinProbability: 0.5, Action: &hook.Action{Kind: hook.ActionAllow}},
+		}},
+	}
+	compiled, err := hook.Validate("h", spec)
+	if err != nil {
+		t.Fatalf("the diamond was refused: %v", err)
+	}
+	if len(compiled.Steps) != 4 {
+		t.Fatalf("the compiled graph has %d step(s), want 4", len(compiled.Steps))
 	}
 }
 
@@ -637,6 +844,10 @@ func TestCompiledIgnoresLaterSpecChanges(t *testing.T) {
 	spec.Steps["classify_fix"].Branches["run_gofmt"].Action.Message = "changed"
 	spec.Match.CommandContains[0] = "changed"
 	spec.Context.Probes[0].Command[0] = "changed"
+	choice := spec.Steps["classify_fix"]
+	choice.Question = hook.QuestionSpec{Kind: hook.QuestionChoice, Options: []decide.Option{{Name: "changed"}}}
+	spec.Steps["classify_fix"] = choice
+	spec.Context.Probes[1].Tool.Args = json.RawMessage(`{"path":"changed"}`)
 
 	if got := compiled.Steps["is_pushing_go_code"].Branches["yes"].MinProbability; got != 0.75 {
 		t.Fatalf("the compiled branch needs %v", got)
@@ -649,6 +860,28 @@ func TestCompiledIgnoresLaterSpecChanges(t *testing.T) {
 	}
 	if got := compiled.Context.Probes[0].Command[0]; got != "gofmt" {
 		t.Fatalf("the compiled probe runs %q", got)
+	}
+	if got := compiled.Steps["classify_fix"].Question.Keys(); !reflect.DeepEqual(got, []string{"run_gofmt", "allow_anyway"}) {
+		t.Fatalf("the compiled question's answers are %v, want the fixture's", got)
+	}
+	if got := string(compiled.Context.Probes[1].Tool.Args); !strings.Contains(got, "go.mod") {
+		t.Fatalf("the compiled probe's arguments are %q", got)
+	}
+}
+
+// TestCompiledCopiesThePointersASpecSets proves the compiled matcher does
+// not share the spec's own pointers, so a caller that keeps its Spec
+// cannot change a policy mid-run.
+func TestCompiledCopiesThePointersASpecSets(t *testing.T) {
+	spec := validSpec(hook.PointBeforeSettle)
+	spec.Match = hook.Match{Reason: hook.ReasonEndTurn, MinTurn: intOf(2)}
+	compiled, err := hook.Validate("h", spec)
+	if err != nil {
+		t.Fatalf("the spec was refused: %v", err)
+	}
+	*spec.Match.MinTurn = 7
+	if got := *compiled.Match.MinTurn; got != 2 {
+		t.Fatalf("the compiled matcher needs turn %d, want the spec's 2", got)
 	}
 }
 

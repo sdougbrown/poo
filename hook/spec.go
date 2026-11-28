@@ -9,17 +9,19 @@
 // The spec is checked before any runner exists. Validate turns a Spec
 // into a Compiled, and a spec that cannot be executed is a build
 // failure: an unknown point, a matcher the point cannot use, a decision
-// the point cannot carry, a question whose answers no branch covers, or
-// a graph that loops or strands a step.
+// the point cannot carry, or a graph that loops or strands a step. An
+// answer no branch covers is not a failure: the runner reads it as the
+// hook being unsure, and takes the spec's on_uncertain policy.
 //
-// The package imports the standard library and poo/decide only, so a
-// build that links no tool, no provider and no code mode still checks
-// its hooks.
+// The package imports the standard library, the core and poo/decide
+// only, so a build that links no tool, no provider and no code mode still
+// checks its hooks.
 package hook
 
 import (
 	"encoding/json"
 
+	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/decide"
 )
 
@@ -115,21 +117,24 @@ const (
 )
 
 // The matcher values each point's fields allow.
+//
+// They are the core's own words, so a matcher cannot name a run a trigger
+// the core stopped naming, or a reason it renamed.
 const (
 	// TriggerPrompt matches a run a person started.
-	TriggerPrompt = "prompt"
+	TriggerPrompt = poo.TriggerPrompt
 	// TriggerJob matches a run a job started.
-	TriggerJob = "job"
+	TriggerJob = poo.TriggerJob
 	// TriggerFeed matches a run a feed started.
-	TriggerFeed = "feed"
+	TriggerFeed = poo.TriggerFeed
 	// ClassReadOnly matches a tool that only reads.
-	ClassReadOnly = "read_only"
+	ClassReadOnly = poo.ClassReadOnly
 	// ClassSideEffecting matches a tool that changes something.
-	ClassSideEffecting = "side_effecting"
+	ClassSideEffecting = poo.ClassSideEffecting
 	// ReasonEndTurn matches a settle the model ended.
-	ReasonEndTurn = "end_turn"
+	ReasonEndTurn = poo.ReasonEndTurn
 	// ReasonOutputTruncated matches a settle the output limit ended.
-	ReasonOutputTruncated = "output_truncated"
+	ReasonOutputTruncated = poo.ReasonOutputTruncated
 )
 
 // The question kinds a step may ask.
@@ -153,7 +158,9 @@ type Spec struct {
 	// Zero sets no cap of the hook's own.
 	MaxFiresPerRun int `json:"max_fires_per_run,omitempty"`
 	// FiringTimeoutMs is how long the hook has to answer. Zero takes
-	// DefaultFiringTimeoutMs.
+	// DefaultFiringTimeoutMs. A runner keeps its own budget under the
+	// session's hook deadline, so a longer spec timeout never outlives
+	// the call it answers.
 	FiringTimeoutMs int `json:"firing_timeout_ms,omitempty"`
 	// OnError is what the runner does when the hook fails. An absent
 	// policy is FailOpen.
@@ -179,19 +186,19 @@ type Spec struct {
 type Match struct {
 	// Trigger is the kind of run this point matches: one of the Trigger
 	// values. before_run only.
-	Trigger string `json:"trigger,omitempty"`
+	Trigger poo.TriggerKind `json:"trigger,omitempty"`
 	// Tool is the tool's name. The tool points match on it.
 	Tool string `json:"tool,omitempty"`
 	// Class is the tool's class: ClassReadOnly or ClassSideEffecting.
 	// The tool points match on it, and a matcher names a tool or a
 	// class, never both.
-	Class string `json:"class,omitempty"`
+	Class poo.ToolKind `json:"class,omitempty"`
 	// CommandPrefix is what the call's command starts with. It needs a
 	// tool, and it excludes CommandContains.
 	CommandPrefix string `json:"command_prefix,omitempty"`
-	// CommandContains are substrings the call's command holds: all of
-	// them must be there. It needs a tool, and it excludes
-	// CommandPrefix.
+	// CommandContains are substrings the call's command may hold: any
+	// one of them holding is the matcher holding. It needs a tool, and it
+	// excludes CommandPrefix.
 	CommandContains []string `json:"command_contains,omitempty"`
 	// IsError matches a result the tool reported as an error.
 	// after_tool only.
@@ -203,7 +210,7 @@ type Match struct {
 	Interrupted *bool `json:"interrupted,omitempty"`
 	// Reason is the settle reason this point matches: one of the Reason
 	// values. before_settle only.
-	Reason string `json:"reason,omitempty"`
+	Reason poo.Reason `json:"reason,omitempty"`
 }
 
 // ContextSpec is the evidence a hook is shown.
@@ -229,7 +236,8 @@ type Probe struct {
 	// Tool is the tool a tool probe calls.
 	Tool *ToolProbe `json:"tool,omitempty"`
 	// TimeoutMs is how long the probe may take. Zero runs the probe
-	// under the hook's own firing timeout.
+	// under the hook's own firing timeout, and no probe outlives the
+	// hook that asked for it, however long its own bound is.
 	TimeoutMs int `json:"timeout_ms,omitempty"`
 }
 
@@ -248,7 +256,9 @@ type Step struct {
 	TimeoutMs int `json:"timeout_ms,omitempty"`
 	// Question is what the step asks.
 	Question QuestionSpec `json:"question"`
-	// Branches route the answers, by answer key.
+	// Branches route the answers, by answer key. A step needs at least
+	// one; an answer no branch covers is the hook being unsure, and
+	// takes the spec's on_uncertain policy.
 	Branches map[string]Branch `json:"branches"`
 }
 
@@ -328,8 +338,8 @@ type Compiled struct {
 	OnUncertain FailurePolicy
 	// FailClosedMessage is the text a FailClosed policy hands the model.
 	FailClosedMessage string
-	// Idempotent reports that the hook gathers no command probe, so its
-	// evidence does not depend on when it is gathered.
+	// Idempotent reports that the hook gathers no command probe, so
+	// running it again repeats no operator's command.
 	Idempotent bool
 }
 
