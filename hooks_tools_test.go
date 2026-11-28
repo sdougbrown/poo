@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/sdougbrown/poo"
@@ -44,6 +45,9 @@ type probeHook struct {
 	counts map[string]int
 	// probes is how many probes the hook made in all.
 	probes int
+	// repeat holds the repeat counts each tool call's hook read, in
+	// order.
+	repeat []poo.RepeatCounts
 	// tool is the tool the hook probes.
 	tool string
 	// args are the arguments it probes with.
@@ -91,6 +95,13 @@ func (h *probeHook) Probes() int {
 	return h.probes
 }
 
+// Counts returns the repeat counts each tool call's hook read, in order.
+func (h *probeHook) Counts() []poo.RepeatCounts {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]poo.RepeatCounts(nil), h.repeat...)
+}
+
 // Points returns each hook point's probe, by point name.
 func (h *probeHook) Points() map[string]probePoint {
 	h.mu.Lock()
@@ -125,9 +136,13 @@ func (h *probeHook) BeforeRun(ctx poo.HookContext, _ poo.RunTrigger) (poo.StartD
 	return poo.StartDecision{}, nil
 }
 
-// BeforeTool probes before the model's call.
-func (h *probeHook) BeforeTool(ctx poo.HookContext, _ poo.ToolCallInfo) (poo.ToolDecision, error) {
+// BeforeTool probes before the model's call, and records the doom loop's
+// counts as the hook sees them.
+func (h *probeHook) BeforeTool(ctx poo.HookContext, info poo.ToolCallInfo) (poo.ToolDecision, error) {
 	h.probe("before_tool", ctx)
+	h.mu.Lock()
+	h.repeat = append(h.repeat, poo.RepeatCounts{Exact: info.RepeatCount, Near: info.NearRepeatCount})
+	h.mu.Unlock()
 	return poo.Allow(), nil
 }
 
@@ -281,31 +296,187 @@ func TestHookContextOffersWorkingDirAndAReadOnlyProbe(t *testing.T) {
 }
 
 // TestAProbeLeavesTheDoomLoopsCountersAlone covers the counters: a hook
-// that probes the same tool many times in a row counts nothing, so the
-// model's own streak is untouched and the run settles as it would.
+// that probes the tool and the arguments the model is about to call
+// leaves the model's streak where it was, so the model's second call
+// counts its two calls and the probes it ran count nothing.
 func TestAProbeLeavesTheDoomLoopsCountersAlone(t *testing.T) {
 	read := &namedTool{name: "read", echoTool: echoTool{result: "the tree's files"}}
+	again := []byte(`{"path":"go.mod"}`)
 	tr := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "read", Arguments: again}}},
+		{calls: []poo.ToolCall{{CallID: "c2", Name: "read", Arguments: again}}},
 		{text: "done"},
 	})
-	hook := newProbeHook("read", `{"path":"go.mod"}`)
-	hook.repeats = 5
+	hook := newProbeHook("read", string(again))
+	// More probes than the doom loop's own thresholds, of the call the
+	// model is about to make: a probe that counted would leave the second
+	// call's counts far past them.
+	hook.repeats = 6
 	opts := probeOptions(t, tr, &recordingSink{}, &echoTool{result: "the effect"}, read)
 	opts.BeforeTool = []poo.BeforeToolHook{hook}
 	s := newTestSession(t, opts)
 
 	res := runSession(t, s, "start")
 
-	if got, want := len(read.Calls()), 5; got != want {
-		t.Fatalf("the hook ran %d probe(s), want %d", got, want)
+	// Every call's probes, and the model's own calls, which ran as asked.
+	if got, want := len(read.Calls()), 2*hook.repeats+2; got != want {
+		t.Fatalf("the read tool ran %d time(s), want %d", got, want)
 	}
-	if got := s.RepeatCountsFor("r1"); got.Exact != 1 || got.Near != 1 {
-		t.Errorf("the model's call counts %+v, want the first call's 1 and 1: probes are not counted", got)
+	counts := hook.Counts()
+	if len(counts) != 2 {
+		t.Fatalf("the hook read %d call(s) of counts, want 2", len(counts))
+	}
+	if counts[1].Exact != 2 || counts[1].Near != 2 {
+		t.Errorf("the model's second call counts %+v, want 2 and 2: probes are not counted", counts[1])
 	}
 	if res.Reason != poo.ReasonEndTurn {
 		t.Errorf("the run settled %s, want %s", res.Reason, poo.ReasonEndTurn)
 	}
+}
+
+// detachedProbeHook probes with a context of its own, the way a hook that
+// ignores the context it was handed does.
+type detachedProbeHook struct {
+	// tool is the tool the hook probes.
+	tool string
+	// done carries what the probe reported.
+	done chan error
+}
+
+// newDetachedProbeHook returns a hook that probes one tool with a context
+// of its own.
+func newDetachedProbeHook(tool string) *detachedProbeHook {
+	return &detachedProbeHook{tool: tool, done: make(chan error, 1)}
+}
+
+// BeforeTool probes the tool with a context the hook made itself.
+func (h *detachedProbeHook) BeforeTool(ctx poo.HookContext, _ poo.ToolCallInfo) (poo.ToolDecision, error) {
+	_, err := ctx.ReadOnlyTools.CallReadOnly(context.Background(), h.tool, json.RawMessage(`{"path":"go.mod"}`))
+	h.done <- err
+	return poo.Allow(), nil
+}
+
+// Wait returns what the probe reported.
+func (h *detachedProbeHook) Wait(t *testing.T) error {
+	t.Helper()
+	select {
+	case err := <-h.done:
+		return err
+	case <-time.After(10 * time.Second):
+		t.Fatal("the probe never returned")
+		return nil
+	}
+}
+
+// callerCapture keeps the read-only caller a session-start hook was given.
+type callerCapture struct {
+	// mu guards caller.
+	mu sync.Mutex
+	// caller is the hook context's read-only tool caller.
+	caller poo.ReadOnlyToolCaller
+}
+
+// SessionStart keeps the caller and decides nothing.
+func (c *callerCapture) SessionStart(ctx poo.HookContext) (poo.StartDecision, error) {
+	c.mu.Lock()
+	c.caller = ctx.ReadOnlyTools
+	c.mu.Unlock()
+	return poo.StartDecision{}, nil
+}
+
+// Caller returns the caller the session's hook context carried.
+func (c *callerCapture) Caller() poo.ReadOnlyToolCaller {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.caller
+}
+
+// TestAProbeStopsWithItsHookAndItsSession covers the bound: a probe ends
+// with the hook that asked for it, even when it was handed a context of
+// its own, and it ends with the session that owns it.
+func TestAProbeStopsWithItsHookAndItsSession(t *testing.T) {
+	t.Run("the hook's deadline", func(t *testing.T) {
+		ended := make(chan error, 1)
+		read := &namedTool{name: "read", echoTool: echoTool{call: func(ctx context.Context) (poo.ToolResult, error) {
+			<-ctx.Done()
+			ended <- ctx.Err()
+			return poo.ToolResult{}, ctx.Err()
+		}}}
+		hook := newDetachedProbeHook("read")
+		tr := scripted([]fakeResponse{
+			{calls: []poo.ToolCall{{CallID: "c1", Name: "read", Arguments: []byte(`{"path":"go.mod"}`)}}},
+			{text: "done"},
+		})
+		opts := probeOptions(t, tr, &recordingSink{}, &echoTool{result: "the effect"}, read)
+		opts.HookTimeout = 200 * time.Millisecond
+		opts.BeforeTool = []poo.BeforeToolHook{hook}
+		s := newTestSession(t, opts)
+
+		res := runSession(t, s, "start")
+
+		select {
+		case err := <-ended:
+			if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+				t.Errorf("the probe's tool ended with %v, want the hook's deadline", err)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatal("the probe outlived the hook's deadline")
+		}
+		if hook.Wait(t) == nil {
+			t.Error("the probe reported no failure after its hook's deadline")
+		}
+		if res.Reason != poo.ReasonHookError {
+			t.Errorf("the run settled %s, want %s", res.Reason, poo.ReasonHookError)
+		}
+	})
+
+	// A probe in a before-tool hook is bound to the hook's context, and
+	// Close ends that context with the run it settles. The stop is the
+	// session's, and it arrives through the hook.
+	t.Run("the session's close", func(t *testing.T) {
+		started := make(chan struct{})
+		ended := make(chan error, 1)
+		read := &namedTool{name: "read", echoTool: echoTool{call: func(ctx context.Context) (poo.ToolResult, error) {
+			close(started)
+			<-ctx.Done()
+			ended <- ctx.Err()
+			return poo.ToolResult{}, ctx.Err()
+		}}}
+		hook := newDetachedProbeHook("read")
+		tr := scripted([]fakeResponse{
+			{calls: []poo.ToolCall{{CallID: "c1", Name: "read", Arguments: []byte(`{"path":"go.mod"}`)}}},
+			{text: "done"},
+		})
+		capture := &callerCapture{}
+		opts := probeOptions(t, tr, &recordingSink{}, &echoTool{result: "the effect"}, read)
+		opts.SessionStart = []poo.SessionStartHook{capture}
+		opts.BeforeTool = []poo.BeforeToolHook{hook}
+		s := newTestSession(t, opts)
+
+		go func() { _, _ = s.Prompt(context.Background(), "start") }()
+		select {
+		case <-started:
+		case <-time.After(10 * time.Second):
+			t.Fatal("the probe never started")
+		}
+		if err := s.Close(); err != nil {
+			t.Fatalf("closing the session: %v", err)
+		}
+		select {
+		case err := <-ended:
+			if !errors.Is(err, context.Canceled) {
+				t.Errorf("the probe's tool ended with %v, want the session's close", err)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatal("the probe outlived the session")
+		}
+		if hook.Wait(t) == nil {
+			t.Error("the probe of a closing session returned no error")
+		}
+		if _, err := capture.Caller().CallReadOnly(context.Background(), "read", json.RawMessage(`{"path":"go.mod"}`)); !errors.Is(err, poo.ErrSessionClosed) {
+			t.Errorf("a probe after the close failed with %v, want %v", err, poo.ErrSessionClosed)
+		}
+	})
 }
 
 // TestAProbeRefusesEveryToolThatCouldAct covers the eligibility rule: a
@@ -520,5 +691,20 @@ func TestAProbeObeysTheSessionsReadRestrictions(t *testing.T) {
 		if strings.Contains(p.observation.Text, "the guarded line") {
 			t.Errorf("the probe of %s saw the protected file's content: %q", tt.name, p.observation.Text)
 		}
+	}
+}
+
+// TestAHookProbeNeverNamesABackgroundOnlyTool covers the eligibility the
+// build check and the call share: a tool that only runs as a background
+// job cannot answer a probe, so the build refuses it rather than every
+// firing failing open.
+func TestAHookProbeNeverNamesABackgroundOnlyTool(t *testing.T) {
+	spec := poo.ToolSpec{Name: "read", Class: poo.ClassReadOnly, Background: poo.BackgroundAlways}
+	if poo.HookReadOnlyToolAllowed("read", spec) {
+		t.Error("a probe may name a tool that only runs in the background")
+	}
+	spec.Background = poo.BackgroundAllowed
+	if !poo.HookReadOnlyToolAllowed("read", spec) {
+		t.Error("a probe may not name a read-only tool the model may also background")
 	}
 }

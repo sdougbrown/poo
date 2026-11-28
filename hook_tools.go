@@ -28,10 +28,15 @@ var hookProbeTools = map[string]struct{}{
 
 // HookReadOnlyToolAllowed reports whether a hook may probe a tool.
 //
-// A tool is probeable when it says it reads and is one of the tools a
-// probe may name.
+// A tool is probeable when it says it reads, is one of the tools a probe
+// may name, and runs in the turn its caller runs in: a probe is a call
+// the hook waits on, so a tool that only runs as a background job has no
+// answer to give it.
 func HookReadOnlyToolAllowed(name string, spec ToolSpec) bool {
 	if spec.Class != ClassReadOnly {
+		return false
+	}
+	if spec.Background == BackgroundAlways {
 		return false
 	}
 	_, ok := hookProbeTools[name]
@@ -71,8 +76,11 @@ type readOnlyToolCaller struct {
 //
 // The tool is validated and prepared the way a call the model makes is,
 // and it runs in the session's environment, so a probe obeys the
-// session's read restrictions. What follows the call is nothing: the
-// probe appends no history, writes no record, emits no event, raises no
+// session's read restrictions. The permission engine does not see it: a
+// probe raises no ask, so a deny rule and an ask for a path outside the
+// working directory leave it alone, and only the tool's own read rules
+// bound what it reaches. What follows the call is nothing: the probe
+// appends no history, writes no record, emits no event, raises no
 // permission ask and touches no repeat counter.
 func (c *readOnlyToolCaller) CallReadOnly(ctx context.Context, name string, args json.RawMessage) (observation HookToolObservation, err error) {
 	// A tool that panics runs here on the hook's goroutine, where the
@@ -98,6 +106,13 @@ func (c *readOnlyToolCaller) CallReadOnly(ctx context.Context, name string, args
 	if closed {
 		return HookToolObservation{}, ErrSessionClosed
 	}
+	// A probe never starts for a caller that has already ended: the
+	// hook's own deadline or the session's jobs have stopped it.
+	for _, candidate := range []context.Context{ctx, c.parentCtx, jobCtx} {
+		if candidate != nil && candidate.Err() != nil {
+			return HookToolObservation{}, candidate.Err()
+		}
+	}
 
 	tool, ok := s.opts.Tools[name]
 	if !ok {
@@ -121,6 +136,9 @@ func (c *readOnlyToolCaller) CallReadOnly(ctx context.Context, name string, args
 	// session's jobs: whichever ends first stops it.
 	ctx, release := probeContext(ctx, c.parentCtx, jobCtx)
 	defer release()
+	if err := ctx.Err(); err != nil {
+		return HookToolObservation{}, err
+	}
 
 	env := s.toolEnvFor(c.runID, "")
 	env.Nested = nil
