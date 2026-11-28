@@ -168,8 +168,8 @@ type Session struct {
 	// running job and its queued result.
 	jobCompletions int
 	// DEBUG-FLAKE: temporary trace of the wake path's decisions, read
-	// by a test that strands. Not meant to merge.
-	debugMu    sync.Mutex
+	// by a test that strands. Guarded by the session's mutex. Not meant
+	// to merge.
 	debugTrace []string
 	// jobCompletionsDone is signalled when a completion finishes, so the
 	// close can wait for them without polling.

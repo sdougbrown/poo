@@ -1436,10 +1436,10 @@ func (s *Session) queueJobResult(result jobResult) {
 	// DEBUG-FLAKE: temporary trace of the wake path's decisions.
 	defer func() {
 		if IsFeedOrigin(result.origin) && result.fault != nil {
-			s.debugMu.Lock()
+			s.mu.Lock()
 			s.debugTrace = append(s.debugTrace, fmt.Sprintf("queued fault result: run=%v state=%v queue=%d reserved=%v closed=%v broken=%v pending=%v",
 				s.run != nil, s.state, len(s.jobQueue), s.reserved, s.closed, s.broken, s.pending != nil))
-			s.debugMu.Unlock()
+			s.mu.Unlock()
 		}
 	}()
 	s.mu.Lock()
@@ -1603,8 +1603,8 @@ func (s *Session) debugTracef(format string, args ...any) {
 // DEBUG-FLAKE: temporary scaffolding while the fault-report strand is
 // chased; it is not meant to merge.
 func (s *Session) DebugFaultTrace() []string {
-	s.debugMu.Lock()
-	defer s.debugMu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return append([]string(nil), s.debugTrace...)
 }
 
