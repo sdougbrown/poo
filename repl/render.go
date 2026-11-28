@@ -672,6 +672,13 @@ func (r *renderer) finish() {
 		return
 	}
 	if r.block.stalled {
+		// The stall was a resize the debounce has not rebuilt yet, and
+		// the seal's write is the last paint this block gets: adopt the
+		// terminal's live width before the body renders, or the rows
+		// wrap at the stale width and the pane scrolls the head off.
+		if w := r.contentWidth(); w > 4 && w != r.width {
+			r.rewrap(w)
+		}
 		if body := r.pendingBody(); body != "" {
 			r.layout.clearPreview()
 			r.layout.write(body)
