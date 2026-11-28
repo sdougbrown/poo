@@ -3,10 +3,13 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"reflect"
+	"slices"
 	"strings"
 
+	"github.com/sdougbrown/poo/hook"
 	"github.com/sdougbrown/poo/protect"
 )
 
@@ -117,6 +120,9 @@ func (s *Settings) checkValues() error {
 	if err := s.checkRoles(); err != nil {
 		return err
 	}
+	if err := s.checkHooks(); err != nil {
+		return err
+	}
 	if err := s.checkRules(); err != nil {
 		return err
 	}
@@ -152,6 +158,25 @@ func (s *Settings) checkRoles() error {
 				Field:   "roles." + name,
 				Message: "the settings do not have this role",
 			}
+		}
+	}
+	return nil
+}
+
+// checkHooks checks the hooks the settings declare.
+//
+// A hook is a graph of questions with a terminal decision at each leaf,
+// and the point it runs at decides which matchers, decisions and
+// failure policies it may use. The check is the whole of that: a hook
+// the check accepts is one a runner can execute, so a spec that cannot
+// run is a load failure and not a hook that fails mid-run.
+func (s *Settings) checkHooks() error {
+	for _, name := range slices.Sorted(maps.Keys(s.Hooks)) {
+		if name == "" {
+			return &Error{Code: CodeInvalid, Field: "hooks", Message: "a hook name cannot be empty"}
+		}
+		if _, err := hook.Validate(name, s.Hooks[name]); err != nil {
+			return &Error{Code: CodeInvalid, Field: "hooks." + name, Err: err}
 		}
 	}
 	return nil

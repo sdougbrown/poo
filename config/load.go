@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -126,6 +127,12 @@ func parse(data []byte, format Format, dir string) (*Settings, error) {
 	// known: a relative name is beside the settings file, and a prompt file
 	// inside one answers to the profiles file's own directory.
 	if err := settings.importProfilesFiles(dir); err != nil {
+		return nil, err
+	}
+	// The hooks files are read here, where the settings' own hooks are
+	// already decoded: a file's hook is a layer below them, and a relative
+	// name is beside the settings file.
+	if err := settings.importHooksFiles(dir); err != nil {
 		return nil, err
 	}
 	// The prompt and schema files are resolved here, where the document's
@@ -368,6 +375,8 @@ func canonicalValue(value any) (any, error) {
 			out[key] = canonical
 		}
 		return out, nil
+	case map[any]any:
+		return scalarKeyedMap(v)
 	case []any:
 		out := make([]any, 0, len(v))
 		for _, item := range v {
@@ -384,4 +393,68 @@ func canonicalValue(value any) (any, error) {
 			Message: fmt.Sprintf("the settings hold a value of a type the settings do not use (%T)", value),
 		}
 	}
+}
+
+// scalarKeyedMap turns a YAML mapping into the JSON object the settings
+// hold.
+//
+// YAML reads an unquoted true or false as a boolean, and an unquoted 0
+// as a number: a hook's bool question names its descriptions "true" and
+// "false", and its score question names its branches "0" to "N-1". A
+// boolean or a whole-number key is the text it is spelled with, and a
+// key of any other type is a value the settings do not use, the same as
+// everywhere else.
+//
+// Two keys that spell the same text are refused rather than kept one at
+// random: YAML compares the keys it reads, so a pair that spells
+// differently and resolves alike, such as True and "true", is the
+// load's own to catch.
+func scalarKeyedMap(fields map[any]any) (any, error) {
+	out := make(map[string]any, len(fields))
+	for key, item := range fields {
+		var name string
+		switch k := key.(type) {
+		case string:
+			name = k
+		case bool:
+			name = strconv.FormatBool(k)
+		case int:
+			name = strconv.Itoa(k)
+		case int8:
+			name = strconv.FormatInt(int64(k), 10)
+		case int16:
+			name = strconv.FormatInt(int64(k), 10)
+		case int32:
+			name = strconv.FormatInt(int64(k), 10)
+		case int64:
+			name = strconv.FormatInt(k, 10)
+		case uint:
+			name = strconv.FormatUint(uint64(k), 10)
+		case uint8:
+			name = strconv.FormatUint(uint64(k), 10)
+		case uint16:
+			name = strconv.FormatUint(uint64(k), 10)
+		case uint32:
+			name = strconv.FormatUint(uint64(k), 10)
+		case uint64:
+			name = strconv.FormatUint(k, 10)
+		default:
+			return nil, &Error{
+				Code:    CodeDecode,
+				Message: fmt.Sprintf("the settings hold a key of a type the settings do not use (%T)", key),
+			}
+		}
+		if _, repeated := out[name]; repeated {
+			return nil, &Error{
+				Code:    CodeDecode,
+				Message: fmt.Sprintf("the settings hold two keys that spell %q", name),
+			}
+		}
+		canonical, err := canonicalValue(item)
+		if err != nil {
+			return nil, err
+		}
+		out[name] = canonical
+	}
+	return out, nil
 }

@@ -17,6 +17,9 @@
 //     the same resolver the tools use
 //   - the perm/decide package may import the standard library, the core
 //     package, the perm package and the decide package
+//   - the hook package may import the standard library, the core
+//     package, the decide package and the exec package, for a hook's
+//     questions are the decision model's and its probes run on an executor
 //   - the session package may import the standard library, the core
 //     package and the decide package
 //   - the session/sqlite package may import the standard library, the
@@ -55,8 +58,9 @@
 //     one package that imports the go-sdk, so a binary that links no
 //     launcher for it never links the SDK at all
 //   - the server package may import the packages it composes: the core,
-//     the settings, the profiles, the executors, the permission policy,
-//     the sessions, the catalogs, the feeds and the wire
+//     the settings, the profiles, the hooks, the executors, the
+//     permission policy, the sessions, the catalogs, the feeds and the
+//     wire
 //   - the exec package may import the standard library only, and the
 //     exec/bwrap package may import the exec package
 //   - the protect package may import the standard library only
@@ -153,6 +157,7 @@ func (c Checker) rules() []rule {
 		{path: m + "/provider/internal/anthropic", allowed: []string{m, m + "/provider/internal/support", m + "/provider/internal/transport"}},
 		{path: m + "/perm", allowed: []string{m, m + "/internal/urlnorm", m + "/protect"}},
 		{path: m + "/perm/decide", allowed: []string{m, m + "/perm", m + "/decide"}},
+		{path: m + "/hook", allowed: []string{m, m + "/decide", m + "/exec"}},
 		{path: m + "/session", allowed: []string{m, m + "/decide"}},
 		// The SQLite-backed store: the opt-in alternative to the file
 		// store, a binary links it and registers it by the settings'
@@ -201,6 +206,9 @@ func (c Checker) rules() []rule {
 				m + "/decide",
 				m + "/exec",
 				m + "/feed",
+				// The hook package: the policies the settings compile, and
+				// the question a session's points ask.
+				m + "/hook",
 				m + "/internal/caps",
 				// The mcp manifests the settings load: the declarations a
 				// session's servers are selected from.

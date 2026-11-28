@@ -1,5 +1,7 @@
 package config
 
+import "slices"
+
 // CoreToolNames is the list of the tools the core adds by itself, for the
 // tests that check the settings refuse to disable one.
 var CoreToolNames = coreToolNames
@@ -8,6 +10,12 @@ var CoreToolNames = coreToolNames
 // order, for the tests that check which manifests a build loaded.
 func (r *Runtime) MCPServerNames() []string {
 	return r.mcpSet.Names()
+}
+
+// ProfileHooks is the hook chain a profile resolves to, for the tests that
+// check inheritance and opt-out.
+func (r *Runtime) ProfileHooks(name string) []string {
+	return slices.Clone(r.resolvedProfiles[name].hooks)
 }
 
 // ModelAPIKey is the key the runtime sends for a model, for the tests that check

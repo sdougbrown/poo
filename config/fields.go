@@ -20,6 +20,7 @@ func fieldsOf(s *Settings) SettingsFields {
 	f.AuthReadonly = flag(s.AuthReadonly)
 	f.Profile = text(s.Profile)
 	f.ProfilesFiles = list(s.ProfilesFiles)
+	f.HooksFiles = list(s.HooksFiles)
 	f.ReplProfile = pointer(s.ReplProfile)
 
 	f.RolesChat = text(s.Roles["chat"])

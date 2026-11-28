@@ -15,6 +15,7 @@ package config
 
 import (
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/hook"
 	"github.com/sdougbrown/poo/provider/catalog"
 )
 
@@ -50,6 +51,19 @@ type Settings struct {
 	// settings file's own directory. A prompt_file inside a file answers
 	// to that file's own directory.
 	ProfilesFiles []string `json:"profiles_files,omitempty"`
+	// HooksFiles name the files that hold standalone hook specs, read as
+	// layers below the settings' own hooks. The settings' word on a hook
+	// name wins over a file's, and the first file that names one wins
+	// over the later files. Each file uses the settings' own vocabulary
+	// under a `hooks` key, in YAML or JSON. A relative path resolves
+	// against the settings file's own directory.
+	HooksFiles []string `json:"hooks_files,omitempty"`
+	// Hooks are the standalone hooks the settings declare, by name. A hook
+	// is a policy, not code: it names the point it runs at, the calls it
+	// matches, the evidence it gathers, and the typed questions whose
+	// answers pick its decision. Every hook is checked before a runtime
+	// exists, so a spec that could not run is a load failure.
+	Hooks map[string]hook.Spec `json:"hooks,omitempty"`
 	// ReplProfile is the name of the profile the repl runs under when
 	// its command names none. The key is the repl's own word, not the
 	// session's: run and serve keep the profile the command line or
@@ -354,8 +368,17 @@ type ProfileSettings struct {
 	// family's guidance: a text per family, keyed by the model's prompt
 	// variant. It is off unless the profile names true, and a family the
 	// prompt does not know leaves the prompt unchanged.
-	ModelFamily *bool        `json:"model_family,omitempty"`
-	Tools       ProfileTools `json:"tools,omitempty"`
+	ModelFamily *bool `json:"model_family,omitempty"`
+	// Hooks are the hooks the profile runs, by name. They add to the
+	// base's hooks, kept once each, in the order of first appearance.
+	// A name the settings do not declare is a failure, not a hook that
+	// silently never fires.
+	Hooks []string `json:"hooks,omitempty"`
+	// HooksDisabled are the hooks the profile turns off, by name: a hook
+	// the base chain runs is dropped from this profile's chain. A name
+	// the profile both runs and turns off is a failure.
+	HooksDisabled []string     `json:"hooks_disabled,omitempty"`
+	Tools         ProfileTools `json:"tools,omitempty"`
 }
 
 type ProfileTools struct {
