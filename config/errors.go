@@ -99,6 +99,14 @@ func CodeOf(err error) (string, bool) {
 	return "", false
 }
 
+// ErrorCode returns the failure's code.
+//
+// The wire layer names the code through the method, not the type: the
+// wire cannot import this package without taking the settings' whole
+// dependency closure with it, and a method is the one shape both sides
+// can name without that import.
+func (e *Error) ErrorCode() string { return e.Code }
+
 // FieldOf returns the field an error is about, and whether it named
 // one.
 func FieldOf(err error) (string, bool) {

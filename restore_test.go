@@ -840,14 +840,56 @@ func TestTheRestoreKeepsTheResolvedControlWhenTheRecordedLevelIsBesideTheList(t 
 	}
 }
 
-// TestTheRestoreRefusesADurableSession covers the mode check on the core
-// path: a durable session is not one this build continues.
-func TestTheRestoreRefusesADurableSession(t *testing.T) {
+// TestTheRestoreAcceptsADurableSession covers the mode on the core path: a
+// durable session is one this build continues, so a restore of one with no
+// run left unsettled hands back an idle session that holds nothing.
+func TestTheRestoreAcceptsADurableSession(t *testing.T) {
 	created := header("s1")
 	created.Mode = "durable"
-	_, _, err := poo.Restore(restoreOptions(t, scripted(nil), &recordingSink{}), []poo.Record{created})
-	if !errors.Is(err, poo.ErrUnsupportedMode) {
-		t.Fatalf("the restore returned %v, want an unsupported mode", err)
+	session, restored, err := poo.Restore(restoreOptions(t, scripted(nil), &recordingSink{}), []poo.Record{created})
+	if err != nil {
+		t.Fatalf("the restore returned %v, want the durable session", err)
+	}
+	t.Cleanup(func() { session.Close() })
+	if restored.PendingRun != nil {
+		t.Errorf("the restore holds the pending run %+v, want none", restored.PendingRun)
+	}
+	if got := session.PendingRun(); got != nil {
+		t.Errorf("the session holds the pending run %+v, want none", got)
+	}
+	if got := session.State(); got != poo.StateIdle {
+		t.Errorf("the restored session is %q, want %q", got, poo.StateIdle)
+	}
+}
+
+// TestTheRestoreRefusesAnOrphanedCall covers the check the mode change left
+// in place: a call the model saw with no result, and no continuation to
+// answer it, is a request the provider rejects.
+func TestTheRestoreRefusesAnOrphanedCall(t *testing.T) {
+	created := header("s1")
+	created.Mode = "durable"
+	records := []poo.Record{
+		created,
+		&poo.RunStartedRecord{
+			RecordMeta: poo.NewRecordMeta("run.started"),
+			RunID:      "r1",
+		},
+		&poo.MessageRecord{
+			RecordMeta: poo.NewRecordMetaFrom("message", poo.OriginModel),
+			RunID:      "r1",
+			Turn:       1,
+			Role:       poo.RoleAssistant,
+			Content: []poo.ContentBlock{{
+				Kind:       poo.ContentToolCall,
+				ToolCallID: "call_1",
+				Name:       "echo",
+				Arguments:  json.RawMessage(`{"text":"hi"}`),
+			}},
+		},
+	}
+	_, _, err := poo.Restore(restoreOptions(t, scripted(nil), &recordingSink{}), records)
+	if !errors.Is(err, poo.ErrUnansweredCall) {
+		t.Fatalf("the restore returned %v, want an unanswered call", err)
 	}
 }
 

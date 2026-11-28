@@ -533,6 +533,9 @@ type testFactory struct {
 	mu sync.Mutex
 	// sessions are the sessions the factory built.
 	sessions []*poo.Session
+	// crashStore is the store the factory opened last, for a crash
+	// simulation: a close of it is the process dying.
+	crashStore session.Store
 	// released counts the sessions that were released.
 	released int
 	// ids numbers the sessions.
@@ -572,7 +575,7 @@ func (f *testFactory) Capabilities() protocol.Capabilities {
 	return protocol.Capabilities{
 		Decider:     false,
 		Compaction:  true,
-		Persistence: []string{"ephemeral", "logged"},
+		Persistence: []string{"ephemeral", "logged", "durable"},
 		Jobs:        false,
 		// The history items carry their records' origins.
 		HistoryOrigin: true,
@@ -647,6 +650,7 @@ func (f *testFactory) Create(ctx context.Context, params protocol.CreateParams, 
 	}
 	f.mu.Lock()
 	f.sessions = append(f.sessions, sess)
+	f.crashStore = store
 	f.mu.Unlock()
 	if f.onCreate != nil {
 		f.onCreate(env.Observer)
@@ -673,7 +677,14 @@ func (f *testFactory) Create(ctx context.Context, params protocol.CreateParams, 
 
 // Load opens a recorded session.
 func (f *testFactory) Load(ctx context.Context, params protocol.LoadParams, env wire.FactoryEnv) (*poo.Session, *wire.Info, error) {
-	store, err := session.NewStore(f.dir, session.WithBuild(poo.BuildInfo{Name: "poo-test", Version: "test"}))
+	// The store is the session's own mode: a durable session's
+	// unsettled run is planned for a continuation by the store's
+	// recovery, and the plan needs the store's durable options.
+	meta, err := session.MetadataOf(f.dir, params.SessionID)
+	if err != nil {
+		return nil, nil, err
+	}
+	store, err := f.openStore(string(meta.Mode))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -767,7 +778,23 @@ func (f *testFactory) openStore(mode string) (session.Store, error) {
 	if mode == string(session.ModeEphemeral) {
 		return session.NewMemory(), nil
 	}
-	return session.NewStore(f.dir, session.WithBuild(poo.BuildInfo{Name: "poo-test", Version: "test"}))
+	build := session.WithBuild(poo.BuildInfo{Name: "poo-test", Version: "test"})
+	if mode == string(session.ModeDurable) {
+		return session.NewStore(f.dir, build, session.WithDurableOptions(session.DurableOptions{}))
+	}
+	return session.NewStore(f.dir, build)
+}
+
+// crash closes the session's store without settling the session, which
+// is what a dead process leaves behind: the records hold the run the
+// process was in, and the next load recovers it.
+func (f *testFactory) crash() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.crashStore != nil {
+		_ = f.crashStore.Close()
+		f.crashStore = nil
+	}
 }
 
 // policy builds the permission policy of a session.

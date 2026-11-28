@@ -1179,11 +1179,13 @@ func (s *suite) ephemeral() {
 		}
 	}
 
-	// The session cannot be loaded: it was never written.
+	// The session cannot be loaded: the process serves no recorded
+	// session, so the load says so rather than claiming the session is
+	// missing.
 	failure := c.refuse(protocol.MethodSessionLoad, map[string]any{
 		"session_id": info.SessionID,
 	})
-	if dataCode(failure) != protocol.DataSessionNotFound {
-		s.t.Errorf("the failure carries %q, want %q", dataCode(failure), protocol.DataSessionNotFound)
+	if dataCode(failure) != protocol.DataUnsupportedMode {
+		s.t.Errorf("the failure carries %q, want %q", dataCode(failure), protocol.DataUnsupportedMode)
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/cli"
@@ -28,6 +29,7 @@ import (
 	"github.com/sdougbrown/poo/profile/code"
 	"github.com/sdougbrown/poo/profile/search"
 	"github.com/sdougbrown/poo/prompt"
+	"github.com/sdougbrown/poo/session"
 	"github.com/sdougbrown/poo/skill"
 	"github.com/sdougbrown/poo/tool/bash"
 	"github.com/sdougbrown/poo/tool/callmcp"
@@ -880,6 +882,220 @@ func TestASessionReadsTheInstructionsOfItsOwnDirectory(t *testing.T) {
 	}
 	if strings.Contains(system, "the process's instructions") {
 		t.Error("the prompt holds the instructions of the directory the process was built in")
+	}
+}
+
+// A durable mode builds, and its store opens: the settings accept the
+// mode, the build resolves it, and the open dispatches on the store's
+// name.
+func TestADurableSessionModeBuilds(t *testing.T) {
+	settings, err := config.Parse([]byte(theModelSettings+"session:\n  mode: durable\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+	if runtime.SessionMode != "durable" {
+		t.Fatalf("the session mode = %q, want durable", runtime.SessionMode)
+	}
+	store, err := runtime.OpenStore("durable", t.TempDir())
+	if err != nil {
+		t.Fatalf("opening the durable store: %v", err)
+	}
+	defer store.Close()
+	// The open dispatches on the default store's name, "file": the
+	// built-in backend opens the file store with the lease options,
+	// so a session the store opens holds a live lease. A store that
+	// dropped the lease options would hold the flock, and its lease
+	// owner would be nil.
+	if _, err := store.Create(context.Background(), theDurableCreatedRecord("s1", "durable", t.TempDir())); err != nil {
+		t.Fatalf("creating the session: %v", err)
+	}
+	fs, ok := store.(*session.FileStore)
+	if !ok {
+		t.Fatalf("the store is %T, want a file store", store)
+	}
+	if fs.LeaseLost() == nil {
+		t.Error("the durable store's lease owner is nil, want a live lease: the open dropped the lease options")
+	}
+}
+
+// TestTheDurableOpenersCarryTheBuild covers the durable path's build
+// identity: the openers record the build the runtime runs as, so a session
+// written by another build loads with the warning the logged path gives.
+func TestTheDurableOpenersCarryTheBuild(t *testing.T) {
+	settings, err := config.Parse([]byte(theModelSettings+"session:\n  mode: durable\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	dir := t.TempDir()
+	ctx := context.Background()
+	runtime := buildWith(t, config.BuildOptions{
+		Settings:   settings,
+		Overrides:  config.Overrides{},
+		WorkingDir: t.TempDir(),
+		Executors:  theExecutors(),
+		Build:      poo.BuildInfo{Name: "poo", Version: "0.2.0-test"},
+	})
+
+	// The session's header names another build, and the store records the
+	// build the runtime opens under.
+	store, err := runtime.OpenStore("durable", dir)
+	if err != nil {
+		t.Fatalf("opening the durable store: %v", err)
+	}
+	created := theDurableCreatedRecord("s1", "durable", dir)
+	created.Build = poo.BuildInfo{Name: "poo", Version: "0.1.0-test"}
+	if _, err := store.Create(ctx, created); err != nil {
+		store.Close()
+		t.Fatalf("creating the session: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("closing the store: %v", err)
+	}
+
+	reader, err := runtime.OpenStore("durable", dir)
+	if err != nil {
+		t.Fatalf("reopening the durable store: %v", err)
+	}
+	defer reader.Close()
+	loaded, err := reader.Load(ctx, "s1")
+	if err != nil {
+		t.Fatalf("loading the session: %v", err)
+	}
+	var warned bool
+	for _, warning := range loaded.Warnings {
+		if strings.Contains(warning, "made by poo 0.1.0-test") {
+			warned = true
+		}
+	}
+	if !warned {
+		t.Errorf("the load warns %v, want the other build's warning", loaded.Warnings)
+	}
+}
+
+// theDurableCreatedRecord is the header a test's store creates a session with.
+func theDurableCreatedRecord(id, mode, dir string) *poo.SessionCreatedRecord {
+	return &poo.SessionCreatedRecord{
+		RecordMeta: poo.NewRecordMeta("session.created"), SessionMetadata: poo.SessionMetadata{Format: poo.FormatVersion,
+			SessionID: id, Mode: mode, CreatedAt: "2026-10-22T12:00:00Z",
+			WorkingDir: dir, Profile: "code", Model: poo.SessionModel{ModelID: "test-model"},
+			ContextLimit: 32768},
+	}
+}
+
+// The durable store's name is checked: a name the settings do not
+// accept fails the parse, and a name that is accepted but not
+// registered fails the open.
+func TestADurableStoreNameIsChecked(t *testing.T) {
+	_, err := config.Parse([]byte(theModelSettings+"session:\n  mode: durable\n  durable:\n    store: bolt\n"), config.FormatYAML)
+	if err == nil {
+		t.Fatal("the settings accepted a store name they do not accept")
+	}
+	if code, ok := config.CodeOf(err); !ok || code != config.CodeInvalid {
+		t.Errorf("the code is %q, want %q", code, config.CodeInvalid)
+	}
+
+	settings, err := config.Parse([]byte(theModelSettings+"session:\n  mode: durable\n  durable:\n    store: sqlite\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+	_, err = runtime.OpenStore("durable", t.TempDir())
+	if err == nil {
+		t.Fatal("the open served a store with no backend registered")
+	}
+	if code, ok := config.CodeOf(err); !ok || code != config.CodeUnsupported {
+		t.Errorf("the code is %q, want %q", code, config.CodeUnsupported)
+	}
+}
+
+// A registered store backend is used: a binary that links a store of
+// its own registers it by the settings' store name, and the open
+// dispatches on the name. The test registers under a name no real
+// backend takes, and restores the registry, so the unregistered-name
+// assertion on "sqlite" holds whatever the test order is.
+func TestARegisteredStoreBackendIsUsed(t *testing.T) {
+	const name = "test_backend"
+	fake := &fakeStore{name: name}
+	t.Cleanup(config.RegisterStoreBackendForTest(name, func(string, config.DurableSettings, poo.BuildInfo) (session.Store, error) {
+		return fake, nil
+	}))
+	settings, err := config.Parse([]byte(theModelSettings+"session:\n  mode: durable\n  durable:\n    store: sqlite\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	// The settings accept only "file" or "sqlite"; the open dispatches
+	// on the name the settings resolve to, so the test names the
+	// backend it registered.
+	*settings.Session.Durable.Store = name
+	runtime := build(t, settings, config.Overrides{})
+	store, err := runtime.OpenStore("durable", t.TempDir())
+	if err != nil {
+		t.Fatalf("opening the store: %v", err)
+	}
+	if store != session.Store(fake) {
+		t.Error("the open did not dispatch on the registered backend")
+	}
+}
+
+// A nil opener is refused at the registration: the open would panic
+// on the call.
+func TestARegisteredStoreBackendRefusesANilOpener(t *testing.T) {
+	if err := config.RegisterStoreBackend("nil_opener", nil); err == nil {
+		t.Fatal("the registration took a nil opener, want a refusal")
+	}
+}
+
+// a fakeStore stands in for a backend's store.
+type fakeStore struct {
+	session.Store
+	name string
+}
+
+func (f *fakeStore) Close() error { return nil }
+
+// The durable settings' defaults are filled in: the resumption budget,
+// the lease TTL, the auto-resume and the store's name.
+func TestTheDurableSettingsTakeTheirDefaults(t *testing.T) {
+	settings, err := config.Parse([]byte(theModelSettings+"session:\n  mode: durable\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	durable := settings.DurableSettings()
+	if durable.MaxResumptions != 3 {
+		t.Errorf("the resumption budget = %d, want 3", durable.MaxResumptions)
+	}
+	if durable.LeaseTTL != 30*time.Second {
+		t.Errorf("the lease TTL = %s, want 30s", durable.LeaseTTL)
+	}
+	if durable.AutoResume {
+		t.Error("the auto-resume is on, want it off")
+	}
+	if durable.Store != "file" {
+		t.Errorf("the store = %q, want file", durable.Store)
+	}
+}
+
+// The durable settings' values are taken from the settings: the
+// resumption budget, the lease TTL, the auto-resume and the store's
+// name.
+func TestTheDurableSettingsTakeTheSettings(t *testing.T) {
+	settings, err := config.Parse([]byte(theModelSettings+"session:\n  mode: durable\n  durable:\n    max_resumptions: 5\n    lease_ttl_s: 60\n    auto_resume: true\n    store: sqlite\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	durable := settings.DurableSettings()
+	if durable.MaxResumptions != 5 {
+		t.Errorf("the resumption budget = %d, want 5", durable.MaxResumptions)
+	}
+	if durable.LeaseTTL != 60*time.Second {
+		t.Errorf("the lease TTL = %s, want 60s", durable.LeaseTTL)
+	}
+	if !durable.AutoResume {
+		t.Error("the auto-resume is off, want it on")
+	}
+	if durable.Store != "sqlite" {
+		t.Errorf("the store = %q, want sqlite", durable.Store)
 	}
 }
 

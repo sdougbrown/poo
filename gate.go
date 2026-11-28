@@ -147,6 +147,123 @@ var errCompactionInterrupted = errors.New("poo: the compaction was interrupted")
 // candidate check.
 var errCompactionStore = errors.New("poo: the compaction record was refused")
 
+// resumeGate re-enters the FSM where a continuation left the run, and
+// carries the run to its next request.
+//
+// A run held open by a job waits for the result the recovery queued, and a
+// run that stopped streaming, requesting or compacting resumes at the
+// gate: the request gate re-reads the budget and the compaction before it
+// opens the run's next request, so a run that stopped with a compaction as
+// its last record discards it and decides again.
+func (s *Session) resumeGate(run *runState, plan *ContinuationPlan) []candidate {
+	if plan.Phase == StateWaiting {
+		// The transition and the drain are one step: a queue that already
+		// holds the job's result sends the run to the gate, and one that
+		// does not leaves it waiting for the result to arrive.
+		s.enterWaiting(run)
+		return s.loop(run)
+	}
+	// A stream the crash cut short is the one phase the gate resumes from
+	// as itself: its partial reply is discarded, and the next request
+	// carries the view without it. Every other phase the gate serves is
+	// the run's next request, so the transition table is read from the
+	// requesting state, which is where the resumption installed the run.
+	if plan.Phase == StateStreaming {
+		s.transition(StateStreaming)
+	} else {
+		s.transition(StateRequesting)
+	}
+	// The inputs a crash left queued are the user's messages, so they
+	// reach the model before its next request. A follow-up waits for a
+	// natural stop, which is what it was accepted for.
+	s.drainInputs(run, false)
+	return s.loop(run)
+}
+
+// resumeHooks re-enters the turn-hook chain a continuation stopped inside.
+//
+// The run picks the chain up at the hook whose start the log never ended.
+// A hook before it ran already, and a hook that did not declare itself
+// idempotent is skipped and noted: running it again could repeat something
+// the session cannot see.
+func (s *Session) resumeHooks(run *runState, plan *ContinuationPlan) []candidate {
+	if plan.Hook.Phase == "before_settle" {
+		return s.resumeSettleHooks(run, plan)
+	}
+	return s.resumeTurnHooks(run, plan)
+}
+
+// resumeTurnHooks re-runs a turn's AfterTurn chain from where it stopped,
+// and takes the turn to its end.
+//
+// A turn the crash caught while it was being interrupted follows the
+// interrupted turn-end path into the gate, which is what a live interrupt
+// does: the queued message is the turn's, not another turn's.
+func (s *Session) resumeTurnHooks(run *runState, plan *ContinuationPlan) []candidate {
+	s.transition(StateExecuting)
+	if plan.Hook.Interrupted {
+		s.interruptedTurnEnd(run, plan.Turn)
+		return s.loop(run)
+	}
+	// The turn-end steps the log had not reached: the queues, the rest of
+	// the chain and every stop condition.
+	_, cands, interrupted := s.turnEndStepsFrom(run, plan.Turn, turnNote{}, plan.Hook.HookIndex, true)
+	if interrupted {
+		// The interrupt ended the turn's steps, and its message is on the
+		// queue: the gate reads it.
+		return s.loop(run)
+	}
+	if len(cands) > 0 {
+		return cands
+	}
+	return s.loop(run)
+}
+
+// resumeSettleHooks re-runs a run's BeforeSettle chain from where it
+// stopped.
+//
+// The model had stopped on its own when the chain began, so the chain's
+// answer is the run's: a hook that asks to carry on sends the run back to
+// the model through the gate, a hook that stops the run settles it, and a
+// chain that accepts the stop settles the run naturally.
+func (s *Session) resumeSettleHooks(run *runState, plan *ContinuationPlan) []candidate {
+	s.transition(StateRequesting)
+	decision, continued, err := s.runBeforeSettleFrom(run, plan.Turn, ReasonEndTurn, plan.Hook.HookIndex, true)
+	if s.interruptPending(&run.callOwner) {
+		// An interrupt that arrived during the settle hooks discards
+		// their decisions, and that is not a hook error.
+		s.interruptedTurnEnd(run, plan.Turn)
+		return s.loop(run)
+	}
+	if detail, ok := s.externalCancellation(run); ok {
+		return []candidate{newCandidate(ReasonCancelled, detail)}
+	}
+	if err != nil {
+		var limit *hookContinueLimitError
+		if errors.As(err, &limit) {
+			return []candidate{newCandidate(ReasonHookContinueLimit, SettleDetail{
+				Source: "before_settle",
+				Text:   limit.Error(),
+			})}
+		}
+		return []candidate{newCandidate(ReasonHookError, SettleDetail{
+			Source: hookFailureSource(err, "before_settle"),
+			Text:   err.Error(),
+		})}
+	}
+	switch {
+	case decision.Stop:
+		return []candidate{newCandidate(ReasonStopRequested, SettleDetail{
+			Source: "before_settle",
+			Text:   decision.Detail,
+		})}
+	case continued:
+		return s.loop(run)
+	}
+	// The chain accepted the stop the model made before the crash.
+	return []candidate{newCandidate(ReasonEndTurn, SettleDetail{Source: string(ReasonEndTurn)})}
+}
+
 // offersHistoryTool reports that the session's tools include the
 // history tool: the recovery pointer names it only when the model can
 // call it.

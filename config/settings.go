@@ -687,7 +687,7 @@ type Skills struct {
 
 // Session are the session's settings.
 type Session struct {
-	// Mode is the persistence mode: logged or ephemeral.
+	// Mode is the persistence mode: logged, ephemeral or durable.
 	Mode *string `json:"mode,omitempty"`
 	// Dir is the directory the session files live in.
 	Dir *string `json:"dir,omitempty"`
@@ -710,6 +710,8 @@ type Session struct {
 	UserPromptFile *string `json:"user_prompt_file,omitempty"`
 	// Retention says which sessions a prune deletes.
 	Retention Retention `json:"retention,omitempty"`
+	// Durable are the durable mode's settings.
+	Durable Durable `json:"durable,omitempty"`
 }
 
 // Retention says which sessions a prune deletes.
@@ -721,4 +723,26 @@ type Retention struct {
 	MaxAgeDays *int `json:"max_age_days,omitempty"`
 	// MaxSessions is how many sessions the prune keeps.
 	MaxSessions *int `json:"max_sessions,omitempty"`
+}
+
+// Durable are the durable mode's settings.
+//
+// The durable mode stores the session's records in a file and
+// continues a run a crash left unsettled. The settings say how the
+// continuation is planned, how the session's ownership is held, and
+// which store the sessions live in.
+type Durable struct {
+	// MaxResumptions is how many times a run may be resumed before
+	// the planner gives up on it. The default is 3.
+	MaxResumptions *int `json:"max_resumptions,omitempty"`
+	// LeaseTTL is how long a session's lease lasts before it
+	// expires, in seconds. The default is 30.
+	LeaseTTLS *int `json:"lease_ttl_s,omitempty"`
+	// AutoResume says a loaded session resumes its run itself. The
+	// default is false: the session holds the run, idle, until it is
+	// asked.
+	AutoResume *bool `json:"auto_resume,omitempty"`
+	// Store is the store the sessions live in: "file" or "sqlite".
+	// The default is "file".
+	Store *string `json:"store,omitempty"`
 }

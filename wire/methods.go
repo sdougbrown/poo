@@ -25,6 +25,8 @@ func (s *server) dispatch(req protocol.Request) (any, *protocol.Error) {
 		return s.sessionCreate(req)
 	case protocol.MethodSessionLoad:
 		return s.sessionLoad(req)
+	case protocol.MethodSessionResumeRun:
+		return s.sessionResumeRun(req.Params)
 	case protocol.MethodSessionGet:
 		return s.sessionGet(req.Params)
 	case protocol.MethodSessionConfigure:
@@ -196,7 +198,40 @@ func sessionInfoOf(entry *session) protocol.SessionInfo {
 	if len(entry.info.Warnings) > 0 {
 		info.Warnings = entry.info.Warnings
 	}
+	if pending := pendingRunOf(entry.sess); pending != nil {
+		info.PendingRun = pending
+	}
 	return info
+}
+
+// sessionResumeRun resumes the run a durable session holds.
+//
+// The run goes on in the background, the way a prompt's does: the
+// call returns at once, and the client watches it through the events.
+// A session with nothing to continue answers with no_pending_run, and
+// a session that is already running answers with busy.
+func (s *server) sessionResumeRun(raw json.RawMessage) (any, *protocol.Error) {
+	var params protocol.ResumeRunParams
+	if err := protocol.DecodeParams(raw, &params); err != nil {
+		return nil, paramsFailure(err)
+	}
+	entry, rerr := s.lookup(params.SessionID)
+	if rerr != nil {
+		return nil, rerr
+	}
+	runID, err := entry.sess.ResumeRun(context.Background())
+	if err != nil {
+		switch {
+		case errors.Is(err, poo.ErrNoPendingRun):
+			return nil, protocol.Errorf(protocol.CodeServerError, protocol.DataNoPendingRun,
+				"the session %q has no run to continue", entry.id)
+		case errors.Is(err, poo.ErrBusy):
+			return nil, protocol.Errorf(protocol.CodeServerError, protocol.DataBusy,
+				"the session %q is running", entry.id)
+		}
+		return nil, failure(err)
+	}
+	return protocol.ResumeRunResult{RunID: runID}, nil
 }
 
 // sessionGet reports a session's state.
@@ -218,6 +253,12 @@ func (s *server) sessionGet(raw json.RawMessage) (any, *protocol.Error) {
 	}
 	if runID := entry.sess.ActiveRunID(); runID != "" {
 		result.RunID = runID
+	}
+	if pending := pendingRunOf(entry.sess); pending != nil {
+		result.PendingRun = pending
+	}
+	if awaiting := awaitingStatusOf(entry.sess); awaiting != nil {
+		result.Awaiting = awaiting
 	}
 	return s.getResult(result), nil
 }
@@ -569,6 +610,40 @@ func promptOf(sess *poo.Session) protocol.PromptStateInfo {
 		Hash:     state.Hash,
 		Sections: state.Sections,
 		Preview:  state.Preview,
+	}
+}
+
+// pendingRunOf returns the wire's view of a session's pending run.
+func pendingRunOf(sess *poo.Session) *protocol.PendingRunInfo {
+	info := sess.PendingRun()
+	if info == nil {
+		return nil
+	}
+	return &protocol.PendingRunInfo{
+		RunID:       info.RunID,
+		Turn:        info.Turn,
+		Phase:       string(info.Phase),
+		Resumptions: info.Resumptions,
+	}
+}
+
+// awaitingStatusOf returns the wire's view of what a session's run
+// waits on.
+func awaitingStatusOf(sess *poo.Session) *protocol.AwaitingStatus {
+	info, ok := sess.Awaiting()
+	if !ok {
+		return nil
+	}
+	// A zero deadline is no deadline: the field is omitted, not the
+	// zero time rendered.
+	var deadline *time.Time
+	if !info.Deadline.IsZero() {
+		deadline = &info.Deadline
+	}
+	return &protocol.AwaitingStatus{
+		Kind:     info.Kind,
+		AskID:    info.AskID,
+		Deadline: deadline,
 	}
 }
 

@@ -31,6 +31,7 @@ func (r *Runtime) SessionTools() []poo.ToolInfo {
 			Name:       spec.Name,
 			Class:      spec.Class,
 			Background: spec.Background,
+			Idempotent: spec.Idempotent,
 		})
 	}
 	return tools

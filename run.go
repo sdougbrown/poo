@@ -297,24 +297,45 @@ func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, n
 // Every path out of the loop goes through finalize, so the run always
 // has exactly one settle record.
 func (s *Session) drive(run *runState) {
-	defer func() {
-		// A panic in a hook or a tool must not leave the run without
-		// a settle record: the promise the log makes is that a
-		// run.started is always followed by a run.settled.
-		if r := recover(); r != nil {
-			s.finalize(run, newCandidate(ReasonToolFatal, SettleDetail{
-				Source: "panic",
-				Text:   fmt.Sprintf("%v", r),
-			}))
-		}
-	}()
-
+	defer s.recoverRun(run)
 	// The duration budget is a timer: it fires even while a tool is
 	// running, and it settles the run through the normal protocol. It
 	// started when the run was admitted, before the startup hooks.
 	defer s.stopRunTimer(run)
 
-	cands := s.loop(run)
+	s.driveFrom(run, s.loop(run))
+}
+
+// driveResumed drives the run a durable session resumed.
+//
+// The run picks up at the phase its continuation names instead of at the
+// loop's first turn, and from there it is an ordinary run: the same
+// finalization, the same reopen on a queued input, and the same duration
+// budget.
+func (s *Session) driveResumed(run *runState, plan *ContinuationPlan) {
+	defer s.recoverRun(run)
+	defer s.stopRunTimer(run)
+
+	s.driveFrom(run, s.resumePhases(run, plan))
+}
+
+// recoverRun is the panic recovery every run goroutine defers.
+//
+// A panic in a hook or a tool must not leave the run without a settle
+// record: the promise the log makes is that a run.started is always
+// followed by a run.settled.
+func (s *Session) recoverRun(run *runState) {
+	if r := recover(); r != nil {
+		s.finalize(run, newCandidate(ReasonToolFatal, SettleDetail{
+			Source: "panic",
+			Text:   fmt.Sprintf("%v", r),
+		}))
+	}
+}
+
+// driveFrom settles the run with the candidates a loop produced, and takes
+// the run back when a queued input reopens it.
+func (s *Session) driveFrom(run *runState, cands []candidate) {
 	for {
 		_, abandoned := s.finalizeCandidates(run, true, s.settleCandidates(run, cands))
 		if !abandoned {
@@ -327,6 +348,21 @@ func (s *Session) drive(run *runState) {
 			return
 		}
 	}
+}
+
+// resumePhases carries out what a continuation planned.
+//
+// The order is the plan's: a hook the log cut short is where the run was,
+// a call to run again or an ask to wait on is the run executing, and
+// anything else is the run at its next request.
+func (s *Session) resumePhases(run *runState, plan *ContinuationPlan) []candidate {
+	if plan.Hook != nil {
+		return s.resumeHooks(run, plan)
+	}
+	if plan.Phase == StateExecuting {
+		return s.resumeExecuting(run, plan)
+	}
+	return s.resumeGate(run, plan)
 }
 
 // settleCandidates returns the candidates a loop that ended hands to the
@@ -708,6 +744,16 @@ type turnOutcome struct {
 // point discards the hooks' decisions and skips the remaining steps, so the
 // caller must stop there too.
 func (s *Session) turnEndSteps(run *runState, turn int, note turnNote) (appended bool, cands []candidate, interrupted bool) {
+	return s.turnEndStepsFrom(run, turn, note, 0, false)
+}
+
+// turnEndStepsFrom runs the turn-end steps from the hook a resumed run
+// stopped at.
+//
+// A continuation re-enters the chain where the log cut it short, so the
+// hooks before from ran already and do not run again. The rest of the
+// steps are the ones every turn end runs.
+func (s *Session) turnEndStepsFrom(run *runState, turn int, note turnNote, from int, resumed bool) (appended bool, cands []candidate, interrupted bool) {
 	// Step 1: the turn is over.
 	s.events.emit(EventTurnEnded, map[string]any{"run_id": run.id, "turn": turn})
 
@@ -720,7 +766,7 @@ func (s *Session) turnEndSteps(run *runState, turn int, note turnNote) (appended
 
 	// Step 3: the AfterTurn hooks run on every turn, tool-free turns
 	// included.
-	hookAppended, stop := s.runAfterTurn(run, turn, false)
+	hookAppended, stop := s.runAfterTurnFrom(run, turn, false, from, resumed)
 	appended = appended || hookAppended
 
 	// An interrupt that arrived during the hooks cancels them, and
@@ -1284,12 +1330,17 @@ func (s *Session) noteStoreError(owner *callOwner, err error) {
 }
 
 // originForMode returns the origin an input's message carries.
+//
+// A job's result is the session's own work coming back, and a resumed run
+// delivers the result a job never reported as the queue it was on.
 func originForMode(mode InputMode) Origin {
 	switch mode {
 	case Interrupt:
 		return OriginInterrupt
 	case FollowUp:
 		return OriginFollowUp
+	case InputModeJob:
+		return OriginJob
 	default:
 		return OriginSteer
 	}

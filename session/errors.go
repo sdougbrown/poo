@@ -13,6 +13,9 @@ const (
 	CodeCodecMismatch = "codec_mismatch"
 	// CodeSessionLocked means another process holds the session's lock.
 	CodeSessionLocked = "session_locked"
+	// CodeLeaseLost means the session's lease was lost: the owner was
+	// fenced, and its writes are refused.
+	CodeLeaseLost = "lease_lost"
 	// CodeSessionNotFound means the store holds no such session.
 	CodeSessionNotFound = "session_not_found"
 	// CodeSessionExists means the store already holds that session.
@@ -38,6 +41,9 @@ const (
 var (
 	// ErrSessionLocked means another process holds the session's lock.
 	ErrSessionLocked = &Error{Code: CodeSessionLocked, Message: "another process holds the session's lock"}
+	// ErrLeaseLost means the session's lease was lost: the owner was
+	// fenced, and its writes are refused.
+	ErrLeaseLost = &Error{Code: CodeLeaseLost, Message: "the session's lease was lost"}
 	// ErrSessionNotFound means the store holds no such session.
 	ErrSessionNotFound = &Error{Code: CodeSessionNotFound, Message: "no such session"}
 	// ErrUnsupportedMode means the persistence mode is not supported by
@@ -93,6 +99,13 @@ func (e *Error) Is(target error) bool {
 	}
 	return other.Code == e.Code
 }
+
+// LeaseLost reports whether the failure is the lost lease.
+//
+// The core names this failure through the method, not the type: the
+// core cannot import this package, and a method is the one shape both
+// sides can name without the cycle.
+func (e *Error) LeaseLost() bool { return e.Code == CodeLeaseLost }
 
 // CodeOf returns the code an error carries, and whether it carried one.
 //

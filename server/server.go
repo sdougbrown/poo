@@ -11,10 +11,11 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io/fs"
+	"os"
 	"sort"
 	"sync"
-	"time"
 
 	"fmt"
 	"github.com/sdougbrown/poo"
@@ -376,8 +377,17 @@ func (f *Server) Capabilities() protocol.Capabilities {
 		return protocol.Capabilities{}
 	}
 	modes := []string{"ephemeral"}
-	if runtime.SessionMode == string(session.ModeLogged) {
+	switch runtime.SessionMode {
+	case string(session.ModeLogged):
 		modes = []string{"ephemeral", "logged"}
+	case string(session.ModeDurable):
+		// The durable mode is offered only when the settings' store
+		// name has a registered backend: a binary that links no
+		// backend for the name cannot open the sessions it would
+		// announce.
+		if config.StoreBackendRegistered(runtime.Settings.DurableSettings().Store) {
+			modes = []string{"ephemeral", "durable"}
+		}
 	}
 	decider := false
 	if _, err := runtime.DeciderModel(); err == nil {
@@ -477,9 +487,9 @@ func (f *Server) Create(ctx context.Context, params protocol.CreateParams, env w
 	}
 	// The decision model must be one the settings name, and it is built
 	// before the session is so a bad name leaves nothing behind. The
-	// header says which model decides: the one the request names, and
-	// otherwise the one the runtime resolved from the settings.
-	headerDecider := runtime.Options.DeciderModel
+	// header says which model decides: the one the runtime holds, and
+	// the one the request names, which the runtime does not know.
+	var requestDecider *poo.ModelInfo
 	var deciderModel poo.ModelInfo
 	var decider decide.Decider
 	if deciderName != "" {
@@ -491,7 +501,7 @@ func (f *Server) Create(ctx context.Context, params protocol.CreateParams, env w
 		if err != nil {
 			return nil, nil, err
 		}
-		headerDecider = deciderModel
+		requestDecider = &deciderModel
 	}
 	mode := params.Mode
 	if mode == "" {
@@ -502,7 +512,11 @@ func (f *Server) Create(ctx context.Context, params protocol.CreateParams, env w
 	// names an unsupported mode cannot get a session that pretends to
 	// run in it.
 	if !contains(f.Capabilities().Persistence, mode) {
-		return nil, nil, fmt.Errorf("server: this process does not serve the %q mode", mode)
+		return nil, nil, &config.Error{
+			Code:    config.CodeUnsupported,
+			Field:   "session.mode",
+			Message: fmt.Sprintf("this process does not serve the %q mode", mode),
+		}
 	}
 	store, err := runtime.OpenStore(mode, params.SessionDir)
 	if err != nil {
@@ -515,10 +529,13 @@ func (f *Server) Create(ctx context.Context, params protocol.CreateParams, env w
 	if workDir == "" {
 		workDir = f.workDir
 	}
-	created, err := f.created(runtime, mode, workDir, headerDecider)
-	if err != nil {
-		_ = store.Close()
-		return nil, nil, err
+	// The header is the runtime's, and the request's decider is the one
+	// fact the runtime does not hold: the session runs with it, so the
+	// header names it.
+	created := runtime.CreatedRecord(mode, workDir, session.NewID())
+	if requestDecider != nil {
+		logged := session.LoggedModel(*requestDecider)
+		created.Roles.Decider = &logged
 	}
 	sess, err := runtime.CreateSession(ctx, recorder, created, poo.WithObserver(env.Observer))
 	if err != nil {
@@ -563,7 +580,7 @@ func (f *Server) Create(ctx context.Context, params protocol.CreateParams, env w
 	// guidance a profile opted into rides the variant the session
 	// renders in, and the session knows whether it does.
 	info.Warnings = append(info.Warnings, sess.StartWarnings()...)
-	if mode == string(session.ModeLogged) {
+	if mode == string(session.ModeLogged) || mode == string(session.ModeDurable) {
 		info.SessionDir = session.StoreDir(store)
 	}
 	return sess, info, nil
@@ -572,24 +589,63 @@ func (f *Server) Create(ctx context.Context, params protocol.CreateParams, env w
 // Load opens a recorded session.
 func (f *Server) Load(ctx context.Context, params protocol.LoadParams, env wire.FactoryEnv) (*poo.Session, *wire.Info, error) {
 	f.client.set(env.Client)
+	// A process in the ephemeral mode serves no recorded session: its
+	// store is the memory, which holds nothing to read back, so it refuses
+	// the load before any store is opened.
+	if f.runtime.SessionMode == string(session.ModeEphemeral) {
+		return nil, nil, &config.Error{
+			Code:    config.CodeUnsupported,
+			Field:   "session.mode",
+			Message: fmt.Sprintf("this process is in the %q mode: it serves no recorded session", f.runtime.SessionMode),
+		}
+	}
+	if err := session.ValidateID(params.SessionID); err != nil {
+		return nil, nil, err
+	}
 	dir := params.SessionDir
 	if dir == "" {
 		dir = f.runtime.SessionDir
 	}
+	// A load names an existing session's directory. One that is not there
+	// holds no session, and opening a store would create it.
+	if _, err := os.Stat(dir); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil, session.ErrSessionNotFound
+		}
+		return nil, nil, &session.Error{Code: session.CodeStoreError, Message: "stating " + dir, Err: err}
+	}
 	// The session's own profile decides the tools it runs with, and its
 	// own model decides the endpoint it talks to. The header says both,
-	// and it is read before the session is loaded.
-	meta, err := session.MetadataOf(dir, params.SessionID)
+	// and the store that holds the session is what reads it: the process's
+	// own store is opened first, and a session of another mode is reopened
+	// by the store that mode names.
+	store, err := f.runtime.OpenStore(f.runtime.SessionMode, dir)
 	if err != nil {
+		return nil, nil, err
+	}
+	meta, err := store.Metadata(ctx, params.SessionID)
+	if err != nil {
+		_ = store.Close()
 		return nil, nil, err
 	}
 	runtime, err := f.runtimeForLoad(meta)
 	if err != nil {
+		_ = store.Close()
 		return nil, nil, err
 	}
-	store, err := runtime.OpenStore(string(session.ModeLogged), dir)
-	if err != nil {
-		return nil, nil, err
+	// The header's mode is the session's own. The open by that mode is the
+	// refusal's one owner, so a process that does not serve the session's
+	// mode answers CodeUnsupported. A session of the process's own mode
+	// keeps the store already opened.
+	if string(meta.Mode) != f.runtime.SessionMode {
+		_ = store.Close()
+		// The store is the session's own mode: a durable session's records
+		// go to the store the settings open, and its unsettled run is
+		// planned for a continuation by the store's recovery.
+		store, err = runtime.OpenStore(string(meta.Mode), dir)
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 	recorder := &session.Recording{Store: store}
 	resumed, err := runtime.ResumeSession(ctx, recorder, params.SessionID, poo.WithObserver(env.Observer))
@@ -830,43 +886,6 @@ func (f *Server) Settings(ctx context.Context) (map[string]any, error) {
 		return nil, err
 	}
 	return out, nil
-}
-
-// created returns the header record a session starts with.
-//
-// The roles are the models the session runs with: the chat model the
-// runtime was built for, the decision model the caller resolved, and
-// the compaction model the strategies reconstruct with. A model with no
-// name is no model, so the header records no such role.
-func (f *Server) created(runtime *config.Runtime, mode, workDir string, decider poo.ModelInfo) (*poo.SessionCreatedRecord, error) {
-	model := runtime.Options.Model
-	chat := session.LoggedModel(model)
-	roles := poo.ModelRoles{Chat: &chat}
-	if decider.Name != "" {
-		logged := session.LoggedModel(decider)
-		roles.Decider = &logged
-	}
-	if runtime.Options.SideModel.ModelID != "" {
-		side := session.LoggedModel(runtime.Options.SideModel)
-		roles.Compaction = &side
-	}
-	return &poo.SessionCreatedRecord{
-		RecordMeta: poo.NewRecordMeta("session.created"),
-		SessionMetadata: poo.SessionMetadata{
-			Format:       poo.FormatVersion,
-			SessionID:    session.NewID(),
-			Mode:         mode,
-			CreatedAt:    time.Now().UTC().Format(time.RFC3339Nano),
-			WorkingDir:   workDir,
-			Tools:        runtime.SessionTools(),
-			Profile:      runtime.Profile.Name,
-			Roles:        roles,
-			Build:        f.build.Build,
-			Model:        poo.SessionModel{ModelID: model.ModelID, Endpoint: session.LoggedEndpoint(model.Endpoint), MaxOutput: model.MaxOutput},
-			ContextLimit: model.ContextLimit,
-			ToolsMode:    poo.ToolsMode(model.Tools.Mode),
-		},
-	}, nil
 }
 
 // promptOverrides converts the wire's prompt overrides into the

@@ -152,6 +152,49 @@ func TestARunBoundaryAndASideEffectingResultAreSynced(t *testing.T) {
 	}
 }
 
+// TestAToolStartAndAResumptionAreSynced covers the durability rule's
+// additions: a side-effecting call's start and a run's resumption are on
+// disk before the write returns. A crash must not lose the record that
+// says an effect may have happened, nor the phase a resumed run picked up
+// in.
+func TestAToolStartAndAResumptionAreSynced(t *testing.T) {
+	_, store := newTestStore(t)
+	ctx := context.Background()
+
+	if _, err := store.Create(ctx, createdRecord("s1")); err != nil {
+		t.Fatalf("creating the session: %v", err)
+	}
+	log := store.open.log
+	before := log.syncs
+
+	if err := store.Append(ctx, &poo.ToolStartedRecord{
+		RecordMeta: poo.NewRecordMeta("tool.started"),
+		RunID:      "r1",
+		Turn:       1,
+		Handle:     "r1",
+		CallID:     "c1",
+		Tool:       "bash",
+	}); err != nil {
+		t.Fatalf("appending: %v", err)
+	}
+	if log.syncs != before+1 {
+		t.Errorf("the call's start was synced %d times, want one", log.syncs-before)
+	}
+
+	if err := store.Append(ctx, &poo.RunResumedRecord{
+		RecordMeta:        poo.NewRecordMeta("run.resumed"),
+		RunID:             "r1",
+		ResumptionAttempt: 1,
+		FromPhase:         poo.StateExecuting,
+		Turn:              1,
+	}); err != nil {
+		t.Fatalf("appending: %v", err)
+	}
+	if log.syncs != before+2 {
+		t.Errorf("the resumption was synced %d times, want two", log.syncs-before)
+	}
+}
+
 // TestACodecMismatchIsATypedError covers a log written in a format the
 // codec does not know.
 func TestACodecMismatchIsATypedError(t *testing.T) {
@@ -232,14 +275,37 @@ func (m migratingCodec) Migrate(from string, lines [][]byte) ([][]byte, error) {
 	return lines, nil
 }
 
-// TestADurableSessionIsRefused covers the reserved mode.
-func TestADurableSessionIsRefused(t *testing.T) {
-	_, store := newTestStore(t)
+// TestADurableSessionIsCreatedAndLoaded covers the mode: the store creates
+// one, and the load reads it back as a session whose mode the check accepts.
+func TestADurableSessionIsCreatedAndLoaded(t *testing.T) {
+	dir, store := newTestStore(t)
 	ctx := context.Background()
 
 	header := createdRecord("s1")
 	header.Mode = string(ModeDurable)
-	_, err := store.Create(ctx, header)
+	if _, err := store.Create(ctx, header); err != nil {
+		t.Fatalf("the creation returned %v, want a durable session", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("closing the store: %v", err)
+	}
+	reopened, err := NewStore(dir)
+	if err != nil {
+		t.Fatalf("opening the store: %v", err)
+	}
+	defer reopened.Close()
+	loaded, err := reopened.Load(ctx, "s1")
+	if err != nil {
+		t.Fatalf("the load returned %v, want the durable session", err)
+	}
+	if loaded.Metadata.Mode != ModeDurable {
+		t.Errorf("the loaded mode is %q, want %q", loaded.Metadata.Mode, ModeDurable)
+	}
+
+	// An unknown mode is still refused, with the code the wire reads.
+	other := createdRecord("s2")
+	other.Mode = "nonsense"
+	_, err = reopened.Create(ctx, other)
 	if !errors.Is(err, ErrUnsupportedMode) {
 		t.Fatalf("the creation returned %v, want an unsupported mode", err)
 	}

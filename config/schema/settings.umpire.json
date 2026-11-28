@@ -96,7 +96,11 @@
     "session.user_prompt": { "isEmpty": "boolean" },
     "session.user_prompt_file": { "isEmpty": "string" },
     "session.retention.max_age_days": { "isEmpty": "number" },
-    "session.retention.max_sessions": { "isEmpty": "number" }
+    "session.retention.max_sessions": { "isEmpty": "number" },
+    "session.durable.max_resumptions": { "isEmpty": "number" },
+    "session.durable.lease_ttl_s": { "isEmpty": "number" },
+    "session.durable.auto_resume": { "isEmpty": "boolean" },
+    "session.durable.store": { "isEmpty": "string" }
   },
   "conditions": {
     "has_decider": { "type": "boolean", "description": "the settings name a model for the decider role" },
@@ -224,8 +228,29 @@
       "type": "check",
       "field": "session.mode",
       "op": "matches",
-      "pattern": "^(logged|ephemeral)$",
-      "reason": "session.mode must be logged or ephemeral"
+      "pattern": "^(logged|ephemeral|durable)$",
+      "reason": "session.mode must be logged, ephemeral or durable"
+    },
+    {
+      "type": "check",
+      "field": "session.durable.store",
+      "op": "matches",
+      "pattern": "^(file|sqlite)$",
+      "reason": "session.durable.store must be file or sqlite"
+    },
+    {
+      "type": "check",
+      "field": "session.durable.max_resumptions",
+      "op": "min",
+      "value": 1,
+      "reason": "session.durable.max_resumptions must be at least one"
+    },
+    {
+      "type": "check",
+      "field": "session.durable.lease_ttl_s",
+      "op": "min",
+      "value": 1,
+      "reason": "session.durable.lease_ttl_s must be at least a second"
     },
     {
       "type": "check",

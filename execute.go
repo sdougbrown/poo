@@ -81,6 +81,10 @@ type callPlan struct {
 	// policy is the model-ordered permission decision for this call.
 	policy    *ToolDecision
 	policyErr error
+	// replayed reports that the call's own record is on the log: a call a
+	// continuation runs again is one the crashed run already wrote, so the
+	// batch that runs it writes no second tool.call.
+	replayed bool
 }
 
 // executeBatch runs a turn's tool calls.
@@ -261,6 +265,12 @@ func (s *Session) beginTurn(run *runState, turn int, plans []callPlan) {
 			continue
 		}
 		for _, p := range plans {
+			// A call a resumed turn runs again is a call its summary
+			// already holds: the turn's calls are the model's, and a
+			// replay adds none.
+			if hasCallSummary(s.turns[i].Calls, p.handle) {
+				continue
+			}
 			s.turns[i].Calls = append(s.turns[i].Calls, ToolCallSummary{
 				Handle:  p.handle,
 				Tool:    p.call.Name,
@@ -269,6 +279,16 @@ func (s *Session) beginTurn(run *runState, turn int, plans []callPlan) {
 		}
 		return
 	}
+}
+
+// hasCallSummary reports whether a turn's summary already holds a call.
+func hasCallSummary(calls []ToolCallSummary, handle string) bool {
+	for _, call := range calls {
+		if call.Handle == handle {
+			return true
+		}
+	}
+	return false
 }
 
 // nextHandle returns the next tool-result handle, r<n>.
@@ -294,101 +314,190 @@ func (s *Session) nextHandle() string {
 func (s *Session) planCalls(owner *callOwner, turn int, calls []ToolCall, truncated, nested bool) []callPlan {
 	var plans []callPlan
 	for i, call := range calls {
-		handle := s.nextHandle()
-		plan := callPlan{handle: handle, call: call, index: i, complete: true}
-		if truncated && !isCompleteJSONObject(call.Arguments) {
-			plan.complete = false
-			plans = append(plans, plan)
-			continue
-		}
-		tool, ok := s.opts.Tools[call.Name]
-		if !ok {
-			plans = append(plans, plan)
-			continue
-		}
-		// The reserved background argument is validated and removed
-		// before the tool's own decoder sees the arguments, so a
-		// strict decoder never sees it. Only a tool that may become a
-		// job reserves the name: a never-background tool may define its
-		// own background property. The tool.call record keeps the
-		// original arguments.
-		asked := false
-		present := false
-		stripped := call.Arguments
-		if s.backgroundModeOf(call.Name) != BackgroundNever {
-			var err error
-			asked, present, stripped, err = backgroundArg(call.Arguments)
-			if err != nil {
-				plan.invalid = true
-				plan.prepareErr = err
-				// A call that failed the reserved argument did not
-				// pass preparation, so in a truncated response it is
-				// incomplete.
-				if truncated {
-					plan.complete = false
-				}
-				plans = append(plans, plan)
-				continue
-			}
-		}
-		plan.background = asked
-		plan.stripped = stripped
-		if !nested && s.backgroundModeOf(call.Name) == BackgroundAllowed {
-			if sh, ok := tool.(BackgroundShorthander); ok {
-				effective, err := sh.BackgroundShorthand(call.Arguments)
-				if err != nil {
-					plan.invalid, plan.prepareErr, plan.complete = true, err, !truncated
-					plans = append(plans, plan)
-					continue
-				}
-				if effective != nil {
-					// A non-nil shorthand asks for the job, so the core
-					// decides the reserved argument itself: it refuses a
-					// shorthand request beside an explicit "background":
-					// false, and strips the reserved argument from the
-					// effective call.
-					if present && !asked {
-						plan.invalid = true
-						plan.prepareErr = InvalidArgsf(`the call asks for a background job but also sets %q: false; remove one of them`, BackgroundArgName)
-						plan.complete = !truncated
-						plans = append(plans, plan)
-						continue
-					}
-					_, _, plan.stripped, err = backgroundArg(effective)
-					if err != nil {
-						plan.invalid, plan.prepareErr, plan.complete = true, err, !truncated
-						plans = append(plans, plan)
-						continue
-					}
-					plan.background = true
-					plan.shorthand = effective
-				}
-			}
-		}
-		// The call is validated on the arguments it will prepare with,
-		// so a shorthand rewrite is validated like any other input.
-		if err := s.argSchemas.validate(call.Name, plan.stripped); err != nil {
-			plan.invalid = true
-			plan.prepareErr = err
-			if truncated {
-				plan.complete = false
-			}
-			plans = append(plans, plan)
-			continue
-		}
-		prepared, err := tool.Prepare(plan.stripped, s.prepareEnv())
+		plans = append(plans, s.planOneCall(s.nextHandle(), i, call, truncated, nested))
+	}
+	return plans
+}
+
+// planOneCall turns one call into the plan the core runs.
+//
+// The handle is the caller's: a call the model just made gets the
+// session's next one, and a call a continuation replays keeps the handle
+// its records carry, so its result pairs with the record the crashed run
+// wrote.
+func (s *Session) planOneCall(handle string, index int, call ToolCall, truncated, nested bool) callPlan {
+	plan := callPlan{handle: handle, call: call, index: index, complete: true}
+	if truncated && !isCompleteJSONObject(call.Arguments) {
+		plan.complete = false
+		return plan
+	}
+	tool, ok := s.opts.Tools[call.Name]
+	if !ok {
+		return plan
+	}
+	// The reserved background argument is validated and removed
+	// before the tool's own decoder sees the arguments, so a
+	// strict decoder never sees it. Only a tool that may become a
+	// job reserves the name: a never-background tool may define its
+	// own background property. The tool.call record keeps the
+	// original arguments.
+	asked := false
+	present := false
+	stripped := call.Arguments
+	if s.backgroundModeOf(call.Name) != BackgroundNever {
+		var err error
+		asked, present, stripped, err = backgroundArg(call.Arguments)
 		if err != nil {
 			plan.invalid = true
 			plan.prepareErr = err
-			// A call that fails Prepare did not pass the plan's
-			// completeness test.
+			// A call that failed the reserved argument did not
+			// pass preparation, so in a truncated response it is
+			// incomplete.
 			if truncated {
 				plan.complete = false
 			}
-		} else {
-			plan.prepared = prepared
-			plan.summary = CapSummary(prepared.Summary())
+			return plan
 		}
+	}
+	plan.background = asked
+	plan.stripped = stripped
+	if !nested && s.backgroundModeOf(call.Name) == BackgroundAllowed {
+		if sh, ok := tool.(BackgroundShorthander); ok {
+			effective, err := sh.BackgroundShorthand(call.Arguments)
+			if err != nil {
+				plan.invalid, plan.prepareErr, plan.complete = true, err, !truncated
+				return plan
+			}
+			if effective != nil {
+				// A non-nil shorthand asks for the job, so the core
+				// decides the reserved argument itself: it refuses a
+				// shorthand request beside an explicit "background":
+				// false, and strips the reserved argument from the
+				// effective call.
+				if present && !asked {
+					plan.invalid = true
+					plan.prepareErr = InvalidArgsf(`the call asks for a background job but also sets %q: false; remove one of them`, BackgroundArgName)
+					plan.complete = !truncated
+					return plan
+				}
+				_, _, plan.stripped, err = backgroundArg(effective)
+				if err != nil {
+					plan.invalid, plan.prepareErr, plan.complete = true, err, !truncated
+					return plan
+				}
+				plan.background = true
+				plan.shorthand = effective
+			}
+		}
+	}
+	// The call is validated on the arguments it will prepare with,
+	// so a shorthand rewrite is validated like any other input.
+	if err := s.argSchemas.validate(call.Name, plan.stripped); err != nil {
+		plan.invalid = true
+		plan.prepareErr = err
+		if truncated {
+			plan.complete = false
+		}
+		return plan
+	}
+	prepared, err := tool.Prepare(plan.stripped, s.prepareEnv())
+	if err != nil {
+		plan.invalid = true
+		plan.prepareErr = err
+		// A call that fails Prepare did not pass the plan's
+		// completeness test.
+		if truncated {
+			plan.complete = false
+		}
+	} else {
+		plan.prepared = prepared
+		plan.summary = CapSummary(prepared.Summary())
+	}
+	return plan
+}
+
+// resumeExecuting runs the calls a continuation replays, and ends the turn
+// the way every turn ends.
+//
+// The calls are the ones a crash left without a result and that the log
+// makes safe to run again, and the asks the run was waiting on: a replayed
+// ask is a re-run of the call it was about, because the ask happens inside
+// the call's authorization. The records of the calls that did finish are
+// already in the view, so the model reads the batch whole.
+func (s *Session) resumeExecuting(run *runState, plan *ContinuationPlan) []candidate {
+	processed := s.replayBatch(run, plan)
+	// The turn end is the turn's own: its queues, its hooks, and every stop
+	// condition. A turn that processed a call goes to the gate from there.
+	outcome := s.turnEnd(run, plan.Turn, processed, &response{}, turnNote{})
+	if len(outcome.candidates) > 0 {
+		return outcome.candidates
+	}
+	return s.loop(run)
+}
+
+// replayBatch runs the calls a continuation replays.
+//
+// It is executeBatch's shape with two differences: the handles are the ones
+// the crashed run recorded, so a result pairs with the call it answers, and
+// the calls' own tool.call records are on the log already, so none is
+// written a second time. The batch runs in the turn the plan resumes, which
+// is the turn the log's last record belongs to: a batch that stopped partway
+// held the turn open.
+func (s *Session) replayBatch(run *runState, plan *ContinuationPlan) bool {
+	plans := s.replayPlans(plan.ReplayCalls, plan.LiveAsks)
+	if len(plans) == 0 {
+		return false
+	}
+	turn := plan.Turn
+	s.claimBatch(&run.callOwner, turn, plans)
+	// A run that is winding down starts no new effect.
+	if s.runWindingDown(&run.callOwner) {
+		return false
+	}
+	s.mu.Lock()
+	s.transitionLocked(StateExecuting)
+	s.mu.Unlock()
+	s.beginTurn(run, turn, plans)
+	s.startActivity(run)
+	defer s.endActivity(run)
+	s.runBatch(&run.callOwner, turn, plans, false)
+	return true
+}
+
+// replayPlans turns a continuation's calls into the plan the core runs.
+//
+// A planned ask is re-run as the call it asked about: the policy slot asks
+// again when the call reaches it, and the resumption arms the ask with the
+// deadline the log recorded.
+func (s *Session) replayPlans(calls []PlannedCall, asks []PlannedAsk) []callPlan {
+	plans := make([]callPlan, 0, len(calls)+len(asks))
+	for _, call := range calls {
+		if call.Handle == "" {
+			continue
+		}
+		plan := s.planOneCall(call.Handle, len(plans), ToolCall{
+			CallID:    call.CallID,
+			Name:      call.Tool,
+			Arguments: call.Arguments,
+		}, false, false)
+		plan.replayed = true
+		plans = append(plans, plan)
+	}
+	// An ask is re-run as the call it asked about, and a log that holds
+	// more than one unanswered ask for one call (a crash during the re-ask)
+	// names one call: the run asks it once.
+	asked := map[string]bool{}
+	for _, ask := range asks {
+		if ask.Handle == "" || asked[ask.Handle] {
+			continue
+		}
+		asked[ask.Handle] = true
+		plan := s.planOneCall(ask.Handle, len(plans), ToolCall{
+			CallID:    ask.CallID,
+			Name:      ask.Tool,
+			Arguments: ask.Arguments,
+		}, false, false)
+		plan.replayed = true
 		plans = append(plans, plan)
 	}
 	return plans
@@ -480,6 +589,13 @@ func (s *Session) executeOne(owner *callOwner, turn int, plan callPlan) {
 	recorded := false
 	record := func(m CallMode) bool {
 		if recorded {
+			return true
+		}
+		if plan.replayed {
+			// The call's record is the one the crashed run wrote: a
+			// continuation runs the call again, and the log already says
+			// what the model asked for.
+			recorded = true
 			return true
 		}
 		// The write is claimed against the seal, so a dispatch that was
@@ -723,6 +839,19 @@ func (s *Session) executeOne(owner *callOwner, turn int, plan callPlan) {
 		callCtx = plan.callCtx
 	}
 	env := s.toolEnv(owner, turn, handle, plan)
+	// A side-effecting call is on the log before the tool can change
+	// anything, so a crash that cuts the call short leaves a durable
+	// record of the effect that may have happened. A record that did not
+	// land starts nothing: the run trusts the log as the record of what
+	// may have happened.
+	if tool.Spec().Class == ClassSideEffecting {
+		if !s.writeToolStarted(owner, turn, handle, call.CallID, call.Name) {
+			// The call was claimed started, so the finalization owns its
+			// result: a refused record has already settled the run broken,
+			// and a close that fenced the write has cancelled the activity.
+			return
+		}
+	}
 	var result ToolResult
 	if owner.run != nil && s.backgroundableCall(call.Name, plan.parent) {
 		var moved bool
@@ -825,7 +954,7 @@ func (s *Session) executeOne(owner *callOwner, turn int, plan callPlan) {
 // starts. The call's own result is the "started" one, and the batch
 // carries on.
 func (s *Session) startJobCall(owner *callOwner, turn int, handle string, call ToolCall, plan callPlan) {
-	jobID, ok, winding, refusal := s.startJob(owner.run, turn, handle, call.Name, plan.prepared, plan.summary, call.Arguments, plan.stripped, plan.shorthand, nil)
+	jobID, ok, winding, refusal := s.startJob(owner.run, turn, handle, call.CallID, call.Name, plan.prepared, plan.summary, call.Arguments, plan.stripped, plan.shorthand, nil)
 	if winding {
 		// The run settled while the job was being accepted; nothing
 		// else starts, and the finalization owns the run.
@@ -953,7 +1082,7 @@ func (s *Session) toolInfos() []ToolInfo {
 		if !nestedCallable(spec.Name, spec) {
 			continue
 		}
-		infos = append(infos, ToolInfo{Name: spec.Name, Class: spec.Class, Background: spec.Background})
+		infos = append(infos, ToolInfo{Name: spec.Name, Class: spec.Class, Background: spec.Background, Idempotent: spec.Idempotent})
 	}
 	return infos
 }
@@ -1340,6 +1469,39 @@ func (s *Session) startCall(owner *callOwner, handle string) bool {
 		return false
 	}
 	call.started = true
+	return true
+}
+
+// writeToolStarted records a side-effecting call's start before its tool
+// runs.
+//
+// The write goes through the session's claimed-write gate, and the store
+// syncs the record before the append returns, so a call a crash cut short
+// is on disk: the log says the effect may have happened, and a durable
+// session replays the call or reports it. A read-only call writes none,
+// because a crashed read has nothing to replay.
+//
+// It reports whether the record durably landed. A call whose record did
+// not land must not start: the log is what a durable session trusts, so
+// an effect beside no record is one nothing can account for.
+func (s *Session) writeToolStarted(owner *callOwner, turn int, handle, callID, tool string) bool {
+	gate, ok := s.beginWrite("tool.started")
+	if !ok {
+		// The close has fenced the session: the record is abandoned.
+		return false
+	}
+	rec := &ToolStartedRecord{
+		RecordMeta: NewRecordMetaFrom("tool.started", OriginModel),
+		RunID:      owner.id,
+		Turn:       turn,
+		Handle:     handle,
+		CallID:     callID,
+		Tool:       tool,
+	}
+	if err := s.writeClaimed(context.Background(), rec, gate); err != nil {
+		s.noteStoreError(owner, err)
+		return false
+	}
 	return true
 }
 

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/config"
 	storesession "github.com/sdougbrown/poo/session"
 	"github.com/sdougbrown/poo/wire/protocol"
 )
@@ -28,6 +29,7 @@ func TestCodeOf(t *testing.T) {
 		{"incompatible", poo.ErrSessionIncompatible, protocol.DataSessionIncompatible},
 		{"unanswered call", poo.ErrUnansweredCall, protocol.DataUnansweredCall},
 		{"unsupported mode", poo.ErrUnsupportedMode, protocol.DataUnsupportedMode},
+		{"unsupported settings", &config.Error{Code: config.CodeUnsupported, Field: "session.durable.store"}, protocol.DataUnsupportedMode},
 		{"prompt render", poo.ErrPromptRender, protocol.DataInvalidSettings},
 		{"no header", poo.ErrNoSessionHeader, protocol.DataCodecMismatch},
 		{"codec version", poo.ErrCodecVersion, protocol.DataCodecMismatch},

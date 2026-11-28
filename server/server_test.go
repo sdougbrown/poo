@@ -23,6 +23,7 @@ import (
 	"github.com/sdougbrown/poo/profile/search"
 	"github.com/sdougbrown/poo/server"
 	"github.com/sdougbrown/poo/session"
+	"github.com/sdougbrown/poo/session/sqlite"
 	"github.com/sdougbrown/poo/tool/grep"
 	"github.com/sdougbrown/poo/tool/read"
 	"github.com/sdougbrown/poo/wire"
@@ -208,6 +209,110 @@ func TestALoadedSessionTellsAClientThatCannotAnswerWhyItsAsksFallBack(t *testing
 	}
 	if warning := info.Warnings[0]; !strings.Contains(warning, "permission_answers") {
 		t.Errorf("the warning is %q, want it to name the capability", warning)
+	}
+}
+
+// TestALoadInTheEphemeralModeRefusesARecordedSession covers the process
+// that serves no recorded session: a load in the ephemeral mode answers
+// the unsupported-mode refusal, not the store's not-found failure.
+func TestALoadInTheEphemeralModeRefusesARecordedSession(t *testing.T) {
+	ctx := context.Background()
+	settings := servedSettings(t, search.Name, `{"chat": "chat-model"}`)
+	srv := newServer(t, settings)
+	dir := t.TempDir()
+	sess, info, err := srv.Create(ctx, protocol.CreateParams{
+		Mode:       "logged",
+		SessionDir: dir,
+	}, wire.FactoryEnv{})
+	if err != nil {
+		t.Fatalf("creating the session: %v", err)
+	}
+	id := sess.ID()
+	if err := sess.Close(); err != nil {
+		t.Fatalf("closing the session: %v", err)
+	}
+	if err := info.Release(); err != nil {
+		t.Fatalf("releasing the store: %v", err)
+	}
+
+	mode := "ephemeral"
+	settings.Session.Mode = &mode
+	ephemeral := newServer(t, settings)
+	_, _, err = ephemeral.Load(ctx, protocol.LoadParams{SessionID: id, SessionDir: dir}, wire.FactoryEnv{})
+	if errors.Is(err, session.ErrSessionNotFound) {
+		t.Fatalf("the ephemeral load of a recorded session is %v, want the unsupported-mode refusal", err)
+	}
+	var failure *config.Error
+	if !errors.As(err, &failure) || failure.Code != config.CodeUnsupported {
+		t.Fatalf("the ephemeral load of a recorded session is %v, want the unsupported-mode refusal", err)
+	}
+	if failure.Field != "session.mode" {
+		t.Errorf("the refusal's field is %q, want session.mode", failure.Field)
+	}
+}
+
+// TestALoadOfAMissingDirectoryCreatesNothing covers the load's read-only
+// failure: a directory that holds no session is the store's not-found
+// failure, and the load does not create the directory.
+func TestALoadOfAMissingDirectoryCreatesNothing(t *testing.T) {
+	srv := newServer(t, servedSettings(t, search.Name, `{"chat": "chat-model"}`))
+	dir := filepath.Join(t.TempDir(), "not-there")
+	_, _, err := srv.Load(context.Background(), protocol.LoadParams{SessionID: "s1", SessionDir: dir}, wire.FactoryEnv{})
+	if !errors.Is(err, session.ErrSessionNotFound) {
+		t.Fatalf("the load of a missing directory is %v, want %v", err, session.ErrSessionNotFound)
+	}
+	if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the load created the missing directory: %v", err)
+	}
+}
+
+// TestALoadOfADirectoryItCannotStatCarriesTheStoreFailure covers the
+// load's probe failure: a directory path that runs through a regular
+// file is the store's own failure, not the internal one, so the wire
+// carries the store's code for it.
+func TestALoadOfADirectoryItCannotStatCarriesTheStoreFailure(t *testing.T) {
+	srv := newServer(t, servedSettings(t, search.Name, `{"chat": "chat-model"}`))
+	file := filepath.Join(t.TempDir(), "a-file")
+	if err := os.WriteFile(file, []byte("not a directory"), 0o600); err != nil {
+		t.Fatalf("writing the file: %v", err)
+	}
+	_, _, err := srv.Load(context.Background(), protocol.LoadParams{
+		SessionID:  "s1",
+		SessionDir: filepath.Join(file, "sub"),
+	}, wire.FactoryEnv{})
+	code, _ := session.CodeOf(err)
+	if code != session.CodeStoreError {
+		t.Fatalf("the load of an unstattable directory is %v, want the store failure", err)
+	}
+}
+
+// TestALoadRefusesAnInvalidSessionID covers the load's validation: an id
+// that would name outside the session's directory is refused before any
+// store is opened.
+func TestALoadRefusesAnInvalidSessionID(t *testing.T) {
+	srv := newServer(t, servedSettings(t, search.Name, `{"chat": "chat-model"}`))
+	dir := filepath.Join(t.TempDir(), "not-there")
+	_, _, err := srv.Load(context.Background(), protocol.LoadParams{SessionID: "../x", SessionDir: dir}, wire.FactoryEnv{})
+	if !errors.Is(err, session.ErrInvalidSessionID) {
+		t.Errorf("the load of an invalid id is %v, want %v", err, session.ErrInvalidSessionID)
+	}
+	if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the load opened a store for an invalid id: %v", err)
+	}
+}
+
+// TestACreateInAModeTheProcessDoesNotServe covers the create's refusal:
+// a mode the process does not serve carries the unsupported-mode
+// failure, the same refusal the load gives, not the internal one.
+func TestACreateInAModeTheProcessDoesNotServe(t *testing.T) {
+	srv := newServer(t, servedSettings(t, search.Name, `{"chat": "chat-model"}`))
+	_, _, err := srv.Create(context.Background(), protocol.CreateParams{Mode: "quantum"}, wire.FactoryEnv{})
+	var failure *config.Error
+	if !errors.As(err, &failure) || failure.Code != config.CodeUnsupported {
+		t.Fatalf("the create in an unserved mode is %v, want the unsupported-mode refusal", err)
+	}
+	if failure.Field != "session.mode" {
+		t.Errorf("the refusal's field is %q, want session.mode", failure.Field)
 	}
 }
 
@@ -1017,5 +1122,107 @@ func TestARefreshedCatalogIsWhatASessionSwitchesTo(t *testing.T) {
 	}
 	if configured.Models.Chat != "grace/fresh-model" {
 		t.Errorf("the session runs %q, want the model the refresh reported", configured.Models.Chat)
+	}
+}
+
+// durableServedSettings returns the settings a durable served session is
+// built from: the named profile, the durable mode, and the named store.
+func durableServedSettings(t *testing.T, profile, store string) *config.Settings {
+	t.Helper()
+	document := `{
+  "version": 1,
+  "profile": "` + profile + `",
+  "session": {"mode": "durable", "durable": {"store": "` + store + `"}},
+  "endpoints": {
+    "grace": {"endpoint": "http://user:secret@grace:4000/v1", "api_key_env": "POO_TEST_KEY"}
+  },
+  "models": {
+    "chat-model": {"endpoint": "grace", "model_id": "chat-model", "api": "chat_completions", "tools_mode": "native", "ops": ["chat"], "inputs": ["text"], "context_limit": 32768}
+  },
+  "roles": {"chat": "chat-model"}
+}`
+	settings, err := config.Parse([]byte(document), config.FormatJSON)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	return settings
+}
+
+// TestAServedDurableSqliteSessionLoads covers the load path over a store
+// that keeps no log: a durable session lives in the sqlite store, so its
+// header is read through that store and the session resumes.
+func TestAServedDurableSqliteSessionLoads(t *testing.T) {
+	const storeName = "server_test_sqlite"
+	// The server tests are the binary that registers the durable store,
+	// as poo does: the settings accept only "file" or "sqlite", and the
+	// open dispatches on the resolved name.
+	if err := config.RegisterStoreBackend(storeName, func(dir string, settings config.DurableSettings, build poo.BuildInfo) (session.Store, error) {
+		lease := sqlite.LeaseOptions{TTL: settings.LeaseTTL}
+		durable := session.DurableOptions{MaxResumptions: settings.MaxResumptions}
+		return sqlite.New(filepath.Join(dir, "sessions.db"), sqlite.WithBuild(build), sqlite.WithLeaseOptions(lease), sqlite.WithDurableOptions(durable))
+	}); err != nil {
+		t.Fatalf("registering the sqlite backend: %v", err)
+	}
+	settings := durableServedSettings(t, search.Name, "sqlite")
+	*settings.Session.Durable.Store = storeName
+	srv := newServer(t, settings)
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	sess, info, err := srv.Create(ctx, protocol.CreateParams{Mode: "durable", SessionDir: dir}, wire.FactoryEnv{})
+	if err != nil {
+		t.Fatalf("creating the session: %v", err)
+	}
+	id := sess.ID()
+	if _, err := os.Stat(filepath.Join(dir, id+".jsonl")); !os.IsNotExist(err) {
+		t.Fatalf("the sqlite session wrote a log: %v", err)
+	}
+	if err := sess.Close(); err != nil {
+		t.Fatalf("closing the session: %v", err)
+	}
+	if err := info.Release(); err != nil {
+		t.Fatalf("releasing the store: %v", err)
+	}
+
+	loaded, info, err := srv.Load(ctx, protocol.LoadParams{SessionID: id, SessionDir: dir}, wire.FactoryEnv{})
+	if err != nil {
+		t.Fatalf("loading the session: %v", err)
+	}
+	defer func() {
+		if err := loaded.Close(); err != nil {
+			t.Errorf("closing the loaded session: %v", err)
+		}
+		if err := info.Release(); err != nil {
+			t.Errorf("releasing the store: %v", err)
+		}
+	}()
+	if loaded.ID() != id {
+		t.Errorf("the loaded session is %q, want %q", loaded.ID(), id)
+	}
+	if info.Mode != "durable" {
+		t.Errorf("the loaded session's mode is %q, want durable", info.Mode)
+	}
+	// The sqlite store names its directory, so a client that resumes
+	// later keeps it, as it does for a durable file session.
+	if info.SessionDir != dir {
+		t.Errorf("the loaded session's directory is %q, want %q", info.SessionDir, dir)
+	}
+}
+
+// The handshake announces the durable mode only when the settings'
+// store name has a registered backend: a binary that links no backend
+// for the name does not offer the sessions it cannot open.
+func TestTheHandshakeAnnouncesDurableOnlyForARegisteredBackend(t *testing.T) {
+	// "file" is built in, so a durable process over it offers the mode.
+	srv := newServer(t, durableServedSettings(t, search.Name, "file"))
+	if !slices.Contains(srv.Capabilities().Persistence, "durable") {
+		t.Error("the capabilities do not announce durable for the built-in store")
+	}
+
+	// "sqlite" has no backend registered in this binary, so a durable
+	// process over it offers no durable mode.
+	srv = newServer(t, durableServedSettings(t, search.Name, "sqlite"))
+	if slices.Contains(srv.Capabilities().Persistence, "durable") {
+		t.Error("the capabilities announce durable for a store with no registered backend")
 	}
 }

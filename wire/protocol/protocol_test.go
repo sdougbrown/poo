@@ -3,6 +3,7 @@ package protocol_test
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/sdougbrown/poo/wire/protocol"
 )
@@ -127,5 +128,39 @@ func TestAnEventRoundTrips(t *testing.T) {
 	}
 	if back.Payload["run_id"] != "r1" || back.Payload["fresh_field"] != float64(42) {
 		t.Errorf("the payload read back as %+v", back.Payload)
+	}
+}
+
+// A zero deadline is no deadline: the field is omitted, not the zero
+// time rendered.
+func TestAwaitingStatusOmitsANilDeadline(t *testing.T) {
+	when := time.Date(2026, 11, 11, 0, 0, 0, 0, time.UTC)
+	cases := []struct {
+		name     string
+		deadline *time.Time
+		wantKey  bool
+		wantText string
+	}{
+		{"nil", nil, false, ""},
+		{"set", &when, true, "2026-11-11T00:00:00Z"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			data, err := json.Marshal(protocol.AwaitingStatus{Kind: "permission", AskID: "a1", Deadline: tc.deadline})
+			if err != nil {
+				t.Fatalf("the status did not encode: %v", err)
+			}
+			var flat map[string]any
+			if err := json.Unmarshal(data, &flat); err != nil {
+				t.Fatalf("the status did not decode: %v", err)
+			}
+			got, ok := flat["deadline"]
+			if ok != tc.wantKey {
+				t.Fatalf("the deadline key is present = %v, want %v (encoded %s)", ok, tc.wantKey, data)
+			}
+			if ok && got != tc.wantText {
+				t.Errorf("the deadline = %v, want %q", got, tc.wantText)
+			}
+		})
 	}
 }

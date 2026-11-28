@@ -60,7 +60,7 @@ func (s *Session) BackgroundCall(runID, handle string) (string, error) {
 	live := issued.live
 	s.mu.Unlock()
 	p := live.plan
-	id, ok, winding, refusal := s.startJob(run, live.turn, handle, p.call.Name, p.prepared, p.summary, p.call.Arguments, p.stripped, p.shorthand, live)
+	id, ok, winding, refusal := s.startJob(run, live.turn, handle, p.call.CallID, p.call.Name, p.prepared, p.summary, p.call.Arguments, p.stripped, p.shorthand, live)
 	if winding {
 		return "", ErrNotRunning
 	}

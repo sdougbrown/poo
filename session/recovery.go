@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strconv"
@@ -46,6 +47,13 @@ type Pending struct {
 	// Delivered are the inputs whose message reached the log without the
 	// delivered record that follows it, in the order of their messages.
 	Delivered []PendingInput
+	// Subscriptions are the feed instances that are still subscribed,
+	// in the order they first subscribed.
+	//
+	// A subscription is not a pending operation: it is the state a
+	// session had when it stopped, and a durable session takes it on
+	// again. It is therefore not counted as work to resolve.
+	Subscriptions []PendingSubscription
 }
 
 // IsEmpty reports whether there is nothing to resolve.
@@ -63,7 +71,56 @@ type PendingRun struct {
 	// Asks are the permission asks the run never got an answer to, in
 	// the order the run asked.
 	Asks []PendingAsk
+	// Turn is the last turn the run recorded a record in.
+	Turn int
+	// Phase is where the run stopped, as the durable planner derives
+	// it. The scan leaves it zero, and the planner fills it in on the
+	// Pending it is given, so a caller that inspects the Pending after
+	// planning sees the phase the plan resumes from.
+	Phase poo.State
+	// Resumptions is how many times the run was resumed: its
+	// run.resumed records.
+	Resumptions int
+	// PartialAssistant reports that the run's last assistant message was
+	// cut short, and that nothing of the run followed it.
+	PartialAssistant bool
+	// HookPhase is the turn hook the run was inside when it stopped, and
+	// nil when no hook started without ending.
+	HookPhase *PendingHookPhase
+	// RetryCount is how many of the run's turns the session cut short and
+	// asked again: its turn.interrupted records.
+	RetryCount int
+	// ContinuationCount is how many times the run's last turn went back
+	// to the model after its first response: the turn's assistant
+	// messages beyond the first.
+	ContinuationCount int
+	// UncommittedCompaction reports that the run's last record is a
+	// compaction, with nothing of the run after it.
+	UncommittedCompaction bool
 }
+
+// PendingHookPhase is the turn hook a run was inside when it stopped.
+type PendingHookPhase struct {
+	// Phase is the hook's phase: "after_turn" or "before_settle".
+	Phase string
+	// HookIndex is the hook's position in the chain, counting from zero.
+	HookIndex int
+	// Interrupted reports that the turn was being interrupted as the
+	// hook ran.
+	Interrupted bool
+}
+
+// PendingSubscription is a feed instance that is still subscribed.
+//
+// The type is the core's: a durable session's continuation takes the
+// instances on again, and the plan that names them is the core's.
+type PendingSubscription = poo.PendingSubscription
+
+// PendingToolLookup resolves a tool's class and idempotency by name.
+//
+// A planner asks the session's live tool set when it has one, and falls
+// back to the tools the session's header recorded.
+type PendingToolLookup func(tool string) (poo.ToolInfo, bool)
 
 // PendingCall is a tool call whose result record or result message is
 // missing.
@@ -98,6 +155,13 @@ type PendingCall struct {
 	ResultText string
 	// ResultIsError is whether the call's existing result is an error.
 	ResultIsError bool
+	// Started reports that the log holds a tool.started record for the
+	// call, so the effect may have begun.
+	Started bool
+	// Arguments are the call's arguments, as the model gave them: the
+	// record's, or the message block's when the record was never
+	// written.
+	Arguments json.RawMessage
 }
 
 // PendingAsk is a permission ask with no answer.
@@ -108,6 +172,34 @@ type PendingAsk struct {
 	AskID string
 	// Tool is the name of the tool the model called.
 	Tool string
+	// Summary describes the call, as the ask shows it.
+	Summary string
+	// Class is the tool's class.
+	Class poo.ToolKind
+	// Reason is why the call is being asked about.
+	Reason poo.AskReason
+	// Deadline is the wall-clock time the ask expires, and the zero time
+	// when the ask has no deadline, or the log is one written before the
+	// field existed.
+	Deadline time.Time
+	// Fallback is the decision an expired ask resolves to: "allow" or
+	// "deny". It is the request's effective fallback, so an ask that
+	// names none says "deny" here, and one written before the field
+	// existed says nothing and resolves to "deny" too.
+	Fallback string
+	// Handle is the handle of the call the ask is about, and CallID is the
+	// provider's id of that call. The ask's own record names them when it
+	// carries them; a log written before it did pairs the ask with the
+	// last call of its tool before it, and both fields then hold that
+	// call's.
+	Handle string
+	CallID string
+	// recordedHandle is the handle the ask's own record names, and is
+	// empty on a log written before the record carried one. The plan
+	// matches a re-ask by it, and an ask whose handle names a call the
+	// scan cannot find is answered by its fallback instead: an ask without
+	// one is matched by tool name.
+	recordedHandle string
 }
 
 // PendingJob is a job that started and never ended.
@@ -146,6 +238,13 @@ type PendingInput struct {
 	// Origin is the origin of the message that delivered the input. It is
 	// set only on a delivery the recovery completes.
 	Origin poo.Origin
+	// Text is the message text the input carries.
+	Text string
+	// DeliveryNote says how much of the previous reply the user had
+	// seen, when the input carries one.
+	DeliveryNote *poo.DeliveryNote
+	// Attachments are the files the input carries beside its text.
+	Attachments []poo.Attachment
 }
 
 // RecoveryPolicy resolves a session's pending operations.
@@ -174,6 +273,10 @@ type RecoveryPolicy interface {
 type InterruptPolicy struct {
 	// Now is the policy's clock. The default is time.Now.
 	Now func() time.Time
+	// SettleText is the text of the settle detail. The default names the
+	// process stopping; the durable planner names the resumption limit
+	// when it gives up on a run.
+	SettleText string
 }
 
 // Name names the policy.
@@ -194,6 +297,10 @@ func (p InterruptPolicy) Resolve(ctx context.Context, sink poo.RecordSink, pend 
 		now = time.Now
 	}
 	at := now().UTC().Format(time.RFC3339Nano)
+	settleText := p.SettleText
+	if settleText == "" {
+		settleText = "the process stopped during this run"
+	}
 	for _, run := range pend.Runs {
 		for _, call := range run.Calls {
 			text := call.ResultText
@@ -252,7 +359,7 @@ func (p InterruptPolicy) Resolve(ctx context.Context, sink poo.RecordSink, pend 
 			Reason:     poo.ReasonInterrupted,
 			Detail: poo.SettleDetail{
 				Source: "recovery",
-				Text:   "the process stopped during this run",
+				Text:   settleText,
 			},
 			SettledAt: at,
 		}
@@ -325,6 +432,82 @@ func (p InterruptPolicy) Resolve(ctx context.Context, sink poo.RecordSink, pend 
 	return nil
 }
 
+// Recovery is what a load reads to recover a session and to say what
+// changed since it was written.
+//
+// Every store that loads a session composes it, so a durable session is
+// planned and a logged one settled the same way whether its records are
+// lines in a file or rows in a table, and both stores warn through the
+// same comparison, when both sides name a build or a settings hash.
+type Recovery struct {
+	// Policy settles a logged or ephemeral session's pending
+	// operations. The default is the interrupt policy, on the
+	// recovery's own clock.
+	Policy RecoveryPolicy
+	// Durable is how a durable session's continuation is planned.
+	Durable DurableOptions
+	// Now is the store's clock. The planner given no clock of its own
+	// inherits it, and so does the default policy.
+	Now func() time.Time
+	// Build names the binary that owns the store. A session whose
+	// header names a different build is loaded with a warning; a store
+	// or a header that names no build compares nothing, so it warns
+	// nothing.
+	Build poo.BuildInfo
+	// SettingsHash is the hash of the settings the store was made
+	// with. A session whose header carries a different hash is loaded
+	// with a warning; a store or a header with no hash compares
+	// nothing, so it warns nothing.
+	SettingsHash string
+}
+
+// Resolve recovers a session according to its mode: a durable session's
+// pending operations are planned and the plan is returned; any other
+// mode's are settled by the policy, and the plan is nil.
+//
+// A store that sets no policy settles with the interrupt policy on the
+// recovery's clock.
+func (r Recovery) Resolve(ctx context.Context, sink poo.RecordSink, pending *Pending, mode Mode, meta Metadata) (*ContinuationPlan, error) {
+	if mode == ModeDurable {
+		return r.planner(meta).Plan(ctx, sink, pending)
+	}
+	policy := r.Policy
+	if policy == nil {
+		policy = InterruptPolicy{Now: r.Now}
+	}
+	return nil, policy.Resolve(ctx, sink, pending)
+}
+
+// planner returns the planner a session is loaded with.
+//
+// The planner reads the session's own tools as its fallback lookup: the
+// header is what the session was created with, and a live tool set is the
+// caller's to supply.
+func (r Recovery) planner(meta Metadata) DurablePlanner {
+	opts := r.Durable
+	opts.Tools = meta.Tools
+	if opts.Now == nil {
+		opts.Now = r.Now
+	}
+	return DurablePlanner{Options: opts}
+}
+
+// Warnings reports what changed since the session was written.
+//
+// A different build or different settings are not failures: the records
+// are still readable. A caller that cares reports them.
+func (r Recovery) Warnings(meta Metadata) []string {
+	var out []string
+	if r.Build.Name != "" && meta.Build.Name != "" && r.Build != meta.Build {
+		out = append(out, "the session was made by "+meta.Build.Name+" "+meta.Build.Version+
+			", and this build is "+r.Build.Name+" "+r.Build.Version)
+	}
+	if r.SettingsHash != "" && meta.SettingsHash != "" && r.SettingsHash != meta.SettingsHash {
+		out = append(out, "the settings changed since the session was created")
+	}
+	return out
+}
+
 // recoveredInputID returns the id of the input a recovered job's result
 // is queued under.
 //
@@ -340,6 +523,16 @@ func recoveredInputID(sessionID, job string) string {
 // records landed in. A call the model saw but whose record was never
 // written is recovered from the message alone.
 func pendingOf(id string, recs []poo.Record) *Pending {
+	return PendingOf(id, recs)
+}
+
+// PendingOf computes the operations a session has not resolved, from its
+// records.
+//
+// It is the exported form of the pending computation: a store of its
+// own, in another package, computes a session's pending operations
+// through it, the way the file store does.
+func PendingOf(id string, recs []poo.Record) *Pending {
 	state := &pendingState{
 		runs:       map[string]*PendingRun{},
 		settled:    map[string]bool{},
@@ -353,11 +546,21 @@ func pendingOf(id string, recs []poo.Record) *Pending {
 		messaged:   map[string]bool{},
 		callIDs:    poo.CallIDs(recs),
 		feedStarts: map[string][]int{},
+		facts:      map[string]*runFacts{},
+		lastCalls:  map[string]callRef{},
+		hooks:      map[string]poo.TurnHookRecord{},
+		hookEnded:  map[string]bool{},
+		subs:       map[string]poo.FeedSubscribedRecord{},
+		subActive:  map[string]bool{},
 	}
 	for _, rec := range recs {
 		switch r := rec.(type) {
 		case *poo.RunStartedRecord:
 			state.run(r.RunID)
+		case *poo.RunResumedRecord:
+			state.run(r.RunID)
+			state.factsOf(r.RunID).resumptions++
+			state.factsOf(r.RunID).note(r.Turn)
 		case *poo.RunSettledRecord:
 			state.run(r.RunID)
 			state.settled[r.RunID] = true
@@ -375,6 +578,28 @@ func pendingOf(id string, recs []poo.Record) *Pending {
 			call.CallID = id
 			call.Nested = r.Parent != ""
 			call.Recorded = true
+			call.Arguments = r.Arguments
+			state.lastCalls[callToolKey(r.RunID, r.Tool)] = callRef{handle: r.Handle, callID: id}
+			state.factsOf(r.RunID).ran(r.Turn)
+		case *poo.ToolStartedRecord:
+			state.run(r.RunID)
+			id := r.CallID
+			if id == "" {
+				id = state.callIDs[r.Handle]
+			}
+			key := callIdentity(id, r.RunID, r.Handle)
+			call := state.call(key)
+			if call.RunID == "" {
+				// The start names a call whose own record was never
+				// written: the call's place is the start's.
+				call.RunID = r.RunID
+				call.Turn = r.Turn
+				call.Handle = r.Handle
+				call.Tool = r.Tool
+				call.CallID = id
+			}
+			call.Started = true
+			state.factsOf(r.RunID).ran(r.Turn)
 		case *poo.ToolResultRecord:
 			state.run(r.RunID)
 			id := r.CallID
@@ -382,6 +607,7 @@ func pendingOf(id string, recs []poo.Record) *Pending {
 				id = state.callIDs[r.Handle]
 			}
 			state.results[callIdentity(id, r.RunID, r.Handle)] = r
+			state.factsOf(r.RunID).ran(r.Turn)
 		case *poo.MessageRecord:
 			if r.RunID != "" {
 				state.run(r.RunID)
@@ -394,6 +620,7 @@ func pendingOf(id string, recs []poo.Record) *Pending {
 			}
 			switch r.Role {
 			case poo.RoleAssistant:
+				state.factsOf(r.RunID).sawAssistant(r)
 				for _, block := range r.Content {
 					if block.Kind != poo.ContentToolCall || block.ToolCallID == "" {
 						continue
@@ -403,23 +630,85 @@ func pendingOf(id string, recs []poo.Record) *Pending {
 					call.Turn = r.Turn
 					call.Tool = block.Name
 					call.CallID = block.ToolCallID
+					if len(block.Arguments) > 0 {
+						call.Arguments = block.Arguments
+					}
 				}
 			case poo.RoleTool:
+				state.factsOf(r.RunID).ran(r.Turn)
 				for _, block := range r.Content {
 					if block.Kind != poo.ContentToolResult || block.ToolCallID == "" {
 						continue
 					}
 					state.messages[callIdentity(block.ToolCallID, r.RunID, "")] = true
 				}
+			default:
+				state.factsOf(r.RunID).ran(r.Turn)
 			}
 		case *poo.PermissionAskedRecord:
 			key := askIdentity(r.RunID, r.AskID)
 			if _, ok := state.asks[key]; !ok {
-				state.asks[key] = &PendingAsk{RunID: r.RunID, AskID: r.AskID, Tool: r.Tool}
+				ask := &PendingAsk{
+					RunID:          r.RunID,
+					AskID:          r.AskID,
+					Handle:         r.Handle,
+					CallID:         r.CallID,
+					Tool:           r.Tool,
+					Summary:        r.Summary,
+					Class:          r.Class,
+					Reason:         r.Reason,
+					Deadline:       askDeadline(r.Deadline),
+					Fallback:       r.Fallback,
+					recordedHandle: r.Handle,
+				}
+				if ask.Handle == "" {
+					// A log written before the ask carried its call
+					// pairs it the way it always did: with the last
+					// call of its tool before it.
+					about := state.lastCalls[callToolKey(r.RunID, r.Tool)]
+					ask.Handle, ask.CallID = about.handle, about.callID
+				} else if ask.CallID == "" {
+					ask.CallID = state.callIDs[ask.Handle]
+				}
+				state.asks[key] = ask
 				state.askOrder = append(state.askOrder, key)
 			}
 		case *poo.PermissionAnsweredRecord:
 			state.answered[askIdentity(r.RunID, r.AskID)] = true
+		case *poo.TurnHookRecord:
+			state.run(r.RunID)
+			key := hookIdentity(r.RunID, r.Turn, r.Phase, r.HookIndex)
+			if r.Status == hookEnded {
+				state.hookEnded[key] = true
+				continue
+			}
+			if _, ok := state.hooks[key]; !ok {
+				state.hooks[key] = *r
+				state.hookOrder = append(state.hookOrder, key)
+			}
+			state.factsOf(r.RunID).note(r.Turn)
+		case *poo.TurnInterruptedRecord:
+			state.run(r.RunID)
+			state.factsOf(r.RunID).retries++
+			state.factsOf(r.RunID).note(r.Turn)
+		case *poo.CompactionRecord:
+			state.run(r.RunID)
+			state.factsOf(r.RunID).compacted = true
+		case *poo.FeedSubscribedRecord:
+			key := subscriptionIdentity(r.Feed, r.Instance)
+			state.subs[key] = *r
+			state.subActive[key] = true
+			if !containsString(state.subOrder, key) {
+				state.subOrder = append(state.subOrder, key)
+			}
+		case *poo.FeedUnsubscribedRecord:
+			key := subscriptionIdentity(r.Feed, r.Instance)
+			state.subActive[key] = false
+			if _, ok := state.subs[key]; !ok {
+				// An unsubscribe of an instance whose subscribe is not
+				// in the log keeps the instance out.
+				state.subs[key] = poo.FeedSubscribedRecord{Feed: r.Feed, Instance: r.Instance}
+			}
 		case *poo.JobStartedRecord:
 			state.jobs = append(state.jobs, *r)
 			state.jobEnded = append(state.jobEnded, false)
@@ -478,6 +767,14 @@ func pendingOf(id string, recs []poo.Record) *Pending {
 			continue
 		}
 		pending := PendingRun{RunID: runID}
+		facts := state.factsOf(runID)
+		pending.Turn = facts.turn
+		pending.Resumptions = facts.resumptions
+		pending.RetryCount = facts.retries
+		pending.ContinuationCount = max(0, facts.assistants-1)
+		pending.PartialAssistant = facts.partial()
+		pending.UncommittedCompaction = facts.compacted
+		pending.HookPhase = state.hookPhaseOf(runID)
 		for _, key := range state.callOrder {
 			call := state.calls[key]
 			if call.RunID != runID {
@@ -549,9 +846,12 @@ func pendingOf(id string, recs []poo.Record) *Pending {
 			continue
 		}
 		pend.Inputs = append(pend.Inputs, PendingInput{
-			InputID: input.InputID,
-			RunID:   input.RunID,
-			Mode:    input.Mode,
+			InputID:      input.InputID,
+			RunID:        input.RunID,
+			Mode:         input.Mode,
+			Text:         input.Text,
+			DeliveryNote: input.DeliveryNote,
+			Attachments:  input.Attachments,
 		})
 	}
 	for _, msg := range state.delivering {
@@ -560,14 +860,36 @@ func pendingOf(id string, recs []poo.Record) *Pending {
 		}
 		// A job result is the only input with no queued record.
 		mode := poo.InputModeJob
+		var note *poo.DeliveryNote
+		var attachments []poo.Attachment
+		text := ""
 		if queued, ok := state.inputs[msg.InputID]; ok {
 			mode = queued.Mode
+			note = queued.DeliveryNote
+			attachments = queued.Attachments
+			text = queued.Text
 		}
 		pend.Delivered = append(pend.Delivered, PendingInput{
-			InputID: msg.InputID,
-			RunID:   msg.RunID,
-			Mode:    mode,
-			Origin:  msg.Origin,
+			InputID:      msg.InputID,
+			RunID:        msg.RunID,
+			Mode:         mode,
+			Origin:       msg.Origin,
+			Text:         text,
+			DeliveryNote: note,
+			Attachments:  attachments,
+		})
+	}
+	for _, key := range state.subOrder {
+		if !state.subActive[key] {
+			continue
+		}
+		sub := state.subs[key]
+		pend.Subscriptions = append(pend.Subscriptions, PendingSubscription{
+			Feed:     sub.Feed,
+			Instance: sub.Instance,
+			Scope:    sub.Scope,
+			Prompt:   sub.Prompt,
+			Origin:   sub.Meta().Origin,
 		})
 	}
 	return pend
@@ -623,6 +945,26 @@ type pendingState struct {
 	delivering []poo.MessageRecord
 	// callIDs are the provider's ids of the calls, by handle.
 	callIDs map[string]string
+	// facts are what the scan learned about each run beyond its calls
+	// and asks, by run id.
+	facts map[string]*runFacts
+	// lastCalls are the calls seen so far, by run and tool: an ask
+	// written before its call's record is paired with the last call of
+	// its tool that precedes it. An ask whose own record carries its
+	// call does not use this.
+	lastCalls map[string]callRef
+	// hooks are the turn hooks that started, by identity, and hookOrder
+	// is the order they started in.
+	hooks     map[string]poo.TurnHookRecord
+	hookEnded map[string]bool
+	hookOrder []string
+	// subs are each feed instance's latest subscription, by feed and
+	// instance, and subOrder is the order the instances first
+	// appeared in. subActive reports the instances that have not
+	// unsubscribed since.
+	subs      map[string]poo.FeedSubscribedRecord
+	subOrder  []string
+	subActive map[string]bool
 }
 
 // run returns a run's state, creating it when it is new.
@@ -655,6 +997,143 @@ func (s *pendingState) endJob(id string) {
 			return
 		}
 	}
+}
+
+// factsOf returns a run's facts, creating them when they are new.
+func (s *pendingState) factsOf(runID string) *runFacts {
+	facts, ok := s.facts[runID]
+	if !ok {
+		facts = &runFacts{}
+		s.facts[runID] = facts
+	}
+	return facts
+}
+
+// hookPhaseOf returns the hook the run was inside when it stopped.
+//
+// Only one hook of a turn runs at a time, so the first started hook the
+// log never ended is the one the process died in.
+func (s *pendingState) hookPhaseOf(runID string) *PendingHookPhase {
+	for _, key := range s.hookOrder {
+		hook := s.hooks[key]
+		if hook.RunID != runID || s.hookEnded[key] {
+			continue
+		}
+		return &PendingHookPhase{
+			Phase:       hook.Phase,
+			HookIndex:   hook.HookIndex,
+			Interrupted: hook.Interrupted,
+		}
+	}
+	return nil
+}
+
+// runFacts is what the scan learns about a run beyond its calls and asks.
+type runFacts struct {
+	// turn is the last turn the run recorded a record in.
+	turn int
+	// resumptions counts the run's run.resumed records.
+	resumptions int
+	// retries counts the run's turn.interrupted records.
+	retries int
+	// lastAssistant is the run's last assistant message, and trailing
+	// reports whether anything of the run followed it.
+	lastAssistant *poo.MessageRecord
+	trailing      bool
+	// assistantTurn is the turn of the run's last assistant message, and
+	// assistants is how many assistant messages that turn has.
+	assistantTurn int
+	assistants    int
+	// compacted reports that the run's last record is a compaction.
+	compacted bool
+}
+
+// note records the turn a record of the run belongs to.
+func (f *runFacts) note(turn int) {
+	f.turn = max(f.turn, turn)
+}
+
+// ran records activity of the run that is not a hook: it is what makes a
+// trailing assistant message no longer trailing, and a compaction no
+// longer the last thing the run did.
+func (f *runFacts) ran(turn int) {
+	f.note(turn)
+	f.compacted = false
+	if f.lastAssistant != nil {
+		f.trailing = true
+	}
+}
+
+// sawAssistant records an assistant message the run produced.
+func (f *runFacts) sawAssistant(msg *poo.MessageRecord) {
+	f.note(msg.Turn)
+	if msg.Turn != f.assistantTurn {
+		f.assistantTurn = msg.Turn
+		f.assistants = 0
+	}
+	f.assistants++
+	f.lastAssistant = msg
+	f.trailing = false
+	f.compacted = false
+}
+
+// partial reports that the run's last assistant message was cut short and
+// that nothing of the run followed it.
+func (f *runFacts) partial() bool {
+	return f.lastAssistant != nil && f.lastAssistant.Partial && !f.trailing
+}
+
+// hookEnded is the status of a hook's end record.
+const hookEnded = "ended"
+
+// hookIdentity names one hook of one turn.
+func hookIdentity(runID string, turn int, phase string, index int) string {
+	return fmt.Sprintf("%s\x00%d\x00%s\x00%d", runID, turn, phase, index)
+}
+
+// callRef names a call the log has seen.
+type callRef struct {
+	handle string
+	callID string
+}
+
+// callToolKey names the place a run's calls of one tool hold, so an ask
+// pairs with the call that precedes it.
+func callToolKey(runID, tool string) string {
+	return runID + "\x00" + tool
+}
+
+// subscriptionIdentity names a feed instance: a feed's instances are its
+// own.
+func subscriptionIdentity(feed, instance string) string {
+	return feed + "\x00" + instance
+}
+
+// askDeadline parses the wall-clock deadline an ask recorded.
+//
+// A log whose deadline does not parse holds no deadline for the ask: the
+// ask is live, which is the reading that never answers it on the model's
+// behalf.
+func askDeadline(at string) time.Time {
+	if at == "" {
+		return time.Time{}
+	}
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
+		if parsed, err := time.Parse(layout, at); err == nil {
+			return parsed
+		}
+	}
+	return time.Time{}
+}
+
+// containsString reports whether a list holds a value.
+func containsString(list []string, value string) bool {
+	for _, item := range list {
+		if item == value {
+			return true
+		}
+	}
+	return false
 }
 
 // callIdentity names a call. A call with a provider id is named by it;

@@ -49,6 +49,9 @@ func (s *Session) finalizeCandidates(run *runState, resumable bool, cands []cand
 	}
 	run.finalizing = true
 	run.candidates = append(run.candidates, cands...)
+	// A run that is ending waits on nothing: the ask it published is over
+	// with the run, whenever the ask itself is answered.
+	s.awaiting = nil
 	s.mu.Unlock()
 
 	return s.finalizeRun(run, resumable)
@@ -1079,6 +1082,15 @@ func (s *Session) messagesByIDLocked(id string) (Message, bool) {
 // it with ErrCloseStalled; a run reports it as a store error.
 var errFlushStalled = errors.New("poo: the flush is still in flight")
 
+// isLeaseLost reports whether err is the store's lease-lost failure: the
+// flush refused because the session's lease was taken over. The core
+// cannot name the store's error type without an import cycle, so the
+// failure is recognized by its method, not its message.
+func isLeaseLost(err error) bool {
+	var lost interface{ LeaseLost() bool }
+	return errors.As(err, &lost) && lost.LeaseLost()
+}
+
 // flushBounded flushes the sink and waits at most for ctx.
 //
 // The flush runs on its own and is not tracked or cancelled: a sink that
@@ -1112,7 +1124,15 @@ func (s *Session) Close() error {
 	}
 	s.closed = true
 	run := s.run
+	// The lease watcher ends with the session: the lease it watched is
+	// gone with the close.
+	stopWatch := s.leaseStop
+	s.leaseStop = nil
+	lost := s.leaseLost
 	s.mu.Unlock()
+	if stopWatch != nil {
+		close(stopWatch)
+	}
 
 	var errs []error
 	if run != nil {
@@ -1146,13 +1166,22 @@ func (s *Session) Close() error {
 		errs = append(errs, err)
 	}
 	s.events.stop()
-	if s.opts.Sink != nil {
+	// A session whose lease was lost writes nothing more, and a flush of a
+	// log another owner now holds is not this session's to make. The store
+	// releases the lease itself, and a lease that was taken over is left to
+	// its new owner.
+	if s.opts.Sink != nil && !lost {
 		ctx, cancel := context.WithTimeout(context.Background(), s.recordBudget())
 		if err := s.flushBounded(ctx); err != nil {
-			if errors.Is(err, errFlushStalled) {
-				err = fmt.Errorf("poo: closing the session: %w: %w", ErrCloseStalled, err)
+			// A lease lost during the teardown makes the flush refuse:
+			// the log is the new owner's to hold, and the close ends
+			// clean rather than write into it.
+			if !isLeaseLost(err) {
+				if errors.Is(err, errFlushStalled) {
+					err = fmt.Errorf("poo: closing the session: %w: %w", ErrCloseStalled, err)
+				}
+				errs = append(errs, err)
 			}
-			errs = append(errs, err)
 		}
 		cancel()
 	}

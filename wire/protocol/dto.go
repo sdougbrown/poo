@@ -1,6 +1,9 @@
 package protocol
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"time"
+)
 
 // The data the client and the server exchange.
 //
@@ -208,15 +211,15 @@ type CreateParams struct {
 	// Profile is the profile to build the session from. It defaults
 	// to the handshake's default_profile.
 	Profile string `json:"profile,omitempty"`
-	// Mode is the persistence mode: "logged" or "ephemeral". It
-	// defaults to the process default.
+	// Mode is the persistence mode: "logged", "ephemeral" or
+	// "durable". It defaults to the process default.
 	Mode string `json:"mode,omitempty"`
 	// Models overrides the settings' roles.
 	Models *ModelRoles `json:"models,omitempty"`
 	// PromptOverrides changes the session's system prompt.
 	PromptOverrides *PromptOverrides `json:"prompt_overrides,omitempty"`
 	// SessionDir is where the session's records live, for a logged
-	// session.
+	// session and for a durable one whose store names a directory.
 	SessionDir string `json:"session_dir,omitempty"`
 }
 
@@ -229,6 +232,18 @@ type LoadParams struct {
 	SessionDir string `json:"session_dir,omitempty"`
 }
 
+// ResumeRunParams are the params of session/resume_run.
+type ResumeRunParams struct {
+	// SessionID identifies the session.
+	SessionID string `json:"session_id"`
+}
+
+// ResumeRunResult is the result of session/resume_run.
+type ResumeRunResult struct {
+	// RunID identifies the run that continues.
+	RunID string `json:"run_id"`
+}
+
 // SessionInfo is what a client learns about a session it opened.
 //
 // The create and load results share it.
@@ -237,8 +252,10 @@ type SessionInfo struct {
 	SessionID string `json:"session_id"`
 	// Mode is the session's persistence mode.
 	Mode string `json:"mode"`
-	// SessionDir is the session's directory. It is present only for a
-	// logged session, and a client that resumes later keeps it.
+	// SessionDir is the session's directory. It is present when the
+	// session's store names a directory — a logged session's, and a
+	// durable one's whose store answers — and a client that resumes later
+	// keeps it.
 	SessionDir string `json:"session_dir,omitempty"`
 	// Tools are the tools the session offers.
 	Tools []ToolInfo `json:"tools"`
@@ -253,6 +270,9 @@ type SessionInfo struct {
 	// permission/ask: a policy that can ask, a chain that asks the
 	// wire, and a client that did not declare permission_answers.
 	Warnings []string `json:"warnings,omitempty"`
+	// PendingRun is the run the session has left to continue, and
+	// nil when there is none.
+	PendingRun *PendingRunInfo `json:"pending_run,omitempty"`
 }
 
 // GetParams are the params of session/get.
@@ -290,6 +310,37 @@ type PromptStateInfo struct {
 	Preview bool `json:"preview"`
 }
 
+// PendingRunInfo is the run a durable session has left to continue.
+//
+// It is the wire's view of the continuation: enough for a client to
+// show that the session holds a run, and to ask the session to carry
+// it on.
+type PendingRunInfo struct {
+	// RunID identifies the run.
+	RunID string `json:"run_id"`
+	// Turn is the last turn the run recorded a record in.
+	Turn int `json:"turn"`
+	// Phase is where the run resumes.
+	Phase string `json:"phase"`
+	// Resumptions is how many times the run was resumed already.
+	Resumptions int `json:"resumptions"`
+}
+
+// AwaitingStatus is what a run is waiting on.
+//
+// A resumed run that waits on a permission ask publishes what it
+// waits on, so a client can answer it. The ask id is the log's, and
+// the deadline is the wall-clock time it expires at.
+type AwaitingStatus struct {
+	// Kind is what the run waits on. The only kind is "permission".
+	Kind string `json:"kind"`
+	// AskID names the ask a client answers by.
+	AskID string `json:"ask_id,omitempty"`
+	// Deadline is the wall-clock time the wait ends, and nil when it
+	// has none.
+	Deadline *time.Time `json:"deadline,omitempty"`
+}
+
 // GetResult is the result of session/get.
 type GetResult struct {
 	// State is where the session is in the loop.
@@ -307,6 +358,12 @@ type GetResult struct {
 	// Broken says the session's store failed and the session cannot be
 	// used any more.
 	Broken bool `json:"broken"`
+	// PendingRun is the run the session has left to continue, and
+	// nil when there is none.
+	PendingRun *PendingRunInfo `json:"pending_run,omitempty"`
+	// Awaiting is what the session's run waits on, and nil when it
+	// waits on nothing.
+	Awaiting *AwaitingStatus `json:"awaiting,omitempty"`
 }
 
 // ConfigureParams are the params of session/configure.

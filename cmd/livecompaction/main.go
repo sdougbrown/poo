@@ -96,7 +96,7 @@ func toolInfos(linked map[string]poo.Tool) ([]poo.ToolInfo, error) {
 			return nil, fmt.Errorf("the %s profile offers %q and nothing links it", code.Name, name)
 		}
 		spec := tool.Spec()
-		infos = append(infos, poo.ToolInfo{Name: name, Class: spec.Class, Background: spec.Background})
+		infos = append(infos, poo.ToolInfo{Name: name, Class: spec.Class, Background: spec.Background, Idempotent: spec.Idempotent})
 	}
 	return infos, nil
 }

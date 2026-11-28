@@ -100,8 +100,9 @@ an essay. Each source records exactly what was read and when.
   with the store, the projection and the authority lock as the session seam.
 - **The task-and-checkpoint idea as the durability model.** pi-durable stores a
   checkpoint before every step, so a new process can find unfinished work. Poo
-  takes the v1 subset: every record is written as it happens, and Stage 8
-  recovery marks interrupted runs rather than continuing them.
+  writes every record as it happens: a `logged` session's load marks the run it
+  finds interrupted, and a `durable` session's load plans the run's
+  continuation and resumes it, from the phase the log cut short.
 - **Sections, not a monolithic prompt.** pi-durable rebuilds the system prompt
   from the sections of a conversation's extensions and records what changed.
   Poo's prompt builder is section-based too (plan, §System prompt), with the
@@ -125,10 +126,6 @@ an essay. Each source records exactly what was read and when.
 
 ### Rejected
 
-- **The durable session mode.** pi-durable's SQLite-backed durable sessions
-  and its "resume the interrupted run" behavior are out of scope for v1.
-  Poo's `logged` mode records everything and always starts a new run on load;
-  `durable` is a reserved mode that returns `unsupported_mode`.
 - **A task graph with ownership trees and abort propagation.** pi-durable
   models conversations, tasks and their ownership as one tree, with bottom-up
   abort. Poo runs one agent loop per session and has no task graph.

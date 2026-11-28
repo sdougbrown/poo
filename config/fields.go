@@ -121,6 +121,10 @@ func fieldsOf(s *Settings) SettingsFields {
 	f.SessionUserPromptFile = pointer(s.Session.UserPromptFile)
 	f.SessionRetentionMaxAgeDays = count(s.Session.Retention.MaxAgeDays)
 	f.SessionRetentionMaxSessions = count(s.Session.Retention.MaxSessions)
+	f.SessionDurableMaxResumptions = count(s.Session.Durable.MaxResumptions)
+	f.SessionDurableLeaseTtlS = count(s.Session.Durable.LeaseTTLS)
+	f.SessionDurableAutoResume = flag(s.Session.Durable.AutoResume)
+	f.SessionDurableStore = pointer(s.Session.Durable.Store)
 
 	return f
 }

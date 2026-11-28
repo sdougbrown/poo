@@ -131,6 +131,28 @@ func TestFixtures(t *testing.T) {
 			},
 		},
 		{
+			// The session/sqlite package may import the core package,
+			// the session package and the packages outside the module,
+			// and no other package of the module: the extra is a
+			// finding.
+			name: "session_sqlite",
+			want: []string{
+				m + "session_sqlite/session/sqlite imports " + m + "session_sqlite/extra",
+			},
+		},
+		{
+			// The boundary the check holds: the core and the session
+			// package may not import the session/sqlite package, so a
+			// core or session import of it is a finding. The
+			// session/sqlite package imports the standard library only,
+			// so the imports are not cycles.
+			name: "sqlite_boundary",
+			want: []string{
+				m + "sqlite_boundary imports " + m + "sqlite_boundary/session/sqlite",
+				m + "sqlite_boundary/session imports " + m + "sqlite_boundary/session/sqlite",
+			},
+		},
+		{
 			name: "ignored",
 		},
 		{
@@ -181,6 +203,7 @@ func wantSkipped(m string, extra ...string) []string {
 		m + "/scopeschema (does not exist yet)",
 		m + "/server (does not exist yet)",
 		m + "/session (does not exist yet)",
+		m + "/session/sqlite (does not exist yet)",
 		m + "/skill (does not exist yet)",
 		m + "/tool/callmcp (does not exist yet)",
 		m + "/tool/cliregistry (does not exist yet)",

@@ -66,6 +66,20 @@ const serveLong = `poo serve runs the wire protocol on stdin and stdout: one JSO
 object per line. It takes the same endpoint flags as poo run, plus the
 session's directory and the executor the bash tool runs commands through.`
 
+// daemonLong is the help body of `poo daemon`.
+const daemonLong = `The daemon hosts a long-lived feed-driven session: it starts the
+session's feeds, and waits for a signal or a lost lease without reading
+stdin. The session is durable, and a pending run resumes on load.
+
+--session names the session to load, or create if it does not exist.
+Without it, a new id is generated and printed to stderr, so a supervisor
+can pin it.
+
+The lifecycle goes to stderr, one fact per line. The exit code says why
+the daemon ended: 0 after a clean shutdown, 1 when the lease was lost
+(a takeover owner now holds the session), and 2 when the command refuses
+its arguments or its settings.`
+
 // replLong is the help body of `poo repl`.
 const replLong = `The repl takes the same flags as poo serve, and starts a poo serve with
 them. Its input reads with vi keys at a terminal, and the transcript
@@ -194,6 +208,15 @@ func pooApp(stdout io.Writer) *clicontract.App {
 				Flags: serveFlagSpecs(),
 				Handle: func(_ context.Context, inv clicontract.Invocation, cmdStderr io.Writer) (any, error) {
 					return handleServe(inv, stdout, cmdStderr), nil
+				},
+			},
+			{
+				Name:  "daemon",
+				Short: "Host a long-lived feed-driven session",
+				Long:  daemonLong,
+				Flags: daemonFlagSpecs(),
+				Handle: func(ctx context.Context, inv clicontract.Invocation, cmdStderr io.Writer) (any, error) {
+					return handleDaemon(ctx, inv, stdout, cmdStderr), nil
 				},
 			},
 			{

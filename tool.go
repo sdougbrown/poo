@@ -11,8 +11,9 @@ import (
 
 // ToolInfo describes one tool as a session's metadata records it.
 //
-// It is the tool's name, its side-effect class and its background mode:
-// what a restored session checks the tool against.
+// It is the tool's name, its side-effect class, its background mode and
+// whether repeating it is safe: what a restored session checks the tool
+// against.
 type ToolInfo struct {
 	// Name is the tool's identifier.
 	Name string `json:"name"`
@@ -22,6 +23,11 @@ type ToolInfo struct {
 	// the record is incompatible with the current build when a tool's
 	// mode changed.
 	Background Background `json:"background,omitempty"`
+	// Idempotent marks a SideEffecting tool whose repeated execution
+	// is safe, so a durable session may replay an interrupted call.
+	// A record written before the tool declared itself idempotent says
+	// nothing about it, so gaining the flag is not a difference.
+	Idempotent bool `json:"idempotent,omitempty"`
 }
 
 // ToolSpec describes a tool to the model and to the core.
@@ -40,6 +46,9 @@ type ToolSpec struct {
 	// Background says whether the model may run the tool in the
 	// background.
 	Background Background `json:"background,omitempty"`
+	// Idempotent marks a SideEffecting tool whose repeated execution
+	// is safe, so a durable session may replay an interrupted call.
+	Idempotent bool `json:"idempotent,omitempty"`
 }
 
 // ToolKind is the side-effect class of a tool.

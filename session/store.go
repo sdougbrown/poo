@@ -30,30 +30,32 @@ const (
 	// length of the process. Nothing is written, and there is nothing
 	// to load.
 	ModeEphemeral Mode = "ephemeral"
-	// ModeDurable is reserved. v1 marks an interrupted run and moves
-	// on; a durable session continues it.
+	// ModeDurable stores the session's records in a file and continues a
+	// run a crash left unsettled. The file is the session's, locked and
+	// recovered the way a logged one is; where a logged session settles
+	// the pending operations it finds, a durable session plans a
+	// continuation and the restored session resumes the run.
 	ModeDurable Mode = "durable"
 )
 
 // CheckMode returns the failure a mode names, when this build does not
 // support it.
 //
-// A durable session is refused with ErrUnsupportedMode.
+// The three modes are the ones this build offers. An unknown mode is
+// refused with CodeUnsupportedMode.
 func CheckMode(mode Mode) error {
 	switch mode {
-	case ModeLogged, ModeEphemeral:
+	case ModeLogged, ModeEphemeral, ModeDurable:
 		return nil
-	case ModeDurable:
-		return ErrUnsupportedMode
 	}
 	return &Error{Code: CodeUnsupportedMode, Message: "unknown persistence mode: " + string(mode)}
 }
 
 // Store holds sessions' records.
 //
-// A store creates sessions, loads them, lists them and prunes them. It
-// implements poo.RecordSink, so a caller hands it to a core session as
-// the session's sink.
+// A store creates sessions, reads a session's header, loads them, lists
+// them and prunes them. It implements poo.RecordSink, so a caller hands
+// it to a core session as the session's sink.
 type Store interface {
 	poo.RecordSink
 
@@ -65,6 +67,15 @@ type Store interface {
 	// Create starts a session in the store and makes it the store's
 	// current session. It returns the session's id.
 	Create(ctx context.Context, created *poo.SessionCreatedRecord) (string, error)
+
+	// Metadata returns the header of a session the store has not opened.
+	//
+	// The read takes no authority: a caller may learn what a session was
+	// before it takes the lock on it. The read honors ctx when the store's
+	// medium can: a query is canceled with it, a header-sized file read has
+	// nothing to wait on. A session the store does not hold is its
+	// not-found failure.
+	Metadata(ctx context.Context, id string) (Metadata, error)
 
 	// Load reads a session's records, recovers the session, and makes
 	// it the store's current session.
@@ -104,18 +115,14 @@ type FileStore struct {
 	dir string
 	// codec reads and writes the records.
 	codec Codec
-	// now is the store's clock.
-	now func() time.Time
-	// build names the binary that owns the store. A session written
-	// by another build is loaded with a warning.
-	build poo.BuildInfo
-	// settingsHash is the hash of the settings the store was made
-	// with. A session written with other settings is loaded with a
-	// warning.
-	settingsHash string
-	// policy resolves the pending operations of a session that is
-	// loaded.
-	policy RecoveryPolicy
+	// recovery is what a load reads to recover a session and to say what
+	// changed since it was written: the policy, the durable options, the
+	// store's clock, and the build and settings the warnings compare.
+	recovery Recovery
+	// lease, when set, opens sessions with a lease instead of the
+	// flock: the session's owner is renewed by a heartbeat, and a dead
+	// owner is taken over after the lease expires.
+	lease *LeaseOptions
 	// mu guards the store's state.
 	mu sync.Mutex
 	// open is the session the store has open, if any.
@@ -135,8 +142,9 @@ type openSession struct {
 	id string
 	// path is the session's file.
 	path string
-	// lock is the session's authority.
-	lock *Authority
+	// owner is the session's authority: the flock authority, or the
+	// lease authority when the store opens sessions with a lease.
+	owner sessionOwner
 	// log writes the session's records.
 	log *Log
 	// tools are the tool classes the session was created with, by
@@ -165,7 +173,7 @@ func WithCodec(codec Codec) Option {
 func WithClock(now func() time.Time) Option {
 	return func(s *FileStore) {
 		if now != nil {
-			s.now = now
+			s.recovery.Now = now
 		}
 	}
 }
@@ -176,7 +184,7 @@ func WithClock(now func() time.Time) Option {
 // records are still readable, but the binary that wrote them is not
 // this one.
 func WithBuild(build poo.BuildInfo) Option {
-	return func(s *FileStore) { s.build = build }
+	return func(s *FileStore) { s.recovery.Build = build }
 }
 
 // WithSettingsHash sets the hash of the settings the store was made
@@ -184,18 +192,43 @@ func WithBuild(build poo.BuildInfo) Option {
 //
 // A session written with other settings is loaded with a warning.
 func WithSettingsHash(hash string) Option {
-	return func(s *FileStore) { s.settingsHash = hash }
+	return func(s *FileStore) { s.recovery.SettingsHash = hash }
 }
 
 // WithRecoveryPolicy sets the policy that resolves a loaded session's
 // pending operations.
 //
 // The default is the interrupt policy: v1 marks everything interrupted.
+// The policy resolves a logged or ephemeral session; a durable session's
+// pending operations are planned, and DurableOptions say how.
 func WithRecoveryPolicy(policy RecoveryPolicy) Option {
 	return func(s *FileStore) {
 		if policy != nil {
-			s.policy = policy
+			s.recovery.Policy = policy
 		}
+	}
+}
+
+// WithDurableOptions sets how a durable session's continuation is planned.
+//
+// The load reads the planner's fallback lookup from the session's own
+// header, so a plan reads the class and the idempotency the session
+// recorded, whatever the store was opened with. A ToolLookup in the
+// options outranks it.
+func WithDurableOptions(opts DurableOptions) Option {
+	return func(s *FileStore) { s.recovery.Durable = opts }
+}
+
+// WithLeaseOptions sets the lease options the store opens sessions
+// with.
+//
+// When set, a session's owner is a lease instead of the flock: the
+// owner is renewed by a heartbeat, and a dead owner is taken over after
+// the lease expires. A session that is fenced is refused: its writes
+// fail with ErrLeaseLost.
+func WithLeaseOptions(opts LeaseOptions) Option {
+	return func(s *FileStore) {
+		s.lease = &opts
 	}
 }
 
@@ -205,10 +238,13 @@ func WithRecoveryPolicy(policy RecoveryPolicy) Option {
 // prompts and answers, so it is created private to its owner.
 func NewStore(dir string, opts ...Option) (*FileStore, error) {
 	s := &FileStore{
-		dir:    dir,
-		codec:  NewCodec(),
-		now:    time.Now,
-		policy: InterruptPolicy{},
+		dir:   dir,
+		codec: NewCodec(),
+		// No policy: the load settles with the interrupt policy on the
+		// store's own clock, whatever a caller set it to.
+		recovery: Recovery{
+			Now: time.Now,
+		},
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -221,6 +257,9 @@ func NewStore(dir string, opts ...Option) (*FileStore, error) {
 
 // Dir returns the directory the store keeps its sessions in.
 func (s *FileStore) Dir() string { return s.dir }
+
+// now returns the store's clock.
+func (s *FileStore) now() time.Time { return s.recovery.Now() }
 
 // DirStore is a store that keeps its sessions in a directory.
 //
@@ -253,8 +292,7 @@ func (s *FileStore) path(id string) string {
 // never a session. The store's authority is taken before the first
 // record is written, and it is held until the store closes.
 //
-// The created record's mode must be a mode this build supports: a
-// durable session is refused with ErrUnsupportedMode.
+// The created record's mode must be a mode this build supports.
 func (s *FileStore) Create(ctx context.Context, created *poo.SessionCreatedRecord) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -282,7 +320,7 @@ func (s *FileStore) Create(ctx context.Context, created *poo.SessionCreatedRecor
 		return "", err
 	}
 
-	lock, err := Acquire(LockPath(s.dir, id))
+	owner, err := s.takeOwner(id)
 	if err != nil {
 		return "", err
 	}
@@ -290,31 +328,49 @@ func (s *FileStore) Create(ctx context.Context, created *poo.SessionCreatedRecor
 	if _, err := os.Stat(path); err == nil {
 		// The session is already there: a log holds one session, and
 		// a second one would take the first one's records with it.
-		lock.Release()
+		owner.Release()
 		return "", &Error{Code: CodeSessionExists, Message: "the session already exists: " + id}
 	} else if !errors.Is(err, fs.ErrNotExist) {
-		lock.Release()
+		owner.Release()
 		return "", &Error{Code: CodeStoreError, Message: "stating " + path, Err: err}
 	}
 	if err := s.writeSessionFile(ctx, path, created); err != nil {
-		lock.Release()
+		owner.Release()
 		return "", err
 	}
 	log, err := openLog(path, 1, s.now)
 	if err != nil {
 		os.Remove(path)
-		lock.Release()
+		owner.Release()
 		return "", &Error{Code: CodeStoreError, Message: "opening " + path, Err: err}
 	}
 	log.appendFault = s.appendFault
 	s.open = &openSession{
 		id:    id,
 		path:  path,
-		lock:  lock,
+		owner: owner,
 		log:   log,
 		tools: toolClasses(created.Tools),
 	}
 	return id, nil
+}
+
+// takeOwner takes the owner on a session: the flock authority, or the
+// lease authority when the store opens sessions with a lease. The
+// authority is held for the store's own life — a lease's heartbeat ends
+// only at its release — so it takes no context from the open call.
+//
+// The lease runs on the store's clock unless its options name one, so a
+// store given a clock leases, and lists, on that one timeline.
+func (s *FileStore) takeOwner(id string) (sessionOwner, error) {
+	if s.lease != nil {
+		opts := *s.lease
+		if opts.Now == nil {
+			opts.Now = s.now
+		}
+		return AcquireLease(s.dir, id, opts)
+	}
+	return Acquire(LockPath(s.dir, id))
 }
 
 // writeSessionFile writes a new session's file.
@@ -383,6 +439,16 @@ func (s *FileStore) writeSessionFile(ctx context.Context, path string, created *
 	return nil
 }
 
+// Metadata returns the header of a session the store has not opened.
+//
+// The read takes no authority, and the file format's knowledge — the
+// format check, the migration and the codec — stays in one read, whose
+// failures are the ones a caller already maps. The read uses the store's
+// codec, the way Load and ReadRecords decode with it.
+func (s *FileStore) Metadata(ctx context.Context, id string) (Metadata, error) {
+	return metadataWith(s.codec, s.dir, id)
+}
+
 // Load reads a session's records, recovers the session, and opens it.
 //
 // The load takes the authority on the session, so a session another
@@ -390,11 +456,13 @@ func (s *FileStore) writeSessionFile(ctx context.Context, path string, created *
 // taken for a load that failed is given up before the failure is
 // returned.
 //
-// The load recovers the session: a torn tail is truncated, an unsettled
-// run is marked interrupted, an unfinished job is ended, and an input
-// that never reached the model is dropped. The recovery is idempotent,
-// so a load that failed partway is finished by the next one, without
-// writing a record twice.
+// The load recovers the session: a torn tail is truncated, an
+// unfinished job is ended, and an input that never reached the model is
+// dropped. A logged session's unsettled run is marked interrupted; a
+// durable session's is planned for a continuation, which the load
+// returns as the session's plan. The recovery is idempotent, so a load
+// that failed partway is finished by the next one, without writing a
+// record twice.
 func (s *FileStore) Load(ctx context.Context, id string) (*Loaded, error) {
 	if err := ValidateID(id); err != nil {
 		return nil, err
@@ -405,22 +473,22 @@ func (s *FileStore) Load(ctx context.Context, id string) (*Loaded, error) {
 	if err := s.closeOpen(); err != nil {
 		return nil, err
 	}
-	lock, err := Acquire(LockPath(s.dir, id))
+	owner, err := s.takeOwner(id)
 	if err != nil {
 		return nil, err
 	}
-	loaded, err := s.loadLocked(ctx, id, lock)
+	loaded, err := s.loadLocked(ctx, id, owner)
 	if err != nil {
-		lock.Release()
+		owner.Release()
 		return nil, err
 	}
 	return loaded, nil
 }
 
-// loadLocked loads a session with the authority already taken.
+// loadLocked loads a session with the owner already taken.
 //
-// The authority is the caller's: a failure gives it up.
-func (s *FileStore) loadLocked(ctx context.Context, id string, lock *Authority) (*Loaded, error) {
+// The owner is the caller's: a failure gives it up.
+func (s *FileStore) loadLocked(ctx context.Context, id string, owner sessionOwner) (*Loaded, error) {
 	path := s.path(id)
 	lines, torn, err := s.readLog(path, true)
 	if err != nil {
@@ -463,9 +531,12 @@ func (s *FileStore) loadLocked(ctx context.Context, id string, lock *Authority) 
 		return nil, &Error{Code: CodeStoreError, Message: "opening " + path, Err: err}
 	}
 	log.appendFault = s.appendFault
-	// The recovery appends to the log. A failure partway leaves the
-	// log with what it wrote, and the next load finishes the job.
-	if err := s.recover(ctx, log, pendingOf(id, recs)); err != nil {
+	// The recovery resolves the session's pending operations. A durable
+	// session's are planned instead, so its run continues. A failure
+	// partway leaves the log with what it wrote, and the next load
+	// finishes the job.
+	continuation, err := s.recover(ctx, log, pendingOf(id, recs), Mode(created.Mode), meta)
+	if err != nil {
 		log.Close()
 		return nil, err
 	}
@@ -485,7 +556,7 @@ func (s *FileStore) loadLocked(ctx context.Context, id string, lock *Authority) 
 	s.open = &openSession{
 		id:    id,
 		path:  path,
-		lock:  lock,
+		owner: owner,
 		log:   log,
 		tools: toolClasses(meta.Tools),
 	}
@@ -495,42 +566,27 @@ func (s *FileStore) loadLocked(ctx context.Context, id string, lock *Authority) 
 		Records:       recs,
 		RecoveredTail: torn,
 		Jobs:          poo.PendingJobResults(recs),
-		Warnings:      s.warnings(meta),
+		Continuation:  continuation,
+		Warnings:      s.recovery.Warnings(meta),
 	}, nil
 }
 
 // recover resolves a session's pending operations and puts them on disk.
 //
+// It returns the continuation a durable session has left to do, and nil
+// for every other session: those settle what is pending.
+//
 // The recovery appends only what is missing, so it is idempotent: a
 // recovery that failed partway is finished by the next load.
-func (s *FileStore) recover(ctx context.Context, log *Log, pending *Pending) error {
-	policy := s.policy
-	if policy == nil {
-		policy = InterruptPolicy{Now: s.now}
-	}
-	if err := policy.Resolve(ctx, log, pending); err != nil {
-		return &Error{Code: CodeStoreError, Message: "recovering the session", Err: err}
+func (s *FileStore) recover(ctx context.Context, log *Log, pending *Pending, mode Mode, meta Metadata) (*ContinuationPlan, error) {
+	continuation, err := s.recovery.Resolve(ctx, log, pending, mode, meta)
+	if err != nil {
+		return nil, &Error{Code: CodeStoreError, Message: "recovering the session", Err: err}
 	}
 	if err := log.Sync(ctx); err != nil {
-		return &Error{Code: CodeStoreError, Message: "syncing the session", Err: err}
+		return nil, &Error{Code: CodeStoreError, Message: "syncing the session", Err: err}
 	}
-	return nil
-}
-
-// warnings reports what changed since the session was written.
-//
-// A different build or different settings are not failures: the records
-// are still readable. A caller that cares reports them.
-func (s *FileStore) warnings(meta Metadata) []string {
-	var out []string
-	if s.build.Name != "" && meta.Build.Name != "" && s.build != meta.Build {
-		out = append(out, "the session was made by "+meta.Build.Name+" "+meta.Build.Version+
-			", and this build is "+s.build.Name+" "+s.build.Version)
-	}
-	if s.settingsHash != "" && meta.SettingsHash != "" && s.settingsHash != meta.SettingsHash {
-		out = append(out, "the settings changed since the session was created")
-	}
-	return out
+	return continuation, nil
 }
 
 // readLog reads a session's records.
@@ -583,23 +639,43 @@ func (s *FileStore) decodeRecords(lines [][]byte) ([]poo.Record, error) {
 // Append writes one record to the open session.
 //
 // The record is written as one write of the line and its newline. A run's
-// boundaries and a side-effecting tool's result are synced before the
-// append returns: those are the records a crash must not lose.
+// boundaries, a run's resumption, and a side-effecting tool's start and
+// result are synced before the append returns: those are the records a
+// crash must not lose.
 func (s *FileStore) Append(ctx context.Context, rec poo.Record) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.open == nil {
 		return &Error{Code: CodeStoreError, Message: "the store has no open session"}
 	}
+	if err := s.open.owner.CheckHeld(); err != nil {
+		return err
+	}
 	if err := s.open.log.Append(ctx, rec); err != nil {
 		return &Error{Code: CodeStoreError, Message: "writing " + rec.Meta().Record, Err: err}
 	}
-	if s.needsSync(rec) {
+	if NeedsSync(rec, s.open.tools) {
 		if err := s.open.log.Sync(ctx); err != nil {
 			return &Error{Code: CodeStoreError, Message: "syncing " + rec.Meta().Record, Err: err}
 		}
 	}
 	return nil
+}
+
+// LeaseLost is the channel that closes when the open session's lease is
+// lost, and nil when the session's ownership is not a lease.
+//
+// A session that writes through a lease watches the channel: the lease it
+// lost fences every write, and the session's run stops at once. The flock
+// authority is never lost, so a store that holds one answers nil and the
+// session watches nothing.
+func (s *FileStore) LeaseLost() <-chan struct{} {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.open == nil || s.open.owner == nil {
+		return nil
+	}
+	return s.open.owner.LeaseLost()
 }
 
 // Flush pushes the open session's records out.
@@ -611,24 +687,37 @@ func (s *FileStore) Flush(ctx context.Context) error {
 	if s.open == nil {
 		return nil
 	}
+	if err := s.open.owner.CheckHeld(); err != nil {
+		return err
+	}
 	if err := s.open.log.Flush(ctx); err != nil {
 		return &Error{Code: CodeStoreError, Message: "flushing the session", Err: err}
 	}
 	return nil
 }
 
-// needsSync reports whether a record must be on disk before the session
+// NeedsSync reports whether a record must be on disk before the session
 // carries on.
 //
-// A run's boundaries and a side-effecting tool's result are the records
-// a crash must not lose: the run's outcome, and the effect that
-// happened.
-func (s *FileStore) needsSync(rec poo.Record) bool {
+// A run's boundaries, a run's resumption, a tool's start and a
+// side-effecting tool's result are the records a crash must not lose: the
+// run's outcome, where a resumed run picked up, and the effect that may
+// have happened.
+//
+// tools classifies the open session's tools. A tool the map does not name
+// has no class, so its result does not sync.
+func NeedsSync(rec poo.Record, tools map[string]poo.ToolKind) bool {
 	switch r := rec.(type) {
 	case *poo.RunStartedRecord, *poo.RunSettledRecord:
 		return true
+	case *poo.ToolStartedRecord, *poo.RunResumedRecord:
+		// A tool's start is written before the tool can act, so it is on
+		// disk before the effect it marks may happen. A resumption's
+		// record says where the run picked up, and a crash must not lose
+		// it either.
+		return true
 	case *poo.ToolResultRecord:
-		return s.open.tools[r.Tool] == poo.ClassSideEffecting
+		return tools[r.Tool] == poo.ClassSideEffecting
 	}
 	return false
 }
@@ -651,11 +740,11 @@ func (s *FileStore) closeOpen() error {
 	open := s.open
 	s.open = nil
 	logErr := open.log.Close()
-	lockErr := open.lock.Release()
+	ownerErr := open.owner.Release()
 	if logErr != nil {
 		return logErr
 	}
-	return lockErr
+	return ownerErr
 }
 
 // Pending returns the operations a session has not resolved.
@@ -773,6 +862,15 @@ func (s *FileStore) summarize(id string) (Listing, error) {
 		return Listing{}, err
 	}
 	sum.Locked = locked
+	if !sum.Locked {
+		// A live lease locks the session too: a leased session is
+		// held, the way a locked one is.
+		leased, err := LeaseLocked(LeasePath(s.dir, id), s.now())
+		if err != nil {
+			return Listing{}, err
+		}
+		sum.Locked = leased
+	}
 	return sum, nil
 }
 
@@ -801,37 +899,12 @@ func (s *FileStore) Prune(ctx context.Context, policy Policy) (*PruneResult, err
 	if err != nil {
 		return nil, err
 	}
-	// The count rule keeps the newest sessions, and it counts the
-	// locked ones: a locked session is one of the sessions that are
-	// kept.
-	byActivity := make([]Listing, len(summaries))
-	copy(byActivity, summaries)
-	sort.Slice(byActivity, func(i, j int) bool {
-		if !byActivity[i].LastActivity.Equal(byActivity[j].LastActivity) {
-			return byActivity[i].LastActivity.After(byActivity[j].LastActivity)
-		}
-		// Ties are broken by id, so the same sessions are kept on every
-		// run.
-		return byActivity[i].ID < byActivity[j].ID
-	})
-	kept := map[string]bool{}
-	var boundary time.Time
-	if policy.Keep > 0 {
-		for i, sum := range byActivity {
-			if i >= policy.Keep {
-				break
-			}
-			kept[sum.ID] = true
-		}
-		if policy.Keep <= len(byActivity) {
-			boundary = byActivity[policy.Keep-1].LastActivity
-		}
-	}
+	byActivity, marked := MarkedBy(policy, summaries, now)
 
 	result := &PruneResult{}
 	deleted := false
 	for _, sum := range byActivity {
-		if !s.markedBy(sum, policy, now, kept, boundary) {
+		if !marked(sum) {
 			continue
 		}
 		lock, err := Acquire(LockPath(s.dir, sum.ID))
@@ -841,6 +914,18 @@ func (s *FileStore) Prune(ctx context.Context, policy Policy) (*PruneResult, err
 				continue
 			}
 			return nil, err
+		}
+		// A live-leased session is never pruned: the lease holds it,
+		// the way a lock does.
+		leased, err := LeaseLocked(LeasePath(s.dir, sum.ID), now)
+		if err != nil {
+			lock.Release()
+			return nil, err
+		}
+		if leased {
+			lock.Release()
+			result.Skipped = append(result.Skipped, sum)
+			continue
 		}
 		// The session's activity may have moved since the listing, so
 		// the rules are checked again under the lock.
@@ -856,7 +941,7 @@ func (s *FileStore) Prune(ctx context.Context, policy Policy) (*PruneResult, err
 		// The prune holds the lock, so the session is not locked by
 		// another process.
 		fresh.Locked = false
-		if !s.markedBy(fresh, policy, now, kept, boundary) {
+		if !marked(fresh) {
 			lock.Release()
 			continue
 		}
@@ -885,23 +970,6 @@ func (s *FileStore) Prune(ctx context.Context, policy Policy) (*PruneResult, err
 		}
 	}
 	return result, nil
-}
-
-// markedBy reports whether a policy marks a session.
-//
-// With both rules set, a session is marked when either rule marks it.
-func (s *FileStore) markedBy(sum Listing, policy Policy, now time.Time, kept map[string]bool, boundary time.Time) bool {
-	if policy.MaxAge > 0 && now.Sub(sum.LastActivity) > policy.MaxAge {
-		return true
-	}
-	if policy.Keep > 0 && !kept[sum.ID] {
-		// A session that became newer than the sessions that are kept
-		// is kept too: the count rule is about the newest sessions.
-		if boundary.IsZero() || !sum.LastActivity.After(boundary) {
-			return true
-		}
-	}
-	return false
 }
 
 // removeStaleTmp removes the temporary files of constructions that were
@@ -934,6 +1002,17 @@ func (s *FileStore) removeStaleTmp(now time.Time) ([]string, error) {
 				continue
 			}
 			return nil, err
+		}
+		// A live-leased session is never touched: the lease holds it,
+		// the way a lock does.
+		leased, err := LeaseLocked(LeasePath(s.dir, id), now)
+		if err != nil {
+			lock.Release()
+			return nil, err
+		}
+		if leased {
+			lock.Release()
+			continue
 		}
 		if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			lock.Release()

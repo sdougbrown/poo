@@ -9,6 +9,12 @@ import (
 	"github.com/sdougbrown/poo/wire/protocol"
 )
 
+// configCodeUnsupported mirrors the settings' failure code for
+// "unsupported" — the code a store whose backend this build does not
+// link answers with — the way the protocol's own codes mirror the
+// store's.
+const configCodeUnsupported = "unsupported"
+
 // codeOf returns the data code an error carries.
 //
 // The core's failures and the store's failures are the two families
@@ -50,6 +56,15 @@ func codeOf(err error) string {
 	// corrupt_log and store_error.
 	if code, ok := storesession.CodeOf(err); ok {
 		return code
+	}
+	// A settings failure that names a mode this build does not have:
+	// the store the settings name has no registered backend, or the
+	// process is not in the mode the session asks for. The failure is
+	// recognized by its method, not its type, so the wire takes none of
+	// the settings' dependency closure with it.
+	var coded interface{ ErrorCode() string }
+	if errors.As(err, &coded) && coded.ErrorCode() == configCodeUnsupported {
+		return protocol.DataUnsupportedMode
 	}
 	// An input the session refused: an unknown message id, or a
 	// delivery note that does not describe a number of characters.

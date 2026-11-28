@@ -19,6 +19,10 @@
 //     package, the perm package and the decide package
 //   - the session package may import the standard library, the core
 //     package and the decide package
+//   - the session/sqlite package may import the standard library, the
+//     core package, the session package and the packages outside the
+//     module that hold the SQLite driver, for it is the opt-in store a
+//     binary links and registers by the settings' store name
 //   - the tool/cliregistry package may import the standard library, the core
 //     package, the cli package, the prompt package, the decide package, the
 //     bash package, the arguments' shared JSON rules and the packages outside
@@ -150,6 +154,11 @@ func (c Checker) rules() []rule {
 		{path: m + "/perm", allowed: []string{m, m + "/internal/urlnorm", m + "/protect"}},
 		{path: m + "/perm/decide", allowed: []string{m, m + "/perm", m + "/decide"}},
 		{path: m + "/session", allowed: []string{m, m + "/decide"}},
+		// The SQLite-backed store: the opt-in alternative to the file
+		// store, a binary links it and registers it by the settings'
+		// store name. It may reach the driver, and nothing else outside
+		// the module.
+		{path: m + "/session/sqlite", allowed: []string{m, m + "/session"}, external: true},
 		{path: m + "/exec"},
 		{path: m + "/exec/bwrap", allowed: []string{m + "/exec"}},
 		{path: m + "/protect"},

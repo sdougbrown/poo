@@ -103,6 +103,21 @@ type Session struct {
 
 	// run is the active run, nil when the session is idle.
 	run *runState
+	// pending is the continuation a durable restore left, and nil when
+	// the session has no run to carry on. ResumeRun claims and clears it.
+	pending *ContinuationPlan
+	// resumedAsks are the asks a continuing run asks again, in the order
+	// the plan listed them. The policy slot takes the first one whose tool
+	// matches, so the re-ask carries the persisted deadline and the log's
+	// ask id instead of a fresh deadline of its own.
+	resumedAsks []PlannedAsk
+	// awaiting is what the run waits on, and nil when it waits on
+	// nothing. It is published for as long as the ask is unanswered.
+	awaiting *AwaitingInfo
+	// sessionTurns maps a run's own turn numbers to the session's, as the
+	// records numbered them. A resumed turn reads it rather than counting
+	// the turns again.
+	sessionTurns map[turnKey]int
 	// reserved reports that a run has been admitted but has not been
 	// installed yet.
 	//
@@ -113,6 +128,11 @@ type Session struct {
 	// broken reports that the store failed and the session cannot be
 	// used any more.
 	broken bool
+	// leaseLost reports that the session's lease was lost: every write is
+	// fenced, and no record of the run that was going may be written.
+	leaseLost bool
+	// leaseStop ends the lease watcher when the session closes.
+	leaseStop chan struct{}
 	// closed reports that the session is closing or closed.
 	closed bool
 	// fenced reports that the close has begun: a record write that has
@@ -750,6 +770,15 @@ type Options struct {
 	// A restore queues the results it recovered before a feed may add an
 	// input of its own, so it defers the start and calls it itself.
 	feedsDeferred bool
+	// continuation is the plan a durable session's restore carries out,
+	// and nil when the session has no run to continue.
+	//
+	// A restore stores it on the session, which holds it, idle, until
+	// ResumeRun carries it out.
+	continuation *ContinuationPlan
+	// autoResume makes a restore resume the run it found before it
+	// returns.
+	autoResume bool
 	// Logger receives the core's diagnostic messages: observer errors
 	// and overflow, candidates that arrive after the commit point, and
 	// completions that arrive after it.
@@ -963,6 +992,9 @@ func New(opts Options, fns ...Option) (*Session, error) {
 	if !opts.feedsDeferred {
 		s.startFeeds()
 	}
+	// A session that writes through a lease watches it: the lease it lost
+	// is another owner's session, and the run stops at once.
+	s.watchLease()
 	complete = true
 	return s, nil
 }
@@ -1032,6 +1064,321 @@ func (s *Session) ActiveRunID() string {
 		return ""
 	}
 	return s.run.id
+}
+
+// PendingRun returns the run a durable session has left to continue, and
+// nil when there is none.
+//
+// The session holds the run, idle, until ResumeRun resumes it. The shape
+// is the wire's: the run's id, the turn it stopped in, the phase it
+// resumes at, and how many times it was resumed already.
+func (s *Session) PendingRun() *PendingRunInfo {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return pendingRunInfoLocked(s.pending)
+}
+
+// pendingRunInfoLocked returns the wire's view of a plan.
+func pendingRunInfoLocked(plan *ContinuationPlan) *PendingRunInfo {
+	if plan == nil {
+		return nil
+	}
+	return &PendingRunInfo{
+		RunID:       plan.RunID,
+		Turn:        plan.Turn,
+		Phase:       plan.Phase,
+		Resumptions: plan.Resumptions,
+	}
+}
+
+// setPendingRun stores the continuation a restore left.
+func (s *Session) setPendingRun(plan *ContinuationPlan) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pending = plan
+}
+
+// pendingCoveredCalls returns the calls a continuation answers, by the
+// provider's id, so a restore does not read them as unanswered.
+func (s *Session) pendingCoveredCalls() (map[string]bool, map[string]bool) {
+	s.mu.Lock()
+	plan := s.pending
+	s.mu.Unlock()
+	return plan.coveredCalls()
+}
+
+// Awaiting returns what the run waits on, and whether it waits at all.
+//
+// A run that waits on a permission ask publishes it for as long as the ask
+// is unanswered: a client answers it by the ask id, and the deadline says
+// when the wait ends on its own. The wait is cleared when the ask is
+// answered, and a run that waits on nothing reports false.
+func (s *Session) Awaiting() (AwaitingInfo, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.awaiting == nil {
+		return AwaitingInfo{}, false
+	}
+	return *s.awaiting, true
+}
+
+// ErrNoPendingRun means the session has no run to continue.
+var ErrNoPendingRun = errors.New("poo: the session has no run to continue")
+
+// ErrLeaseLost means the session's lease was lost: another owner took the
+// session over, and the run that was going stopped rather than write into a
+// log that is no longer this session's.
+var ErrLeaseLost = errors.New("poo: the session's lease was lost")
+
+// watchLease starts the watcher that stops the session when its lease is
+// lost.
+//
+// A store whose ownership is a lease offers the channel. The flock
+// authority is never lost, so a store that holds one offers nothing and the
+// session watches nothing, which is what a nil channel says.
+func (s *Session) watchLease() {
+	watcher, ok := s.opts.Sink.(LeaseLostWatch)
+	if !ok {
+		return
+	}
+	lost := watcher.LeaseLost()
+	if lost == nil {
+		return
+	}
+	stop := make(chan struct{})
+	s.mu.Lock()
+	s.leaseStop = stop
+	s.mu.Unlock()
+	go func() {
+		select {
+		case <-lost:
+			s.noteLeaseLost()
+		case <-stop:
+		}
+	}()
+}
+
+// noteLeaseLost is the lease-loss failure boundary.
+//
+// The session is broken at once, which fences every record it would write
+// from here: the run's settle included, because a run.settled beside a log
+// the new owner is writing is a run the new owner never saw. The run's
+// context is cancelled with the cause its settle detail names, so the run
+// ends through the failure path it would take for any store that cannot be
+// written.
+func (s *Session) noteLeaseLost() {
+	s.mu.Lock()
+	s.leaseLost = true
+	run := s.run
+	s.mu.Unlock()
+	s.markBroken()
+	if run == nil {
+		return
+	}
+	s.noteStoreError(&run.callOwner, ErrLeaseLost)
+	run.cancel(ErrLeaseLost)
+}
+
+// ResumeRun continues the run a durable restore left unsettled.
+//
+// The run's identifier is returned at once, and the run goes on in the
+// background until it settles: the shape is Prompt's.
+//
+// The resumption claims the plan and clears it, increments the run's
+// resumption count on the log, and only then starts the work: a crash
+// during the resumed run leaves the count on disk, so the next load
+// spends it against the run's resumption budget instead of replaying the
+// same effect for ever.
+//
+// The work the plan names is the run's: the feeds it subscribed to start
+// again, the inputs that never reached the model are queued again and
+// delivered by the run's own drains, the calls are run again, the hooks
+// resume from the position the log cut short, and the run re-enters the
+// FSM at the phase it stopped in. Once the resumption begins, the run's
+// ordinary failure semantics apply: a provider retry, a tool error and a
+// normal settle are the run's own, not the resumption's.
+//
+// A session with nothing to continue reports ErrNoPendingRun, and a
+// session that is already running reports ErrBusy.
+func (s *Session) ResumeRun(ctx context.Context) (string, error) {
+	plan, runID, err := s.claimPendingRun()
+	if err != nil {
+		return "", err
+	}
+	return s.resumeStart(ctx, plan, runID)
+}
+
+// claimPendingRun takes the continuation and reserves the session for the
+// run that carries it out.
+//
+// The claim, the clear and the reservation are one critical section, so
+// two calls never resume one plan, and a prompt that lands at the same
+// moment gets busy.
+func (s *Session) claimPendingRun() (*ContinuationPlan, string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	switch {
+	case s.closed:
+		return nil, "", ErrSessionClosed
+	case s.broken:
+		return nil, "", ErrSessionBroken
+	case s.run != nil || s.reserved:
+		return nil, "", ErrBusy
+	case s.pending == nil:
+		return nil, "", ErrNoPendingRun
+	}
+	plan := s.pending
+	s.pending = nil
+	s.reserved = true
+	s.unattendedWakes = 0
+	return plan, plan.RunID, nil
+}
+
+// resumeContextFor returns the context a resumption runs under.
+//
+// The caller's context is the run's parent, as it is for a prompt: a
+// caller that ends its context ends the resumed run with it.
+func resumeContextFor(ctx context.Context) context.Context {
+	if ctx == nil {
+		return context.Background()
+	}
+	return ctx
+}
+
+// resumeStart installs the resumed run and starts it.
+//
+// The run keeps the plan's identifier: it is the run the records name, so
+// its results, its settle and its next resumption are all the same run's.
+// The resumption's own record is written before any effect, and a record
+// the store refuses starts nothing.
+func (s *Session) resumeStart(ctx context.Context, plan *ContinuationPlan, runID string) (string, error) {
+	defer func() {
+		s.mu.Lock()
+		s.reserved = false
+		s.mu.Unlock()
+	}()
+	runCtx, cancel := context.WithCancelCause(resumeContextFor(ctx))
+	run := &runState{
+		callOwner: callOwner{
+			id:           runID,
+			ctx:          runCtx,
+			pendingCalls: map[string]*issuedCall{},
+			workDone:     make(chan struct{}, 1),
+			repeats:      newRepeatCounter(),
+			turn:         plan.Turn,
+		},
+		cancel:          cancel,
+		startedAt:       time.Now(),
+		finalizeDone:    make(chan struct{}),
+		finalizeStarted: make(chan struct{}),
+		wake:            make(chan struct{}, 1),
+	}
+	run.callOwner.run = run
+
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		cancel(ErrSessionClosed)
+		return "", ErrSessionClosed
+	}
+	if s.broken {
+		s.mu.Unlock()
+		cancel(ErrSessionBroken)
+		return "", ErrSessionBroken
+	}
+	s.run = run
+	// The turn the run stopped in keeps the number the records gave it, so
+	// a turn resumed is the turn it was, not a second one beside it.
+	run.globalTurn = s.sessionTurns[turnKey{run: runID, turn: plan.Turn}]
+	s.resumedAsks = append(s.resumedAsks[:0], plan.LiveAsks...)
+	s.awaiting = awaitingOf(plan)
+	s.transitionLocked(StateRequesting)
+	s.mu.Unlock()
+
+	// The resumption is on the log before anything else it does: a crash
+	// during the resumed run leaves the count that the next load spends
+	// against the run's budget. The store syncs the record before the
+	// append returns.
+	if err := s.writeRun(run, &RunResumedRecord{
+		RecordMeta:        NewRecordMeta("run.resumed"),
+		RunID:             runID,
+		ResumptionAttempt: plan.Resumptions + 1,
+		FromPhase:         plan.Phase,
+		Turn:              plan.Turn,
+	}); err != nil {
+		// The store refused the resumption's own record. The run cannot
+		// be picked up, so it goes through the ordinary finalization and
+		// reports what the store said.
+		s.finalize(run, storeErrorCandidate(err))
+		return runID, nil
+	}
+	// The feeds come back before the run continues, so an input a feed
+	// produced joins the queues the run's own drains empty.
+	s.restoreSubscriptions(runCtx, plan.Subscriptions)
+	// The inputs that never reached the model are the user's messages: the
+	// run's own drains deliver them, and write their input.delivered
+	// records, exactly as they would have before the crash.
+	s.requeueInputs(plan.PendingInputs)
+	if s.runWindingDown(&run.callOwner) {
+		return runID, nil
+	}
+	stopTimer := s.startDurationTimer(run)
+	s.mu.Lock()
+	run.stopTimer = stopTimer
+	s.mu.Unlock()
+
+	go s.driveResumed(run, plan)
+	return runID, nil
+}
+
+// awaitingOf returns what a continued run waits on, and nil when the plan
+// leaves it waiting on nothing.
+//
+// The plan lists the asks the run still waits on. Only the first one is
+// published: the run asks them in order, and the one that is answered
+// publishes the next.
+func awaitingOf(plan *ContinuationPlan) *AwaitingInfo {
+	if len(plan.LiveAsks) == 0 {
+		return nil
+	}
+	ask := plan.LiveAsks[0]
+	return &AwaitingInfo{Kind: AskKindPermission, AskID: ask.AskID, Deadline: ask.Deadline}
+}
+
+// requeueInputs puts the inputs a crash left queued back on the queue they
+// were accepted on.
+//
+// An accepted input is the user's message whatever happens to the process
+// that queued it, so it is not dropped and not rewritten: its acceptance
+// record is already on the log, and what it lacks is its delivery.
+func (s *Session) requeueInputs(inputs []PlannedInput) {
+	if len(inputs) == 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed || s.broken {
+		return
+	}
+	for _, input := range inputs {
+		queued := queuedInput{
+			id:       input.InputID,
+			mode:     input.Mode,
+			text:     input.Text,
+			note:     input.DeliveryNote,
+			accepted: true,
+		}
+		switch input.Mode {
+		case FollowUp:
+			s.followUpQueue = append(s.followUpQueue, queued)
+		default:
+			// A steer, an interrupt and a job's result reach the model at
+			// the next drain; an interrupt whose activity is gone has
+			// nothing left to abort, and the input's mode carries the
+			// origin its message is delivered with.
+			s.steerQueue = append(s.steerQueue, queued)
+		}
+	}
 }
 
 // Result returns the outcome of a run that has settled.

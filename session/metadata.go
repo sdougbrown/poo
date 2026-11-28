@@ -18,6 +18,11 @@ import (
 // failure, and a log in a format this build does not know is the
 // codec's mismatch.
 func MetadataOf(dir, id string) (Metadata, error) {
+	return metadataWith(NewCodec(), dir, id)
+}
+
+// metadataWith returns a session's header, read with codec.
+func metadataWith(codec Codec, dir, id string) (Metadata, error) {
 	if err := ValidateID(id); err != nil {
 		return Metadata{}, err
 	}
@@ -33,7 +38,6 @@ func MetadataOf(dir, id string) (Metadata, error) {
 	if len(lines) == 0 {
 		return Metadata{}, &Error{Code: CodeCorruptLog, Message: "the log holds no session"}
 	}
-	codec := NewCodec()
 	format, err := logFormat(lines[0])
 	if err != nil {
 		return Metadata{}, err

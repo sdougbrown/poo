@@ -241,6 +241,9 @@ type jobState struct {
 	id string
 	// handle is the handle of the tool call the job came from.
 	handle string
+	// callID is the provider's id of the call the job came from, so the
+	// job's tool.started record pairs with the call's own record.
+	callID string
 	// tool is the name of the tool the job runs.
 	tool string
 	// runID identifies the run that started the job.
@@ -468,7 +471,7 @@ func WithJobs(o JobOptions) Option {
 // admission hooks saw, and a live call rides in when the job moves a
 // running call into the session's jobs: the move keys on the tool's
 // CanBackgroundRunningCall, not on any one tool.
-func (s *Session) startJob(run *runState, turn int, handle, tool string, prepared Prepared, summary string, raw, stripped, shorthand json.RawMessage, live *liveCall) (jobID string, ok bool, winding bool, refusal string) {
+func (s *Session) startJob(run *runState, turn int, handle, callID, tool string, prepared Prepared, summary string, raw, stripped, shorthand json.RawMessage, live *liveCall) (jobID string, ok bool, winding bool, refusal string) {
 	// The slot is reserved under the lock, and the job is registered
 	// there too, so a job that is admitted is a job the session knows
 	// about. A run that is winding down admits nothing: no new effect
@@ -540,6 +543,7 @@ func (s *Session) startJob(run *runState, turn int, handle, tool string, prepare
 	job := &jobState{
 		id:        jobID,
 		handle:    handle,
+		callID:    callID,
 		tool:      tool,
 		runID:     run.id,
 		turn:      turn,
@@ -736,6 +740,20 @@ func (s *Session) runJob(job *jobState, prepared Prepared, live *liveCall) {
 	ctx, cancel := context.WithCancelCause(job.ctx)
 	defer cancel(nil)
 	defer s.armJobTimeout(cancel)()
+
+	// A side-effecting job's call is on the log before the tool runs, on
+	// the job's own goroutine: the record is durable before the job's
+	// effect can start, whatever the model's turn is doing. A job that
+	// never launches writes none, because the write is here and not at
+	// the admission. A record that did not land starts nothing.
+	if tool.Spec().Class == ClassSideEffecting {
+		if !s.writeToolStarted(job.owner, job.turn, job.handle, job.callID, job.tool) {
+			// The job's effect cannot be accounted for, so it does not
+			// run: its end record reports the refusal.
+			s.completeJob(job, ToolResult{Text: fmt.Sprintf("the start of the %s job could not be recorded, so it did not run", job.tool), IsError: true}, OutcomeError, false, false, "")
+			return
+		}
+	}
 
 	env := s.jobToolEnv(job)
 	result, err := tool.Call(ctx, prepared, env)
@@ -1474,6 +1492,13 @@ func (s *Session) deliverJobResults() {
 func (s *Session) handleIdleJobResults() {
 	s.mu.Lock()
 	if s.run != nil || s.reserved || s.closed || s.broken {
+		s.mu.Unlock()
+		return
+	}
+	// A session that holds a run to continue does not wake for a result:
+	// the result belongs to that run, and the resumption is what takes it.
+	// A woken run beside it would be a second run started on its behalf.
+	if s.pending != nil {
 		s.mu.Unlock()
 		return
 	}

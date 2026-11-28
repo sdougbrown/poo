@@ -29,6 +29,8 @@ const (
 	MethodSessionCreate = "session/create"
 	// MethodSessionLoad opens a recorded session.
 	MethodSessionLoad = "session/load"
+	// MethodSessionResumeRun resumes the run a durable session holds.
+	MethodSessionResumeRun = "session/resume_run"
 	// MethodSessionGet reports a session's state.
 	MethodSessionGet = "session/get"
 	// MethodSessionConfigure changes a session between its runs.
@@ -136,6 +138,8 @@ const (
 	DataSessionIncompatible = "session_incompatible"
 	// DataBusy means the session already has a run.
 	DataBusy = "busy"
+	// DataNoPendingRun means the session has no run to continue.
+	DataNoPendingRun = "no_pending_run"
 	// DataNotRunning means the session has no run that could take the
 	// request.
 	DataNotRunning = "not_running"

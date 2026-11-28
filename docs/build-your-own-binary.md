@@ -513,8 +513,10 @@ instance's question alone; an empty `prompt` clears the model's question, and
 the manifest's applies again. The prompt belongs to the instance, so it
 reaches the instance a call reaches — a running one changes the question its
 next record is asked, without a restart — and a feed re-armed by a later
-subscription keeps it while the session lasts. A resumed session does not
-carry it: an optional feed's subscription is not resumed. Everything above
+subscription keeps it while the session lasts. A session that loads again
+carries its subscriptions when the session is durable — the load restores
+every instance the records hold as subscribed — and a logged session does
+not: the model starts one again with `subscribe_feed`. Everything above
 holds for a prompt too, including the fail-open answers and the messages
 delivered unasked.
 
@@ -620,6 +622,7 @@ lists them.
 as its origin, `feed:<name>[<field>=<value>]`. `cancel_job` takes either
 id and stops that feed until the session closes, and it stops a feed a
 filter suspended as it stops any other. A suspended feed is listed as
+<<<<<<< HEAD
 `suspended`, and `subscribe_feed` starts an optional one again. A feed the
 session starts itself — a configured manifest feed, or a resource feed an
 `mcp.json` declares — stays suspended until the session closes, for no call
@@ -827,6 +830,12 @@ the session closes; a resume starts over. A relaunch re-lists the server's
 tools and the feeds subscribe again, so a search and a call see the new
 generation; the prompt's MCP catalog is rendered once, when the session
 starts, and is not re-rendered.
+=======
+`suspended`, and `subscribe_feed` starts it again. A session that loads
+again starts every configured feed that is not optional; a durable
+session's subscriptions are restored by the load, and a logged session's
+are not, so the model starts one again with `subscribe_feed`.
+>>>>>>> 85af094 (⏯️ Continue a dead session's run instead of settling it)
 
 ## The conformance recipe
 
