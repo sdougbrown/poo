@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -126,6 +127,12 @@ func parse(data []byte, format Format, dir string) (*Settings, error) {
 	// known: a relative name is beside the settings file, and a prompt file
 	// inside one answers to the profiles file's own directory.
 	if err := settings.importProfilesFiles(dir); err != nil {
+		return nil, err
+	}
+	// The hooks files are read here, where the settings' own hooks are
+	// already decoded: a file's hook is a layer below them, and a relative
+	// name is beside the settings file.
+	if err := settings.importHooksFiles(dir); err != nil {
 		return nil, err
 	}
 	// The prompt and schema files are resolved here, where the document's
@@ -368,6 +375,8 @@ func canonicalValue(value any) (any, error) {
 			out[key] = canonical
 		}
 		return out, nil
+	case map[any]any:
+		return scalarKeyedMap(v)
 	case []any:
 		out := make([]any, 0, len(v))
 		for _, item := range v {
@@ -384,4 +393,35 @@ func canonicalValue(value any) (any, error) {
 			Message: fmt.Sprintf("the settings hold a value of a type the settings do not use (%T)", value),
 		}
 	}
+}
+
+// scalarKeyedMap turns a YAML mapping into the JSON object the settings
+// hold.
+//
+// YAML reads an unquoted true or false as a boolean, and a hook's bool
+// question names its descriptions "true" and "false". A boolean key is
+// the word it is spelled with, and a key of any other type is a value
+// the settings do not use, the same as everywhere else.
+func scalarKeyedMap(fields map[any]any) (any, error) {
+	out := make(map[string]any, len(fields))
+	for key, item := range fields {
+		var name string
+		switch k := key.(type) {
+		case string:
+			name = k
+		case bool:
+			name = strconv.FormatBool(k)
+		default:
+			return nil, &Error{
+				Code:    CodeDecode,
+				Message: fmt.Sprintf("the settings hold a key of a type the settings do not use (%T)", key),
+			}
+		}
+		canonical, err := canonicalValue(item)
+		if err != nil {
+			return nil, err
+		}
+		out[name] = canonical
+	}
+	return out, nil
 }

@@ -9,6 +9,7 @@
     "auth_readonly": { "isEmpty": "boolean" },
     "profile": { "isEmpty": "string" },
     "profiles_files": { "isEmpty": "array" },
+    "hooks_files": { "isEmpty": "array" },
     "repl_profile": { "isEmpty": "string" },
     "roles.chat": { "isEmpty": "string" },
     "roles.decider": { "isEmpty": "string" },
