@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"runtime"
 	"strings"
 	"time"
 )
@@ -1434,25 +1433,7 @@ func (s *Session) dropOldestFeedInputLocked(origin Origin) string {
 // queued result, and an idle session either wakes a run with it or holds
 // it for the next one.
 func (s *Session) queueJobResult(result jobResult) {
-	// DEBUG-FLAKE: temporary trace of the wake path's decisions.
-	defer func() {
-		if IsFeedOrigin(result.origin) && result.fault != nil {
-			s.mu.Lock()
-			s.debugTrace = append(s.debugTrace, fmt.Sprintf("queued fault result: run=%v state=%v queue=%d reserved=%v closed=%v broken=%v pending=%v",
-				s.run != nil, s.state, len(s.jobQueue), s.reserved, s.closed, s.broken, s.pending != nil))
-			s.mu.Unlock()
-		}
-	}()
 	s.mu.Lock()
-	if s.reserved && s.run == nil {
-		// DEBUG-FLAKE: name the reservation the strand rides on. The
-		// pump runs on the queueing goroutine, so the holder's stack
-		// is this goroutine's own ancestry: dump it here, where the
-		// mismatch is live, instead of inferring it from a later dump.
-		stacks := make([]byte, 1<<20)
-		stacks = stacks[:runtime.Stack(stacks, true)]
-		s.debugTrace = append(s.debugTrace, fmt.Sprintf("RESERVED-WITH-NO-RUN at queue time:\n%s", stacks))
-	}
 	// A result is never held at queue time: on_idle is the idle row of
 	// the delivery table. A run that is open or waiting takes the
 	// result; only the idle decision (or the close) holds it.
@@ -1510,11 +1491,7 @@ func (s *Session) deliverJobResults() {
 // none follows the session's setting, so a job's result always follows it.
 func (s *Session) handleIdleJobResults() {
 	s.mu.Lock()
-	// DEBUG-FLAKE: temporary trace of the wake path's decisions.
-	s.debugTracef("idle pump entered: run=%v state=%v queue=%d reserved=%v closed=%v broken=%v pending=%v unattendedWakes=%d maxWakes=%d",
-		s.run != nil, s.state, len(s.jobQueue), s.reserved, s.closed, s.broken, s.pending != nil, s.unattendedWakes, s.opts.Jobs.MaxUnattendedWakes)
 	if s.run != nil || s.reserved || s.closed || s.broken {
-		s.debugTracef("idle pump exit: busy-or-dead guard")
 		s.mu.Unlock()
 		return
 	}
@@ -1522,17 +1499,14 @@ func (s *Session) handleIdleJobResults() {
 	// the result belongs to that run, and the resumption is what takes it.
 	// A woken run beside it would be a second run started on its behalf.
 	if s.pending != nil {
-		s.debugTracef("idle pump exit: pending continuation guard")
 		s.mu.Unlock()
 		return
 	}
 	if len(s.jobQueue) == 0 {
-		s.debugTracef("idle pump exit: empty queue")
 		s.mu.Unlock()
 		return
 	}
 	if !s.wakesOnIdleLocked() {
-		s.debugTracef("idle pump exit: holds on idle")
 		s.holdJobResultsLocked(HeldOnIdle)
 		s.mu.Unlock()
 		s.writePendingHeld()
@@ -1541,7 +1515,6 @@ func (s *Session) handleIdleJobResults() {
 	// The wake limit counts the woken runs that follow one another with
 	// no client input in between.
 	if s.opts.Jobs.MaxUnattendedWakes > 0 && s.unattendedWakes >= s.opts.Jobs.MaxUnattendedWakes {
-		s.debugTracef("idle pump exit: wake limit")
 		s.holdJobResultsLocked(HeldWakeLimit)
 		s.mu.Unlock()
 		s.writePendingHeld()
@@ -1580,7 +1553,6 @@ func (s *Session) handleIdleJobResults() {
 	// lands between the check above and start's own keeps the results
 	// on the queue, where the close's held-record pass covers them.
 	if _, err := s.start(context.Background(), "", triggerFor(results), nil, results...); err != nil {
-		s.debugTracef("idle pump exit: start refused (%v)", err)
 		s.mu.Lock()
 		for _, result := range results {
 			s.jobQueue = append(s.jobQueue, jobQueueItem{result: result, held: true})
@@ -1591,35 +1563,8 @@ func (s *Session) handleIdleJobResults() {
 	}
 
 	s.mu.Lock()
-	s.debugTracef("idle pump exit: woken run started")
 	s.reserved = false
 	s.mu.Unlock()
-	// The woken run may have settled before the reservation cleared: a
-	// result that queued in that window was skipped by the busy guard,
-	// and the release pumps it the way the prompt's release does.
-	s.handleIdleJobResults()
-}
-
-// debugTracef appends one line to the fault-report trace under the
-// session's lock. The caller holds the session's lock.
-//
-// DEBUG-FLAKE: temporary scaffolding while the fault-report strand is
-// chased; it is not meant to merge.
-func (s *Session) debugTracef(format string, args ...any) {
-	if s.debugTrace == nil {
-		s.debugTrace = []string{}
-	}
-	s.debugTrace = append(s.debugTrace, fmt.Sprintf(format, args...))
-}
-
-// DebugFaultTrace returns the wake path's traced decisions.
-//
-// DEBUG-FLAKE: temporary scaffolding while the fault-report strand is
-// chased; it is not meant to merge.
-func (s *Session) DebugFaultTrace() []string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return append([]string(nil), s.debugTrace...)
 }
 
 // wakesOnIdleLocked reports whether a queued result may start a run.

@@ -167,10 +167,6 @@ type Session struct {
 	// outstanding work, so it cannot return in the gap between the
 	// running job and its queued result.
 	jobCompletions int
-	// DEBUG-FLAKE: temporary trace of the wake path's decisions, read
-	// by a test that strands. Guarded by the session's mutex. Not meant
-	// to merge.
-	debugTrace []string
 	// jobCompletionsDone is signalled when a completion finishes, so the
 	// close can wait for them without polling.
 	jobCompletionsDone chan struct{}
@@ -1260,9 +1256,6 @@ func (s *Session) resumeStart(ctx context.Context, plan *ContinuationPlan, runID
 		s.mu.Lock()
 		s.reserved = false
 		s.mu.Unlock()
-		// The release acts on a result that queued under the
-		// reservation, the way the prompt's and the wake's do.
-		s.handleIdleJobResults()
 	}()
 	runCtx, cancel := context.WithCancelCause(resumeContextFor(ctx))
 	run := &runState{
