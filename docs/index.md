@@ -3,8 +3,11 @@ layout: home
 
 hero:
   name: poo
-  text: A modular Go agent harness
+  text: a modular Go agent harness
   tagline: Headless CLI and embeddable Go library for engineered agents. Compose at compile time, run feeds in a daemon, compact transparently.
+  image:
+    src: /hero-logo.jpg
+    alt: poo blueprint mascot
   actions:
     - theme: brand
       text: Quickstart
