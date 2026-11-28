@@ -1,0 +1,14 @@
+{
+  "name": "poo-docs",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "llms": "node scripts/generate-llms.mjs",
+    "docs:dev": "node scripts/generate-llms.mjs && vitepress dev .",
+    "docs:build": "node scripts/generate-llms.mjs && vitepress build .",
+    "docs:preview": "vitepress preview ."
+  },
+  "devDependencies": {
+    "vitepress": "^1.6.3"
+  }
+}

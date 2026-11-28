@@ -203,7 +203,7 @@ tools:
 # entries with a decider model is searched with find_tool instead of
 # listed. A registered tool runs through the same
 # executor as bash, so a sandboxed session runs it in the sandbox;
-# docs/sandbox.md says what that means.
+# docs/operations/sandbox.md says what that means.
 cli_registry:
   paths: []
 
