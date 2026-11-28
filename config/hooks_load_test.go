@@ -243,3 +243,141 @@ hooks:
 // TestProfileHooksInheritAppendAndOptOut checks the chain a profile
 // resolves to: its base's hooks, then its own, kept once each, with the
 // names it turns off removed.
+func TestTheHooksFixtureLoadsAndResolvesItsProfiles(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "hooks"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeProfilesFixture(t, filepath.Join(dir, "hooks", "go-checks.yaml"), theContractHooksFile)
+	path := filepath.Join(dir, "settings.yaml")
+	writeProfilesFixture(t, path, theModelSettings+`
+hooks_files:
+  - hooks/go-checks.yaml
+
+profiles:
+  strict-go:
+    base: code
+    hooks: [pre-push-gofmt]
+  relaxed-go:
+    base: strict-go
+    hooks_disabled: [pre-push-gofmt]
+`)
+	settings, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec, ok := settings.Hooks["pre-push-gofmt"]
+	if !ok {
+		t.Fatalf("the hooks file's hook is not loaded: %v", settings.Hooks)
+	}
+	if spec.Point != hook.PointBeforeTool || spec.MaxFiresPerRun != 3 || spec.FiringTimeoutMs != 8000 {
+		t.Errorf("the hook is %+v; want a before_tool hook firing at most 3 times with an 8000ms timeout", spec)
+	}
+	if spec.Match.Tool != "bash" || len(spec.Match.CommandContains) != 2 {
+		t.Errorf("the matcher is %+v; want bash and two command substrings", spec.Match)
+	}
+	if len(spec.Context.Probes) != 2 || spec.Context.Probes[0].Name != "unformatted_files" {
+		t.Errorf("the probes are %+v; want the command and tool probes the file names", spec.Context.Probes)
+	}
+
+	runtime := buildIn(t, settings, config.Overrides{}, t.TempDir(), theExecutors())
+	for _, tt := range []struct {
+		profile string
+		want    []string
+	}{
+		{"strict-go", []string{"pre-push-gofmt"}},
+		{"relaxed-go", nil},
+	} {
+		if got := runtime.ProfileHooks(tt.profile); !slicesEqual(got, tt.want) {
+			t.Errorf("the %s profile runs %v; want %v", tt.profile, got, tt.want)
+		}
+	}
+}
+
+// slicesEqual reports whether the two name lists hold the same names in
+// the same order, treating an empty list as no list.
+func slicesEqual(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// TestHooksFilesLayerBelowTheSettings loads three layers: the settings'
+// own hook, then two files. The settings' word wins over every file's,
+// and the first file that names a hook wins over the later ones.
+func TestProfileHooksInheritAppendAndOptOut(t *testing.T) {
+	settings, err := config.Parse([]byte(theModelSettings), config.FormatYAML)
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings.Hooks = map[string]hook.Spec{
+		"gofmt":   theToolHook(1),
+		"secrets": theToolHook(2),
+		"budget":  theToolHook(3),
+	}
+	settings.Profiles = map[string]config.ProfileSettings{
+		"base-go":     {Base: "code", Hooks: []string{"gofmt"}},
+		"strict-go":   {Base: "base-go", Hooks: []string{"gofmt", "secrets"}},
+		"relaxed-go":  {Base: "strict-go", HooksDisabled: []string{"gofmt"}},
+		"no-hooks-go": {Base: "code", HooksDisabled: []string{"budget"}},
+	}
+	runtime := buildIn(t, settings, config.Overrides{}, t.TempDir(), theExecutors())
+	for _, tt := range []struct {
+		profile string
+		want    []string
+	}{
+		{"base-go", []string{"gofmt"}},
+		{"strict-go", []string{"gofmt", "secrets"}},
+		{"relaxed-go", []string{"secrets"}},
+		{"no-hooks-go", nil},
+	} {
+		if got := runtime.ProfileHooks(tt.profile); !slicesEqual(got, tt.want) {
+			t.Errorf("the %s profile runs %v; want %v", tt.profile, got, tt.want)
+		}
+	}
+}
+
+// TestProfileHookNamesMustBeDeclared checks the names a profile selects
+// and turns off against the hooks the settings declare.
+func TestProfileHookNamesMustBeDeclared(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		profile    string
+		field      string
+		definition config.ProfileSettings
+	}{
+		{"unknown hook", "reviewer", "profiles.reviewer.hooks", config.ProfileSettings{Base: "code", Hooks: []string{"missing"}}},
+		{"empty hook", "reviewer", "profiles.reviewer.hooks", config.ProfileSettings{Base: "code", Hooks: []string{""}}},
+		{"unknown disabled hook", "reviewer", "profiles.reviewer.hooks_disabled", config.ProfileSettings{Base: "code", HooksDisabled: []string{"missing"}}},
+		{"empty disabled hook", "reviewer", "profiles.reviewer.hooks_disabled", config.ProfileSettings{Base: "code", HooksDisabled: []string{""}}},
+		{"both run and turned off", "reviewer", "profiles.reviewer.hooks_disabled", config.ProfileSettings{Base: "code", Hooks: []string{"gofmt"}, HooksDisabled: []string{"gofmt"}}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			settings, err := config.Parse([]byte(theModelSettings), config.FormatYAML)
+			if err != nil {
+				t.Fatal(err)
+			}
+			settings.Hooks = map[string]hook.Spec{"gofmt": theToolHook(1)}
+			settings.Profiles = map[string]config.ProfileSettings{tt.profile: tt.definition}
+			_, err = config.Build(config.BuildOptions{
+				Settings: settings, DefaultProfile: "code", WorkingDir: t.TempDir(),
+				Tools: theTools(), Profiles: theProfiles(), Executors: theExecutors(),
+			})
+			if err == nil {
+				t.Fatal("the profile built; want the hook name to be refused")
+			}
+			if field, _ := config.FieldOf(err); field != tt.field {
+				t.Errorf("the failure names %q; want %q", field, tt.field)
+			}
+			if code, _ := config.CodeOf(err); code != config.CodeInvalid {
+				t.Errorf("the failure's code is %q; want %q", code, config.CodeInvalid)
+			}
+		})
+	}
+}

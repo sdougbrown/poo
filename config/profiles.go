@@ -40,6 +40,10 @@ type resolvedProfile struct {
 	// mcpDefaults is the profile's word on the default mcp directory, or
 	// nil when the chain names none.
 	mcpDefaults *bool
+	// hooks are the hooks the profile runs: its base chain's hooks
+	// followed by its own, each name once, in the order of first
+	// appearance, with the names the profile turned off removed.
+	hooks       []string
 	promptSteps []profilePromptStep
 }
 
@@ -73,6 +77,9 @@ func (r *Runtime) resolveProfileDefinitions(opts BuildOptions) ([]profile.Profil
 			if server == "" {
 				return nil, nil, &Error{Code: CodeInvalid, Field: field + ".mcp_servers", Message: "a selected server name cannot be empty"}
 			}
+		}
+		if err := r.checkProfileHooks(field, definition); err != nil {
+			return nil, nil, err
 		}
 	}
 
@@ -137,6 +144,7 @@ func (r *Runtime) resolveProfileDefinitions(opts BuildOptions) ([]profile.Profil
 			DisabledTools:    slices.Clone(parent.DisabledTools),
 			mcpServers:       slices.Clone(parent.mcpServers),
 			mcpDefaults:      parent.mcpDefaults,
+			hooks:            slices.Clone(parent.hooks),
 		}
 		if definition.FeedsDefaults != nil {
 			merged.FeedsDefaults = definition.FeedsDefaults
@@ -159,6 +167,17 @@ func (r *Runtime) resolveProfileDefinitions(opts BuildOptions) ([]profile.Profil
 				merged.mcpServers = append(merged.mcpServers, server)
 			}
 		}
+		// The hooks a profile names add to its base chain's, the way the
+		// servers do, and the ones it turns off leave the chain. A hook the
+		// base runs and the profile also names is kept once.
+		for _, name := range definition.Hooks {
+			if !slices.Contains(merged.hooks, name) {
+				merged.hooks = append(merged.hooks, name)
+			}
+		}
+		merged.hooks = slices.DeleteFunc(merged.hooks, func(name string) bool {
+			return slices.Contains(definition.HooksDisabled, name)
+		})
 		for _, tool := range definition.Tools.Disabled {
 			canonical := canonicalToolName(tool)
 			if !slices.Contains(merged.DisabledTools, canonical) {
@@ -199,6 +218,35 @@ func (r *Runtime) resolveProfileDefinitions(opts BuildOptions) ([]profile.Profil
 		definitions = append(definitions, def)
 	}
 	return definitions, resolvedSettings, nil
+}
+
+// checkProfileHooks checks the hooks a profile names.
+//
+// A profile selects hooks the settings declare: a name nothing
+// declares is a failure, not a hook that never fires. A name the same
+// profile both runs and turns off has no answer, so it is refused
+// rather than resolved by order.
+func (r *Runtime) checkProfileHooks(field string, definition ProfileSettings) error {
+	for _, name := range definition.Hooks {
+		if name == "" {
+			return &Error{Code: CodeInvalid, Field: field + ".hooks", Message: "a selected hook name cannot be empty"}
+		}
+		if _, declared := r.Settings.Hooks[name]; !declared {
+			return &Error{Code: CodeInvalid, Field: field + ".hooks", Message: fmt.Sprintf("the settings declare no %q hook", name)}
+		}
+	}
+	for _, name := range definition.HooksDisabled {
+		if name == "" {
+			return &Error{Code: CodeInvalid, Field: field + ".hooks_disabled", Message: "a disabled hook name cannot be empty"}
+		}
+		if _, declared := r.Settings.Hooks[name]; !declared {
+			return &Error{Code: CodeInvalid, Field: field + ".hooks_disabled", Message: fmt.Sprintf("the settings declare no %q hook", name)}
+		}
+		if slices.Contains(definition.Hooks, name) {
+			return &Error{Code: CodeInvalid, Field: field + ".hooks_disabled", Message: fmt.Sprintf("the profile both runs and turns off the %q hook", name)}
+		}
+	}
+	return nil
 }
 
 func (r *Runtime) disabledTools(name string) []string {
