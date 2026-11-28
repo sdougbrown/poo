@@ -2744,7 +2744,7 @@ jobs:
 
 # Permissions & Safety
 
-Every tool call passes through the permission policy (`poo/perm`) before it executes. The policy runs as the first before-tool hook and resolves each call to either **allow** or **deny**. Calls configured to **ask** block on the asker chain until an asker answers or the chain falls back.
+Every tool call passes through the permission policy (`poo/perm`) before it executes, except the read-only probes a hook runs (see [Hook Probes](#hook-probes)). The policy runs as the first before-tool hook and resolves each call to either **allow** or **deny**. Calls configured to **ask** block on the asker chain until an asker answers or the chain falls back.
 
 ## Evaluation Order
 
@@ -2808,6 +2808,10 @@ For tools whose primary argument is an absolute `http` or `https` URL (such as `
 ::: warning Tripwire, not a safety boundary
 `command_contains` is plain text matching. A command spelled around a substring — using extra spaces, split flags, quoting, or shell variables — will not match. Use `command_contains` as a tripwire to prompt on risky patterns, and pair it with a [bubblewrap sandbox](/operations/sandbox) when hard isolation is required.
 :::
+
+## Hook Probes
+
+A hook's read-only probe is not a call the model made: it runs the session's `read`, `grep` or `history` directly. No rule is evaluated, no ask is raised, and no doom-loop counter moves. `permission.rules`, `permission.unmatched` and `ask_outside_working_dir` therefore bound the model's calls and not a probe; what a probe reaches is what the tool's own restrictions allow, such as `restrict_to_working_dir` and `tools.protected_paths`. A probe's command runs on the session's executor, so confining a probe means choosing the executor, not writing a rule.
 
 ## Unmatched Calls and Fallback
 
@@ -3454,7 +3458,7 @@ Once a run enters `settling` or `settled`, background work from the ending run c
 
 ## Hook points
 
-Hooks extend the session lifecycle without altering the FSM. Every hook receives a `poo.HookContext` carrying the session ID, run ID, turn number, read-only `HistoryView`, `ContextBudget`, and optional `Decider`. Hooks may append to history through their return decisions, never mutate prior messages in place.
+Hooks extend the session lifecycle without altering the FSM. Every hook receives a `poo.HookContext` carrying the session ID, run ID, turn number, read-only `HistoryView`, `ContextBudget`, and optional `Decider`. Hooks may append to history through their return decisions, never mutate prior messages in place. The context also carries `WorkingDir`, the directory the session's tools work in, and `ReadOnlyTools`, a bounded probe over the `read`, `grep` and `history` tools.
 
 | Option / Interface | When it runs | Decisions / Effect |
 |---|---|---|
