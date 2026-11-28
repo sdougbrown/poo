@@ -132,8 +132,9 @@ func TestAMatcherReadsTheCall(t *testing.T) {
 		{name: "command prefix", match: Match{Tool: "bash", CommandPrefix: "git push"}, call: bashCall("git push origin main"), want: true},
 		{name: "command prefix after whitespace", match: Match{Tool: "bash", CommandPrefix: "git push"}, call: bashCall("   git push"), want: true},
 		{name: "another command", match: Match{Tool: "bash", CommandPrefix: "git push"}, call: bashCall("git pull"), want: false},
-		{name: "every substring", match: Match{Tool: "bash", CommandContains: []string{"git push", "origin"}}, call: bashCall("git push origin main"), want: true},
-		{name: "one substring missing", match: Match{Tool: "bash", CommandContains: []string{"git push", "origin"}}, call: bashCall("git push"), want: false},
+		{name: "either substring", match: Match{Tool: "bash", CommandContains: []string{"git push", "git commit"}}, call: bashCall("git push origin main"), want: true},
+		{name: "the second substring", match: Match{Tool: "bash", CommandContains: []string{"git push", "git commit"}}, call: bashCall("git commit -m \"the change\""), want: true},
+		{name: "neither substring", match: Match{Tool: "bash", CommandContains: []string{"git push", "git commit"}}, call: bashCall("git pull"), want: false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -159,7 +160,8 @@ func TestAMatcherReadsTheCall(t *testing.T) {
 
 func TestAnUnmatchedCallChargesNoFiring(t *testing.T) {
 	spec := oneStep(PointBeforeTool, Action{Kind: ActionDeny, Message: "refused"})
-	spec.Match = Match{Tool: "bash", CommandContains: []string{"git push"}}
+	// The fixture's matcher: a push or a commit, either one.
+	spec.Match = Match{Tool: "bash", CommandContains: []string{"git push", "git commit"}}
 	spec.MaxFiresPerRun = 1
 	decider := pootest.NewStubDecider(0.9)
 	runner := runnerOf(checkHook(t, spec), decider)
@@ -168,7 +170,7 @@ func TestAnUnmatchedCallChargesNoFiring(t *testing.T) {
 	if decision, err := runner.BeforeTool(hctx, bashCall("ls -la")); err != nil || decision.Denied {
 		t.Fatalf("an unmatched call produced %+v with error %v", decision, err)
 	}
-	if decision, err := runner.BeforeTool(hctx, bashCall("git push")); err != nil || !decision.Denied {
+	if decision, err := runner.BeforeTool(hctx, bashCall("git commit -m the change")); err != nil || !decision.Denied {
 		t.Fatalf("the matching call produced %+v with error %v", decision, err)
 	}
 	if calls := decider.Calls(); calls != 1 {

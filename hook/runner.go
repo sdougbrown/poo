@@ -514,10 +514,11 @@ func blockedKind(point Point) ActionKind {
 // evalMatch reports whether the hook fires on the activity.
 //
 // Every field a matcher sets must hold, and a matcher that sets nothing
-// fires on everything at its point. The command comparison is lexical:
-// the call's primary argument has its leading whitespace trimmed and the
-// rest is compared as text, so a compound command matches its first
-// part.
+// fires on everything at its point. A command substring is one of the
+// ways the call may match: any substring holding is the matcher holding.
+// The command comparison is lexical: the call's primary argument has its
+// leading whitespace trimmed and the rest is compared as text, so a
+// compound command matches its first part.
 func evalMatch(match Match, in matchInput) bool {
 	if match.Trigger != "" && match.Trigger != in.point.Trigger {
 		return false
@@ -531,10 +532,8 @@ func evalMatch(match Match, in matchInput) bool {
 	if match.CommandPrefix != "" && !strings.HasPrefix(in.command, match.CommandPrefix) {
 		return false
 	}
-	for _, substring := range match.CommandContains {
-		if !strings.Contains(in.command, substring) {
-			return false
-		}
+	if len(match.CommandContains) > 0 && !containsAny(match.CommandContains, in.command) {
+		return false
 	}
 	if match.IsError != nil {
 		if in.point.Result == nil || *match.IsError != in.point.Result.IsError {
@@ -551,6 +550,16 @@ func evalMatch(match Match, in matchInput) bool {
 		return false
 	}
 	return true
+}
+
+// containsAny reports whether the text holds one of the substrings.
+func containsAny(substrings []string, text string) bool {
+	for _, substring := range substrings {
+		if strings.Contains(text, substring) {
+			return true
+		}
+	}
+	return false
 }
 
 // callData is the evidence of the call a tool hook judges.
