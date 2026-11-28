@@ -4,11 +4,22 @@ export default defineConfig({
   title: 'poo',
   description: 'A modular Go agent harness — headless CLI and embeddable library for engineered agents.',
   lang: 'en-US',
+  appearance: 'dark',
   cleanUrls: true,
   lastUpdated: true,
 
   head: [
-    ['meta', { name: 'theme-color', content: '#3c8772' }],
+    ['meta', { name: 'theme-color', content: '#0d1626' }],
+    ['link', { rel: 'icon', type: 'image/jpeg', href: '/logo.jpg' }],
+    ['link', { rel: 'preconnect', href: 'https://fonts.googleapis.com' }],
+    ['link', { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: '' }],
+    [
+      'link',
+      {
+        rel: 'stylesheet',
+        href: 'https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap',
+      },
+    ],
   ],
 
   markdown: {
@@ -22,6 +33,7 @@ export default defineConfig({
   },
 
   themeConfig: {
+    logo: '/logo.jpg',
     siteTitle: 'poo',
     search: {
       provider: 'local',
