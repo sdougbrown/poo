@@ -3454,7 +3454,7 @@ Once a run enters `settling` or `settled`, background work from the ending run c
 
 ## Hook points
 
-Hooks extend the session lifecycle without altering the FSM. Every hook receives a `poo.HookContext` carrying the session ID, run ID, turn number, read-only `HistoryView`, `ContextBudget`, and optional `Decider`. Hooks may append to history through their return decisions, never mutate prior messages in place.
+Hooks extend the session lifecycle without altering the FSM. Every hook receives a `poo.HookContext` carrying the session ID, run ID, turn number, read-only `HistoryView`, `ContextBudget`, and optional `Decider`. Hooks may append to history through their return decisions, never mutate prior messages in place. The context also carries `WorkingDir`, the directory the session's tools work in, and `ReadOnlyTools`, a bounded probe over the `read`, `grep` and `history` tools.
 
 | Option / Interface | When it runs | Decisions / Effect |
 |---|---|---|
