@@ -141,6 +141,12 @@ func (l *layout) enter() {
 	l.active = true
 	l.chromeStale = true
 	l.emit(l.regionSeq() + l.footerSeq())
+	// A committed transcript rebuilds its tail at the live geometry: a
+	// resize while suspended adopted the size without rebuilding, and
+	// the next write would land at the stale row the suspension held.
+	if l.transcript.Len() > 0 {
+		l.rebuildLocked(nil)
+	}
 }
 
 // leave restores the whole screen to the terminal and leaves the
@@ -197,8 +203,22 @@ func (l *layout) write(s string) {
 		return
 	}
 	if _, _, changed := l.sizeChangedLocked(); changed {
-		// The text is already in l.transcript; defer painting until
-		// layout.resize rebuilds the viewport at the settled width.
+		// The size moved under the standing rows. The text is already in
+		// l.transcript: lay the tail out at the live size now, because a
+		// rebuild the debounce would run may never follow — the write's
+		// caller can be the seal of a stream the resize stalled, and no
+		// winch comes after it. The tail repaint recovers the rows a
+		// scroll pushed out of the pane, and the footer clamps to the
+		// pane the resize left behind.
+		if w, h, ok := l.size(); ok {
+			l.width, l.height = w, h
+		}
+		if l.footer > l.height-1 {
+			l.footer = l.height - 1
+		}
+		preview := l.previewRows
+		l.preview, l.previewRows = 0, nil
+		l.rebuildLocked(preview)
 		return
 	}
 	rows := textRows(s, l.width)
@@ -215,14 +235,18 @@ func (l *layout) write(s string) {
 	l.emit(b.String())
 }
 
-// wrapRows lays one line out as rows no wider than the terminal. A row
-// the layout writes is a row the terminal shows, so nothing wraps
-// behind its back.
+// wrapRows lays one line out as rows no wider than the terminal. Rows
+// break at word boundaries: a word the wrap point would split reads as
+// two fragments, and a marker the model streamed — a bar-terminated
+// word — counts as neither fragment. A token longer than the width has
+// no boundary to break at, so the wrap leaves it whole and the hard
+// pass splits it, keeping every byte visible.
 func wrapRows(text string, width int) []string {
 	if width <= 0 {
 		return []string{text}
 	}
-	return strings.Split(ansi.Hardwrap(expandTabs(text), width, true), "\n")
+	words := ansi.Wordwrap(expandTabs(text), width, "")
+	return strings.Split(ansi.Hardwrap(words, width, true), "\n")
 }
 
 // textRows lays one transcript text out in rows. Each line wraps at the
@@ -637,12 +661,21 @@ func (l *layout) resize(width, height, footer int, committed string, preview []s
 	}
 	l.footer = l.clampFooter(footer)
 	l.preview, l.previewRows = 0, nil
-	bottom := l.regionBottom()
-	rows := transcriptTail(l.transcript.Bytes(), width, bottom-len(preview))
-	l.last = bottom - min(len(preview), bottom) - len(rows)
 	if !l.active {
 		return
 	}
+	l.rebuildLocked(preview)
+}
+
+// rebuildLocked repaints the region's tail: the transcript's committed
+// rows laid out at the layout's current width, the standing preview over
+// them, and the chrome, ending with the cursor anchored at the footer.
+// The caller holds l.mu, with l.footer already clamped for the live
+// height and the preview cache cleared for the rows it passes.
+func (l *layout) rebuildLocked(preview []string) {
+	bottom := l.regionBottom()
+	rows := transcriptTail(l.transcript.Bytes(), l.width, bottom-len(preview))
+	l.last = bottom - min(len(preview), bottom) - len(rows)
 	var b strings.Builder
 	b.WriteString(l.regionSeq())
 	b.WriteString("\x1b[H" + seqEraseBelow)

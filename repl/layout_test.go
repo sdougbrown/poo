@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/chubin/vt10x"
 )
 
@@ -569,7 +570,7 @@ func TestFooterGrowthNeverScrollsPendingRows(t *testing.T) {
 	}
 }
 
-// TestAFrameDuringAResizePaintsNothingAtTheOldWidth covers the frame
+// TestAFrameAnchorsAndAWriteRelaysTheTailDuringAResize covers the frame
 // that lands between the terminal's size change and the resize that
 // rebuilds the screen: readline's own watcher renders one from the
 // geometry the layout still holds. Everything such a frame would paint
@@ -577,7 +578,7 @@ func TestFooterGrowthNeverScrollsPendingRows(t *testing.T) {
 // scrolls the region and takes the standing preview above it with it,
 // and a repainted preview stacks a mangled copy of itself. The frame
 // anchors the cursor inside the live screen and paints nothing else.
-func TestAFrameDuringAResizePaintsNothingAtTheOldWidth(t *testing.T) {
+func TestAFrameAnchorsAndAWriteRelaysTheTailDuringAResize(t *testing.T) {
 	vt := vt10x.New(vt10x.WithSize(40, 12))
 	rec := &recordingScreen{vt: vt}
 	l := aLayout(t, rec, 40, 12)
@@ -598,14 +599,24 @@ func TestAFrameDuringAResizePaintsNothingAtTheOldWidth(t *testing.T) {
 			t.Fatalf("frame %d painted %q, want only the cursor anchored inside the live screen", frame, painted)
 		}
 	}
-	// A transcript write or status update landing before the resize
-	// records its state without painting old-width rows to the terminal.
+	// A transcript write landing before the resize lays the tail out at
+	// the live size: the standing rows were wrapped at a width the pane
+	// no longer has, and no rebuild the debounce would run may follow
+	// the write — the seal of a stream the resize stalled ends it. The
+	// status update lands after and paints its own row.
 	l.write("arrived during resize\n")
-	l.setStatus("status during resize")
-	if painted := rec.take(); painted != "" {
-		t.Fatalf("write/status painted %q during resize mismatch, want nothing", painted)
-	}
+	rec.take() // The tail relay paints; its content is asserted on the screen below.
 	shown := trimScreen(vt.String())
+	if !strings.Contains(shown, "arrived during resize") {
+		t.Fatalf("the write during the resize did not paint the tail:\n%s", shown)
+	}
+	if n := strings.Count(shown, "committed row"); n != 1 {
+		t.Errorf("the tail repaint holds %d copies of the committed row:\n%s", n, shown)
+	}
+	l.setStatus("status during resize")
+	if statusPaint := rec.take(); statusPaint == "" {
+		t.Fatal("the status update painted nothing after the tail relay")
+	}
 	for _, row := range previewRows(3) {
 		if n := strings.Count(shown, row); n != 1 {
 			t.Fatalf("the standing row %q shows %d time(s) across the frames:\n%s", row, n, shown)
@@ -637,6 +648,62 @@ func TestAFrameDuringAResizePaintsNothingAtTheOldWidth(t *testing.T) {
 	}
 	if l.preview != 3 || len(l.previewRows) != 3 {
 		t.Errorf("the preview cache is preview=%d rows=%d, want the three rows it stands on", l.preview, len(l.previewRows))
+	}
+}
+
+// TestAWrapSplitsAnOverlongTokenWithinThePane covers a single token as
+// wide as or wider than the pane — a URL or path the stream lands as
+// one word: the word wrap leaves it whole and the hard pass splits it,
+// so every row stays within the pane and every byte shows exactly once.
+func TestAWrapSplitsAnOverlongTokenWithinThePane(t *testing.T) {
+	token := strings.Repeat("x", 48)
+	rows := wrapRows(token, 40)
+	if got := strings.Join(rows, ""); got != token {
+		t.Errorf("the wrap lost bytes: got %q, want %q", got, token)
+	}
+	for _, row := range rows {
+		if width := ansi.StringWidth(row); width > 40 {
+			t.Errorf("the row %q is %d columns wide, want at most 40", row, width)
+		}
+	}
+
+	// A token exactly the pane's width has no split to make: it reads
+	// whole, on one row.
+	rows = wrapRows(strings.Repeat("y", 40), 40)
+	if len(rows) != 1 || rows[0] != strings.Repeat("y", 40) {
+		t.Errorf("the pane-width token split: %q", rows)
+	}
+}
+
+// TestAResizeWhileInactiveAnchorsTheTailOnResume covers a winch while
+// the layout is suspended — a pager's session: the suspended resize
+// adopts the live size without rebuilding, so the resume rebuilds the
+// tail at the new geometry and the first write after it lands at the
+// transcript's tail, not at the stale row the suspension held.
+func TestAResizeWhileInactiveAnchorsTheTailOnResume(t *testing.T) {
+	vt := vt10x.New(vt10x.WithSize(40, 12))
+	l := aLayout(t, vt, 40, 12)
+	showPrompt(l, promptMark)
+	l.write("committed row\n")
+	l.suspend()
+	vt.Resize(40, 24)
+	l.resize(40, 24, 0, "", nil)
+	l.resume()
+	l.write("next row\n")
+
+	// The region's bottom row holds the new write with the transcript's
+	// tail directly above it.
+	if got := lastRow(vt, "next row"); got != 20 {
+		t.Errorf("the first write after the resume landed at row %d, want 20:\n%s", got, vt.String())
+	}
+	if got := lastRow(vt, "committed row"); got != 19 {
+		t.Errorf("the tail rebuilt at row %d, want 19:\n%s", got, vt.String())
+	}
+	drawn := strings.Join(screenRows(vt), "\n")
+	for _, want := range []string{"committed row", "next row"} {
+		if n := strings.Count(drawn, want); n != 1 {
+			t.Errorf("%q reads %d time(s), want 1:\n%s", want, n, vt.String())
+		}
 	}
 }
 
