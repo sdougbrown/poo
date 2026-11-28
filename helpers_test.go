@@ -224,6 +224,9 @@ func waitForSink(t *testing.T, sink *recordingSink, what string, cond func() boo
 	if err := sink.WaitFunc(ctx, cond); err == nil {
 		return
 	}
+	// DEBUG-FLAKE: the wake-path trace rides every dump while the
+	// strand is chased.
+	dumpTraces(t)
 	// The strand's evidence: what every goroutine was doing when the
 	// signal the wait waits on never came. The buffer holds the stacks
 	// of a full session — a run, its feeds, the close and the test —
@@ -231,6 +234,24 @@ func waitForSink(t *testing.T, sink *recordingSink, what string, cond func() boo
 	stacks := make([]byte, 1<<20)
 	stacks = stacks[:runtime.Stack(stacks, true)]
 	t.Fatalf("timed out waiting for %s (the sink holds %s)\n%s", what, strings.Join(sink.Names(), " "), stacks)
+}
+
+// debugSessions holds the sessions the trace dump reads. DEBUG-FLAKE:
+// temporary scaffolding; not meant to merge.
+var debugSessions []*poo.Session
+
+// debugTrack registers a session whose wake-path trace a dump prints.
+// DEBUG-FLAKE: temporary scaffolding; not meant to merge.
+func debugTrack(s *poo.Session) { debugSessions = append(debugSessions, s) }
+
+// dumpTraces prints every tracked session's wake-path trace.
+// DEBUG-FLAKE: temporary scaffolding; not meant to merge.
+func dumpTraces(t *testing.T) {
+	for i, s := range debugSessions {
+		for _, line := range s.DebugFaultTrace() {
+			t.Logf("trace[%d]: %s", i, line)
+		}
+	}
 }
 
 // messages returns the message records, in order.

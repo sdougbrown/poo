@@ -140,6 +140,7 @@ func TestALongScopeStillWritesTheFaultLog(t *testing.T) {
 	opts := testOptions(t, tr, &echoTool{}, sink)
 	opts.SessionDir = dir
 	s := newTestSession(t, opts, poo.WithFeeds(theOptionalFeedSpec(faultedFeed, poo.OnIdleHold)))
+	debugTrack(s)
 
 	runSession(t, s, "start the feed")
 	waitForSink(t, sink, "the fault report to reach the chat model", func() bool {
@@ -246,6 +247,7 @@ func TestResubscribingASuspendedFeedStartsItAgain(t *testing.T) {
 	opts := testOptions(t, tr, &echoTool{}, sink)
 	opts.SessionDir = t.TempDir()
 	s := newTestSession(t, opts, poo.WithFeeds(spec))
+	debugTrack(s)
 
 	runSession(t, s, "start the feed")
 	// The first attempt failed and the session delivered the report, which
