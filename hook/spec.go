@@ -13,9 +13,9 @@
 // answer no branch covers is not a failure: the runner reads it as the
 // hook being unsure, and takes the spec's on_uncertain policy.
 //
-// The package imports the standard library, the core and poo/decide
-// only, so a build that links no tool, no provider and no code mode still
-// checks its hooks.
+// The package imports the standard library, the core package, poo/decide
+// and poo/exec only, so a build that links no tool, no provider and no
+// code mode still checks and runs its hooks.
 package hook
 
 import (
@@ -235,9 +235,9 @@ type Probe struct {
 	Command []string `json:"command,omitempty"`
 	// Tool is the tool a tool probe calls.
 	Tool *ToolProbe `json:"tool,omitempty"`
-	// TimeoutMs is how long the probe may take. Zero runs the probe
-	// under the hook's own firing timeout, and no probe outlives the
-	// hook that asked for it, however long its own bound is.
+	// TimeoutMs is how long the probe may take, in milliseconds. Zero
+	// takes 3000 ms. The hook's firing context bounds it either way, so
+	// a probe never outlives the hook that asked for it.
 	TimeoutMs int `json:"timeout_ms,omitempty"`
 }
 
