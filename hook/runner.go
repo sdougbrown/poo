@@ -540,13 +540,13 @@ func blockedKind(point Point) ActionKind {
 // leading whitespace trimmed and the rest is compared as text, so a
 // compound command matches its first part.
 func evalMatch(match Match, in matchInput) bool {
-	if match.Trigger != "" && match.Trigger != in.point.Trigger {
+	if match.Trigger != "" && string(match.Trigger) != in.point.Trigger {
 		return false
 	}
 	if match.Tool != "" && (in.point.Call == nil || match.Tool != in.point.Call.Tool) {
 		return false
 	}
-	if match.Class != "" && (in.point.Call == nil || match.Class != in.point.Call.Class) {
+	if match.Class != "" && (in.point.Call == nil || string(match.Class) != in.point.Call.Class) {
 		return false
 	}
 	if match.CommandPrefix != "" && !strings.HasPrefix(in.command, match.CommandPrefix) {
@@ -566,7 +566,7 @@ func evalMatch(match Match, in matchInput) bool {
 	if match.Interrupted != nil && *match.Interrupted != in.interrupted {
 		return false
 	}
-	if match.Reason != "" && match.Reason != string(in.reason) {
+	if match.Reason != "" && match.Reason != in.reason {
 		return false
 	}
 	return true
