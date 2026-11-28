@@ -66,7 +66,7 @@ Submitting a regular message (not a slash command) during an active run sends a 
 | `/quit` | Close the session and exit the REPL (aliases: `/q`, `/exit`). |
 
 ::: tip Backgrounding with `/bg`
-`/bg` only moves a call when exactly one backgroundable call is running. The promoted job survives run cancellation, but it keeps the original `bash` command timeout. For long-running work that needs the full job timeout, launch it with `background: true` from the start.
+`/bg` only moves a call when exactly one backgroundable call is running. The promoted job survives run cancellation, but it keeps the original `bash` command timeout. For long-running work that needs the full job timeout, instruct the model to run it in the background from the start (so it launches with `background: true`).
 :::
 
 ## Permission Prompts
