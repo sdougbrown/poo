@@ -16,7 +16,7 @@ import (
 // poo/prompt, poo/prompt/agentsmd, poo/decide and poo/wire/protocol may
 // import the standard library only, and poo/provider/catalog may import the
 // standard library and the core package. perm may add protect, the shared
-// path resolver.
+// path resolver, and hook may add decide, the model its questions ask.
 func TestRepoImports(t *testing.T) {
 	root := moduleRoot(t)
 	modulePath := modulePathOf(t, root)
@@ -183,6 +183,7 @@ func wantSkipped(m string, extra ...string) []string {
 		m + "/exec (does not exist yet)",
 		m + "/exec/bwrap (does not exist yet)",
 		m + "/feed (does not exist yet)",
+		m + "/hook (does not exist yet)",
 		m + "/internal/caps (does not exist yet)",
 		m + "/internal/jsonutil (does not exist yet)",
 		m + "/internal/schematext (does not exist yet)",
