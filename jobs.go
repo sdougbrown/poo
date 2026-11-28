@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -1443,6 +1444,15 @@ func (s *Session) queueJobResult(result jobResult) {
 		}
 	}()
 	s.mu.Lock()
+	if s.reserved && s.run == nil {
+		// DEBUG-FLAKE: name the reservation the strand rides on. The
+		// pump runs on the queueing goroutine, so the holder's stack
+		// is this goroutine's own ancestry: dump it here, where the
+		// mismatch is live, instead of inferring it from a later dump.
+		stacks := make([]byte, 1<<20)
+		stacks = stacks[:runtime.Stack(stacks, true)]
+		s.debugTrace = append(s.debugTrace, fmt.Sprintf("RESERVED-WITH-NO-RUN at queue time:\n%s", stacks))
+	}
 	// A result is never held at queue time: on_idle is the idle row of
 	// the delivery table. A run that is open or waiting takes the
 	// result; only the idle decision (or the close) holds it.
