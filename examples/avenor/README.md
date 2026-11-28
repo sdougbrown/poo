@@ -32,4 +32,4 @@ When the inbox delivers a child's ask, answer it with the feed's `avenor_reply` 
 
 To share an existing local supervisor, set `AVENOR_SOCKET` to its socket path in the feed and each tool entry. The feed will attach to that supervisor instead of starting one.
 
-See [Feeds](../../docs/build-your-own-binary.md#feeds) for feed settings and [CLI registry](../../README.md#what-works-today) for tool availability.
+See [Feeds & Daemon](../../docs/capabilities/feeds-and-daemon.md) for feed settings and [CLI Registry](../../docs/capabilities/cli-registry.md) for tool availability.

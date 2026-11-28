@@ -133,6 +133,6 @@ asks the host to reconnect. Killing the server process is the recovery poo
 offers: the relaunch binds a fresh conversation. poo adds nothing Avenor's own
 contract does not already say.
 
-See [MCP servers](../../docs/build-your-own-binary.md#mcp-servers) for the
-manifest, the templates and the feed's settings, and [Feeds](../../docs/build-your-own-binary.md#feeds)
+See [MCP servers](../../docs/capabilities/mcp-servers.md) for the
+manifest, the templates and the feed's settings, and [Feeds & Daemon](../../docs/capabilities/feeds-and-daemon.md)
 for what a filter may write.

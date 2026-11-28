@@ -6,7 +6,7 @@
 //
 // The sandbox is not a security boundary against hostile code. It keeps
 // a model's commands inside the task: the kernel is the host's, and
-// with the network on, the network is the host's too. docs/sandbox.md
+// with the network on, the network is the host's too. docs/operations/sandbox.md
 // says what it contains and what it does not.
 //
 // The command's exit status is the shell's. A command that dies from a

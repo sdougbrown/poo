@@ -55,3 +55,8 @@ evals/harbor/bin/
 
 /poo-eval
 /livecompaction
+
+# VitePress docs build and dependencies
+docs/node_modules/
+docs/.vitepress/cache/
+docs/.vitepress/dist/

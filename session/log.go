@@ -10,7 +10,7 @@
 // session carries on in the file it was recorded in.
 //
 // A session's records are the log's vocabulary, documented in
-// docs/session-log-v0.md. The log takes a lock around each write, so a
+// docs/reference/session-log-v0.md. The log takes a lock around each write, so a
 // concurrent append never interleaves two records' bytes. The lock is a
 // mutex, not a file lock: the file lock that keeps two processes out of
 // one session is the store's authority.
